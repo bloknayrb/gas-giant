@@ -9,10 +9,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-CURRENT_PRESET_FORMAT = 1
+CURRENT_PRESET_FORMAT = 2
+
+
+def _v1_to_v2(doc: dict) -> dict:
+    """Format 2: appearance.palette (flat gradient) became
+    appearance.palette_rows (latitude-anchored gradients). A single row at
+    latitude 0 reproduces the v1 look exactly. Defensive: sparse presets may
+    omit appearance or palette entirely."""
+    appearance = doc.get("params", {}).get("appearance")
+    if isinstance(appearance, dict) and "palette" in appearance:
+        appearance["palette_rows"] = [
+            {"latitude": 0.0, "stops": appearance.pop("palette")}
+        ]
+    return doc
+
 
 # {from_version: upgrade(doc) -> doc at from_version + 1}
-_MIGRATIONS: dict[int, Callable[[dict], dict]] = {}
+_MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _v1_to_v2}
 
 
 def migrate(doc: dict, from_format: int) -> dict:

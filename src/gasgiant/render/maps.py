@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gasgiant.gl import GpuContext
-from gasgiant.palette import bake_lut
+from gasgiant.palette import bake_lut, bake_rows
 from gasgiant.params.model import AppearanceParams, GradientStop
 
 if TYPE_CHECKING:
@@ -31,7 +31,11 @@ class MapDeriver:
         for tex in (self._palette_tex, self._storm_tex):
             if tex is not None:
                 tex.release()
-        self._palette_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.palette)))
+        # A1 bridge: sample the row blend at the equator until the derive
+        # kernel consumes the full latitude-row LUT (A2).
+        rows = [(row.latitude, _stops(row.stops)) for row in appearance.palette_rows]
+        row_lut = bake_rows(rows, height=64)
+        self._palette_tex = self.gpu.lut_texture(row_lut[row_lut.shape[0] // 2])
         self._storm_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.storm_tints)))
 
     def derive(

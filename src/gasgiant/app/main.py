@@ -119,11 +119,28 @@ class StudioApp:
 
     def _load_session_or_default(self) -> PlanetParams:
         if SESSION_PATH.is_file():
+            self._backup_old_format_session()
             try:
                 return load_preset(SESSION_PATH)
             except (PresetError, OSError) as exc:
                 log.warning("session restore failed (%s); using default preset", exc)
         return load_factory_preset("jupiter_like")
+
+    def _backup_old_format_session(self) -> None:
+        """Before the first load that would migrate (and later overwrite) an
+        older-format session, keep the original next to it."""
+        import json
+
+        from gasgiant.params.migrations import CURRENT_PRESET_FORMAT
+
+        backup = SESSION_PATH.with_suffix(".json.bak")
+        try:
+            doc = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
+            if doc.get("preset_format", 1) < CURRENT_PRESET_FORMAT and not backup.exists():
+                backup.write_bytes(SESSION_PATH.read_bytes())
+                log.info("backed up pre-migration session to %s", backup)
+        except (OSError, ValueError):
+            pass  # unreadable session: the load below reports it
 
     def _save_session(self) -> None:
         try:

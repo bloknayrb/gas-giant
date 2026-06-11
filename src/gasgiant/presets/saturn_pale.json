@@ -1,5 +1,5 @@
 {
-  "preset_format": 1,
+  "preset_format": 2,
   "app_version": "0.1.0",
   "name": "saturn_pale",
   "params": {
@@ -31,11 +31,16 @@
       "south": { "style": "plain_vortex" }
     },
     "appearance": {
-      "palette": [
-        { "pos": 0.0, "color": [0.55, 0.45, 0.32] },
-        { "pos": 0.4, "color": [0.76, 0.66, 0.48] },
-        { "pos": 0.75, "color": [0.88, 0.80, 0.62] },
-        { "pos": 1.0, "color": [0.94, 0.89, 0.74] }
+      "palette_rows": [
+        {
+          "latitude": 0.0,
+          "stops": [
+            { "pos": 0.0, "color": [0.55, 0.45, 0.32] },
+            { "pos": 0.4, "color": [0.76, 0.66, 0.48] },
+            { "pos": 0.75, "color": [0.88, 0.80, 0.62] },
+            { "pos": 1.0, "color": [0.94, 0.89, 0.74] }
+          ]
+        }
       ],
       "haze_amount": 0.55,
       "haze_color": [0.87, 0.78, 0.58],

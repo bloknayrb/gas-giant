@@ -79,6 +79,19 @@ DEFAULT_STORM_TINTS = [
 ]
 
 
+class PaletteRow(_Params):
+    """One palette gradient anchored at a signed latitude (degrees, north
+    positive). Rows are blended across latitude at derive time; a single row
+    reproduces the latitude-independent v1 palette exactly."""
+
+    latitude: float = Field(0.0, ge=-90.0, le=90.0)
+    stops: list[GradientStop]
+
+
+def default_palette_rows() -> list[PaletteRow]:
+    return [PaletteRow(latitude=0.0, stops=list(DEFAULT_PALETTE))]
+
+
 class BandsParams(_Params):
     count: int = pfield(
         14, tier=Tier.RESTART, lo=2, hi=MAX_BANDS, rand=(6, 24), ui="Bands",
@@ -302,9 +315,10 @@ class PolesParams(_Params):
 
 
 class AppearanceParams(_Params):
-    palette: list[GradientStop] = pfield(
-        DEFAULT_PALETTE, tier=Tier.POST, ui="Appearance",
-        description="Color gradient indexed by the color tracer (belt dark -> zone bright)",
+    palette_rows: list[PaletteRow] = pfield(
+        default_palette_rows(), tier=Tier.POST, ui="Appearance",
+        description="Latitude-anchored color gradients indexed by the color tracer "
+                    "(belt dark -> zone bright), blended across signed latitude",
     )
     storm_tints: list[GradientStop] = pfield(
         DEFAULT_STORM_TINTS, tier=Tier.POST, ui="Appearance",
