@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bloknayrb/gas-giant/mapset.schema.json",
+  "title": "Gas Giant Studio map-set manifest",
+  "description": "The contract between the gasgiant exporter and the Blender importer. Readers MUST ignore unknown keys (additive changes never bump schema_version).",
+  "type": "object",
+  "required": ["schema_version", "generator", "name", "seed", "projection", "resolution", "physical", "maps"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "name": { "type": "string" },
+    "seed": { "type": "integer" },
+    "projection": { "const": "equirectangular" },
+    "resolution": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "physical": {
+      "type": "object",
+      "required": ["radius_km", "height_scale", "height_midlevel"],
+      "properties": {
+        "radius_km": { "type": "number", "exclusiveMinimum": 0 },
+        "height_scale": { "type": "number", "minimum": 0 },
+        "height_midlevel": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "maps": {
+      "type": "object",
+      "required": ["color"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["file", "format", "colorspace"],
+        "properties": {
+          "file": { "type": "string" },
+          "format": { "enum": ["png16", "exr32f"] },
+          "colorspace": { "enum": ["srgb", "non-color"] },
+          "channels": { "type": "integer", "minimum": 1, "maximum": 4 },
+          "convention": { "type": "string" }
+        }
+      }
+    },
+    "atmosphere_hint": {
+      "type": "object",
+      "properties": {
+        "rim_color": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "rim_strength": { "type": "number", "minimum": 0 }
+      }
+    },
+    "preset": { "type": "object" },
+    "frames": {
+      "type": "array",
+      "description": "Reserved for animated sequences (future).",
+      "items": { "type": "object" }
+    }
+  }
+}

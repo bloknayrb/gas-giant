@@ -1,0 +1,23 @@
+{
+  "preset_format": 1,
+  "app_version": "0.1.0",
+  "name": "jupiter_like",
+  "params": {
+    "seed": 4257,
+    "name": "jupiter_like",
+    "bands": {
+      "count": 16,
+      "width_jitter": 0.4,
+      "value_contrast": 1.1,
+      "warp_amount": 0.04,
+      "warp_freq": 3.5,
+      "detail_amount": 0.12,
+      "detail_freq": 14.0
+    },
+    "appearance": {
+      "haze_amount": 0.05,
+      "contrast": 1.05,
+      "saturation": 1.0
+    }
+  }
+}

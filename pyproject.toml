@@ -55,6 +55,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.importlinter]
 root_package = "gasgiant"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layered architecture: params/palette -> gl -> core -> sim -> render -> export/jobs -> engine -> app/cli"
