@@ -9,6 +9,9 @@ layout(local_size_x = 16, local_size_y = 16) in;
 #include "noise3d.glsl"
 #include "common.glsl"
 #include "vortex_stamp.glsl"
+#if DOMAIN == 0
+#include "wave_stamp.glsl"
+#endif
 
 layout(rgba32f, binding = 0) writeonly uniform image2D out_tracers;
 
@@ -51,6 +54,13 @@ void main() {
     t0 += vs.x;
     t1 += vs.y;
     float t3 = vs.z;
+
+#if DOMAIN == 0
+    vec3 ws = waveStamp(ll);
+    t0 += ws.x;
+    t1 += ws.y;
+    t3 += ws.z;
+#endif
 
 #if DOMAIN != 0
     if (u_poly_amp > 0.0) {

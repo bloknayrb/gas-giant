@@ -47,6 +47,16 @@ uniform float u_poly_rho;
 uniform float u_poly_eps;
 uniform float u_poly_phase;
 uniform float u_poly_width;
+#else
+// Equatorial waves (festoon train, ribbon).
+uniform float u_fest_amp;
+uniform float u_fest_lat;
+uniform float u_fest_k;
+uniform float u_fest_phase;
+uniform float u_rib_amp;
+uniform float u_rib_lat;
+uniform float u_rib_k;
+uniform float u_rib_phase;
 #endif
 
 const float KIND_HERO = 1.0;
@@ -99,6 +109,19 @@ void main() {
     float kh = u_kh_amplitude * 0.004 * shear * shear
              * sin(u_kh_wavenumber * ll.x + u_kh_phase);
     psi += kh;
+
+    // Festoon Rossby wave: meridional meander on the equatorial belt edge.
+    if (u_fest_amp > 0.0) {
+        psi += u_fest_amp * 0.0045
+             * exp(-pow((ll.y - u_fest_lat) / 0.05, 2.0))
+             * sin(u_fest_k * ll.x + u_fest_phase);
+    }
+    // Ribbon: standing meander on one mid-latitude jet.
+    if (u_rib_amp > 0.0) {
+        psi += u_rib_amp * 0.005
+             * exp(-pow((ll.y - u_rib_lat) / 0.03, 2.0))
+             * sin(u_rib_k * ll.x + u_rib_phase);
+    }
 #else
     // Polygonal polar jet (hexagon class).
     if (u_poly_amp > 0.0) {

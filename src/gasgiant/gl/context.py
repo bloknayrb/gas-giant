@@ -178,6 +178,9 @@ def _load_flattened(package: str, name: str, defines: dict[str, str]) -> tuple[s
 
 
 def _read_source(package: str, name: str) -> str:
+    # Cross-package includes: #include "gasgiant.sim.kernels:noise3d.glsl"
+    if ":" in name:
+        package, name = name.split(":", 1)
     ref = resources.files(package) / name
     if not ref.is_file():
         raise ShaderError(f"shader source not found: {package}/{name}")

@@ -17,6 +17,14 @@ uniform sampler2D u_psi;            // r32f
 uniform sampler2D u_profile_stamp;  // (t0, t1, polar_fade, -) by latitude
 uniform ivec2 u_size;
 
+#if DOMAIN == 0
+// Active convective outbreaks: brief divergent outflow impulses (the one
+// intentional departure from solenoidal flow; tracer thinning reads as the
+// spreading plume). Up to 2 concurrently.
+uniform int u_outbreak_count;
+uniform vec4 u_outbreaks[2];  // lon, lat, radius, strength (already decayed)
+#endif
+
 float psiAt(int x, int y) {
     return texelFetch(u_psi, ivec2(wrapX(x, u_size.x), clampY(y, u_size.y)), 0).r;
 }
@@ -42,7 +50,22 @@ void main() {
     // Equirect advection degrades toward the caps; fade velocity out there
     // (the polar patches own that region and run unfaded).
     float fade = texture(u_profile_stamp, latProfileUV(ll.y)).b;
-    imageStore(out_vel, px, vec4(u * fade, v * fade, 0.0, 0.0));
+    u *= fade;
+    v *= fade;
+
+    // Convective outbreak outflow.
+    for (int i = 0; i < u_outbreak_count; ++i) {
+        vec4 ob = u_outbreaks[i];
+        float dlon = mod(ll.x - ob.x + 3.0 * PI, 2.0 * PI) - PI;
+        vec2 dxy = vec2(dlon * cosl, ll.y - ob.y);
+        float r = length(dxy);
+        if (r > 1e-5 && r < ob.z * 3.0) {
+            float q = r / ob.z;
+            u += ob.w * (dxy.x / r) * q * exp(-q * q);
+            v += ob.w * (dxy.y / r) * q * exp(-q * q);
+        }
+    }
+    imageStore(out_vel, px, vec4(u, v, 0.0, 0.0));
 #else
     // Patch derivatives in st (radians), then rotate to (east, north):
     //   dpsi/drho   = ds . e_rho,   dpsi/dtheta = rho * (ds . e_theta)

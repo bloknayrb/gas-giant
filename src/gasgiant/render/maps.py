@@ -45,6 +45,8 @@ class MapDeriver:
         height_out: moderngl.Texture,
         appearance: AppearanceParams,
         detail_gain: float = 0.35,
+        detail_tex: moderngl.Texture | None = None,
+        detail_intensity: float = 0.0,
     ) -> None:
         if self._palette_tex is None:
             self.update_palettes(appearance)
@@ -63,6 +65,9 @@ class MapDeriver:
         prog["u_patch_rho_max"].value = patch_rho_max
         prog["u_blend_lo"].value = blend_band[0]
         prog["u_blend_hi"].value = blend_band[1]
+        (detail_tex if detail_tex is not None else self._palette_tex).use(location=5)
+        prog["u_detail"].value = 5
+        prog["u_detail_intensity"].value = detail_intensity if detail_tex is not None else 0.0
         prog["u_size"].value = size
         prog["u_detail_gain"].value = detail_gain
         prog["u_haze_amount"].value = appearance.haze_amount

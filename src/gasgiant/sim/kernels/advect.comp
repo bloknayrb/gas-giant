@@ -23,6 +23,9 @@ layout(local_size_x = 16, local_size_y = 16) in;
 #include "common.glsl"
 #if PASS == 2
 #include "vortex_stamp.glsl"
+#if DOMAIN == 0
+#include "wave_stamp.glsl"
+#endif
 #endif
 
 layout(rgba32f, binding = 0) writeonly uniform image2D out_tracers;
@@ -189,11 +192,14 @@ void main() {
     vec4 stamp = texture(u_profile_stamp, latProfileUV(ll.y + warp));
     vec3 vs = vortexStamp(p);
     float ring = 0.0;
+    vec3 ws = vec3(0.0);
 #if DOMAIN != 0
     ring = polyRing(ll);
+#else
+    ws = waveStamp(ll);
 #endif
-    result.x += (stamp.r + vs.x + ring - result.x) * u_relax_k;
-    result.y += (stamp.g + vs.y - result.y) * u_relax_k;
+    result.x += (stamp.r + vs.x + ws.x + ring - result.x) * u_relax_k;
+    result.y += (stamp.g + vs.y + ws.y - result.y) * u_relax_k;
 
     // Detail tracer: blend in fresh evolving noise (an exponential-decay
     // flow-noise by construction).
@@ -203,9 +209,9 @@ void main() {
     );
     result.z = mix(result.z, fresh, u_replenish);
 
-    // T3 tint relaxes toward the live vortex tint stamps: cores stay colored
-    // while they exist, advected spiral trails decay over ~tau steps.
-    result.w += (vs.z - result.w) * u_relax_k * 0.6;
+    // T3 tint relaxes toward the live vortex + wave tint stamps: cores and
+    // festoon roots stay colored while they exist, advected trails decay.
+    result.w += (vs.z + ws.z - result.w) * u_relax_k * 0.6;
 
     imageStore(out_tracers, px, result);
 #else

@@ -215,6 +215,58 @@ class StormsParams(_Params):
         1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), ui="Storms",
         description="Turbulence boost in the wake wedge downstream of hero storms",
     )
+    outbreak_count: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Storms",
+        description="Convective outbreaks (Great-White-Spot events) during the development run",
+    )
+    outbreak_strength: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Storms",
+    )
+
+
+class WavesParams(_Params):
+    festoon_strength: float = pfield(
+        0.8, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.0, 1.4), ui="Waves",
+        description="Festoon plumes + hot spots on the equatorial belt edge (0 = off)",
+    )
+    festoon_wavenumber: int = pfield(
+        12, tier=Tier.RESTART, lo=4, hi=24, rand=(8, 16), ui="Waves",
+        description="Rossby wavenumber of the festoon/hot-spot train",
+    )
+    hotspot_depth: float = pfield(
+        0.6, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.9), ui="Waves",
+        description="Depth of the cloud-free hot spots at the wave troughs",
+    )
+    ribbon_strength: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.0, 1.0), ui="Waves",
+        description="Saturn-style ribbon wave on one mid-latitude jet (0 = off)",
+    )
+    ribbon_wavenumber: int = pfield(
+        12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
+    )
+
+
+class DetailParams(_Params):
+    intensity: float = pfield(
+        0.55, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 0.9), ui="Detail",
+        description="Export/preview detail synthesis amplitude",
+    )
+    flow_phases: int = pfield(
+        3, tier=Tier.POST, lo=1, hi=4, ui="Detail",
+        description="Staggered advected-noise phases (more = richer filaments)",
+    )
+    flow_stretch: float = pfield(
+        1.0, tier=Tier.POST, lo=0.1, hi=4.0, rand=(0.6, 1.6), ui="Detail",
+        description="How far detail noise is advected along the flow",
+    )
+    frequency: float = pfield(
+        48.0, tier=Tier.POST, lo=8.0, hi=256.0, log=True, ui="Detail",
+        description="Base spatial frequency of the detail noise",
+    )
+    cellular_amount: float = pfield(
+        0.6, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 1.0), ui="Detail",
+        description="Convective cell (closed-cell/popcorn) texture in quiet zones",
+    )
 
 
 class PoleStyle(StrEnum):
@@ -307,8 +359,10 @@ class PlanetParams(_Params):
     jets: JetsParams = Field(default_factory=JetsParams)
     turbulence: TurbulenceParams = Field(default_factory=TurbulenceParams)
     storms: StormsParams = Field(default_factory=StormsParams)
+    waves: WavesParams = Field(default_factory=WavesParams)
     poles: PolesParams = Field(default_factory=PolesParams)
     appearance: AppearanceParams = Field(default_factory=AppearanceParams)
+    detail: DetailParams = Field(default_factory=DetailParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
     export: ExportParams = Field(default_factory=ExportParams)
 

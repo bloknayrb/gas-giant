@@ -1,0 +1,107 @@
+#version 430
+// Export/preview detail synthesis: advected-coordinate noise (NOT line-
+// integral convolution — accumulating noise along the trace reads as
+// brushed-metal smear; backtracing the POSITION and sampling noise there
+// yields noise stretched and folded by the flow, i.e. filaments).
+//
+// 2-4 staggered pseudo-time phases avoid the "everything stretched equally"
+// look; amplitude is masked by the detail tracer + shear/speed so filaments
+// appear where the sim has structure; a Worley convective-cell texture takes
+// over in quiet zone interiors (closed-cell/popcorn fields — without it
+// quiet zones read as fuzz).
+//
+// The velocity is sampled from the BAKED sim-resolution texture (never
+// re-evaluated analytically — review finding: 10^2-10^3 too slow at 16K).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "gasgiant.sim.kernels:noise3d.glsl"
+#include "worley3d.glsl"
+
+layout(r32f, binding = 0) writeonly uniform image2D out_detail;
+
+uniform sampler2D u_vel;          // equirect velocity (sim res, linear, wrap-x)
+uniform sampler2D u_tracers;      // equirect tracers (T2 freshness in .b)
+uniform sampler2D u_profile_dyn;  // (u, psi, shear_norm, belt_mask)
+uniform ivec2 u_size;             // output resolution
+
+uniform float u_freq;
+uniform float u_stretch;          // total backtrace pseudo-time scale
+uniform int u_phases;
+uniform float u_cell_amount;
+uniform vec3 u_offset;
+
+const float PI = 3.14159265358979;
+const int SUBSTEPS = 6;
+const float TAU_BASE = 0.35;      // pseudo-time per unit stretch
+
+vec3 spherePt(vec2 ll) {
+    float cl = cos(ll.y);
+    return vec3(cl * cos(ll.x), sin(ll.y), cl * sin(ll.x));
+}
+
+vec2 eqUV(vec2 ll) {
+    return vec2((ll.x + PI) / (2.0 * PI), (0.5 * PI - ll.y) / PI);
+}
+
+// Backtrace (lon, lat) through the baked velocity for pseudo-time tau.
+vec2 backtraceLL(vec2 ll, float tau) {
+    float h = tau / float(SUBSTEPS);
+    for (int i = 0; i < SUBSTEPS; ++i) {
+        vec2 vel = texture(u_vel, eqUV(ll)).rg;
+        float cosl = max(cos(ll.y), 0.05);
+        ll.x -= h * vel.x / cosl;
+        ll.y -= h * vel.y;
+        ll.y = clamp(ll.y, -0.5 * PI, 0.5 * PI);
+    }
+    return ll;
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = vec2(
+        ((float(px.x) + 0.5) / float(u_size.x)) * 2.0 * PI - PI,
+        0.5 * PI - ((float(px.y) + 0.5) / float(u_size.y)) * PI
+    );
+
+    vec4 tr = texture(u_tracers, eqUV(ll));
+    vec4 prof = texture(u_profile_dyn, vec2(clamp((0.5 * PI - ll.y) / PI, 0.0, 1.0), 0.5));
+    vec2 vel = texture(u_vel, eqUV(ll)).rg;
+    float speedN = clamp(length(vel) / 1.2, 0.0, 1.0);
+    float shearN = prof.b;
+    float belt = prof.a;
+
+    // Flow-stretched filament noise: staggered phases.
+    float streak = 0.0;
+    float wsum = 0.0;
+    for (int ph = 0; ph < u_phases; ++ph) {
+        float tau = u_stretch * TAU_BASE * (float(ph) + 1.0) / float(u_phases);
+        vec2 src = backtraceLL(ll, tau);
+        vec3 ps = spherePt(src);
+        float w = 1.0 - 0.5 * float(ph) / float(max(u_phases - 1, 1));
+        streak += w * fbm(ps * u_freq + u_offset, 4, 2.0, 0.5);
+        wsum += w;
+    }
+    streak /= max(wsum, 1e-5);
+
+    // Convective cells: bright cell interiors with dark lanes (1 - F1 ridged).
+    vec3 p0 = spherePt(ll);
+    float f1 = worleyF1(p0 * (u_freq * 0.45) + u_offset.yzx);
+    float cells = 0.5 - (f1 - 0.55);  // dark lanes at large F1
+
+    // Masks: filaments where the flow is busy and the tracer is fresh;
+    // cells where it is quiet and bright (zone interiors).
+    float w_streak = clamp(0.2 + 0.8 * (shearN + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b);
+    float w_cell = u_cell_amount * (1.0 - belt) * (1.0 - speedN) * (1.0 - shearN);
+
+    float d = 0.5 + 0.5 * streak * w_streak + 0.35 * (cells - 0.5) * w_cell;
+
+    // Equirect backtrace degrades toward the caps; fade to neutral there
+    // (Phase 4 routes polar tiles through the patch velocity).
+    float fade = smoothstep(0.98, 1.15, abs(ll.y));
+    d = mix(d, 0.5, fade);
+
+    imageStore(out_detail, px, vec4(clamp(d, 0.0, 1.0), 0.0, 0.0, 0.0));
+}

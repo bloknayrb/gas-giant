@@ -109,6 +109,24 @@ def build_profiles(
     )
 
 
+def select_wave_latitudes(bands: BandLayout, profiles: LatProfiles) -> tuple[float, float]:
+    """(festoon latitude, ribbon latitude): the band edge nearest ~7 deg for
+    the festoon/hot-spot train, and the strongest mid-latitude jet for the
+    ribbon wave."""
+    interior = bands.edges[1:-1].astype(np.float64)
+    if interior.size == 0:
+        return 0.12, 0.82
+    festoon = float(interior[np.argmin(np.abs(np.abs(interior) - 0.12))])
+
+    mid = [e for e in interior if 0.6 < abs(e) < 1.0]
+    if mid:
+        speeds = [abs(float(np.interp(-e, -profiles.lat, profiles.u))) for e in mid]
+        ribbon = float(mid[int(np.argmax(speeds))])
+    else:
+        ribbon = 0.82
+    return festoon, ribbon
+
+
 def _stamp_profiles(
     lat: np.ndarray, bands: BandLayout, params: BandsParams
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

@@ -14,6 +14,18 @@
       "detail_amount": 0.06,
       "detail_freq": 10.0
     },
+    "waves": {
+      "festoon_strength": 0.0,
+      "ribbon_strength": 1.0,
+      "ribbon_wavenumber": 14
+    },
+    "storms": {
+      "hero_count": 0,
+      "oval_density": 0.4,
+      "barge_density": 0.2,
+      "pearls_count": 0,
+      "outbreak_count": 1
+    },
     "poles": {
       "north": { "style": "polygon_jet", "polygon_sides": 6 },
       "south": { "style": "plain_vortex" }

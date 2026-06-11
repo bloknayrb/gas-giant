@@ -20,9 +20,11 @@ import numpy as np
 from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import PlanetParams, Tier
+from gasgiant.render.detail import DetailSynth
 from gasgiant.render.maps import MapDeriver
 from gasgiant.sim.bands import generate_bands
-from gasgiant.sim.profiles import build_profiles
+from gasgiant.sim.events import EventSchedule
+from gasgiant.sim.profiles import build_profiles, select_wave_latitudes
 from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver
 from gasgiant.sim.vortices import generate_vortices
 
@@ -40,8 +42,10 @@ class Simulation:
         self.params = params
         self.gpu = gpu if gpu is not None else GpuContext.headless()
         self.deriver = MapDeriver(self.gpu)
+        self.detail_synth = DetailSynth(self.gpu)
         self._preview_color: moderngl.Texture | None = None
         self._preview_height: moderngl.Texture | None = None
+        self._detail_tex: moderngl.Texture | None = None
         self._post_dirty = True
         self._tracers_changed = True
         self._extra_steps = 0
@@ -59,7 +63,9 @@ class Simulation:
         self.profile_stamp = self.gpu.lut_texture(self.profiles.stamp_lut())
 
         self.solver = Solver(
-            self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp
+            self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp,
+            wave_lats=select_wave_latitudes(self.bands, self.profiles),
+            events=EventSchedule.generate(p, self.bands),
         )
         self.solver.init_tracers()
         self._tracers_changed = True
@@ -131,8 +137,23 @@ class Simulation:
 
     # -- derive -----------------------------------------------------------------------
 
+    def _get_detail_tex(self, size: tuple[int, int]) -> moderngl.Texture:
+        if self._detail_tex is None or self._detail_tex.size != size:
+            if self._detail_tex is not None:
+                self._detail_tex.release()
+            self._detail_tex = self.gpu.texture2d(size, 1, "f4", linear=True)
+        return self._detail_tex
+
     def _derive(self, color_tex: moderngl.Texture, height_tex: moderngl.Texture) -> None:
         s = self.solver
+        p = self.params
+        detail_tex = None
+        if p.detail.intensity > 0.0:
+            detail_tex = self._get_detail_tex(color_tex.size)
+            self.detail_synth.synthesize(
+                p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
+                self.profile_dyn, detail_tex, p.detail,
+            )
         self.deriver.derive(
             s.equirect.tracers.cur,
             s.north.tracers.cur,
@@ -141,7 +162,9 @@ class Simulation:
             BLEND_BAND,
             color_tex,
             height_tex,
-            self.params.appearance,
+            p.appearance,
+            detail_tex=detail_tex,
+            detail_intensity=p.detail.intensity,
         )
 
     # -- preview -----------------------------------------------------------------------

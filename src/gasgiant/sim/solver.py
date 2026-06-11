@@ -92,6 +92,8 @@ class Solver:
         vortices: VortexRegistry,
         profile_dyn_tex: moderngl.Texture,
         profile_stamp_tex: moderngl.Texture,
+        wave_lats: tuple[float, float] = (0.12, 0.82),
+        events: object | None = None,
     ) -> None:
         self.gpu = gpu
         self.params = params
@@ -99,6 +101,8 @@ class Solver:
         self.vortices = vortices
         self.profile_dyn = profile_dyn_tex
         self.profile_stamp = profile_stamp_tex
+        self.wave_lats = wave_lats
+        self.events = events
 
         w = params.sim.resolution
         n = patch_resolution(w)
@@ -156,6 +160,19 @@ class Solver:
         max_speed = max(self.profiles.max_speed + _VORTEX_SPEED_MARGIN, 0.3)
         return float(self.params.sim.dt_scale * 1.2 * cell / max_speed)
 
+    def _wave_uniforms(self, prog: moderngl.ComputeShader) -> None:
+        p = self.params
+        fest_lat, rib_lat = self.wave_lats
+        _set(prog, "u_fest_amp", p.waves.festoon_strength)
+        _set(prog, "u_fest_lat", fest_lat)
+        _set(prog, "u_fest_k", float(p.waves.festoon_wavenumber))
+        _set(prog, "u_fest_phase", self._fest_phase)
+        _set(prog, "u_hotspot_depth", p.waves.hotspot_depth)
+        _set(prog, "u_rib_amp", p.waves.ribbon_strength)
+        _set(prog, "u_rib_lat", rib_lat)
+        _set(prog, "u_rib_k", float(p.waves.ribbon_wavenumber))
+        _set(prog, "u_rib_phase", self._rib_phase)
+
     def _poly_uniforms(self, prog: moderngl.ComputeShader, pole: PoleParams) -> None:
         enabled = pole.style == PoleStyle.POLYGON_JET and pole.strength > 0.0
         _set(prog, "u_poly_amp", 0.012 * pole.strength if enabled else 0.0)
@@ -176,6 +193,9 @@ class Solver:
         self._turb_offset = tuple(turb_rng.uniform(-100.0, 100.0, 3))
         self._kh_phase = float(kh_rng.uniform(0.0, 2.0 * np.pi))
         self._poly_phase = float(subseed(p.seed, "poly-jet").uniform(0.0, 2.0 * np.pi))
+        wave_rng = subseed(p.seed, "eq-waves")
+        self._fest_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
+        self._rib_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
 
         relax_k = 1.0 / max(p.turbulence.relax_tau, 1.0)
         for dom in self.domains:
@@ -189,9 +209,12 @@ class Solver:
             _set(k, "u_warp_freq", p.bands.warp_freq)
             if dom.kind != DOMAIN_EQUIRECT:
                 self._poly_uniforms(k, pole)
+            else:
+                self._wave_uniforms(k)
 
             _set(dom.k_vel, "u_size", dom.size)
             _set(dom.k_vel, "u_rho_max", RHO_MAX)
+            _set(dom.k_vel, "u_outbreak_count", 0)
 
             for i, prog in enumerate(dom.k_adv):
                 _set(prog, "u_size", dom.size)
@@ -206,6 +229,8 @@ class Solver:
                     _set(prog, "u_detail_freq", p.bands.detail_freq)
                     if dom.kind != DOMAIN_EQUIRECT:
                         self._poly_uniforms(prog, pole)
+                    else:
+                        self._wave_uniforms(prog)
 
             k = dom.k_init
             _set(k, "u_size", dom.size)
@@ -218,6 +243,8 @@ class Solver:
             _set(k, "u_detail_freq", p.bands.detail_freq)
             if dom.kind != DOMAIN_EQUIRECT:
                 self._poly_uniforms(k, pole)
+            else:
+                self._wave_uniforms(k)
 
         for prog in self.k_x_to_patch:
             _set(prog, "u_rho_max", RHO_MAX)
@@ -268,9 +295,15 @@ class Solver:
     def step(self, n: int = 1) -> None:
         ctx = self.gpu.ctx
         for _ in range(n):
-            # 1. Vortex drift (CPU registry -> SSBO).
+            # 1. Events (outbreak spawn/decay), vortex drift, SSBO refresh.
+            impulses: list[tuple[float, float, float, float]] = []
+            if self.events is not None:
+                impulses = self.events.apply(self.step_index, self.vortices)
             self.vortices.drift(self.profiles, self.dt)
-            self._ssbo.write(self.vortices.pack_ssbo().tobytes())
+            ssbo_data = self.vortices.pack_ssbo()
+            if ssbo_data.nbytes > self._ssbo.size:
+                self._ssbo.orphan(ssbo_data.nbytes)
+            self._ssbo.write(ssbo_data.tobytes())
             self._ssbo.bind_to_storage_buffer(2)
 
             turb_time = self.step_index * self.params.turbulence.evolution_rate
@@ -293,6 +326,14 @@ class Solver:
                 _set(dom.k_vel, "u_psi", 0)
                 self.profile_stamp.use(location=1)
                 _set(dom.k_vel, "u_profile_stamp", 1)
+                if dom.kind == DOMAIN_EQUIRECT:
+                    _set(dom.k_vel, "u_outbreak_count", len(impulses))
+                    if impulses:
+                        flat = np.zeros((2, 4), dtype=np.float32)
+                        for i, imp in enumerate(impulses[:2]):
+                            flat[i] = imp
+                        with contextlib.suppress(KeyError):
+                            dom.k_vel["u_outbreaks"].write(flat.tobytes())
                 dom.vel_tex.bind_to_image(0, read=False, write=True)
                 dom.k_vel.run(gx, gy, 1)
                 ctx.memory_barrier()
