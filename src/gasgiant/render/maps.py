@@ -31,11 +31,8 @@ class MapDeriver:
         for tex in (self._palette_tex, self._storm_tex):
             if tex is not None:
                 tex.release()
-        # A1 bridge: sample the row blend at the equator until the derive
-        # kernel consumes the full latitude-row LUT (A2).
         rows = [(row.latitude, _stops(row.stops)) for row in appearance.palette_rows]
-        row_lut = bake_rows(rows, height=64)
-        self._palette_tex = self.gpu.lut_texture(row_lut[row_lut.shape[0] // 2])
+        self._palette_tex = self.gpu.lut_texture(bake_rows(rows, height=64))
         self._storm_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.storm_tints)))
 
     def derive(

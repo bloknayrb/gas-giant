@@ -17,7 +17,8 @@ uniform sampler2D u_patch_s;       // south polar patch tracers
 uniform float u_patch_rho_max;     // patch angular radius (radians)
 uniform float u_blend_lo;          // |lat| feather start (radians)
 uniform float u_blend_hi;          // |lat| fully patch
-uniform sampler2D u_palette;       // 256x1 primary palette LUT
+uniform sampler2D u_palette;       // 256xK primary palette LUT: u = color
+                                   // index, v = latitude (-90 deg at v=0)
 uniform sampler2D u_storm_palette; // 256x1 storm tint LUT, indexed (T3+1)/2
 uniform sampler2D u_detail;        // synthesized detail field, TILE-local
 uniform float u_detail_intensity;  // 0 disables (detail texture unused)
@@ -57,7 +58,8 @@ void main() {
         t = mix(t, tp, w);
     }
 
-    vec3 col = texture(u_palette, vec2(clamp(t.r, 0.0, 1.0), 0.5)).rgb;
+    // Palette row axis: v = 0 at -90 deg, 1 at +90 deg (signed latitude).
+    vec3 col = texture(u_palette, vec2(clamp(t.r, 0.0, 1.0), 1.0 - uv.y)).rgb;
 
     // Storm tint axis: blend toward the secondary palette where |T3| is high.
     vec3 tint = texture(u_storm_palette, vec2(clamp(t.a * 0.5 + 0.5, 0.0, 1.0), 0.5)).rgb;

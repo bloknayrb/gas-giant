@@ -65,9 +65,33 @@ def _draw_model(model: type[BaseModel], doc: dict[str, Any], top_level: bool = F
     return changed
 
 
-def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
+def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
+    """Which widget _draw_leaf renders for this field, or None if it has no
+    widget. Kept as a pure function so a static test can assert every leaf
+    in PlanetParams is renderable without opening a GUI."""
     from enum import StrEnum
 
+    ann = info.annotation
+    if isinstance(ann, type) and issubclass(ann, StrEnum):
+        return "enum"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if _is_color_field(name, value):
+        return "color"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, list) and value and isinstance(value[0], dict) and "pos" in value[0]:
+        return "stops"
+    if isinstance(value, list) and value and isinstance(value[0], dict) and "stops" in value[0]:
+        return "palette_rows"
+    return None
+
+
+def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
     value = doc[name]
     label = name.replace("_", " ")
     extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
@@ -75,16 +99,17 @@ def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
     changed = False
     imgui.push_id(name)
 
+    kind = leaf_kind(name, info, value)
     ann = info.annotation
-    if isinstance(ann, type) and issubclass(ann, StrEnum):
+    if kind == "enum":
         options = [e.value for e in ann]
         current = options.index(value) if value in options else 0
         changed, idx = imgui.combo(label, current, options)
         if changed:
             doc[name] = options[idx]
-    elif isinstance(value, bool):
+    elif kind == "bool":
         changed, doc[name] = imgui.checkbox(label, value)
-    elif isinstance(value, int):
+    elif kind == "int":
         ilo = int(lo) if lo is not None else 0
         ihi = int(hi) if hi is not None else 100
         if ihi - ilo > 1_000_000:  # seeds etc: free input, not a slider
@@ -93,25 +118,62 @@ def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
                 doc[name] = max(ilo, min(ihi, doc[name]))
         else:
             changed, doc[name] = imgui.slider_int(label, value, ilo, ihi)
-    elif isinstance(value, float):
+    elif kind == "float":
         flo = lo if lo is not None else 0.0
         fhi = hi if hi is not None else 1.0
         flags = imgui.SliderFlags_.logarithmic if extra.get("log") else 0
         changed, doc[name] = imgui.slider_float(label, value, flo, fhi, flags=flags)
-    elif _is_color_field(name, value):
+    elif kind == "color":
         changed, rgb = imgui.color_edit3(label, list(value))
         if changed:
             doc[name] = tuple(rgb)
-    elif isinstance(value, str):
+    elif kind == "str":
         changed, doc[name] = imgui.input_text(label, value)
-    elif isinstance(value, list) and value and isinstance(value[0], dict) and "pos" in value[0]:
+    elif kind == "stops":
         changed = _draw_stops(label, value)
+    elif kind == "palette_rows":
+        changed = _draw_palette_rows(label, value)
     else:
         imgui.text_disabled(f"{label}: {value!r}")
 
     if info.description and imgui.is_item_hovered():
         imgui.set_tooltip(info.description)
     imgui.pop_id()
+    return changed
+
+
+def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> bool:
+    """Latitude-anchored palette rows: a latitude slider plus the shared
+    stops editor per row."""
+    changed = False
+    imgui.text(label)
+    remove_index = None
+    for i, row in enumerate(rows):
+        imgui.push_id(1000 + i)
+        imgui.separator_text(f"row {i + 1}")
+        imgui.set_next_item_width(160.0)
+        c, lat = imgui.slider_float("latitude", float(row["latitude"]), -90.0, 90.0)
+        if c:
+            row["latitude"] = lat
+            changed = True
+        if len(rows) > 1:
+            imgui.same_line()
+            if imgui.small_button("remove row"):
+                remove_index = i
+        changed |= _draw_stops("stops", row["stops"])
+        imgui.pop_id()
+    if remove_index is not None:
+        rows.pop(remove_index)
+        changed = True
+    if imgui.small_button(f"add row##{label}"):
+        last = rows[-1]
+        rows.append(
+            {
+                "latitude": min(90.0, float(last["latitude"]) + 30.0),
+                "stops": [dict(s) for s in last["stops"]],
+            }
+        )
+        changed = True
     return changed
 
 

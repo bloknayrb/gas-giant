@@ -126,9 +126,11 @@ class GpuContext:
         return FullscreenPass(self, package, frag_name)
 
     def lut_texture(self, lut: np.ndarray) -> moderngl.Texture:
-        """(N, 4) float32 LUT -> Nx1 linear-filtered, clamped texture."""
+        """(N, 4) or (rows, N, 4) float32 LUT -> Nx1 / NxROWS linear-filtered,
+        clamped texture."""
         data = lut.astype(np.float32).tobytes()
-        tex = self.ctx.texture((lut.shape[0], 1), 4, data=data, dtype="f4")
+        size = (lut.shape[0], 1) if lut.ndim == 2 else (lut.shape[1], lut.shape[0])
+        tex = self.ctx.texture(size, 4, data=data, dtype="f4")
         tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         tex.repeat_x = False
         tex.repeat_y = False
