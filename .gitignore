@@ -15,6 +15,9 @@ dist/
 out/
 *.npz
 
+# Downloaded NASA reference imagery (scripts/fetch_references.py)
+refs/
+
 # Session/handoff state (local memory, not project source)
 .remember/
 

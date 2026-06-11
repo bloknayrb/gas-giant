@@ -59,12 +59,13 @@ root_package = "gasgiant"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Layered architecture: params/palette -> gl -> core -> sim -> render -> export/jobs -> engine -> app/cli"
+name = "Layered architecture: params/palette -> gl -> core -> sim -> render -> jobs -> export -> engine -> app/cli"
 type = "layers"
 layers = [
     "gasgiant.app | gasgiant.cli",
     "gasgiant.engine",
-    "gasgiant.export | gasgiant.jobs",
+    "gasgiant.export",
+    "gasgiant.jobs",
     "gasgiant.render",
     "gasgiant.sim",
     "gasgiant.core",
