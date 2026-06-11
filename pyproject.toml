@@ -15,11 +15,11 @@ dependencies = [
     "jsonschema>=4.23",
 ]
 
+# GUI uses imgui-bundle's native hello_imgui runner (window + backend in C++,
+# version-matched to imgui by construction); ModernGL attaches to its context.
 [project.optional-dependencies]
 gui = [
-    "imgui-bundle>=1.6",
-    "moderngl-window>=3.0",
-    "glfw>=2.7",
+    "imgui-bundle>=1.92",
 ]
 
 [project.scripts]
@@ -89,7 +89,5 @@ source_modules = [
 ]
 forbidden_modules = [
     "imgui_bundle",
-    "moderngl_window",
-    "glfw",
     "gasgiant.app",
 ]

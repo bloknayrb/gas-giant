@@ -5,6 +5,6 @@ and the shader loader. Higher layers receive and use handle objects from here
 but never create raw GL resources.
 """
 
-from gasgiant.gl.context import GpuContext, ShaderError
+from gasgiant.gl.context import FullscreenPass, GpuContext, ShaderError
 
-__all__ = ["GpuContext", "ShaderError"]
+__all__ = ["FullscreenPass", "GpuContext", "ShaderError"]

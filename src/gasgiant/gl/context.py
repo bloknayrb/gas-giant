@@ -28,6 +28,38 @@ class ShaderError(RuntimeError):
     pass
 
 
+_FULLSCREEN_VS = """#version 430
+out vec2 v_uv;
+void main() {
+    vec2 pos = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    v_uv = pos;
+    gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+
+class FullscreenPass:
+    """A fragment shader over a fullscreen triangle, rendered into an FBO."""
+
+    def __init__(self, gpu: GpuContext, package: str, frag_name: str) -> None:
+        source, smap = _load_flattened(package, frag_name, {})
+        try:
+            self.prog = gpu.ctx.program(vertex_shader=_FULLSCREEN_VS, fragment_shader=source)
+        except moderngl.Error as exc:
+            raise ShaderError(
+                f"compile failed for {package}/{frag_name}:\n{format_glsl_error(str(exc), smap)}"
+            ) from exc
+        self._vao = gpu.ctx.vertex_array(self.prog, [])
+
+    def render(self, fbo: moderngl.Framebuffer) -> None:
+        fbo.use()
+        self._vao.render(moderngl.TRIANGLES, vertices=3)
+
+    def release(self) -> None:
+        self._vao.release()
+        self.prog.release()
+
+
 class GpuContext:
     def __init__(self, ctx: moderngl.Context) -> None:
         self.ctx = ctx
@@ -62,6 +94,21 @@ class GpuContext:
         # hardware filtering (8-bit fractional weights) can't sneak in.
         tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
         tex.repeat_x = True
+        tex.repeat_y = False
+        return tex
+
+    def framebuffer(self, color_tex: moderngl.Texture) -> moderngl.Framebuffer:
+        return self.ctx.framebuffer(color_attachments=[color_tex])
+
+    def fullscreen_pass(self, package: str, frag_name: str) -> FullscreenPass:
+        return FullscreenPass(self, package, frag_name)
+
+    def lut_texture(self, lut: np.ndarray) -> moderngl.Texture:
+        """(N, 4) float32 LUT -> Nx1 linear-filtered, clamped texture."""
+        data = lut.astype(np.float32).tobytes()
+        tex = self.ctx.texture((lut.shape[0], 1), 4, data=data, dtype="f4")
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        tex.repeat_x = False
         tex.repeat_y = False
         return tex
 
