@@ -142,6 +142,7 @@ def add_polar_vortices(
     style: str,
     cyclone_count: int,
     strength: float,
+    field_density: float = 0.0,
 ) -> None:
     """Polar features that are vortex-shaped (cyclone clusters, plain vortex).
     The polygon jet is a streamfunction term in the patch kernel, not a vortex,
@@ -156,28 +157,41 @@ def add_polar_vortices(
         reg.vortices.append(
             Vortex(pole_lat, 0.0, 0.09, s_central * 1.4, KIND_POLAR, tint=0.25, brightness=-0.22)
         )
-        return
-
-    if style == "polygon_jet":
+    elif style == "polygon_jet":
         reg.vortices.append(
             Vortex(pole_lat, 0.0, 0.05, s_central, KIND_POLAR, tint=0.15, brightness=-0.14)
         )
-        return
-
-    # cyclone_cluster: central cyclone + ring at polygon vertices (Juno's
-    # 8-around-1 north / 5-around-1 south configuration generalized).
-    reg.vortices.append(
-        Vortex(pole_lat, 0.0, 0.055, s_central, KIND_POLAR, tint=0.3, brightness=-0.26)
-    )
-    ring_colat = 0.135
-    base = float(rng.uniform(0.0, 2.0 * np.pi))
-    for i in range(cyclone_count):
-        theta = base + 2.0 * np.pi * i / cyclone_count
-        lat = pole_sign * (np.pi / 2.0 - ring_colat)
-        lon = (theta + np.pi) % (2.0 * np.pi) - np.pi
+    else:
+        # cyclone_cluster: central cyclone + ring at polygon vertices (Juno's
+        # 8-around-1 north / 5-around-1 south configuration generalized).
         reg.vortices.append(
-            Vortex(lat, lon, 0.05, s_central * 0.85, KIND_POLAR, tint=0.25, brightness=-0.22)
+            Vortex(pole_lat, 0.0, 0.055, s_central, KIND_POLAR, tint=0.3, brightness=-0.26)
         )
+        ring_colat = 0.135
+        base = float(rng.uniform(0.0, 2.0 * np.pi))
+        for i in range(cyclone_count):
+            theta = base + 2.0 * np.pi * i / cyclone_count
+            lat = pole_sign * (np.pi / 2.0 - ring_colat)
+            lon = (theta + np.pi) % (2.0 * np.pi) - np.pi
+            reg.vortices.append(
+                Vortex(lat, lon, 0.05, s_central * 0.85, KIND_POLAR, tint=0.25, brightness=-0.22)
+            )
+
+    # Background field: small cyclones of mixed size filling the cap (the
+    # dense hierarchy PIA21641 shows). Strictly poleward of 70 deg — the
+    # 63-67 deg nesting exchange band must stay storm-free.
+    if field_density > 0.0:
+        count = int(rng.poisson(field_density * 14.0))
+        for _ in range(count):
+            colat = float(rng.uniform(0.06, np.pi / 2.0 - np.deg2rad(70.0)))
+            lat = pole_sign * (np.pi / 2.0 - colat)
+            lon = float(rng.uniform(-np.pi, np.pi))
+            u01 = float(rng.uniform(0.0, 1.0))
+            r = 0.012 + (0.038 - 0.012) * u01 * u01
+            reg.vortices.append(
+                Vortex(lat, lon, r, s_central * (0.25 + 0.5 * u01), KIND_POLAR,
+                       tint=0.18, brightness=-(0.10 + 3.5 * r))
+            )
 
 
 def generate_vortices(
@@ -278,10 +292,12 @@ def generate_vortices(
         add_polar_vortices(
             reg, polar_rng, +1.0, poles.north.style.value,
             poles.north.cyclone_count, poles.north.strength,
+            poles.north.field_density,
         )
         add_polar_vortices(
             reg, polar_rng, -1.0, poles.south.style.value,
             poles.south.cyclone_count, poles.south.strength,
+            poles.south.field_density,
         )
 
     _enforce_cap(reg)

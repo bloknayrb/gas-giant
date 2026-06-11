@@ -93,6 +93,9 @@ class MapDeriver:
         prog["u_detail_gain"].value = detail_gain
         prog["u_haze_amount"].value = appearance.haze_amount
         prog["u_haze_color"].value = appearance.haze_color
+        prog["u_polar_tint_color"].value = appearance.polar_tint_color
+        prog["u_polar_tint_strength"].value = appearance.polar_tint_strength
+        prog["u_polar_tint_start"].value = float(np.deg2rad(appearance.polar_tint_start_lat))
         prog["u_contrast"].value = appearance.contrast
         prog["u_saturation"].value = appearance.saturation
         prog["u_gamma"].value = appearance.gamma

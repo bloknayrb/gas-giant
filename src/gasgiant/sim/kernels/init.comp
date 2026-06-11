@@ -71,7 +71,7 @@ void main() {
         float rho = 0.5 * PI - abs(ll.y);
         float rho0 = u_poly_rho * (1.0 + u_poly_eps * cos(u_poly_k * ll.x + u_poly_phase));
         float dr = (rho - rho0) / max(u_poly_width * 0.7, 1e-4);
-        t0 -= 0.18 * exp(-dr * dr);
+        t0 -= 0.12 * exp(-dr * dr);
     }
 #endif
 

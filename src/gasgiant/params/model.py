@@ -333,6 +333,11 @@ class DetailParams(_Params):
         96.0, tier=Tier.POST, lo=16.0, hi=512.0, log=True, ui="Detail",
         description="Base spatial frequency of the striation noise",
     )
+    polar_stipple: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 1.0), ui="Detail",
+        description="Bright granular storm speckle (popcorn) poleward of ~55 deg "
+                    "(the band-to-mottle transition character)",
+    )
 
 
 class PoleStyle(StrEnum):
@@ -357,6 +362,11 @@ class PoleParams(_Params):
     )
     strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.6, 1.5), ui="Poles",
+    )
+    field_density: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.4, 1.4), ui="Poles",
+        description="Background small-cyclone field filling the cap poleward of "
+                    "70 deg (PIA21641's dense cyclone hierarchy; 0 = off)",
     )
 
 
@@ -393,6 +403,19 @@ class AppearanceParams(_Params):
     gamma: float = pfield(
         1.0, tier=Tier.POST, lo=0.4, hi=2.5, ui="Appearance",
         description="Final tone-curve gamma on the color map",
+    )
+    polar_tint_color: tuple[float, float, float] = pfield(
+        (0.42, 0.50, 0.58), tier=Tier.POST, ui="Appearance",
+        description="Polar cap tint (Juno blue-gray); applied where cloud tops "
+                    "are LOW -- the blue is structural, bright clouds stay pearly",
+    )
+    polar_tint_strength: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.2, 0.7), ui="Appearance",
+        description="Polar tint blend strength (0 = off, the pre-v1.1 look)",
+    )
+    polar_tint_start_lat: float = pfield(
+        55.0, tier=Tier.POST, lo=30.0, hi=80.0, ui="Appearance",
+        description="Latitude (deg) where the polar tint begins",
     )
 
 

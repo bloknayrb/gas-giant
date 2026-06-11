@@ -46,6 +46,10 @@ uniform vec3 u_warp_offset;
 uniform float u_warp_amount;
 uniform float u_warp_freq;
 
+uniform vec3 u_polar_tint_color;
+uniform float u_polar_tint_strength;
+uniform float u_polar_tint_start;  // |lat| radians
+
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= u_size.x || px.y >= u_size.y) return;
@@ -75,6 +79,19 @@ void main() {
     // Storm tint axis: blend toward the secondary palette where |T3| is high.
     vec3 tint = texture(u_storm_palette, vec2(clamp(t.a * 0.5 + 0.5, 0.0, 1.0), 0.5)).rgb;
     col = mix(col, tint, clamp(abs(t.a), 0.0, 1.0));
+
+    // Polar tint, gated by cloud-top height: the Juno blue is structural —
+    // it shows where clouds are absent/deep; bright high clouds stay pearly.
+    // A flat latitude blend would look airbrushed.
+    if (u_polar_tint_strength > 0.0) {
+        float pw = smoothstep(u_polar_tint_start, u_polar_tint_start + 0.30, abs(lat));
+        float gap = 1.0 - smoothstep(0.32, 0.72, t.g);
+        // Luminance-modulated tint: shifts hue toward the polar color while
+        // keeping local contrast, so cyclones/wisps stay visible through it.
+        float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        vec3 polar = u_polar_tint_color * (0.30 + 1.45 * lum);
+        col = mix(col, polar, u_polar_tint_strength * pw * gap);
+    }
 
     // Detail tracer modulates luminance (fine filament shading).
     col *= 1.0 + u_detail_gain * (t.b - 0.5);

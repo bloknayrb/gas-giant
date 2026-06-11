@@ -276,14 +276,22 @@
         0.58
       ],
       "contrast": 0.9,
-      "saturation": 0.85
+      "saturation": 0.85,
+      "polar_tint_color": [
+        0.46,
+        0.52,
+        0.48
+      ],
+      "polar_tint_strength": 0.3,
+      "polar_tint_start_lat": 68.0
     },
     "physical": {
       "radius_km": 58232.0
     },
     "detail": {
       "intensity": 0.15,
-      "cellular_amount": 0.15
+      "cellular_amount": 0.15,
+      "polar_stipple": 0.35
     }
   }
 }

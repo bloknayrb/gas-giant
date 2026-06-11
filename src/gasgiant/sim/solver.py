@@ -175,7 +175,7 @@ class Solver:
 
     def _poly_uniforms(self, prog: moderngl.ComputeShader, pole: PoleParams) -> None:
         enabled = pole.style == PoleStyle.POLYGON_JET and pole.strength > 0.0
-        _set(prog, "u_poly_amp", 0.012 * pole.strength if enabled else 0.0)
+        _set(prog, "u_poly_amp", 0.016 * pole.strength if enabled else 0.0)
         _set(prog, "u_poly_k", float(pole.polygon_sides))
         _set(prog, "u_poly_rho", 0.21)
         _set(prog, "u_poly_eps", 0.12)

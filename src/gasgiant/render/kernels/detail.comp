@@ -41,6 +41,7 @@ uniform vec4 u_heroes[3];
 
 uniform float u_striation_amount;
 uniform float u_striation_freq;
+uniform float u_polar_stipple;
 
 const float PI = 3.14159265358979;
 const int SUBSTEPS = 6;
@@ -149,6 +150,17 @@ void main() {
     // (Phase 4 routes polar tiles through the patch velocity).
     float fade = smoothstep(0.98, 1.15, abs(ll.y));
     d = mix(d, 0.5, fade);
+
+    // High-latitude pepper stipple: bright granular storm speckle (the real
+    // band-to-mottle transition character). Analytic at ll — no backtrace,
+    // no velocity — so it survives the polar fade and keeps the no-apron
+    // contract intact.
+    if (u_polar_stipple > 0.0) {
+        float pw = smoothstep(0.96, 1.25, abs(ll.y));
+        float f1p = worleyF1(pc * (u_freq * 0.9) + u_offset.xzy * 1.7);
+        float speck = clamp(0.42 - f1p, 0.0, 1.0) * 2.2;  // bright granules only
+        d += u_polar_stipple * pw * 0.30 * speck;
+    }
 
     imageStore(out_detail, px, vec4(clamp(d, 0.0, 1.0), 0.0, 0.0, 0.0));
 }

@@ -12,6 +12,7 @@ uniform int u_vortex_count;
 
 const float VKIND_HERO = 1.0;
 const float VKIND_BARGE = 2.0;
+const float VKIND_POLAR = 5.0;
 
 // Accumulates the vortex stamp deltas at sphere point p:
 //   dT0 brightness, dT1 dome/depression, dT3 tint.
@@ -26,8 +27,10 @@ vec3 vortexStamp(vec3 p) {
         float q = d / a.w;
         if (q < 3.0) {
             float core = exp(-q * q);
-            // Anticyclones (everything but barges) are domes; cyclones dips.
-            float dome = (b.y == VKIND_BARGE) ? -1.0 : 1.0;
+            // Barges and polar cyclones are dips (cyclonic); the rest domes.
+            // Polar dips matter doubly: the polar tint is gated by LOW cloud
+            // tops, so cyclone interiors go structurally blue (PIA21641).
+            float dome = (b.y == VKIND_BARGE || b.y == VKIND_POLAR) ? -1.0 : 1.0;
             dT1 += dome * 0.15 * core;
             dT3 += b.z * core;
             if (b.y == VKIND_HERO) {
@@ -36,6 +39,14 @@ vec3 vortexStamp(vec3 p) {
                 dT0 += b.w * core
                      - 0.16 * exp(-(q - 1.0) * (q - 1.0) * 16.0)
                      + 0.22 * exp(-(q - 1.55) * (q - 1.55) * 5.0);
+            } else if (b.y == VKIND_POLAR) {
+                // Dark eye, dark body, and a bright pearly wisp annulus —
+                // neighboring annuli overlap into the chaotic bright
+                // filigree between cyclones.
+                dT0 += b.w * core
+                     - 0.10 * exp(-q * q * 9.0)
+                     + 0.14 * exp(-(q - 2.0) * (q - 2.0) * 2.2);
+                dT1 -= 0.06 * exp(-q * q * 9.0);
             } else {
                 float ring = exp(-(q - 1.2) * (q - 1.2) * 4.0);  // collar annulus
                 dT0 += b.w * core - 0.3 * abs(b.w) * ring;
