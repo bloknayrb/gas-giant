@@ -1,0 +1,94 @@
+[project]
+name = "gasgiant"
+version = "0.1.0"
+description = "Procedural gas giant texture map generator with a GPU sim-advected cloud engine and live preview"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.13"
+authors = [{ name = "bloknayrb", email = "bloknayrb@gmail.com" }]
+dependencies = [
+    "numpy>=2.1",
+    "moderngl>=5.12",
+    "pydantic>=2.9",
+    "openexr>=3.3",
+    "opencv-python-headless>=4.10",
+    "jsonschema>=4.23",
+]
+
+[project.optional-dependencies]
+gui = [
+    "imgui-bundle>=1.6",
+    "moderngl-window>=3.0",
+    "glfw>=2.7",
+]
+
+[project.scripts]
+gasgiant = "gasgiant.cli:main"
+gasgiant-studio = "gasgiant.app.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+    "import-linter>=2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gasgiant"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: tests that require an OpenGL 4.3 context (real GPU or llvmpipe)",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.importlinter]
+root_package = "gasgiant"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture: params/palette -> gl -> core -> sim -> render -> export/jobs -> engine -> app/cli"
+type = "layers"
+layers = [
+    "gasgiant.app | gasgiant.cli",
+    "gasgiant.engine",
+    "gasgiant.export | gasgiant.jobs",
+    "gasgiant.render",
+    "gasgiant.sim",
+    "gasgiant.core",
+    "gasgiant.gl",
+    "gasgiant.params | gasgiant.palette",
+]
+containers = []
+exhaustive = false
+
+[[tool.importlinter.contracts]]
+name = "Core layers never import GUI libraries"
+type = "forbidden"
+source_modules = [
+    "gasgiant.params",
+    "gasgiant.palette",
+    "gasgiant.gl",
+    "gasgiant.core",
+    "gasgiant.sim",
+    "gasgiant.render",
+    "gasgiant.export",
+    "gasgiant.jobs",
+    "gasgiant.engine",
+]
+forbidden_modules = [
+    "imgui_bundle",
+    "moderngl_window",
+    "glfw",
+    "gasgiant.app",
+]

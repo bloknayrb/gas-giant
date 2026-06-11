@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+
+# Generated output
+out/
+*.npz
+
+# Session/handoff state (local memory, not project source)
+.remember/
+
+# OS
+Thumbs.db
+desktop.ini

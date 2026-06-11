@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Software OpenGL for the @gpu-marked tests (llvmpipe supports GL 4.5 + compute)
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Install Mesa (llvmpipe) and EGL
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6
+      - name: Sync dependencies
+        run: uv sync --all-extras
+      - name: Lint
+        run: uv run ruff check .
+      - name: Import contracts
+        run: uv run lint-imports
+      - name: Unit tests
+        run: uv run pytest -m "not gpu" -q
+      - name: GPU smoke tests (llvmpipe)
+        run: uv run pytest -m gpu -q
