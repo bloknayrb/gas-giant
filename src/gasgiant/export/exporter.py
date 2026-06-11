@@ -76,6 +76,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 sim.detail_synth.synthesize(
                     params.seed, snap.vel_eq, snap.tracers_eq, snap.profile_dyn,
                     tile_detail, params.detail, origin=(x0, y0), full_size=(w, h),
+                    heroes=snap.heroes,
                 )
             sim.deriver.derive(
                 snap.tracers_eq, snap.tracers_n, snap.tracers_s,

@@ -155,10 +155,13 @@ class Simulation:
         p = self.params
         detail_tex = None
         if p.detail.intensity > 0.0:
+            from gasgiant.engine.snapshot import hero_centers
+
             detail_tex = self._get_detail_tex(color_tex.size)
             self.detail_synth.synthesize(
                 p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
                 self.profile_dyn, detail_tex, p.detail,
+                heroes=hero_centers(self.vortices),
             )
         self.deriver.derive(
             s.equirect.tracers.cur,

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import DetailParams
 from gasgiant.params.seeds import subseed
@@ -31,12 +33,22 @@ class DetailSynth:
         params: DetailParams,
         origin: tuple[int, int] = (0, 0),
         full_size: tuple[int, int] | None = None,
+        heroes: list[tuple[float, float, float, float]] | None = None,
     ) -> None:
+        """heroes: up to 3 (x, y, z, r_core) hero-storm centers; the detail
+        amplitude and winding time grow inside them (internal spirals)."""
         rng = subseed(seed, "detail-synth")
         prog = self.prog
         size = out_tex.size
         prog["u_origin"].value = origin
         prog["u_full_size"].value = full_size if full_size is not None else size
+        packed = np.zeros((3, 4), dtype=np.float32)
+        n_heroes = 0
+        for h in (heroes or [])[:3]:
+            packed[n_heroes] = h
+            n_heroes += 1
+        prog["u_hero_count"].value = n_heroes
+        prog["u_heroes"].write(packed.tobytes())
         vel_tex.use(location=0)
         prog["u_vel"].value = 0
         tracers_tex.use(location=1)

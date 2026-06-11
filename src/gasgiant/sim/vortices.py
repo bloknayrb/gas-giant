@@ -25,6 +25,10 @@ from gasgiant.sim.profiles import LatProfiles
 # nesting blend band must stay storm-free).
 MAX_VORTEX_LAT = np.deg2rad(68.0)
 
+# Hard cap on the total population: the psi/stamp kernels loop over every
+# vortex per pixel per step, and the CPU repacks the SSBO per step.
+MAX_VORTICES = 400
+
 KIND_OVAL = 0.0
 KIND_HERO = 1.0
 KIND_BARGE = 2.0
@@ -45,6 +49,8 @@ class Vortex:
     tint: float = 0.0
     # T0 brightness stamped at init (ovals bright, barges dark).
     brightness: float = 0.0
+    # Downstream direction of the ambient jet (heroes: wake side), +1 east.
+    wake_dir: float = 0.0
 
 
 @dataclass
@@ -55,25 +61,42 @@ class VortexRegistry:
         return [v for v in self.vortices if v.kind == KIND_HERO]
 
     def pack_ssbo(self) -> np.ndarray:
-        """(N, 8) float32, two vec4 per vortex:
-        [x, y, z, r_core], [strength, kind, tint, brightness]."""
+        """(N, 12) float32, three vec4 per vortex:
+        [x, y, z, r_core], [strength, kind, tint, brightness], [wake_dir, 0, 0, 0].
+        Vectorized: this runs every sim step."""
         n = len(self.vortices)
-        out = np.zeros((max(n, 1), 8), dtype=np.float32)
-        for i, v in enumerate(self.vortices):
-            cl = np.cos(v.lat)
-            out[i, 0:4] = (cl * np.cos(v.lon), np.sin(v.lat), cl * np.sin(v.lon), v.r_core)
-            out[i, 4:8] = (v.strength, v.kind, v.tint, v.brightness)
+        if n == 0:
+            return np.zeros((1, 12), dtype=np.float32)
+        fields = np.array(
+            [
+                (v.lat, v.lon, v.r_core, v.strength, v.kind, v.tint, v.brightness, v.wake_dir)
+                for v in self.vortices
+            ],
+            dtype=np.float64,
+        )
+        lat, lon = fields[:, 0], fields[:, 1]
+        cl = np.cos(lat)
+        out = np.zeros((n, 12), dtype=np.float32)
+        out[:, 0] = cl * np.cos(lon)
+        out[:, 1] = np.sin(lat)
+        out[:, 2] = cl * np.sin(lon)
+        out[:, 3] = fields[:, 2]
+        out[:, 4:8] = fields[:, 3:7]
+        out[:, 8] = fields[:, 7]
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
         """Advect vortex centers with the ambient zonal flow (polar vortices
-        are pinned: the polar jets are weak and the clusters are long-lived)."""
-        lats = profiles.lat
-        for v in self.vortices:
-            if v.kind == KIND_POLAR:
-                continue
-            u = float(np.interp(-v.lat, -lats, profiles.u))  # lats descending
-            v.lon = float((v.lon + u / max(np.cos(v.lat), 0.2) * dt + np.pi) % (2 * np.pi) - np.pi)
+        are pinned: the polar jets are weak and the clusters are long-lived).
+        One vectorized interp for the whole population — this runs every step."""
+        if not self.vortices:
+            return
+        lats = np.array([v.lat for v in self.vortices])
+        u = np.interp(-lats, -profiles.lat, profiles.u)  # profile lats descending
+        dlon = u / np.maximum(np.cos(lats), 0.2) * dt
+        for v, d in zip(self.vortices, dlon, strict=True):
+            if v.kind != KIND_POLAR:
+                v.lon = float((v.lon + d + np.pi) % (2 * np.pi) - np.pi)
 
 
 def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
@@ -179,9 +202,11 @@ def generate_vortices(
         lat = float(np.clip(center + rng.normal(0.0, 0.02), -MAX_VORTEX_LAT, MAX_VORTEX_LAT))
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
         s = _ambient_sign(profiles, lat) * storms.hero_strength * 0.045
+        u_here = float(np.interp(-lat, -profiles.lat, profiles.u))
         reg.vortices.append(
             Vortex(lat, float(rng.uniform(-np.pi, np.pi)), r, s, KIND_HERO,
-                   tint=0.9, brightness=0.05)
+                   tint=0.9, brightness=0.05,
+                   wake_dir=1.0 if u_here >= 0.0 else -1.0)
         )
 
     # White ovals: anticyclones in zones, power-law sizes, Poisson-disc lons.
@@ -234,6 +259,20 @@ def generate_vortices(
                 Vortex(lat, lon, 0.02, s, KIND_PEARL, tint=0.05, brightness=0.25)
             )
 
+    # Small-storm field: sub-oval white spots and dark spots in loose latitude
+    # rows (real maps are peppered with them). Own seed stream; defaults off.
+    if storms.small_density > 0.0:
+        _add_small_storms(reg, subseed(seed, "small-storms"), zones, belts,
+                          profiles, storms.small_density)
+
+    # Stamp contrast (1 = v1): scales how hard non-hero storms register in the
+    # tracers; the velocity strength is untouched.
+    if storms.stamp_contrast != 1.0:
+        for v in reg.vortices:
+            if v.kind != KIND_HERO:
+                v.brightness *= storms.stamp_contrast
+                v.tint *= storms.stamp_contrast
+
     if poles is not None:
         polar_rng = subseed(seed, "poles")
         add_polar_vortices(
@@ -245,4 +284,68 @@ def generate_vortices(
             poles.south.cyclone_count, poles.south.strength,
         )
 
+    _enforce_cap(reg)
     return reg
+
+
+def _veil(lat: float) -> float:
+    """Storm visibility falls poleward under haze (the anti-polka-dot guard:
+    crisp full-contrast spots at 60 deg are a procedural tell)."""
+    x = (abs(lat) - 0.6) / (1.15 - 0.6)
+    x = min(max(x, 0.0), 1.0)
+    return 1.0 - 0.55 * (x * x * (3.0 - 2.0 * x))
+
+
+def _add_small_storms(
+    reg: VortexRegistry,
+    rng: np.random.Generator,
+    zones: list[tuple[float, float]],
+    belts: list[tuple[float, float]],
+    profiles: LatProfiles,
+    density: float,
+) -> None:
+    for center, width, is_belt in (
+        [(c, w, False) for c, w in zones] + [(c, w, True) for c, w in belts]
+    ):
+        count = int(rng.poisson(density * 3.5))
+        if count == 0:
+            continue
+        lons = _poisson_lons(rng, count, min_sep=0.12)
+        for lon in lons:
+            u01 = float(rng.uniform(0.0, 1.0))
+            r = 0.007 + (0.020 - 0.007) * u01 * u01  # below the oval size range
+            lat = float(np.clip(
+                center + rng.normal(0.0, 0.30 * width), -MAX_VORTEX_LAT, MAX_VORTEX_LAT
+            ))
+            # Contrast tied to size and latitude; belts get dark spots, zones
+            # bright ones (subtle either way — these are texture, not features).
+            base = (0.08 + 5.0 * r) * _veil(lat)
+            brightness = -0.8 * base if is_belt else base
+            s = _ambient_sign(profiles, lat) * (0.5 if is_belt else 1.0) * 0.004 * (r / 0.012)
+            if is_belt:
+                s = -s
+            reg.vortices.append(
+                Vortex(lat, lon, r, s, KIND_OVAL, tint=0.0, brightness=brightness)
+            )
+            # A fraction spawn pre-sheared: a weaker twin trailing in longitude
+            # reads as a half-dissolved, elongated storm.
+            if rng.uniform() < 0.3:
+                trail = (lon + float(rng.normal(2.2, 0.6)) * r + np.pi) % (2 * np.pi) - np.pi
+                reg.vortices.append(
+                    Vortex(lat, trail, r * 1.3, s * 0.4, KIND_OVAL,
+                           tint=0.0, brightness=brightness * 0.55)
+                )
+
+
+def _enforce_cap(reg: VortexRegistry) -> None:
+    """Keep the population under MAX_VORTICES by dropping the smallest,
+    faintest ovals first (heroes/barges/pearls/polar are never dropped)."""
+    excess = len(reg.vortices) - MAX_VORTICES
+    if excess <= 0:
+        return
+    ovals = sorted(
+        (v for v in reg.vortices if v.kind == KIND_OVAL),
+        key=lambda v: (v.r_core, abs(v.brightness)),
+    )
+    drop = set(map(id, ovals[:excess]))
+    reg.vortices = [v for v in reg.vortices if id(v) not in drop]

@@ -9,6 +9,7 @@ also the mechanism a future animation exporter steps through.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,16 @@ if TYPE_CHECKING:
     import moderngl
 
     from gasgiant.gl import GpuContext
+    from gasgiant.sim.vortices import VortexRegistry
+
+
+def hero_centers(registry: VortexRegistry) -> list[tuple[float, float, float, float]]:
+    """(x, y, z, r_core) of each hero storm at its current drifted position."""
+    out = []
+    for v in registry.heroes():
+        cl = math.cos(v.lat)
+        out.append((cl * math.cos(v.lon), math.sin(v.lat), cl * math.sin(v.lon), v.r_core))
+    return out
 
 
 @dataclass
@@ -30,6 +41,9 @@ class ExportSnapshot:
     profile_dyn: moderngl.Texture
     patch_rho_max: float
     blend_band: tuple[float, float]
+    # Hero-storm centers at their drifted positions, (x, y, z, r_core) each:
+    # the detail pass amplifies/winds filaments inside them.
+    heroes: list[tuple[float, float, float, float]] = None  # type: ignore[assignment]
 
     @classmethod
     def capture(cls, sim) -> ExportSnapshot:  # sim: engine.Simulation
@@ -46,6 +60,7 @@ class ExportSnapshot:
             profile_dyn=gpu.clone_texture(sim.profile_dyn),
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
+            heroes=hero_centers(sim.vortices),
         )
 
     def release(self) -> None:

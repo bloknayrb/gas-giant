@@ -255,6 +255,15 @@ class StormsParams(_Params):
     outbreak_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Storms",
     )
+    small_density: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
+        description="Small-storm field: sub-oval white spots and dark spots scattered "
+                    "in loose latitude rows (0 = off, the pre-v1.1 look)",
+    )
+    stamp_contrast: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.8, 1.3), ui="Storms",
+        description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
+    )
 
 
 class WavesParams(_Params):

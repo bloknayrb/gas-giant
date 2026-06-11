@@ -17,7 +17,8 @@ uniform sampler2D u_profile_dyn;  // (u, psi_jets, shear_norm, belt_mask) by lat
 uniform ivec2 u_size;
 
 layout(std430, binding = 2) readonly buffer Vortices {
-    vec4 vortex_data[];  // pairs: [x,y,z,r_core], [strength, kind, tint, brightness]
+    // Triples: [x,y,z,r_core], [strength,kind,tint,brightness], [wake_dir,-,-,-]
+    vec4 vortex_data[];
 };
 uniform int u_vortex_count;
 
@@ -79,8 +80,8 @@ void main() {
     // Vortices: Gaussian streamfunction by great-circle (angular) distance.
     float wake = 0.0;
     for (int i = 0; i < u_vortex_count; ++i) {
-        vec4 a = vortex_data[2 * i];
-        vec4 b = vortex_data[2 * i + 1];
+        vec4 a = vortex_data[3 * i];
+        vec4 b = vortex_data[3 * i + 1];
         float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
         float rc = a.w;
         float q = d / rc;
@@ -89,8 +90,7 @@ void main() {
         }
         // Hero wake wedge: boost turbulence downstream of GRS-class storms.
         if (b.y == KIND_HERO) {
-            float jet_u = texture(u_profile_dyn, latProfileUV(asin(clamp(a.y, -1.0, 1.0)))).r;
-            float down = (jet_u >= 0.0) ? 1.0 : -1.0;
+            float down = vortex_data[3 * i + 2].x;  // packed at generation
             // Angular offsets from the vortex in lon/lat.
             float vlat = asin(clamp(a.y, -1.0, 1.0));
             float vlon = atan(a.z, a.x);
