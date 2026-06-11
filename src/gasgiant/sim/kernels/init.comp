@@ -1,0 +1,48 @@
+#version 430
+// Tracer initialization. One RGBA32F texture holds all four tracers:
+//   r = T0 color index    g = T1 cloud-top height
+//   b = T2 detail         a = T3 storm tint (signed: + warm/red, - blue-gray)
+// Banded stamps (noise-warped latitude) + perturbation noise + vortex stamps.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "noise3d.glsl"
+#include "common.glsl"
+#include "vortex_stamp.glsl"
+
+layout(rgba32f, binding = 0) writeonly uniform image2D out_tracers;
+
+uniform sampler2D u_profile_stamp;  // (t0, t1, polar_fade, -)
+uniform ivec2 u_size;
+
+uniform vec3 u_warp_offset;
+uniform float u_warp_amount;
+uniform float u_warp_freq;
+uniform vec3 u_detail_offset;
+uniform float u_detail_amount;
+uniform float u_detail_freq;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    vec3 p = spherePoint(ll);
+
+    float warp = fbm(p * u_warp_freq + u_warp_offset, 4, 2.0, 0.5) * u_warp_amount;
+    vec4 stamp = texture(u_profile_stamp, latProfileUV(ll.y + warp));
+
+    float perturb = fbm(p * u_detail_freq + u_detail_offset, 5, 2.0, 0.5);
+    float t0 = stamp.r + perturb * u_detail_amount;
+    float t1 = stamp.g + perturb * u_detail_amount * 0.5;
+    float t2 = 0.5 + 0.5 * fbm(p * (u_detail_freq * 2.0) + u_detail_offset.zxy, 5, 2.0, 0.5);
+
+    vec3 vs = vortexStamp(p);
+    t0 += vs.x;
+    t1 += vs.y;
+    float t3 = vs.z;
+
+    imageStore(out_tracers, px, vec4(
+        clamp(t0, 0.0, 1.0), clamp(t1, 0.0, 1.0), clamp(t2, 0.0, 1.0), clamp(t3, -1.0, 1.0)
+    ));
+}

@@ -1,0 +1,55 @@
+#version 430
+// Map derivation: tracer state -> color + height maps at any output
+// resolution (the same kernel serves the live preview and export; tracers
+// are sampled bilinearly — a one-shot resample, so hardware filtering is
+// fine here, unlike inside the sim loop).
+//
+// Tracers: r=T0 color index, g=T1 height, b=T2 detail, a=T3 storm tint.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba32f, binding = 0) writeonly uniform image2D out_color;
+layout(r32f, binding = 1) writeonly uniform image2D out_height;
+
+uniform sampler2D u_tracers;
+uniform sampler2D u_palette;       // 256x1 primary palette LUT
+uniform sampler2D u_storm_palette; // 256x1 storm tint LUT, indexed (T3+1)/2
+uniform ivec2 u_size;
+
+uniform float u_detail_gain;       // luminance modulation by the detail tracer
+uniform float u_haze_amount;
+uniform vec3 u_haze_color;
+uniform float u_contrast;
+uniform float u_saturation;
+uniform float u_gamma;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 uv = (vec2(px) + 0.5) / vec2(u_size);
+    vec4 t = texture(u_tracers, uv);
+
+    vec3 col = texture(u_palette, vec2(clamp(t.r, 0.0, 1.0), 0.5)).rgb;
+
+    // Storm tint axis: blend toward the secondary palette where |T3| is high.
+    vec3 tint = texture(u_storm_palette, vec2(clamp(t.a * 0.5 + 0.5, 0.0, 1.0), 0.5)).rgb;
+    col = mix(col, tint, clamp(abs(t.a), 0.0, 1.0));
+
+    // Detail tracer modulates luminance (fine filament shading).
+    col *= 1.0 + u_detail_gain * (t.b - 0.5);
+
+    // Post chain: haze -> contrast -> saturation -> gamma.
+    col = mix(col, u_haze_color, u_haze_amount);
+    float contrast = mix(max(u_contrast, 0.0), 1.0, u_haze_amount * 0.5);
+    col = (col - 0.5) * contrast + 0.5;
+    float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col = mix(vec3(luma), col, u_saturation * (1.0 - u_haze_amount * 0.4));
+    col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / max(u_gamma, 1e-3)));
+
+    float height = clamp(t.g + 0.15 * u_detail_gain * (t.b - 0.5), 0.0, 1.0);
+    height = mix(height, 0.5, u_haze_amount * 0.6);  // haze flattens relief
+
+    imageStore(out_color, px, vec4(col, 1.0));
+    imageStore(out_height, px, vec4(height, 0.0, 0.0, 0.0));
+}

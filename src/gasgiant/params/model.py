@@ -114,6 +114,109 @@ class BandsParams(_Params):
     )
 
 
+class SimParams(_Params):
+    resolution: int = pfield(
+        2048, tier=Tier.RESTART, lo=512, hi=8192, ui="Simulation",
+        description="Sim grid width (2:1 equirect); 2048 interactive, 4096+ for final quality",
+    )
+    dev_steps: int = pfield(
+        500, tier=Tier.RESTART, lo=0, hi=3000, rand=(300, 800), ui="Simulation",
+        description="Development steps: how long structures evolve before the snapshot",
+    )
+    dt_scale: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Simulation",
+        description="Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)",
+    )
+
+
+class JetsParams(_Params):
+    strength: float = pfield(
+        1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.6, 1.6), ui="Jets",
+        description="Global zonal jet speed multiplier",
+    )
+    equatorial_speed: float = pfield(
+        1.6, tier=Tier.VELOCITY, lo=-3.0, hi=4.0, rand=(0.5, 2.5), ui="Jets",
+        description="Equatorial superrotation jet peak speed (negative = retrograde)",
+    )
+    equatorial_width: float = pfield(
+        0.12, tier=Tier.VELOCITY, lo=0.03, hi=0.4, rand=(0.07, 0.25), ui="Jets",
+        description="Equatorial jet half-width, radians of latitude",
+    )
+    polar_decay: float = pfield(
+        0.5, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Jets",
+        description="How strongly jet amplitudes decay toward the poles",
+    )
+
+
+class TurbulenceParams(_Params):
+    intensity: float = pfield(
+        1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.8), ui="Turbulence",
+        description="Global turbulence (curl-noise) amplitude",
+    )
+    shear_coupling: float = pfield(
+        1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.5), ui="Turbulence",
+        description="Extra turbulence where jet shear is strong",
+    )
+    belt_boost: float = pfield(
+        1.6, tier=Tier.VELOCITY, lo=1.0, hi=4.0, rand=(1.2, 2.5), ui="Turbulence",
+        description="Turbulence multiplier inside dark belts (cyclonic bands)",
+    )
+    scale: float = pfield(
+        6.0, tier=Tier.VELOCITY, lo=1.0, hi=32.0, rand=(4.0, 12.0), log=True, ui="Turbulence",
+        description="Base spatial frequency of the turbulence noise",
+    )
+    evolution_rate: float = pfield(
+        0.012, tier=Tier.VELOCITY, lo=0.0, hi=0.1, ui="Turbulence",
+        description="How fast the turbulence pattern decorrelates per step",
+    )
+    relax_tau: float = pfield(
+        350.0, tier=Tier.RESTART, lo=50.0, hi=2000.0, log=True, ui="Turbulence",
+        description="Relaxation time (steps) pulling band color/height back toward the stamp",
+    )
+    replenish_rate: float = pfield(
+        0.015, tier=Tier.RESTART, lo=0.0, hi=0.1, ui="Turbulence",
+        description="Fresh detail-noise blended into the detail tracer per step",
+    )
+    kh_amplitude: float = pfield(
+        0.35, tier=Tier.VELOCITY, lo=0.0, hi=2.0, rand=(0.1, 0.8), ui="Turbulence",
+        description="Kelvin-Helmholtz wave amplitude along high-shear band boundaries",
+    )
+    kh_wavenumber: int = pfield(
+        24, tier=Tier.VELOCITY, lo=4, hi=80, rand=(14, 40), ui="Turbulence",
+        description="KH billow longitudinal wavenumber",
+    )
+
+
+class StormsParams(_Params):
+    hero_count: int = pfield(
+        1, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Storms",
+        description="GRS-class giant anticyclones",
+    )
+    hero_radius: float = pfield(
+        0.10, tier=Tier.RESTART, lo=0.03, hi=0.25, rand=(0.06, 0.16), ui="Storms",
+        description="Hero vortex core radius, radians of arc",
+    )
+    hero_strength: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Storms",
+    )
+    oval_density: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
+        description="White-oval anticyclone population multiplier",
+    )
+    barge_density: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.3, 1.5), ui="Storms",
+        description="Brown-barge cyclone population multiplier (belts)",
+    )
+    pearls_count: int = pfield(
+        7, tier=Tier.RESTART, lo=0, hi=14, rand=(0, 9), ui="Storms",
+        description="String-of-pearls ovals on one seeded latitude (0 = off)",
+    )
+    wake_turbulence: float = pfield(
+        1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), ui="Storms",
+        description="Turbulence boost in the wake wedge downstream of hero storms",
+    )
+
+
 class AppearanceParams(_Params):
     palette: list[GradientStop] = pfield(
         DEFAULT_PALETTE, tier=Tier.POST, ui="Appearance",
@@ -167,7 +270,11 @@ class ExportParams(_Params):
 class PlanetParams(_Params):
     seed: int = pfield(0, tier=Tier.RESTART, lo=0, hi=2**31 - 1, ui="Global")
     name: str = pfield("unnamed", tier=Tier.POST, ui="Global")
+    sim: SimParams = Field(default_factory=SimParams)
     bands: BandsParams = Field(default_factory=BandsParams)
+    jets: JetsParams = Field(default_factory=JetsParams)
+    turbulence: TurbulenceParams = Field(default_factory=TurbulenceParams)
+    storms: StormsParams = Field(default_factory=StormsParams)
     appearance: AppearanceParams = Field(default_factory=AppearanceParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
     export: ExportParams = Field(default_factory=ExportParams)

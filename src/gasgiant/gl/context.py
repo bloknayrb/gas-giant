@@ -87,15 +87,24 @@ class GpuContext:
         components: int = 4,
         dtype: str = "f4",
         data: np.ndarray | None = None,
+        linear: bool = False,
     ) -> moderngl.Texture:
         raw = data.tobytes() if data is not None else None
         tex = self.ctx.texture(size, components, data=raw, dtype=dtype)
         # Sim kernels read via texelFetch; default to NEAREST so accidental
         # hardware filtering (8-bit fractional weights) can't sneak in.
-        tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        # linear=True is for fields where filtering is correct (velocity,
+        # one-shot derive sampling).
+        mode = moderngl.LINEAR if linear else moderngl.NEAREST
+        tex.filter = (mode, mode)
         tex.repeat_x = True
         tex.repeat_y = False
         return tex
+
+    def ssbo(self, data: np.ndarray, binding: int) -> moderngl.Buffer:
+        buf = self.ctx.buffer(np.ascontiguousarray(data, dtype=np.float32).tobytes())
+        buf.bind_to_storage_buffer(binding)
+        return buf
 
     def framebuffer(self, color_tex: moderngl.Texture) -> moderngl.Framebuffer:
         return self.ctx.framebuffer(color_attachments=[color_tex])

@@ -1,0 +1,181 @@
+#version 430
+// Semi-Lagrangian advection, one of the three MacCormack passes selected by
+// the PASS define injected at compile time:
+//   PASS 0 (forward):  dst = CR(src, backtrace(p, +dt))
+//   PASS 1 (backward): dst = CR(src, backtrace(p, -dt))
+//   PASS 2 (correct):  dst = fwd + 0.5*(cur - back), limited against the
+//                      2x2 neighborhood of cur at the backtraced position,
+//                      then relaxation forcing + detail replenishment.
+//
+// Solver requirements baked in (from the design review):
+// - RK2 (midpoint) backtrace; velocity sampled with hardware bilinear (fresh
+//   each step, error does not accumulate in the velocity).
+// - Catmull-Rom via 16 texelFetch taps with FP32 weights and explicit X wrap
+//   (hardware filtering's 8-bit fractional weights would accumulate artifacts
+//   over hundreds of tracer resampling steps).
+// - The limiter clamps against the samples actually used (the stencil at the
+//   BACKTRACED position), falling back to plain semi-Lagrangian on violation.
+// - The same frozen velocity texture serves all three passes of one step.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "noise3d.glsl"
+#include "common.glsl"
+#if PASS == 2
+#include "vortex_stamp.glsl"
+#endif
+
+layout(rgba32f, binding = 0) writeonly uniform image2D out_tracers;
+
+uniform sampler2D u_src;      // pass 0: cur, pass 1: fwd, pass 2: fwd
+uniform sampler2D u_cur;      // pass 2: tracers at step n
+uniform sampler2D u_back;     // pass 2: back-and-forth result
+uniform sampler2D u_vel;      // rg32f, frozen for the whole step
+uniform sampler2D u_profile_stamp;  // (t0, t1, polar_fade, -)
+uniform ivec2 u_size;
+uniform float u_dt;           // signed per pass (set by CPU)
+
+// Relaxation + replenishment (pass 2 only).
+uniform float u_relax_k;        // 1/tau per step
+uniform float u_replenish;      // detail tracer refresh fraction per step
+uniform vec3 u_warp_offset;     // stamp meander (must match init)
+uniform float u_warp_amount;
+uniform float u_warp_freq;
+uniform vec3 u_detail_offset;
+uniform float u_detail_freq;
+uniform float u_turb_time;      // evolves the replenishment noise
+
+vec4 fetchT(sampler2D tex, int x, int y) {
+    return texelFetch(tex, ivec2(wrapX(x, u_size.x), clampY(y, u_size.y)), 0);
+}
+
+// Catmull-Rom weight for offsets -1..2 given fractional position t.
+vec4 crWeights(float t) {
+    float t2 = t * t;
+    float t3 = t2 * t;
+    return vec4(
+        -0.5 * t3 + t2 - 0.5 * t,
+        1.5 * t3 - 2.5 * t2 + 1.0,
+        -1.5 * t3 + 2.0 * t2 + 0.5 * t,
+        0.5 * t3 - 0.5 * t2
+    );
+}
+
+// Bicubic Catmull-Rom at a continuous pixel position (pixel-center convention:
+// integer i samples at pixel center i, position in [0, W) x [0, H)).
+vec4 sampleCR(sampler2D tex, vec2 pos) {
+    vec2 grid = pos - 0.5;             // align so floor() picks the base texel
+    vec2 base = floor(grid);
+    vec2 f = grid - base;
+    vec4 wx = crWeights(f.x);
+    vec4 wy = crWeights(f.y);
+    vec4 acc = vec4(0.0);
+    for (int j = 0; j < 4; ++j) {
+        vec4 row = vec4(0.0);
+        int y = int(base.y) + j - 1;
+        for (int i = 0; i < 4; ++i) {
+            row += wx[i] * fetchT(tex, int(base.x) + i - 1, y);
+        }
+        acc += wy[j] * row;
+    }
+    return acc;
+}
+
+// 2x2 neighborhood min/max at a continuous position (the bilinear stencil).
+void minMax2x2(sampler2D tex, vec2 pos, out vec4 lo, out vec4 hi) {
+    vec2 grid = pos - 0.5;
+    ivec2 base = ivec2(floor(grid));
+    lo = vec4(1e30);
+    hi = vec4(-1e30);
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 2; ++i) {
+            vec4 s = fetchT(tex, base.x + i, base.y + j);
+            lo = min(lo, s);
+            hi = max(hi, s);
+        }
+    }
+}
+
+// RK2 backtrace from pixel-center position; returns continuous pixel position.
+vec2 backtrace(vec2 pixPos, float dt) {
+    vec2 size = vec2(u_size);
+    vec2 uvScale = 1.0 / size;
+
+    vec2 ll = vec2(
+        (pixPos.x / size.x) * 2.0 * PI - PI,
+        0.5 * PI - (pixPos.y / size.y) * PI
+    );
+    vec2 vel = texture(u_vel, pixPos * uvScale).rg;  // (u east, v north)
+    float cosl = max(cos(ll.y), 0.017);
+
+    // Midpoint in (lon, lat).
+    vec2 mid = ll + vec2(-0.5 * dt * vel.x / cosl, -0.5 * dt * vel.y);
+    vec2 midPix = vec2(
+        (mid.x + PI) / (2.0 * PI) * size.x,
+        (0.5 * PI - mid.y) / PI * size.y
+    );
+    vec2 velMid = texture(u_vel, midPix * uvScale).rg;
+    float coslMid = max(cos(mid.y), 0.017);
+
+    vec2 dest = ll + vec2(-dt * velMid.x / coslMid, -dt * velMid.y);
+    return vec2(
+        (dest.x + PI) / (2.0 * PI) * size.x,
+        (0.5 * PI - dest.y) / PI * size.y
+    );
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 pixPos = vec2(px) + 0.5;
+    vec2 src_pos = backtrace(pixPos, u_dt);
+
+#if PASS == 2
+    vec4 fwd = texelFetch(u_src, px, 0);
+    vec4 cur = texelFetch(u_cur, px, 0);
+    vec4 back = texelFetch(u_back, px, 0);
+    vec4 result = fwd + 0.5 * (cur - back);
+
+    // Limit against the source stencil actually used by the forward pass.
+    vec4 lo, hi;
+    minMax2x2(u_cur, src_pos, lo, hi);
+    bvec4 bad = bvec4(
+        result.x < lo.x || result.x > hi.x,
+        result.y < lo.y || result.y > hi.y,
+        result.z < lo.z || result.z > hi.z,
+        result.w < lo.w || result.w > hi.w
+    );
+    result = mix(result, fwd, vec4(bad));
+    result = clamp(result, lo, hi);
+
+    // Relaxation forcing: condensation chemistry continually re-creates band
+    // coloration, and storm anticyclones continually regenerate their bright
+    // cloud tops — so the relaxation target is the band stamp PLUS the vortex
+    // stamps at their current (drifted) positions. Without the vortex term,
+    // ovals and pearls visually dissolve within ~tau steps.
+    vec2 ll = lonlatAt(px, u_size);
+    vec3 p = spherePoint(ll);
+    float warp = fbm(p * u_warp_freq + u_warp_offset, 4, 2.0, 0.5) * u_warp_amount;
+    vec4 stamp = texture(u_profile_stamp, latProfileUV(ll.y + warp));
+    vec3 vs = vortexStamp(p);
+    result.x += (stamp.r + vs.x - result.x) * u_relax_k;
+    result.y += (stamp.g + vs.y - result.y) * u_relax_k;
+
+    // Detail tracer: blend in fresh evolving noise (an exponential-decay
+    // flow-noise by construction).
+    float fresh = 0.5 + 0.5 * fbm(
+        p * (u_detail_freq * 2.0) + u_detail_offset.zxy + vec3(0.0, u_turb_time, 0.0),
+        4, 2.0, 0.5
+    );
+    result.z = mix(result.z, fresh, u_replenish);
+
+    // T3 tint relaxes toward the live vortex tint stamps: cores stay colored
+    // while they exist, advected spiral trails decay over ~tau steps.
+    result.w += (vs.z - result.w) * u_relax_k * 0.6;
+
+    imageStore(out_tracers, px, result);
+#else
+    imageStore(out_tracers, px, sampleCR(u_src, src_pos));
+#endif
+}

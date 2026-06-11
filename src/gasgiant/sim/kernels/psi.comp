@@ -1,0 +1,102 @@
+#version 430
+// Builds the total streamfunction:
+//   psi = psi_jets(lat + meander) + sum(Gaussian vortices) + A(p) * turbulence
+// Any scalar psi yields a divergence-free velocity via the spherical curl
+// (taken in velocity.comp), so all three layers compose freely. Turbulence
+// amplitude A is modulated by jet shear, the belt mask, and hero wake wedges;
+// a Kelvin-Helmholtz wave term rides on high-shear latitudes.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "noise3d.glsl"
+#include "common.glsl"
+
+layout(r32f, binding = 0) writeonly uniform image2D out_psi;
+
+uniform sampler2D u_profile_dyn;  // (u, psi_jets, shear_norm, belt_mask) by latitude
+uniform ivec2 u_size;
+
+layout(std430, binding = 2) readonly buffer Vortices {
+    vec4 vortex_data[];  // pairs: [x,y,z,r_core], [strength, kind, tint, brightness]
+};
+uniform int u_vortex_count;
+
+uniform vec3 u_warp_offset;       // band-boundary meander noise domain offset
+uniform float u_warp_amount;
+uniform float u_warp_freq;
+
+uniform float u_turb_intensity;
+uniform float u_turb_scale;
+uniform float u_turb_shear;       // shear coupling gain
+uniform float u_turb_belt;        // belt boost (multiplier at belt_mask = 1)
+uniform float u_turb_time;        // evolution phase (decorrelates between steps)
+uniform vec3 u_turb_offset;
+
+uniform float u_kh_amplitude;
+uniform float u_kh_wavenumber;
+uniform float u_kh_phase;
+
+uniform float u_wake_gain;        // turbulence boost in hero wakes
+
+const float KIND_HERO = 1.0;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    vec3 p = spherePoint(ll);
+
+    // Band-boundary meander: the jet profile is sampled at a noise-warped
+    // latitude, so band edges (and their jets) wander in longitude.
+    float warp = fbm(p * u_warp_freq + u_warp_offset, 4, 2.0, 0.5) * u_warp_amount;
+    vec4 prof = texture(u_profile_dyn, latProfileUV(ll.y + warp));
+    float psi = prof.g;
+    float shear = prof.b;
+    float belt = prof.a;
+
+    // Vortices: Gaussian streamfunction by great-circle (angular) distance.
+    float wake = 0.0;
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 a = vortex_data[2 * i];
+        vec4 b = vortex_data[2 * i + 1];
+        float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
+        float rc = a.w;
+        float q = d / rc;
+        if (q < 4.0) {
+            psi += b.x * exp(-q * q);
+        }
+        // Hero wake wedge: boost turbulence downstream of GRS-class storms.
+        if (b.y == KIND_HERO) {
+            float jet_u = texture(u_profile_dyn, latProfileUV(asin(clamp(a.y, -1.0, 1.0)))).r;
+            float down = (jet_u >= 0.0) ? 1.0 : -1.0;
+            // Angular offsets from the vortex in lon/lat.
+            float vlat = asin(clamp(a.y, -1.0, 1.0));
+            float vlon = atan(a.z, a.x);
+            float dlon = mod(ll.x - vlon + 3.0 * PI, 2.0 * PI) - PI;
+            float along = dlon * down;  // positive = downstream
+            float across = (ll.y - vlat) / max(rc * 1.6, 1e-4);
+            if (along > rc * 0.5 && along < rc * 7.0) {
+                wake += exp(-across * across) * (1.0 - along / (rc * 7.0));
+            }
+        }
+    }
+
+    // Kelvin-Helmholtz wave on high-shear latitudes: a traveling sinusoidal
+    // psi perturbation that meanders the shear lines into billows.
+    float kh = u_kh_amplitude * 0.004 * shear * shear
+             * sin(u_kh_wavenumber * ll.x + u_kh_phase);
+    psi += kh;
+
+    // Turbulence: scalar fbm noise in psi (curl of any scalar is solenoidal),
+    // amplitude shaped by shear, belts, and wakes; slow 4th-dimension drift
+    // via the time offset.
+    float amp = u_turb_intensity
+              * (1.0 + u_turb_shear * shear)
+              * (1.0 + (u_turb_belt - 1.0) * belt)
+              * (1.0 + u_wake_gain * wake);
+    vec3 tp = p * u_turb_scale + u_turb_offset + vec3(0.0, 0.0, u_turb_time);
+    psi += 0.0035 * amp * fbm(tp, 5, 2.0, 0.55);
+
+    imageStore(out_psi, px, vec4(psi, 0.0, 0.0, 0.0));
+}

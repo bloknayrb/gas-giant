@@ -1,0 +1,42 @@
+#version 430
+// psi -> velocity with the spherical operator pairing (the only pairing that
+// is divergence-free on the sphere):
+//   u = -dpsi/dphi                  (eastward physical speed)
+//   v = (1/cos phi) dpsi/dlambda    (northward physical speed)
+// Central differences, X periodic, Y clamped (pole rows are velocity-faded
+// anyway). A polar fade mask zeroes velocity toward the caps until the
+// Phase 3b polar patches take over.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+layout(rg32f, binding = 0) writeonly uniform image2D out_vel;
+
+uniform sampler2D u_psi;            // r32f
+uniform sampler2D u_profile_stamp;  // (t0, t1, polar_fade, -) by latitude
+uniform ivec2 u_size;
+
+float psiAt(int x, int y) {
+    return texelFetch(u_psi, ivec2(wrapX(x, u_size.x), clampY(y, u_size.y)), 0).r;
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    float dlat = PI / float(u_size.y);   // latitude step between rows (positive)
+    float dlon = 2.0 * PI / float(u_size.x);
+
+    // Row y-1 is HIGHER latitude: dpsi/dphi = (psi(y-1) - psi(y+1)) / (2 dlat).
+    float dpsi_dphi = (psiAt(px.x, px.y - 1) - psiAt(px.x, px.y + 1)) / (2.0 * dlat);
+    float dpsi_dlam = (psiAt(px.x + 1, px.y) - psiAt(px.x - 1, px.y)) / (2.0 * dlon);
+
+    float cosl = max(cos(ll.y), 0.017);  // clamp at ~cos(89 deg)
+    float u = -dpsi_dphi;
+    float v = dpsi_dlam / cosl;
+
+    float fade = texture(u_profile_stamp, latProfileUV(ll.y)).b;
+    imageStore(out_vel, px, vec4(u * fade, v * fade, 0.0, 0.0));
+}

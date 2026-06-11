@@ -221,6 +221,10 @@ class StudioApp:
 
     def draw_equirect(self) -> None:
         self.render_perf.begin()
+        # Advance the development run a little each frame so the user watches
+        # the clouds evolve; the viewport re-derives whenever tracers moved.
+        if self.sim.tick(2):
+            self.viewport.mark_stale()
         self.viewport.draw(self.sim, PREVIEW_WIDTH)
         self.render_perf.end()
 
@@ -232,6 +236,11 @@ class StudioApp:
         imgui.text(f"frame  {self.frame_perf.mean_ms:6.2f} ms")
         imgui.text(f"render {self.render_perf.last_ms:6.2f} ms (last)")
         imgui.text(f"preview {PREVIEW_WIDTH}x{PREVIEW_WIDTH // 2}")
+        done, target = self.sim.steps_done, self.sim.steps_target
+        if done < target:
+            imgui.progress_bar(done / max(target, 1), imgui.ImVec2(-1.0, 0.0), f"{done}/{target}")
+        else:
+            imgui.text(f"developed ({done} steps)")
 
     # -- frame -----------------------------------------------------------------------------
 
