@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _export(args: argparse.Namespace) -> int:
     from gasgiant.engine import Simulation
-    from gasgiant.export.manifest import export_mapset
+    from gasgiant.export.exporter import run_export
     from gasgiant.params.presets import PresetError, resolve_preset
 
     try:
@@ -56,10 +56,10 @@ def _export(args: argparse.Namespace) -> int:
 
     started = time.perf_counter()
     sim = Simulation(params)
-    manifest_path = export_mapset(sim, args.out)
+    run_export(sim, args.out)
     elapsed = time.perf_counter() - started
     print(f"exported {params.export.width}x{params.export.width // 2} map set "
-          f"to {manifest_path.parent} in {elapsed:.1f}s")
+          f"to {args.out} in {elapsed:.1f}s")
     return 0
 
 

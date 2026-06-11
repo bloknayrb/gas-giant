@@ -47,11 +47,15 @@ class MapDeriver:
         detail_gain: float = 0.35,
         detail_tex: moderngl.Texture | None = None,
         detail_intensity: float = 0.0,
+        origin: tuple[int, int] = (0, 0),
+        full_size: tuple[int, int] | None = None,
     ) -> None:
         if self._palette_tex is None:
             self.update_palettes(appearance)
         prog = self.prog
         size = color_out.size
+        prog["u_origin"].value = origin
+        prog["u_full_size"].value = full_size if full_size is not None else size
         tracers.use(location=0)
         prog["u_tracers"].value = 0
         self._palette_tex.use(location=1)

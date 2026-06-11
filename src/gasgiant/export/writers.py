@@ -25,6 +25,15 @@ def write_png16_rgb(path: Path, rgb: np.ndarray, compression: int = 2) -> None:
         raise OSError(f"cv2.imwrite failed for {path}")
 
 
+def write_png16_rgb_u16(path: Path, rgb_u16: np.ndarray, compression: int = 2) -> None:
+    """(H, W, 3) uint16 (already converted) -> 16-bit RGB PNG, no extra copy."""
+    if rgb_u16.dtype != np.uint16 or rgb_u16.ndim != 3:
+        raise ValueError(f"expected (H, W, 3) uint16, got {rgb_u16.dtype} {rgb_u16.shape}")
+    ok = cv2.imwrite(str(path), rgb_u16[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, int(compression)])
+    if not ok:
+        raise OSError(f"cv2.imwrite failed for {path}")
+
+
 def write_png16_gray(path: Path, gray: np.ndarray, compression: int = 2) -> None:
     """(H, W) float32 0..1 -> 16-bit grayscale PNG."""
     if gray.ndim != 2:

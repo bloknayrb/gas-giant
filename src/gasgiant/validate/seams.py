@@ -53,15 +53,21 @@ class Report:
 
 
 def _flat(arr: np.ndarray) -> np.ndarray:
-    """(H, W) or (H, W, C) -> (H, W, C) float64."""
-    a = np.asarray(arr, dtype=np.float64)
+    """(H, W) or (H, W, C) -> (H, W, C) float32 (16K maps in float64 would
+    need multi-GB temporaries)."""
+    a = np.asarray(arr, dtype=np.float32)
     return a[..., None] if a.ndim == 2 else a
 
 
 def check_wrap_continuity(arr: np.ndarray, name: str, report: Report) -> None:
     a = _flat(arr)
-    seam = np.abs(a[:, 0] - a[:, -1]).mean()
-    interior = np.abs(np.diff(a, axis=1)).mean()
+    seam = float(np.abs(a[:, 0] - a[:, -1]).mean())
+    # Interior reference from a column subsample — same statistics, no
+    # full-image diff temporary at 16K.
+    w = a.shape[1]
+    stride = max(w // 1024, 1)
+    cols = np.arange(0, w - 1, stride)
+    interior = float(np.abs(a[:, cols + 1] - a[:, cols]).mean())
     limit = max(WRAP_FACTOR * interior, ABS_FLOOR)
     report.add(
         f"{name}: wrap continuity",

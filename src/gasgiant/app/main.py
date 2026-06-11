@@ -25,8 +25,9 @@ from gasgiant.app.sphere_preview import SpherePreview
 from gasgiant.app.viewport import EquirectViewport
 from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
-from gasgiant.export.manifest import export_mapset
+from gasgiant.export.exporter import export_job
 from gasgiant.gl import GpuContext
+from gasgiant.jobs import Progress
 from gasgiant.params.model import PlanetParams
 from gasgiant.params.presets import (
     PresetError,
@@ -94,6 +95,8 @@ class StudioApp:
         self.render_perf = PerfCounter()
         self._undo_params: PlanetParams | None = None
         self._dialog: tuple[str, object] | None = None
+        self._export: tuple[object, Path] | None = None  # (job generator, out dir)
+        self._export_progress: Progress | None = None
         self._frame_count = 0
         self._smoke_frames = int(os.environ.get("GASGIANT_SMOKE_FRAMES", "0"))
         self._smoke_shot = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
@@ -169,9 +172,8 @@ class StudioApp:
                 self.toasts.info(f"saved {path.name}")
             elif kind == "export":
                 out = Path(result)
-                started = time.perf_counter()
-                export_mapset(self.sim, out)
-                self.toasts.info(f"exported to {out} in {time.perf_counter() - started:.1f}s")
+                self._export = (export_job(self.sim, out), out)
+                self._export_progress = None
         except (PresetError, OSError, ValueError) as exc:
             self.toasts.error(str(exc))
 
@@ -209,10 +211,19 @@ class StudioApp:
             self._commit(self._undo_params)
             self._undo_params = None
 
-        if imgui.button("Export...") and self._dialog is None:
-            self._dialog = ("export", pfd.select_folder("Export map set to folder"))
-        imgui.same_line()
-        imgui.text_disabled(f"{self.params.export.width}x{self.params.export.width // 2}")
+        if self._export is None:
+            if imgui.button("Export...") and self._dialog is None:
+                self._dialog = ("export", pfd.select_folder("Export map set to folder"))
+            imgui.same_line()
+            imgui.text_disabled(f"{self.params.export.width}x{self.params.export.width // 2}")
+        else:
+            prog = self._export_progress
+            frac = prog.fraction if prog else 0.0
+            label = prog.message if prog else "starting"
+            imgui.progress_bar(frac, imgui.ImVec2(180.0, 0.0), label)
+            imgui.same_line()
+            if imgui.button("Cancel"):
+                self._cancel_export()
 
         imgui.separator()
         draft = draw_params_panel(self.params)
@@ -244,6 +255,30 @@ class StudioApp:
 
     # -- frame -----------------------------------------------------------------------------
 
+    def _run_export_slice(self) -> None:
+        if self._export is None:
+            return
+        job, out = self._export
+        try:
+            self._export_progress = next(job)
+        except StopIteration:
+            self._export = None
+            self._export_progress = None
+            self.toasts.info(f"exported to {out}")
+        except Exception as exc:  # noqa: BLE001 - surface any export failure
+            self._export = None
+            self._export_progress = None
+            self.toasts.error(f"export failed: {exc}")
+
+    def _cancel_export(self) -> None:
+        if self._export is None:
+            return
+        job, _ = self._export
+        job.close()  # finally-block removes partial output
+        self._export = None
+        self._export_progress = None
+        self.toasts.info("export cancelled")
+
     def pre_frame(self) -> None:
         """Runs once per frame before imgui NewFrame: dialogs, pacing, smoke exit."""
         if self.gpu is None:  # defensive; post_init normally did this
@@ -251,6 +286,7 @@ class StudioApp:
         self.frame_perf.end()
         self.frame_perf.begin()
         self._poll_dialog()
+        self._run_export_slice()
         self._frame_count += 1
         if self._smoke_frames and self._frame_count >= self._smoke_frames:
             hello_imgui.get_runner_params().app_shall_exit = True

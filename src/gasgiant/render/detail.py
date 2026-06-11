@@ -29,10 +29,14 @@ class DetailSynth:
         profile_dyn: moderngl.Texture,
         out_tex: moderngl.Texture,
         params: DetailParams,
+        origin: tuple[int, int] = (0, 0),
+        full_size: tuple[int, int] | None = None,
     ) -> None:
         rng = subseed(seed, "detail-synth")
         prog = self.prog
         size = out_tex.size
+        prog["u_origin"].value = origin
+        prog["u_full_size"].value = full_size if full_size is not None else size
         vel_tex.use(location=0)
         prog["u_vel"].value = 0
         tracers_tex.use(location=1)

@@ -19,9 +19,11 @@ uniform float u_blend_lo;          // |lat| feather start (radians)
 uniform float u_blend_hi;          // |lat| fully patch
 uniform sampler2D u_palette;       // 256x1 primary palette LUT
 uniform sampler2D u_storm_palette; // 256x1 storm tint LUT, indexed (T3+1)/2
-uniform sampler2D u_detail;        // synthesized detail field at output res
+uniform sampler2D u_detail;        // synthesized detail field, TILE-local
 uniform float u_detail_intensity;  // 0 disables (detail texture unused)
-uniform ivec2 u_size;
+uniform ivec2 u_size;              // tile size (== full size for preview)
+uniform ivec2 u_origin;            // tile origin in the full equirect output
+uniform ivec2 u_full_size;         // full equirect output size
 
 const float PI = 3.14159265358979;
 
@@ -36,7 +38,9 @@ void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= u_size.x || px.y >= u_size.y) return;
 
-    vec2 uv = (vec2(px) + 0.5) / vec2(u_size);
+    // Global (full-output) coordinates drive all lat/lon sampling; the tile
+    // origin only offsets where we are in the full map.
+    vec2 uv = (vec2(px + u_origin) + 0.5) / vec2(u_full_size);
     vec4 t = texture(u_tracers, uv);
 
     // Polar composite: feather toward the patch solutions over the (narrow)
@@ -63,9 +67,10 @@ void main() {
     col *= 1.0 + u_detail_gain * (t.b - 0.5);
 
     // Synthesized detail field (flow-stretched filaments + convective cells).
+    // The detail texture is tile-local, unlike the global tracer samplers.
     float dsyn = 0.5;
     if (u_detail_intensity > 0.0) {
-        dsyn = texture(u_detail, uv).r;
+        dsyn = texture(u_detail, (vec2(px) + 0.5) / vec2(u_size)).r;
         col *= 1.0 + u_detail_intensity * 0.55 * (dsyn - 0.5);
     }
 

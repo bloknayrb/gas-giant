@@ -16,7 +16,6 @@ from typing import Any
 import jsonschema
 
 import gasgiant
-from gasgiant.params.presets import to_preset_doc
 
 SCHEMA_VERSION = 1
 MANIFEST_FILENAME = "mapset.json"
@@ -69,39 +68,3 @@ def read_manifest(mapset_dir: Path) -> dict[str, Any]:
     return manifest
 
 
-def export_mapset(sim: Any, out_dir: Path) -> Path:
-    """Render and write a complete map set + manifest. Phase 1: one-shot,
-    full-resolution render (tiled snapshot export replaces this in Phase 4).
-
-    ``sim`` is an engine.Simulation; typed as Any to keep export below engine
-    in the layer order (engine calls this with itself).
-    """
-    from gasgiant.export.writers import write_exr_gray, write_png16_rgb
-
-    p = sim.params
-    out_dir.mkdir(parents=True, exist_ok=True)
-    rendered = sim.render_maps(p.export.width)
-
-    write_png16_rgb(out_dir / "color.png", rendered["color"], p.export.png_compression)
-    write_exr_gray(out_dir / "height.exr", rendered["height"])
-
-    maps = {
-        "color": {"file": "color.png", "format": "png16", "colorspace": "srgb", "channels": 3},
-        "height": {
-            "file": "height.exr", "format": "exr32f", "colorspace": "non-color", "channels": 1,
-        },
-    }
-    manifest = build_manifest(
-        name=p.name,
-        seed=p.seed,
-        resolution=(p.export.width, p.export.width // 2),
-        maps=maps,
-        physical={
-            "radius_km": p.physical.radius_km,
-            "height_scale": p.physical.height_scale,
-            "height_midlevel": p.physical.height_midlevel,
-        },
-        preset_doc=to_preset_doc(p),
-        atmosphere_hint={"rim_color": [0.55, 0.65, 1.0], "rim_strength": 0.4},
-    )
-    return write_manifest(out_dir, manifest)

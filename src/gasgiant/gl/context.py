@@ -109,6 +109,19 @@ class GpuContext:
     def framebuffer(self, color_tex: moderngl.Texture) -> moderngl.Framebuffer:
         return self.ctx.framebuffer(color_attachments=[color_tex])
 
+    def clone_texture(self, src: moderngl.Texture) -> moderngl.Texture:
+        """GPU-side copy (export snapshots: no CPU round-trip)."""
+        dst = self.ctx.texture(src.size, src.components, dtype=src.dtype)
+        dst.filter = src.filter
+        dst.repeat_x = src.repeat_x
+        dst.repeat_y = src.repeat_y
+        fbo_src = self.ctx.framebuffer(color_attachments=[src])
+        fbo_dst = self.ctx.framebuffer(color_attachments=[dst])
+        self.ctx.copy_framebuffer(fbo_dst, fbo_src)
+        fbo_src.release()
+        fbo_dst.release()
+        return dst
+
     def fullscreen_pass(self, package: str, frag_name: str) -> FullscreenPass:
         return FullscreenPass(self, package, frag_name)
 

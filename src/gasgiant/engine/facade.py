@@ -135,6 +135,12 @@ class Simulation:
         while self.tick(chunk):
             pass
 
+    def create_snapshot(self):
+        """Immutable copy of the renderable state for tiled export."""
+        from gasgiant.engine.snapshot import ExportSnapshot
+
+        return ExportSnapshot.capture(self)
+
     # -- derive -----------------------------------------------------------------------
 
     def _get_detail_tex(self, size: tuple[int, int]) -> moderngl.Texture:
