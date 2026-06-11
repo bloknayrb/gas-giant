@@ -1,40 +1,72 @@
 # Gas Giant Studio
 
-Procedural gas giant texture map generator. A GPU "sim-advected procedural" engine —
-a physically motivated velocity field (alternating zonal jets, injected storm vortices,
-shear-driven turbulence) through which cloud tracer fields are advected — produces
-seamless equirectangular map sets (color, height, optional normal/emission) for wrapping
-on a sphere, plus a thin Blender extension that imports a map set as a ready-to-render
-planet.
+Procedural gas giant texture map generator. A GPU "sim-advected procedural"
+engine — a physically motivated velocity field (alternating zonal jets,
+injected storm vortices, shear-driven turbulence) through which cloud tracer
+fields are advected — produces seamless equirectangular map sets (16-bit
+color + float height) for wrapping on a sphere, plus a Blender extension
+that imports a map set as a ready-to-render planet with material, atmosphere,
+and demo scene.
 
-Modeled on the visible cloud formations of Jupiter and Saturn: zones and belts, the
-Great Red Spot class of anticyclones, white ovals, brown barges, turbulent wakes,
-festoons and hot spots, vortex streets, Kelvin–Helmholtz billows, convective outbreaks,
-Jupiter's polar cyclone clusters, and Saturn's polar hexagon. See `docs/formations.md`.
-
-## Components
-
-- `gasgiant` — headless CLI: render and validate map sets.
-- `gasgiant-studio` — live-preview GUI: watch the simulation evolve, tweak parameters,
-  export when it looks right.
-- `blender_addon/gasgiant_importer` — Blender 4.2+/5.x extension that imports an
-  exported map set and builds the planet material, atmosphere shell, and demo scene.
+Modeled on the visible cloud formations of Jupiter and Saturn: zones and
+belts with meandering boundaries, alternating jets, GRS-class anticyclones
+with turbulent wakes, white ovals, brown barges, strings of pearls,
+Kelvin–Helmholtz billows, festoons and hot spots, convective outbreaks,
+Saturn's ribbon, Jupiter's polar cyclone clusters, and Saturn's polar
+hexagon. The full catalog and how each is implemented: `docs/formations.md`.
 
 ## Requirements
 
-- Python 3.13+
-- A GPU with OpenGL 4.3 (development target: NVIDIA RTX 3070, Windows 11)
-- [uv](https://docs.astral.sh/uv/)
+- Python 3.13+, [uv](https://docs.astral.sh/uv/)
+- A GPU with OpenGL 4.3 (developed on an RTX 3070, Windows 11)
+- Blender 4.2+ for the importer (verified on 5.1.2)
 
 ## Quick start
 
 ```sh
 uv sync --all-extras
-uv run gasgiant export --preset jupiter_like --res 2048 --out out/test1
-uv run gasgiant validate out/test1
+
+# Live-preview GUI: watch the simulation evolve, tweak, export.
 uv run gasgiant-studio
+
+# Headless: render a map set (factory presets: jupiter_like, saturn_pale, ice_giant)
+uv run gasgiant export --preset jupiter_like --res 4096 --out out/jove
+uv run gasgiant validate out/jove        # seam/pole invariants
+
+# Big one: 16384x8192 (about half a minute on an RTX 3070)
+uv run gasgiant export --preset jupiter_like --res 16384 --out out/jove16k
 ```
 
-## Status
+## Into Blender
 
-Early development. Build phases and architecture: `docs/architecture.md`.
+```sh
+uv run python scripts/build_addon.py     # -> dist/gasgiant_importer-1.0.0.zip
+```
+
+Drag the zip into Blender, then *File → Import → Gas Giant Map Set (.json)*
+and pick `out/jove/mapset.json`. Enable "Create demo scene" for a framed,
+sun-lit, AgX-graded first render. Details and options: `docs/blender_addon.md`.
+
+## How it works
+
+Four cloud tracers (color index, cloud-top height, detail, storm tint) are
+advected by a semi-Lagrangian MacCormack solver through a streamfunction-
+built velocity field, on an equirect grid plus two azimuthal-equidistant
+polar patches slaved by a per-step nesting exchange. Relaxation forcing
+toward the analytic band/storm stamps keeps structure alive indefinitely;
+export-time advected-coordinate noise adds flow-stretched filament detail at
+any output resolution. Architecture: `docs/architecture.md`.
+
+Everything is deterministic from one seed. Presets: `docs/presets.md`.
+
+## Development
+
+```sh
+uv run pytest            # unit + GPU tests (llvmpipe works)
+uv run ruff check .
+uv run lint-imports      # layer contracts
+```
+
+The Blender import test runs inside Blender:
+`blender --background --factory-startup --python tests/blender/test_import.py -- <mapset_dir>`
+(writes `tests/blender/result.json`).
