@@ -41,7 +41,8 @@ build-backend = "hatchling.build"
 packages = ["src/gasgiant"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# tests/blender runs inside Blender (blender --background --python), not pytest.
+testpaths = ["tests/unit", "tests/gpu"]
 markers = [
     "gpu: tests that require an OpenGL 4.3 context (real GPU or llvmpipe)",
 ]

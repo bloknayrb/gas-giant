@@ -21,3 +21,6 @@ out/
 # OS
 Thumbs.db
 desktop.ini
+
+tests/blender/result.json
+dist/

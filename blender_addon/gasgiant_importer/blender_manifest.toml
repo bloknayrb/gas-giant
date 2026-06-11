@@ -1,0 +1,12 @@
+schema_version = "1.0.0"
+
+id = "gasgiant_importer"
+version = "1.0.0"
+name = "Gas Giant Importer"
+tagline = "Import Gas Giant Studio map sets as ready-to-render planets"
+maintainer = "bloknayrb <bloknayrb@gmail.com>"
+type = "add-on"
+website = "https://github.com/bloknayrb/gas-giant"
+license = ["SPDX:GPL-3.0-or-later"]
+blender_version_min = "4.2.0"
+tags = ["Import-Export", "Material"]
