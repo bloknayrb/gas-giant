@@ -8,11 +8,14 @@
     "bands": {
       "count": 10,
       "width_jitter": 0.25,
-      "value_contrast": 0.55,
-      "warp_amount": 0.02,
+      "value_contrast": 0.42,
+      "warp_amount": 0.012,
       "warp_freq": 2.5,
-      "detail_amount": 0.06,
-      "detail_freq": 10.0
+      "detail_amount": 0.02,
+      "detail_freq": 10.0,
+      "edge_softness": 0.028,
+      "variance_amount": 0.03,
+      "contrast_envelope": 0.4
     },
     "waves": {
       "festoon_strength": 0.0,
@@ -27,28 +30,257 @@
       "outbreak_count": 1
     },
     "poles": {
-      "north": { "style": "polygon_jet", "polygon_sides": 6 },
-      "south": { "style": "plain_vortex" }
+      "north": {
+        "style": "polygon_jet",
+        "polygon_sides": 6
+      },
+      "south": {
+        "style": "plain_vortex"
+      }
     },
     "appearance": {
       "palette_rows": [
         {
-          "latitude": 0.0,
+          "latitude": -78.0,
           "stops": [
-            { "pos": 0.0, "color": [0.55, 0.45, 0.32] },
-            { "pos": 0.4, "color": [0.76, 0.66, 0.48] },
-            { "pos": 0.75, "color": [0.88, 0.80, 0.62] },
-            { "pos": 1.0, "color": [0.94, 0.89, 0.74] }
+            {
+              "pos": 0.0,
+              "color": [
+                0.45,
+                0.38,
+                0.28
+              ]
+            },
+            {
+              "pos": 0.3,
+              "color": [
+                0.55,
+                0.47,
+                0.35
+              ]
+            },
+            {
+              "pos": 0.54,
+              "color": [
+                0.62,
+                0.54,
+                0.41
+              ]
+            },
+            {
+              "pos": 0.78,
+              "color": [
+                0.68,
+                0.6,
+                0.46
+              ]
+            },
+            {
+              "pos": 1.0,
+              "color": [
+                0.74,
+                0.67,
+                0.53
+              ]
+            }
+          ]
+        },
+        {
+          "latitude": -35.0,
+          "stops": [
+            {
+              "pos": 0.0,
+              "color": [
+                0.62,
+                0.5,
+                0.34
+              ]
+            },
+            {
+              "pos": 0.3,
+              "color": [
+                0.74,
+                0.62,
+                0.44
+              ]
+            },
+            {
+              "pos": 0.54,
+              "color": [
+                0.8,
+                0.69,
+                0.5
+              ]
+            },
+            {
+              "pos": 0.78,
+              "color": [
+                0.86,
+                0.76,
+                0.57
+              ]
+            },
+            {
+              "pos": 1.0,
+              "color": [
+                0.92,
+                0.84,
+                0.66
+              ]
+            }
+          ]
+        },
+        {
+          "latitude": -8.0,
+          "stops": [
+            {
+              "pos": 0.0,
+              "color": [
+                0.7,
+                0.59,
+                0.42
+              ]
+            },
+            {
+              "pos": 0.3,
+              "color": [
+                0.8,
+                0.7,
+                0.51
+              ]
+            },
+            {
+              "pos": 0.54,
+              "color": [
+                0.86,
+                0.77,
+                0.58
+              ]
+            },
+            {
+              "pos": 0.78,
+              "color": [
+                0.9,
+                0.82,
+                0.64
+              ]
+            },
+            {
+              "pos": 1.0,
+              "color": [
+                0.95,
+                0.89,
+                0.72
+              ]
+            }
+          ]
+        },
+        {
+          "latitude": 25.0,
+          "stops": [
+            {
+              "pos": 0.0,
+              "color": [
+                0.52,
+                0.55,
+                0.45
+              ]
+            },
+            {
+              "pos": 0.3,
+              "color": [
+                0.64,
+                0.66,
+                0.55
+              ]
+            },
+            {
+              "pos": 0.54,
+              "color": [
+                0.72,
+                0.74,
+                0.62
+              ]
+            },
+            {
+              "pos": 0.78,
+              "color": [
+                0.79,
+                0.8,
+                0.68
+              ]
+            },
+            {
+              "pos": 1.0,
+              "color": [
+                0.86,
+                0.87,
+                0.76
+              ]
+            }
+          ]
+        },
+        {
+          "latitude": 72.0,
+          "stops": [
+            {
+              "pos": 0.0,
+              "color": [
+                0.4,
+                0.45,
+                0.4
+              ]
+            },
+            {
+              "pos": 0.3,
+              "color": [
+                0.5,
+                0.55,
+                0.49
+              ]
+            },
+            {
+              "pos": 0.54,
+              "color": [
+                0.58,
+                0.62,
+                0.55
+              ]
+            },
+            {
+              "pos": 0.78,
+              "color": [
+                0.65,
+                0.69,
+                0.61
+              ]
+            },
+            {
+              "pos": 1.0,
+              "color": [
+                0.73,
+                0.77,
+                0.69
+              ]
+            }
           ]
         }
       ],
-      "haze_amount": 0.55,
-      "haze_color": [0.87, 0.78, 0.58],
+      "haze_amount": 0.42,
+      "haze_color": [
+        0.87,
+        0.78,
+        0.58
+      ],
       "contrast": 0.9,
       "saturation": 0.85
     },
     "physical": {
       "radius_km": 58232.0
+    },
+    "detail": {
+      "intensity": 0.15,
+      "cellular_amount": 0.15
     }
   }
 }

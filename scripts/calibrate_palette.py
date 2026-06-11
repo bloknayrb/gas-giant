@@ -37,7 +37,7 @@ import numpy as np
 from gasgiant.palette.reference import latitude_profile
 
 _DEFAULT_ANCHORS = (-65.0, -40.0, -15.0, 10.0, 40.0, 65.0)
-_WINDOW_DEG = 9.0  # half-width of the latitude window sampled per anchor
+_DEFAULT_WINDOW_DEG = 9.0  # half-width of the latitude window sampled per anchor
 
 
 def _load_srgb(path: Path) -> np.ndarray:
@@ -51,12 +51,17 @@ def _rgb(values: np.ndarray) -> list[float]:
     return [round(float(v), 4) for v in values]
 
 
-def calibrate(img: np.ndarray, anchors: tuple[float, ...], bins: int) -> dict:
+def calibrate(
+    img: np.ndarray,
+    anchors: tuple[float, ...],
+    bins: int,
+    window_deg: float = _DEFAULT_WINDOW_DEG,
+) -> dict:
     profile = latitude_profile(img, bins)
 
     rows = []
     for anchor in sorted(anchors):
-        sel = np.abs(profile.lat_deg - anchor) <= _WINDOW_DEG
+        sel = np.abs(profile.lat_deg - anchor) <= window_deg
         if not sel.any():
             sel = np.argsort(np.abs(profile.lat_deg - anchor))[:3]
         rows.append(
@@ -97,6 +102,10 @@ def main() -> int:
         help="comma-separated anchor latitudes in signed degrees",
     )
     ap.add_argument("--bins", type=int, default=90)
+    ap.add_argument(
+        "--window", type=float, default=_DEFAULT_WINDOW_DEG,
+        help="half-width (deg) of the latitude window sampled per anchor",
+    )
     ap.add_argument("--out", type=Path, default=None, help="write JSON here instead of stdout")
     ap.add_argument(
         "--write", type=Path, default=None,
@@ -109,7 +118,7 @@ def main() -> int:
             f"error: reference {args.reference} not found — run scripts/fetch_references.py first"
         )
     anchors = tuple(float(a) for a in args.anchors.split(","))
-    doc = calibrate(_load_srgb(args.reference), anchors, args.bins)
+    doc = calibrate(_load_srgb(args.reference), anchors, args.bins, args.window)
 
     if args.write is not None:
         from gasgiant.params.presets import load_preset, save_preset

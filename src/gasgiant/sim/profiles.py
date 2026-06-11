@@ -36,6 +36,8 @@ class LatProfiles:
     t0_stamp: np.ndarray     # (N,) banded color-index stamp
     t1_stamp: np.ndarray     # (N,) banded height stamp
     max_speed: float
+    # (lat_lo, lat_hi, lon, halfwidth) of the faded sector, radians.
+    fade_sector: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 
     def dyn_lut(self) -> np.ndarray:
         """(N, 4) float32: u, psi, shear_norm, belt_mask."""
@@ -106,6 +108,7 @@ def build_profiles(
         t0_stamp=t0,
         t1_stamp=t1,
         max_speed=float(np.abs(u).max()),
+        fade_sector=bands.fade_sector,
     )
 
 

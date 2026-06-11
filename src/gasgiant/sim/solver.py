@@ -182,12 +182,23 @@ class Solver:
         _set(prog, "u_poly_phase", self._poly_phase)
         _set(prog, "u_poly_width", 0.03)
 
+    def _band_mod_uniforms(self, prog: moderngl.ComputeShader) -> None:
+        p = self.params
+        _set(prog, "u_band_variance", p.bands.variance_amount)
+        _set(prog, "u_variance_offset", self._variance_offset)
+        _set(prog, "u_env_strength", p.bands.contrast_envelope)
+        _set(prog, "u_fade_amp", p.bands.faded_sector)
+        _set(prog, "u_fade_sector", tuple(self.profiles.fade_sector))
+
     def _static_uniforms(self) -> None:
         p = self.params
         warp_rng = subseed(p.seed, "warp-noise")
         detail_rng = subseed(p.seed, "detail-noise")
         turb_rng = subseed(p.seed, "turbulence")
         kh_rng = subseed(p.seed, "kh-wave")
+        self._variance_offset = tuple(
+            subseed(p.seed, "band-variance").uniform(-100.0, 100.0, 3)
+        )
         self._warp_offset = tuple(warp_rng.uniform(-100.0, 100.0, 3))
         self._detail_offset = tuple(detail_rng.uniform(-100.0, 100.0, 3))
         self._turb_offset = tuple(turb_rng.uniform(-100.0, 100.0, 3))
@@ -227,6 +238,7 @@ class Solver:
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
                     _set(prog, "u_detail_offset", self._detail_offset)
                     _set(prog, "u_detail_freq", p.bands.detail_freq)
+                    self._band_mod_uniforms(prog)
                     if dom.kind != DOMAIN_EQUIRECT:
                         self._poly_uniforms(prog, pole)
                     else:
@@ -241,6 +253,7 @@ class Solver:
             _set(k, "u_detail_offset", self._detail_offset)
             _set(k, "u_detail_amount", p.bands.detail_amount)
             _set(k, "u_detail_freq", p.bands.detail_freq)
+            self._band_mod_uniforms(k)
             if dom.kind != DOMAIN_EQUIRECT:
                 self._poly_uniforms(k, pole)
             else:

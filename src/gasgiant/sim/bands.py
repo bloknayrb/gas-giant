@@ -29,6 +29,10 @@ class BandLayout:
     edges: np.ndarray  # (count + 1,) latitudes in radians, descending from +pi/2
     values: np.ndarray  # (count,) color index 0..1
     heights: np.ndarray  # (count,) cloud-top height 0..1
+    # Faded-sector geometry (SEB fade): lat_lo, lat_hi, center lon, half-width,
+    # all radians. Drawn for every layout; applied only when
+    # bands.faded_sector > 0.
+    fade_sector: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 
 
 def generate_bands(seed: int, params: BandsParams) -> BandLayout:
@@ -55,8 +59,35 @@ def generate_bands(seed: int, params: BandsParams) -> BandLayout:
     values += rng.uniform(-0.06, 0.06, size=count)
     heights = base_height + rng.uniform(-0.08, 0.08, size=count)
 
+    # Per-band palette offset on its own stream: with hue_jitter == 0 the
+    # layout is bit-identical to layouts generated before the feature existed.
+    hue_rng = subseed(seed, "band-hues")
+    values += params.hue_jitter * hue_rng.uniform(-1.0, 1.0, size=count)
+
+    values = np.clip(values, 0.0, 1.0)
     return BandLayout(
         edges=edges.astype(np.float32),
-        values=np.clip(values, 0.0, 1.0).astype(np.float32),
+        values=values.astype(np.float32),
         heights=np.clip(heights, 0.0, 1.0).astype(np.float32),
+        fade_sector=_select_fade_sector(seed, edges, values),
     )
+
+
+def _select_fade_sector(
+    seed: int, edges: np.ndarray, values: np.ndarray
+) -> tuple[float, float, float, float]:
+    """The widest low/mid-latitude belt gets the (potential) faded sector;
+    longitude and width come from a dedicated stream so drawing them never
+    perturbs the band layout."""
+    rng = subseed(seed, "faded-sector")
+    lon = float(rng.uniform(-np.pi, np.pi))
+    halfwidth = float(np.deg2rad(rng.uniform(38.0, 58.0)))
+
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    widths = -np.diff(edges)
+    is_belt = values < np.median(values)
+    candidates = np.where(is_belt & (np.abs(centers) < 0.9))[0]
+    if candidates.size == 0:
+        return (0.0, 0.0, lon, halfwidth)
+    j = candidates[np.argmax(widths[candidates])]
+    return (float(edges[j + 1]), float(edges[j]), lon, halfwidth)

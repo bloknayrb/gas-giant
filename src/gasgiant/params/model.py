@@ -121,6 +121,26 @@ class BandsParams(_Params):
         0.10, tier=Tier.RESTART, lo=0.0, hi=0.5, rand=(0.04, 0.2), ui="Bands",
         description="Small-scale color-index noise amplitude",
     )
+    hue_jitter: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=0.15, rand=(0.0, 0.08), ui="Bands",
+        description="Per-band color-index offset along the palette (NEB-orange vs "
+                    "SEB-brown variation); seeded independently of the band layout",
+    )
+    variance_amount: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.02, 0.12), ui="Bands",
+        description="Within-band longitudinal color drift (real belts hold several "
+                    "hues at once, varying slowly with longitude)",
+    )
+    faded_sector: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Bands",
+        description="SEB-fade: one belt gets a pale desaturated sector spanning "
+                    "~100 degrees of longitude",
+    )
+    contrast_envelope: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Bands",
+        description="Banding contrast collapse poleward of ~45 deg toward mottle "
+                    "(the real latitude-contrast profile)",
+    )
     detail_freq: float = pfield(
         12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, ui="Bands",
         description="Small-scale noise spatial frequency",
