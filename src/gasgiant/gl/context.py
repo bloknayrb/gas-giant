@@ -109,6 +109,13 @@ class GpuContext:
     def framebuffer(self, color_tex: moderngl.Texture) -> moderngl.Framebuffer:
         return self.ctx.framebuffer(color_attachments=[color_tex])
 
+    def make_current(self) -> None:
+        """Make this GL context current on the thread. Needed when other code
+        created its own context in the meantime (e.g. an in-process CLI run):
+        moderngl routes calls to whichever context is current, not to the one
+        that owns the object."""
+        self.ctx.mglo.__enter__()
+
     def clone_texture(self, src: moderngl.Texture) -> moderngl.Texture:
         """GPU-side copy (export snapshots: no CPU round-trip)."""
         dst = self.ctx.texture(src.size, src.components, dtype=src.dtype)

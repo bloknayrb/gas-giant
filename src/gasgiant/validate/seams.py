@@ -113,12 +113,59 @@ def check_finite(arr: np.ndarray, name: str, report: Report) -> None:
     report.add(f"{name}: finite", bad == 0, f"{bad} non-finite values")
 
 
+# A processing seam (detail route switch, domain feather bug) is a row-pair
+# jump that is UNIFORM across longitude; legitimate sharp content in the same
+# band (band edges) meanders and varies along the row. A row is flagged only
+# when its jump is both large relative to the band (size gate) and more
+# uniform along the row than content ever is (uniformity gate).
+# Tuned against real content: a meandering-but-steep band edge in the height
+# map measures uniformity ~3-4; hard processing cliffs measure 5+.
+BAND_SEAM_SIZE_FACTOR = 10.0      # mean diff vs band median
+BAND_SEAM_UNIFORMITY = 5.0        # mean diff vs along-row std of the diff
+_BAND_LO_DEG = 55.0
+_BAND_HI_DEG = 70.0
+
+
+def check_latitude_band_continuity(arr: np.ndarray, name: str, report: Report) -> None:
+    """No horizontal seam across the polar routing / domain blend band."""
+    a = _flat(arr)
+    h = a.shape[0]
+    lats = 90.0 - (np.arange(h) + 0.5) / h * 180.0
+    for label, sel in (
+        ("north", (lats > _BAND_LO_DEG) & (lats < _BAND_HI_DEG)),
+        ("south", (lats < -_BAND_LO_DEG) & (lats > -_BAND_HI_DEG)),
+    ):
+        rows = np.where(sel)[0]
+        if rows.size < 8:
+            continue
+        # Column-subsampled row-pair diffs (16K-safe).
+        w = a.shape[1]
+        cols = np.arange(0, w, max(w // 1024, 1))
+        band = a[rows[0] : rows[-1] + 2, cols]
+        d = np.abs(np.diff(band, axis=0)).mean(axis=2)  # (rows, cols)
+        mean_r = d.mean(axis=1)
+        std_r = d.std(axis=1)
+        med = float(np.median(mean_r))
+        size_limit = max(BAND_SEAM_SIZE_FACTOR * med, ABS_FLOOR)
+        uniformity = mean_r / (std_r + ABS_FLOOR)
+        seam_rows = (mean_r > size_limit) & (uniformity > BAND_SEAM_UNIFORMITY)
+        worst = int(np.argmax(mean_r * (uniformity > BAND_SEAM_UNIFORMITY)))
+        report.add(
+            f"{name}: {label} blend-band continuity",
+            bool(not seam_rows.any()),
+            f"{int(seam_rows.sum())} uniform-jump rows (worst mean "
+            f"{mean_r[worst]:.3e}, uniformity {uniformity[worst]:.1f}, "
+            f"band median {med:.3e})",
+        )
+
+
 def validate_arrays(maps: dict[str, np.ndarray]) -> Report:
     report = Report()
     for name, arr in maps.items():
         check_finite(arr, name, report)
         check_wrap_continuity(arr, name, report)
         check_pole_rows(arr, name, report)
+        check_latitude_band_continuity(arr, name, report)
     return report
 
 

@@ -158,12 +158,17 @@ class Simulation:
         detail_tex = None
         if p.detail.intensity > 0.0:
             from gasgiant.engine.snapshot import hero_centers
+            from gasgiant.render.detail import PolarRoute
 
             detail_tex = self._get_detail_tex(color_tex.size)
             self.detail_synth.synthesize(
                 p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
                 self.profile_dyn, detail_tex, p.detail,
                 heroes=hero_centers(self.vortices),
+                polar=PolarRoute(
+                    s.north.vel_tex, s.south.vel_tex,
+                    s.north.tracers.cur, s.south.tracers.cur, RHO_MAX,
+                ),
             )
         self.deriver.derive(
             s.equirect.tracers.cur,

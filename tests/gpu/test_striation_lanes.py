@@ -21,9 +21,11 @@ def _quick(seed: int = 17) -> PlanetParams:
 def test_striation_adds_signal_without_nans(gpu):
     p = _quick()
     p.detail.striation_amount = 0.0
-    base = Simulation(p, gpu).render_maps(512)["color"]
+    p.detail.striation_frequency = 24.0  # the 512-px render can hold this;
+    base = Simulation(p, gpu).render_maps(512)["color"]  # 96 would attenuate out
     p2 = _quick()
     p2.detail.striation_amount = 1.0
+    p2.detail.striation_frequency = 24.0
     striated = Simulation(p2, gpu).render_maps(512)["color"]
     assert np.isfinite(striated).all()
     assert not np.array_equal(base, striated)

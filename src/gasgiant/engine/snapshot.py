@@ -38,6 +38,8 @@ class ExportSnapshot:
     tracers_n: moderngl.Texture
     tracers_s: moderngl.Texture
     vel_eq: moderngl.Texture
+    vel_n: moderngl.Texture
+    vel_s: moderngl.Texture
     profile_dyn: moderngl.Texture
     patch_rho_max: float
     blend_band: tuple[float, float]
@@ -60,6 +62,8 @@ class ExportSnapshot:
             tracers_n=gpu.clone_texture(s.north.tracers.cur),
             tracers_s=gpu.clone_texture(s.south.tracers.cur),
             vel_eq=gpu.clone_texture(s.equirect.vel_tex),
+            vel_n=gpu.clone_texture(s.north.vel_tex),
+            vel_s=gpu.clone_texture(s.south.vel_tex),
             profile_dyn=gpu.clone_texture(sim.profile_dyn),
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
@@ -70,5 +74,5 @@ class ExportSnapshot:
 
     def release(self) -> None:
         for tex in (self.tracers_eq, self.tracers_n, self.tracers_s,
-                    self.vel_eq, self.profile_dyn):
+                    self.vel_eq, self.vel_n, self.vel_s, self.profile_dyn):
             tex.release()

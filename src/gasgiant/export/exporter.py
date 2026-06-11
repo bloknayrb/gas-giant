@@ -25,6 +25,7 @@ from gasgiant.export.manifest import MANIFEST_FILENAME, build_manifest, write_ma
 from gasgiant.export.writers import write_exr_gray, write_png16_rgb_u16
 from gasgiant.jobs import Progress
 from gasgiant.params.presets import to_preset_doc
+from gasgiant.render.detail import PolarRoute
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -77,6 +78,10 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                     params.seed, snap.vel_eq, snap.tracers_eq, snap.profile_dyn,
                     tile_detail, params.detail, origin=(x0, y0), full_size=(w, h),
                     heroes=snap.heroes,
+                    polar=PolarRoute(
+                        snap.vel_n, snap.vel_s, snap.tracers_n, snap.tracers_s,
+                        snap.patch_rho_max,
+                    ),
                 )
             sim.deriver.derive(
                 snap.tracers_eq, snap.tracers_n, snap.tracers_s,

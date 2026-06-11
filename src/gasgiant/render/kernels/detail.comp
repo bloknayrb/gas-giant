@@ -27,6 +27,24 @@ uniform ivec2 u_size;             // tile size (== full size for preview)
 uniform ivec2 u_origin;           // tile origin in the full equirect output
 uniform ivec2 u_full_size;        // full equirect output size
 
+// Polar routing: poleward of the route band the equirect velocity is faded/
+// meaningless, so backtraces run through the PATCH velocities instead
+// (physical east/north components, same as the equirect texture).
+uniform int u_polar_route;        // 0 = legacy fade at the caps
+uniform sampler2D u_vel_n;
+uniform sampler2D u_vel_s;
+uniform sampler2D u_tracers_n;
+uniform sampler2D u_tracers_s;
+uniform float u_rho_max;          // patch angular radius (radians)
+
+// The route feather sits at 66-72 deg: the equirect velocity is unfaded
+// until 74 deg and the patch chart is most accurate well inside its edge,
+// so the two noise stacks agree closely where they are mixed (a feather at
+// the 56-64 deg patch edge produced a visible roughness band — the two
+// stacks decorrelate there and the mix gradient reads as a seam).
+const float ROUTE_LO = 1.1519;    // 66 deg: equirect-only below
+const float ROUTE_HI = 1.2566;    // 72 deg: patch-only above
+
 uniform float u_freq;
 uniform float u_stretch;          // total backtrace pseudo-time scale
 uniform int u_phases;
@@ -66,17 +84,57 @@ float heroMask(vec3 p) {
     return clamp(m, 0.0, 1.0);
 }
 
-// Backtrace (lon, lat) through the baked velocity for pseudo-time tau.
-vec2 backtraceLL(vec2 ll, float tau) {
+vec2 patchUV(vec2 ll) {
+    float rho = 0.5 * PI - abs(ll.y);
+    vec2 st = rho * vec2(cos(ll.x), sin(ll.x));
+    return st / u_rho_max * 0.5 + 0.5;
+}
+
+// Velocity (east, north) at ll from either chart. mode 0 = equirect texture,
+// mode 1 = polar patch texture (pass the matching hemisphere's sampler).
+vec2 velAt(sampler2D tex, int mode, vec2 ll) {
+    if (mode == 0) return texture(tex, eqUV(ll)).rg;
+    return texture(tex, patchUV(ll)).rg;
+}
+
+// Backtrace (lon, lat) through a baked velocity for pseudo-time tau. Both
+// charts store physical east/north components, so the integration is chart-
+// independent; only the sampling differs.
+vec2 backtraceLL(sampler2D tex, int mode, vec2 ll, float tau) {
     float h = tau / float(SUBSTEPS);
+    float cos_floor = (mode == 0) ? 0.05 : 0.01;
     for (int i = 0; i < SUBSTEPS; ++i) {
-        vec2 vel = texture(u_vel, eqUV(ll)).rg;
-        float cosl = max(cos(ll.y), 0.05);
+        vec2 vel = velAt(tex, mode, ll);
+        float cosl = max(cos(ll.y), cos_floor);
         ll.x -= h * vel.x / cosl;
         ll.y -= h * vel.y;
         ll.y = clamp(ll.y, -0.5 * PI, 0.5 * PI);
     }
     return ll;
+}
+
+// The full filament+striation noise stack along one chart's backtraces.
+// Returns (streak, stria).
+vec2 noiseStack(sampler2D tex, int mode, vec2 ll, float hero) {
+    float streak = 0.0;
+    float wsum = 0.0;
+    for (int ph = 0; ph < u_phases; ++ph) {
+        float tau = u_stretch * TAU_BASE * (float(ph) + 1.0) / float(u_phases)
+                  * (1.0 + 1.2 * hero);
+        vec2 src = backtraceLL(tex, mode, ll, tau);
+        float w = 1.0 - 0.5 * float(ph) / float(max(u_phases - 1, 1));
+        streak += w * fbm(spherePt(src) * u_freq + u_offset, 4, 2.0, 0.5);
+        wsum += w;
+    }
+    streak /= max(wsum, 1e-5);
+
+    float stria = 0.0;
+    if (u_striation_amount > 0.0) {
+        float tau_s = u_stretch * TAU_BASE * 2.6 * (1.0 + 1.2 * hero);
+        vec2 srcS = backtraceLL(tex, mode, ll, tau_s);
+        stria = fbm(spherePt(srcS) * u_striation_freq + u_offset.zxy, 3, 2.0, 0.5);
+    }
+    return vec2(streak, stria);
 }
 
 void main() {
@@ -99,20 +157,42 @@ void main() {
     vec3 pc = spherePt(ll);
     float hero = heroMask(pc);
 
-    // Flow-stretched filament noise: staggered phases. Inside heroes the
-    // pseudo-time grows so the noise winds into tighter internal spirals.
+    // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the
+    // feather both stacks are computed and the noise VALUES are mixed (never
+    // the positions: KH/festoon/ribbon psi terms exist only on the equirect
+    // domain, so the two velocity fields legitimately differ here and mixed
+    // positions would shear the filaments against each other).
+    float routeW = (u_polar_route != 0) ? smoothstep(ROUTE_LO, ROUTE_HI, abs(ll.y)) : 0.0;
+
     float streak = 0.0;
-    float wsum = 0.0;
-    for (int ph = 0; ph < u_phases; ++ph) {
-        float tau = u_stretch * TAU_BASE * (float(ph) + 1.0) / float(u_phases)
-                  * (1.0 + 1.2 * hero);
-        vec2 src = backtraceLL(ll, tau);
-        vec3 ps = spherePt(src);
-        float w = 1.0 - 0.5 * float(ph) / float(max(u_phases - 1, 1));
-        streak += w * fbm(ps * u_freq + u_offset, 4, 2.0, 0.5);
-        wsum += w;
+    float stria = 0.0;
+    float w_streak;
+    float w_cell;
+    if (routeW < 1.0) {
+        vec2 ns = noiseStack(u_vel, 0, ll, hero);
+        streak = ns.x;
+        stria = ns.y;
     }
-    streak /= max(wsum, 1e-5);
+    if (routeW > 0.0) {
+        vec2 nsp = (ll.y >= 0.0)
+            ? noiseStack(u_vel_n, 1, ll, hero)
+            : noiseStack(u_vel_s, 1, ll, hero);
+        streak = mix(streak, nsp.x, routeW);
+        stria = mix(stria, nsp.y, routeW);
+        // Patch-route masks: the equirect profile LUT zeroes speed/belt
+        // poleward of 74 deg, which would collapse the filament weight (the
+        // old all-Worley caps). Use the patch velocity magnitude and the
+        // patch tracers' T2 freshness as the activity proxy instead.
+        vec2 velP = (ll.y >= 0.0) ? velAt(u_vel_n, 1, ll) : velAt(u_vel_s, 1, ll);
+        float t2P = (ll.y >= 0.0)
+            ? texture(u_tracers_n, patchUV(ll)).b
+            : texture(u_tracers_s, patchUV(ll)).b;
+        float speedP = clamp(length(velP) / 1.2, 0.0, 1.0);
+        speedN = mix(speedN, speedP, routeW);
+        shearN = mix(shearN, 0.0, routeW);
+        belt = mix(belt, 0.0, routeW);
+        tr.b = mix(tr.b, t2P, routeW);
+    }
 
     // Convective cells: bright cell interiors with dark lanes (1 - F1 ridged).
     float f1 = worleyF1(pc * (u_freq * 0.45) + u_offset.yzx);
@@ -120,36 +200,31 @@ void main() {
 
     // Masks: filaments where the flow is busy and the tracer is fresh;
     // cells where it is quiet and bright (zone interiors).
-    float w_streak = clamp(0.2 + 0.8 * (shearN + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
-                   * (1.0 + 1.4 * hero);
-    float w_cell = u_cell_amount * (1.0 - belt) * (1.0 - speedN) * (1.0 - shearN);
+    w_streak = clamp(0.2 + 0.8 * (shearN + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
+             * (1.0 + 1.4 * hero);
+    w_cell = u_cell_amount * (1.0 - belt) * (1.0 - speedN) * (1.0 - shearN)
+           * (1.0 - 0.6 * routeW);  // the caps are not quiet zone interiors
 
     float d = 0.5 + 0.5 * streak * w_streak + 0.35 * (cells - 0.5) * w_cell;
 
     // Intra-band striation: HIGH-frequency noise backtraced 2-3x further than
-    // the filament phases, so it stretches into thin ropey flow-parallel
-    // threads. Strictly analytic (backtrace + sphere noise) — no image-space
-    // blur, so the no-apron tile contract holds. Weighted toward belts and
-    // fast flow; attenuated when the across-flow wavelength approaches the
-    // output pixel size (the anisotropic stretch multiplies the across-flow
-    // frequency, which would otherwise alias at preview resolutions).
+    // the filament phases, stretched into thin ropey flow-parallel threads.
+    // Attenuated when the across-flow wavelength approaches the output pixel.
     if (u_striation_amount > 0.0) {
-        float tau_s = u_stretch * TAU_BASE * 2.6 * (1.0 + 1.2 * hero);
-        vec2 srcS = backtraceLL(ll, tau_s);
-        float stria = fbm(spherePt(srcS) * u_striation_freq + u_offset.zxy, 3, 2.0, 0.5);
         float stretch_est = 1.0 + 5.0 * speedN * u_stretch;
         float wavelength_px = float(u_full_size.x)
                             / max(u_striation_freq * 4.0 * stretch_est, 1.0);
         float atten = smoothstep(1.5, 3.0, wavelength_px);
-        float w_stria = u_striation_amount * (0.3 + 0.7 * belt)
+        float w_stria = u_striation_amount * (0.3 + 0.7 * max(belt, routeW * 0.5))
                       * (0.25 + 0.75 * speedN) * atten;
         d += 0.30 * stria * w_stria;
     }
 
-    // Equirect backtrace degrades toward the caps; fade to neutral there
-    // (Phase 4 routes polar tiles through the patch velocity).
-    float fade = smoothstep(0.98, 1.15, abs(ll.y));
-    d = mix(d, 0.5, fade);
+    // Legacy cap fade, only when routing is off.
+    if (u_polar_route == 0) {
+        float fade = smoothstep(0.98, 1.15, abs(ll.y));
+        d = mix(d, 0.5, fade);
+    }
 
     // High-latitude pepper stipple: bright granular storm speckle (the real
     // band-to-mottle transition character). Analytic at ll — no backtrace,

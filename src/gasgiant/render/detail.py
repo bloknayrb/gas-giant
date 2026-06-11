@@ -3,6 +3,7 @@ output resolution, from the baked velocity and tracer textures."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -16,6 +17,17 @@ if TYPE_CHECKING:
 
 _KERNELS = "gasgiant.render.kernels"
 _GROUP = 16
+
+
+@dataclass
+class PolarRoute:
+    """Patch velocity + tracer textures for routed polar backtraces."""
+
+    vel_n: moderngl.Texture
+    vel_s: moderngl.Texture
+    tracers_n: moderngl.Texture
+    tracers_s: moderngl.Texture
+    rho_max: float
 
 
 class DetailSynth:
@@ -34,12 +46,38 @@ class DetailSynth:
         origin: tuple[int, int] = (0, 0),
         full_size: tuple[int, int] | None = None,
         heroes: list[tuple[float, float, float, float]] | None = None,
+        polar: PolarRoute | None = None,
     ) -> None:
         """heroes: up to 3 (x, y, z, r_core) hero-storm centers; the detail
-        amplitude and winding time grow inside them (internal spirals)."""
+        amplitude and winding time grow inside them (internal spirals).
+        polar: patch velocity/tracer textures — when given, polar backtraces
+        route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
         prog = self.prog
         size = out_tex.size
+        if polar is not None:
+            prog["u_polar_route"].value = 1
+            polar.vel_n.use(location=3)
+            prog["u_vel_n"].value = 3
+            polar.vel_s.use(location=4)
+            prog["u_vel_s"].value = 4
+            polar.tracers_n.use(location=5)
+            prog["u_tracers_n"].value = 5
+            polar.tracers_s.use(location=6)
+            prog["u_tracers_s"].value = 6
+            prog["u_rho_max"].value = polar.rho_max
+        else:
+            prog["u_polar_route"].value = 0
+            # Samplers must still have valid bindings.
+            vel_tex.use(location=3)
+            prog["u_vel_n"].value = 3
+            vel_tex.use(location=4)
+            prog["u_vel_s"].value = 4
+            tracers_tex.use(location=5)
+            prog["u_tracers_n"].value = 5
+            tracers_tex.use(location=6)
+            prog["u_tracers_s"].value = 6
+            prog["u_rho_max"].value = 1.0
         prog["u_origin"].value = origin
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)

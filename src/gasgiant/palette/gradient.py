@@ -60,7 +60,7 @@ def bake_rows(rows: Sequence[Row], size: int = 256, height: int = 64) -> np.ndar
         else:
             t = (lat - lats[j]) / (lats[j + 1] - lats[j])
             w = t * t * (3.0 - 2.0 * t)
-            if w <= 0.0:
+            if w <= 0.0 or np.array_equal(luts[j], luts[j + 1]):
                 out[i] = luts[j]
             elif w >= 1.0:
                 out[i] = luts[j + 1]

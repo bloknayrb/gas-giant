@@ -132,8 +132,13 @@ class Solver:
         gpu = self.gpu
         defines = {"DOMAIN": str(kind)}
         wrap = kind == DOMAIN_EQUIRECT
-        psi_tex = gpu.texture2d(size, 1, "f4")
-        vel_tex = gpu.texture2d(size, 2, "f4", linear=True)
+        # Zero-filled: with dev_steps == 0 the first derive runs before any
+        # step has written these, and an undefined-content texture would feed
+        # the detail backtrace whatever VRAM held before.
+        psi_tex = gpu.texture2d(size, 1, "f4", data=np.zeros((size[1], size[0], 1), np.float32))
+        vel_tex = gpu.texture2d(
+            size, 2, "f4", data=np.zeros((size[1], size[0], 2), np.float32), linear=True
+        )
         vel_tex.repeat_x = wrap
         tracers = TracerState(gpu, size)
         for tex in (tracers.cur, tracers.fwd, tracers.back, tracers.out):
