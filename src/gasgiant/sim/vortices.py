@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gasgiant.params.model import StormsParams
+from gasgiant.params.model import PolesParams, StormsParams
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
@@ -30,6 +30,7 @@ KIND_HERO = 1.0
 KIND_BARGE = 2.0
 KIND_PEARL = 3.0
 KIND_KH = 4.0
+KIND_POLAR = 5.0
 
 
 @dataclass
@@ -65,9 +66,12 @@ class VortexRegistry:
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
-        """Advect vortex centers with the ambient zonal flow."""
+        """Advect vortex centers with the ambient zonal flow (polar vortices
+        are pinned: the polar jets are weak and the clusters are long-lived)."""
         lats = profiles.lat
         for v in self.vortices:
+            if v.kind == KIND_POLAR:
+                continue
             u = float(np.interp(-v.lat, -lats, profiles.u))  # lats descending
             v.lon = float((v.lon + u / max(np.cos(v.lat), 0.2) * dt + np.pi) % (2 * np.pi) - np.pi)
 
@@ -108,11 +112,57 @@ def _poisson_lons(rng: np.random.Generator, count: int, min_sep: float) -> list[
     return lons
 
 
+def add_polar_vortices(
+    reg: VortexRegistry,
+    rng: np.random.Generator,
+    pole_sign: float,
+    style: str,
+    cyclone_count: int,
+    strength: float,
+) -> None:
+    """Polar features that are vortex-shaped (cyclone clusters, plain vortex).
+    The polygon jet is a streamfunction term in the patch kernel, not a vortex,
+    but it still gets a tight central vortex."""
+    if style == "calm" or strength <= 0.0:
+        return
+    pole_lat = pole_sign * (np.pi / 2.0)
+    # Cyclonic sense, mirrored across hemispheres.
+    s_central = pole_sign * 0.032 * strength
+
+    if style == "plain_vortex":
+        reg.vortices.append(
+            Vortex(pole_lat, 0.0, 0.09, s_central * 1.4, KIND_POLAR, tint=0.25, brightness=-0.22)
+        )
+        return
+
+    if style == "polygon_jet":
+        reg.vortices.append(
+            Vortex(pole_lat, 0.0, 0.05, s_central, KIND_POLAR, tint=0.15, brightness=-0.14)
+        )
+        return
+
+    # cyclone_cluster: central cyclone + ring at polygon vertices (Juno's
+    # 8-around-1 north / 5-around-1 south configuration generalized).
+    reg.vortices.append(
+        Vortex(pole_lat, 0.0, 0.055, s_central, KIND_POLAR, tint=0.3, brightness=-0.26)
+    )
+    ring_colat = 0.135
+    base = float(rng.uniform(0.0, 2.0 * np.pi))
+    for i in range(cyclone_count):
+        theta = base + 2.0 * np.pi * i / cyclone_count
+        lat = pole_sign * (np.pi / 2.0 - ring_colat)
+        lon = (theta + np.pi) % (2.0 * np.pi) - np.pi
+        reg.vortices.append(
+            Vortex(lat, lon, 0.05, s_central * 0.85, KIND_POLAR, tint=0.25, brightness=-0.22)
+        )
+
+
 def generate_vortices(
     seed: int,
     bands: BandLayout,
     profiles: LatProfiles,
     storms: StormsParams,
+    poles: PolesParams | None = None,
 ) -> VortexRegistry:
     rng = subseed(seed, "storms")
     reg = VortexRegistry()
@@ -183,5 +233,16 @@ def generate_vortices(
             reg.vortices.append(
                 Vortex(lat, lon, 0.02, s, KIND_PEARL, tint=0.05, brightness=0.25)
             )
+
+    if poles is not None:
+        polar_rng = subseed(seed, "poles")
+        add_polar_vortices(
+            reg, polar_rng, +1.0, poles.north.style.value,
+            poles.north.cyclone_count, poles.north.strength,
+        )
+        add_polar_vortices(
+            reg, polar_rng, -1.0, poles.south.style.value,
+            poles.south.cyclone_count, poles.south.strength,
+        )
 
     return reg

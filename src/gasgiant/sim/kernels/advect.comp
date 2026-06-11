@@ -45,6 +45,25 @@ uniform vec3 u_detail_offset;
 uniform float u_detail_freq;
 uniform float u_turb_time;      // evolves the replenishment noise
 
+#if PASS == 2 && DOMAIN != 0
+// Polygonal polar jet ring: part of the relaxation target on patches
+// (the jet continually regenerates the dark ring it rides on).
+uniform float u_poly_amp;
+uniform float u_poly_k;
+uniform float u_poly_rho;
+uniform float u_poly_eps;
+uniform float u_poly_phase;
+uniform float u_poly_width;
+
+float polyRing(vec2 ll) {
+    if (u_poly_amp <= 0.0) return 0.0;
+    float rho = 0.5 * PI - abs(ll.y);
+    float rho0 = u_poly_rho * (1.0 + u_poly_eps * cos(u_poly_k * ll.x + u_poly_phase));
+    float dr = (rho - rho0) / max(u_poly_width * 0.7, 1e-4);
+    return -0.18 * exp(-dr * dr);
+}
+#endif
+
 vec4 fetchT(sampler2D tex, int x, int y) {
     return texelFetch(tex, ivec2(wrapX(x, u_size.x), clampY(y, u_size.y)), 0);
 }
@@ -101,6 +120,7 @@ vec2 backtrace(vec2 pixPos, float dt) {
     vec2 size = vec2(u_size);
     vec2 uvScale = 1.0 / size;
 
+#if DOMAIN == 0
     vec2 ll = vec2(
         (pixPos.x / size.x) * 2.0 * PI - PI,
         0.5 * PI - (pixPos.y / size.y) * PI
@@ -122,6 +142,15 @@ vec2 backtrace(vec2 pixPos, float dt) {
         (dest.x + PI) / (2.0 * PI) * size.x,
         (0.5 * PI - dest.y) / PI * size.y
     );
+#else
+    // Patch space is Cartesian (in st radians) — no pole singularity.
+    vec2 st = patchStFromPix(pixPos, u_size);
+    vec2 vel = texture(u_vel, pixPos * uvScale).rg;
+    vec2 stMid = st - 0.5 * dt * patchVelocity(st, vel);
+    vec2 velMid = texture(u_vel, patchPixFromSt(stMid, u_size) * uvScale).rg;
+    vec2 stDest = st - dt * patchVelocity(stMid, velMid);
+    return patchPixFromSt(stDest, u_size);
+#endif
 }
 
 void main() {
@@ -159,7 +188,11 @@ void main() {
     float warp = fbm(p * u_warp_freq + u_warp_offset, 4, 2.0, 0.5) * u_warp_amount;
     vec4 stamp = texture(u_profile_stamp, latProfileUV(ll.y + warp));
     vec3 vs = vortexStamp(p);
-    result.x += (stamp.r + vs.x - result.x) * u_relax_k;
+    float ring = 0.0;
+#if DOMAIN != 0
+    ring = polyRing(ll);
+#endif
+    result.x += (stamp.r + vs.x + ring - result.x) * u_relax_k;
     result.y += (stamp.g + vs.y - result.y) * u_relax_k;
 
     // Detail tracer: blend in fresh evolving noise (an exponential-decay

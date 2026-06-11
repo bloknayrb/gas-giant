@@ -11,10 +11,17 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(rgba32f, binding = 0) writeonly uniform image2D out_color;
 layout(r32f, binding = 1) writeonly uniform image2D out_height;
 
-uniform sampler2D u_tracers;
+uniform sampler2D u_tracers;       // equirect tracers
+uniform sampler2D u_patch_n;       // north polar patch tracers
+uniform sampler2D u_patch_s;       // south polar patch tracers
+uniform float u_patch_rho_max;     // patch angular radius (radians)
+uniform float u_blend_lo;          // |lat| feather start (radians)
+uniform float u_blend_hi;          // |lat| fully patch
 uniform sampler2D u_palette;       // 256x1 primary palette LUT
 uniform sampler2D u_storm_palette; // 256x1 storm tint LUT, indexed (T3+1)/2
 uniform ivec2 u_size;
+
+const float PI = 3.14159265358979;
 
 uniform float u_detail_gain;       // luminance modulation by the detail tracer
 uniform float u_haze_amount;
@@ -29,6 +36,20 @@ void main() {
 
     vec2 uv = (vec2(px) + 0.5) / vec2(u_size);
     vec4 t = texture(u_tracers, uv);
+
+    // Polar composite: feather toward the patch solutions over the (narrow)
+    // blend band. Both sides are slaved by the per-step nesting exchange, so
+    // this feather merges two nearly identical fields.
+    float lat = 0.5 * PI - uv.y * PI;
+    float w = smoothstep(u_blend_lo, u_blend_hi, abs(lat));
+    if (w > 0.0) {
+        float lon = uv.x * 2.0 * PI - PI;
+        float rho = 0.5 * PI - abs(lat);
+        vec2 st = rho * vec2(cos(lon), sin(lon));
+        vec2 puv = st / u_patch_rho_max * 0.5 + 0.5;
+        vec4 tp = (lat >= 0.0) ? texture(u_patch_n, puv) : texture(u_patch_s, puv);
+        t = mix(t, tp, w);
+    }
 
     vec3 col = texture(u_palette, vec2(clamp(t.r, 0.0, 1.0), 0.5)).rgb;
 

@@ -1,0 +1,30 @@
+#version 430
+// One-way nesting, equirect -> patch: the equirect solution is authoritative
+// equatorward of the exchange band; every step the patch's outer region is
+// overwritten with resampled equirect tracers (smoothstep-feathered at the
+// edge so no kink forms). Compiled with DOMAIN = 1 or 2.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+layout(rgba32f, binding = 0) uniform image2D patch_tracers;  // read_write own px
+
+uniform sampler2D u_equirect;  // equirect tracers (linear, repeat-x)
+uniform ivec2 u_size;          // patch size
+uniform float u_ex_lo;         // |lat| below this: fully equirect (radians)
+uniform float u_ex_hi;         // |lat| above this: fully patch
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    float w = 1.0 - smoothstep(u_ex_lo, u_ex_hi, abs(ll.y));
+    if (w <= 0.0) return;
+
+    vec2 uv = vec2((ll.x + PI) / (2.0 * PI), (0.5 * PI - ll.y) / PI);
+    vec4 eq = texture(u_equirect, uv);
+    vec4 own = imageLoad(patch_tracers, px);
+    imageStore(patch_tracers, px, mix(own, eq, w));
+}

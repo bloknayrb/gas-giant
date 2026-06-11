@@ -1,0 +1,34 @@
+#version 430
+// One-way nesting, patch -> equirect: the patch solutions are authoritative
+// poleward of the exchange band; every step the equirect's polar rows are
+// overwritten with resampled patch tracers. Compiled with DOMAIN = 0.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+layout(rgba32f, binding = 0) uniform image2D eq_tracers;  // read_write own px
+
+uniform sampler2D u_patch_n;   // north patch tracers (linear, clamped)
+uniform sampler2D u_patch_s;   // south patch tracers
+uniform ivec2 u_size;          // equirect size
+uniform float u_patch_rho_max; // patch angular radius
+uniform float u_ex_lo;         // |lat| below this: fully equirect
+uniform float u_ex_hi;         // |lat| above this: fully patch
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    float w = smoothstep(u_ex_lo, u_ex_hi, abs(ll.y));
+    if (w <= 0.0) return;
+
+    float rho = 0.5 * PI - abs(ll.y);
+    vec2 st = rho * vec2(cos(ll.x), sin(ll.x));
+    vec2 uv = st / u_patch_rho_max * 0.5 + 0.5;
+    vec4 polar = (ll.y >= 0.0) ? texture(u_patch_n, uv) : texture(u_patch_s, uv);
+
+    vec4 own = imageLoad(eq_tracers, px);
+    imageStore(eq_tracers, px, mix(own, polar, w));
+}

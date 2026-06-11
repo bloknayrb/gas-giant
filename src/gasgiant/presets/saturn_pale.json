@@ -14,6 +14,10 @@
       "detail_amount": 0.06,
       "detail_freq": 10.0
     },
+    "poles": {
+      "north": { "style": "polygon_jet", "polygon_sides": 6 },
+      "south": { "style": "plain_vortex" }
+    },
     "appearance": {
       "palette": [
         { "pos": 0.0, "color": [0.55, 0.45, 0.32] },

@@ -1,8 +1,8 @@
 """The Simulation facade: what the GUI, CLI, and tests consume.
 
-Phase 3a internals: a development run advects tracers through the constructed
-velocity field. The facade exposes incremental stepping (tick) so the GUI can
-show the run evolving, plus invalidation-tier dispatch:
+Phase 3b internals: three nested domains (equirect + two polar patches)
+advected in lockstep with per-step boundary exchange; the derive pass
+composites them with a narrow feather. Invalidation-tier dispatch:
 
 - RESTART  rebuild everything, re-init tracers, development run restarts
 - VELOCITY rebuild jet profiles / psi uniforms, run continues (plus a few
@@ -20,21 +20,16 @@ import numpy as np
 from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import PlanetParams, Tier
-from gasgiant.params.seeds import subseed
 from gasgiant.render.maps import MapDeriver
 from gasgiant.sim.bands import generate_bands
 from gasgiant.sim.profiles import build_profiles
-from gasgiant.sim.solver import Solver, _set
-from gasgiant.sim.tracers import TracerState
+from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver
 from gasgiant.sim.vortices import generate_vortices
 
 if TYPE_CHECKING:
     import moderngl
 
 log = logging.getLogger(__name__)
-
-_SIM_KERNELS = "gasgiant.sim.kernels"
-_GROUP = 16
 
 # Extra steps to adapt after a VELOCITY-tier change once the run was finished.
 _ADAPT_STEPS = 120
@@ -50,59 +45,36 @@ class Simulation:
         self._post_dirty = True
         self._tracers_changed = True
         self._extra_steps = 0
-        self._k_init = self.gpu.compute(_SIM_KERNELS, "init.comp")
         self._build()
 
     # -- construction / restart -------------------------------------------------
 
     def _build(self) -> None:
         p = self.params
-        size = (p.sim.resolution, p.sim.resolution // 2)
-
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(p.seed, self.bands, p.bands, p.jets)
-        self.vortices = generate_vortices(p.seed, self.bands, self.profiles, p.storms)
+        self.vortices = generate_vortices(p.seed, self.bands, self.profiles, p.storms, p.poles)
 
         self.profile_dyn = self.gpu.lut_texture(self.profiles.dyn_lut())
         self.profile_stamp = self.gpu.lut_texture(self.profiles.stamp_lut())
 
-        self.tracers = TracerState(self.gpu, size)
         self.solver = Solver(
-            self.gpu, p, self.profiles, self.vortices, self.tracers,
-            self.profile_dyn, self.profile_stamp,
+            self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp
         )
-        self._init_tracers()
+        self.solver.init_tracers()
         self._tracers_changed = True
         self._post_dirty = True
         self._extra_steps = 0
 
     def _release_sim(self) -> None:
         self.solver.release()
-        self.tracers.release()
         self.profile_dyn.release()
         self.profile_stamp.release()
 
-    def _init_tracers(self) -> None:
-        p = self.params
-        k = self._k_init
-        size = self.tracers.size
-        warp_rng = subseed(p.seed, "warp-noise")
-        detail_rng = subseed(p.seed, "detail-noise")
-        _set(k, "u_size", size)
-        _set(k, "u_vortex_count", len(self.vortices.vortices))
-        _set(k, "u_warp_offset", tuple(warp_rng.uniform(-100.0, 100.0, 3)))
-        _set(k, "u_warp_amount", p.bands.warp_amount)
-        _set(k, "u_warp_freq", p.bands.warp_freq)
-        _set(k, "u_detail_offset", tuple(detail_rng.uniform(-100.0, 100.0, 3)))
-        _set(k, "u_detail_amount", p.bands.detail_amount)
-        _set(k, "u_detail_freq", p.bands.detail_freq)
-        self.profile_stamp.use(location=0)
-        _set(k, "u_profile_stamp", 0)
-        self.tracers.cur.bind_to_image(0, read=False, write=True)
-        gx = (size[0] + _GROUP - 1) // _GROUP
-        gy = (size[1] + _GROUP - 1) // _GROUP
-        k.run(gx, gy, 1)
-        self.gpu.ctx.memory_barrier()
+    @property
+    def tracers(self):
+        """Equirect tracer state (tests and diagnostics)."""
+        return self.solver.equirect.tracers
 
     # -- parameters ---------------------------------------------------------------
 
@@ -157,6 +129,21 @@ class Simulation:
         while self.tick(chunk):
             pass
 
+    # -- derive -----------------------------------------------------------------------
+
+    def _derive(self, color_tex: moderngl.Texture, height_tex: moderngl.Texture) -> None:
+        s = self.solver
+        self.deriver.derive(
+            s.equirect.tracers.cur,
+            s.north.tracers.cur,
+            s.south.tracers.cur,
+            RHO_MAX,
+            BLEND_BAND,
+            color_tex,
+            height_tex,
+            self.params.appearance,
+        )
+
     # -- preview -----------------------------------------------------------------------
 
     def ensure_preview(self, width: int) -> tuple[moderngl.Texture, bool]:
@@ -170,10 +157,7 @@ class Simulation:
             self._preview_height = self.gpu.texture2d((width, height), 1, "f4")
             recreated = True
         if recreated or self._post_dirty or self._tracers_changed:
-            self.deriver.derive(
-                self.tracers.cur, self._preview_color, self._preview_height,
-                self.params.appearance,
-            )
+            self._derive(self._preview_color, self._preview_height)
             self._post_dirty = False
             self._tracers_changed = False
             return self._preview_color, True
@@ -194,7 +178,7 @@ class Simulation:
         color_tex = self.gpu.texture2d((w, w // 2), 4, "f4")
         height_tex = self.gpu.texture2d((w, w // 2), 1, "f4")
         try:
-            self.deriver.derive(self.tracers.cur, color_tex, height_tex, self.params.appearance)
+            self._derive(color_tex, height_tex)
             color = self.gpu.read_texture(color_tex)
             height = self.gpu.read_texture(height_tex)[..., 0]
         finally:

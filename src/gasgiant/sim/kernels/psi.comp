@@ -38,6 +38,17 @@ uniform float u_kh_phase;
 
 uniform float u_wake_gain;        // turbulence boost in hero wakes
 
+#if DOMAIN != 0
+// Polygonal polar jet (Saturn hexagon class): a jet ridge in psi along
+// rho0(theta) = u_poly_rho * (1 + eps * cos(k * theta + phase)).
+uniform float u_poly_amp;         // 0 disables
+uniform float u_poly_k;
+uniform float u_poly_rho;
+uniform float u_poly_eps;
+uniform float u_poly_phase;
+uniform float u_poly_width;
+#endif
+
 const float KIND_HERO = 1.0;
 
 void main() {
@@ -82,11 +93,21 @@ void main() {
         }
     }
 
+#if DOMAIN == 0
     // Kelvin-Helmholtz wave on high-shear latitudes: a traveling sinusoidal
     // psi perturbation that meanders the shear lines into billows.
     float kh = u_kh_amplitude * 0.004 * shear * shear
              * sin(u_kh_wavenumber * ll.x + u_kh_phase);
     psi += kh;
+#else
+    // Polygonal polar jet (hexagon class).
+    if (u_poly_amp > 0.0) {
+        float rho = 0.5 * PI - abs(ll.y);
+        float rho0 = u_poly_rho * (1.0 + u_poly_eps * cos(u_poly_k * ll.x + u_poly_phase));
+        float dr = (rho - rho0) / max(u_poly_width, 1e-4);
+        psi += u_poly_amp * exp(-dr * dr);
+    }
+#endif
 
     // Turbulence: scalar fbm noise in psi (curl of any scalar is solenoidal),
     // amplitude shaped by shear, belts, and wakes; slow 4th-dimension drift

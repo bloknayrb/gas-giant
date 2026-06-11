@@ -217,6 +217,38 @@ class StormsParams(_Params):
     )
 
 
+class PoleStyle(StrEnum):
+    CYCLONE_CLUSTER = "cyclone_cluster"  # Jupiter: central cyclone + polygon ring
+    POLYGON_JET = "polygon_jet"          # Saturn: hexagonal (k-gonal) jet
+    PLAIN_VORTEX = "plain_vortex"        # single tight polar vortex
+    CALM = "calm"
+
+
+class PoleParams(_Params):
+    style: PoleStyle = pfield(
+        PoleStyle.CYCLONE_CLUSTER, tier=Tier.RESTART, ui="Poles",
+        description="Polar feature style",
+    )
+    cyclone_count: int = pfield(
+        6, tier=Tier.RESTART, lo=3, hi=9, rand=(5, 8), ui="Poles",
+        description="Ring cyclones around the central one (cyclone_cluster style)",
+    )
+    polygon_sides: int = pfield(
+        6, tier=Tier.RESTART, lo=3, hi=9, ui="Poles",
+        description="Polygon wavenumber of the polar jet (polygon_jet style)",
+    )
+    strength: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.6, 1.5), ui="Poles",
+    )
+
+
+class PolesParams(_Params):
+    north: PoleParams = Field(default_factory=PoleParams)
+    south: PoleParams = Field(
+        default_factory=lambda: PoleParams(style=PoleStyle.PLAIN_VORTEX)
+    )
+
+
 class AppearanceParams(_Params):
     palette: list[GradientStop] = pfield(
         DEFAULT_PALETTE, tier=Tier.POST, ui="Appearance",
@@ -275,6 +307,7 @@ class PlanetParams(_Params):
     jets: JetsParams = Field(default_factory=JetsParams)
     turbulence: TurbulenceParams = Field(default_factory=TurbulenceParams)
     storms: StormsParams = Field(default_factory=StormsParams)
+    poles: PolesParams = Field(default_factory=PolesParams)
     appearance: AppearanceParams = Field(default_factory=AppearanceParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
     export: ExportParams = Field(default_factory=ExportParams)

@@ -66,6 +66,8 @@ def _draw_model(model: type[BaseModel], doc: dict[str, Any], top_level: bool = F
 
 
 def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
+    from enum import StrEnum
+
     value = doc[name]
     label = name.replace("_", " ")
     extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
@@ -73,7 +75,14 @@ def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
     changed = False
     imgui.push_id(name)
 
-    if isinstance(value, bool):
+    ann = info.annotation
+    if isinstance(ann, type) and issubclass(ann, StrEnum):
+        options = [e.value for e in ann]
+        current = options.index(value) if value in options else 0
+        changed, idx = imgui.combo(label, current, options)
+        if changed:
+            doc[name] = options[idx]
+    elif isinstance(value, bool):
         changed, doc[name] = imgui.checkbox(label, value)
     elif isinstance(value, int):
         ilo = int(lo) if lo is not None else 0

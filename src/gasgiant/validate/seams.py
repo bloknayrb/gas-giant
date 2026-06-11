@@ -16,9 +16,11 @@ import numpy as np
 
 # The seam pair may differ from the mean interior pair by at most this factor.
 WRAP_FACTOR = 3.0
-# Tangential variation may not GROW toward the pole by more than this factor
-# (texel circles shrink poleward, so smooth content varies less, never more).
-POLE_TANGENTIAL_FACTOR = 1.5
+# Tangential variation may not GROW toward the pole by more than this factor.
+# Texel circles shrink poleward so smooth content varies less — but a polar
+# vortex's spiral arms wind TIGHTER toward its center, legitimately raising
+# variation ~2x; the pinch artifacts this guards against show 10-30x.
+POLE_TANGENTIAL_FACTOR = 3.0
 # The pole row may not jump away from its neighbor row by more than this
 # factor of the next row-pair difference.
 POLE_VERTICAL_FACTOR = 3.0

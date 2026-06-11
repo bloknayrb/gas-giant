@@ -26,6 +26,8 @@ void main() {
     if (px.x >= u_size.x || px.y >= u_size.y) return;
 
     vec2 ll = lonlatAt(px, u_size);
+
+#if DOMAIN == 0
     float dlat = PI / float(u_size.y);   // latitude step between rows (positive)
     float dlon = 2.0 * PI / float(u_size.x);
 
@@ -37,6 +39,31 @@ void main() {
     float u = -dpsi_dphi;
     float v = dpsi_dlam / cosl;
 
+    // Equirect advection degrades toward the caps; fade velocity out there
+    // (the polar patches own that region and run unfaded).
     float fade = texture(u_profile_stamp, latProfileUV(ll.y)).b;
     imageStore(out_vel, px, vec4(u * fade, v * fade, 0.0, 0.0));
+#else
+    // Patch derivatives in st (radians), then rotate to (east, north):
+    //   dpsi/drho   = ds . e_rho,   dpsi/dtheta = rho * (ds . e_theta)
+    //   u = POLE_SIGN * dpsi/drho,  v = (1/sin rho) * dpsi/dtheta
+    float dstep = 2.0 * u_rho_max / float(u_size.x);
+    vec2 ds = vec2(
+        (psiAt(px.x + 1, px.y) - psiAt(px.x - 1, px.y)) / (2.0 * dstep),
+        (psiAt(px.x, px.y + 1) - psiAt(px.x, px.y - 1)) / (2.0 * dstep)
+    );
+    vec2 st = patchStFromPix(vec2(px) + 0.5, u_size);
+    float rho = length(st);
+    float u = 0.0;
+    float v = 0.0;
+    if (rho > 1e-4) {
+        vec2 er = st / rho;
+        vec2 et = vec2(-er.y, er.x);
+        float dpsi_drho = dot(ds, er);
+        float dpsi_dtheta = rho * dot(ds, et);
+        u = POLE_SIGN * dpsi_drho;
+        v = dpsi_dtheta / max(sin(rho), 1e-4);
+    }
+    imageStore(out_vel, px, vec4(u, v, 0.0, 0.0));
+#endif
 }

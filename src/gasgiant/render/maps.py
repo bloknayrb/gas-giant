@@ -37,6 +37,10 @@ class MapDeriver:
     def derive(
         self,
         tracers: moderngl.Texture,
+        patch_n: moderngl.Texture,
+        patch_s: moderngl.Texture,
+        patch_rho_max: float,
+        blend_band: tuple[float, float],
         color_out: moderngl.Texture,
         height_out: moderngl.Texture,
         appearance: AppearanceParams,
@@ -52,6 +56,13 @@ class MapDeriver:
         prog["u_palette"].value = 1
         self._storm_tex.use(location=2)
         prog["u_storm_palette"].value = 2
+        patch_n.use(location=3)
+        prog["u_patch_n"].value = 3
+        patch_s.use(location=4)
+        prog["u_patch_s"].value = 4
+        prog["u_patch_rho_max"].value = patch_rho_max
+        prog["u_blend_lo"].value = blend_band[0]
+        prog["u_blend_hi"].value = blend_band[1]
         prog["u_size"].value = size
         prog["u_detail_gain"].value = detail_gain
         prog["u_haze_amount"].value = appearance.haze_amount

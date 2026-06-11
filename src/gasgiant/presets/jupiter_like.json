@@ -14,6 +14,10 @@
       "detail_amount": 0.12,
       "detail_freq": 14.0
     },
+    "poles": {
+      "north": { "style": "cyclone_cluster", "cyclone_count": 8 },
+      "south": { "style": "cyclone_cluster", "cyclone_count": 5 }
+    },
     "appearance": {
       "haze_amount": 0.05,
       "contrast": 1.05,
