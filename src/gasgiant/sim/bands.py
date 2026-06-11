@@ -41,6 +41,10 @@ def generate_bands(seed: int, params: BandsParams) -> BandLayout:
 
     widths = 1.0 + params.width_jitter * rng.uniform(-1.0, 1.0, size=count)
     widths = np.maximum(widths, 0.15)
+    # Heavier-tailed width distribution on its own stream (real maps mix very
+    # broad zones with thin strips); width_tail == 0 leaves widths untouched.
+    tail_rng = subseed(seed, "width-tail")
+    widths = widths * np.exp(params.width_tail * tail_rng.normal(0.0, 0.9, size=count))
     fractions = np.concatenate([[0.0], np.cumsum(widths) / widths.sum()])
     # Interior edges in sin-lat space, descending; outer edges pinned to the poles
     # so the lookup is defined everywhere (cap styling replaces this in Phase 3b).

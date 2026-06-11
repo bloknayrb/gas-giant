@@ -97,7 +97,13 @@ def build_profiles(
     shear = np.abs(du)
     shear_norm = shear / max(shear.max(), 1e-9)
 
-    t0, t1, belt = _stamp_profiles(lat, bands, bands_params)
+    # Per-edge softness diversity on its own stream: some edges diffuse, some
+    # sharp. edge_diversity == 0 gives uniform v1 softness.
+    soft_rng = subseed(seed, "edge-softness")
+    soft_mult = np.exp(
+        bands_params.edge_diversity * soft_rng.uniform(-1.2, 1.2, max(len(bands.values) - 1, 1))
+    )
+    t0, t1, belt = _stamp_profiles(lat, bands, bands_params, soft_mult)
 
     return LatProfiles(
         lat=lat,
@@ -110,6 +116,30 @@ def build_profiles(
         max_speed=float(np.abs(u).max()),
         fade_sector=bands.fade_sector,
     )
+
+
+MAX_LANES = 16
+
+
+def select_lanes(
+    seed: int, bands: BandLayout, lane_density: float
+) -> list[tuple[float, float]]:
+    """(latitude, strength) of thin dark lane lines, drawn analytically at
+    derive time. Lanes sit at jet cores (band interior edges) — a 1-3 px
+    line at export resolution cannot survive the sim tracer grid, so this is
+    a render-side feature. Own seed stream; density 0 selects nothing."""
+    if lane_density <= 0.0:
+        return []
+    rng = subseed(seed, "lanes")
+    lanes: list[tuple[float, float]] = []
+    for edge in bands.edges[1:-1]:
+        # Draws happen for every edge regardless of selection so a density
+        # change never reshuffles which edges carry lanes.
+        roll = float(rng.uniform(0.0, 1.0))
+        strength = float(rng.uniform(0.12, 0.30))
+        if roll < lane_density and abs(edge) < 1.1 and len(lanes) < MAX_LANES:
+            lanes.append((float(edge), strength))
+    return lanes
 
 
 def select_wave_latitudes(bands: BandLayout, profiles: LatProfiles) -> tuple[float, float]:
@@ -131,10 +161,14 @@ def select_wave_latitudes(bands: BandLayout, profiles: LatProfiles) -> tuple[flo
 
 
 def _stamp_profiles(
-    lat: np.ndarray, bands: BandLayout, params: BandsParams
+    lat: np.ndarray,
+    bands: BandLayout,
+    params: BandsParams,
+    soft_mult: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Banded T0/T1 stamps and the belt mask, with smoothstep edge transitions
-    (the same shape the init/relaxation kernels expect)."""
+    (the same shape the init/relaxation kernels expect). soft_mult: per-edge
+    softness multipliers (edge diversity)."""
     values = bands.values.astype(np.float64)
     heights = bands.heights.astype(np.float64)
     is_belt = (values < np.median(values)).astype(np.float64)
@@ -142,9 +176,10 @@ def _stamp_profiles(
     t0 = np.full_like(lat, values[0])
     t1 = np.full_like(lat, heights[0])
     belt = np.full_like(lat, is_belt[0])
-    soft = max(params.edge_softness, 1e-4)
+    base_soft = max(params.edge_softness, 1e-4)
     for j in range(1, len(values)):
         e = bands.edges[j]
+        soft = base_soft * (float(soft_mult[j - 1]) if soft_mult is not None else 1.0)
         x = np.clip((e + soft - lat) / (2.0 * soft), 0.0, 1.0)
         t = x * x * (3.0 - 2.0 * x)
         t0 = t0 * (1.0 - t) + values[j] * t

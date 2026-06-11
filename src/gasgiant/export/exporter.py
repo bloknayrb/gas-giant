@@ -85,6 +85,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 detail_tex=tile_detail if use_detail else None,
                 detail_intensity=params.detail.intensity,
                 origin=(x0, y0), full_size=(w, h),
+                lanes=snap.lanes, warp=snap.warp,
             )
             color = gpu.read_texture(tile_color)[:th, :tw, :3]
             height = gpu.read_texture(tile_height)[:th, :tw, 0]

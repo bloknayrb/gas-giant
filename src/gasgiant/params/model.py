@@ -141,6 +141,21 @@ class BandsParams(_Params):
         description="Banding contrast collapse poleward of ~45 deg toward mottle "
                     "(the real latitude-contrast profile)",
     )
+    lane_density: float = pfield(
+        0.0, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.0, 0.8), ui="Bands",
+        description="Thin dark lane lines at jet cores, drawn analytically at "
+                    "derive time (a 1-3 px line cannot survive the sim grid)",
+    )
+    edge_diversity: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.8), ui="Bands",
+        description="Per-edge softness variation: some band edges diffuse, some "
+                    "sharp (uniform edges are a procedural tell)",
+    )
+    width_tail: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Bands",
+        description="Heavier-tailed band width distribution (real maps mix very "
+                    "broad zones with thin strips)",
+    )
     detail_freq: float = pfield(
         12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, ui="Bands",
         description="Small-scale noise spatial frequency",
@@ -308,6 +323,15 @@ class DetailParams(_Params):
     cellular_amount: float = pfield(
         0.6, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 1.0), ui="Detail",
         description="Convective cell (closed-cell/popcorn) texture in quiet zones",
+    )
+    striation_amount: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, rand=(0.2, 0.8), ui="Detail",
+        description="Ropey flow-parallel striations inside belts (intra-band "
+                    "thread texture; 0 = the pre-v1.1 look)",
+    )
+    striation_frequency: float = pfield(
+        96.0, tier=Tier.POST, lo=16.0, hi=512.0, log=True, ui="Detail",
+        description="Base spatial frequency of the striation noise",
     )
 
 

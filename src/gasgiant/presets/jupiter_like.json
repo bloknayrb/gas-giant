@@ -16,7 +16,10 @@
       "hue_jitter": 0.04,
       "variance_amount": 0.07,
       "faded_sector": 0.55,
-      "contrast_envelope": 0.6
+      "contrast_envelope": 0.6,
+      "lane_density": 0.45,
+      "edge_diversity": 0.55,
+      "width_tail": 0.35
     },
     "poles": {
       "north": {
@@ -522,6 +525,14 @@
     "waves": {
       "festoon_strength": 1.2,
       "hotspot_depth": 0.7
+    },
+    "detail": {
+      "intensity": 0.6,
+      "striation_amount": 0.6,
+      "cellular_amount": 0.7
+    },
+    "turbulence": {
+      "kh_amplitude": 0.6
     }
   }
 }

@@ -24,7 +24,7 @@ from gasgiant.render.detail import DetailSynth
 from gasgiant.render.maps import MapDeriver
 from gasgiant.sim.bands import generate_bands
 from gasgiant.sim.events import EventSchedule
-from gasgiant.sim.profiles import build_profiles, select_wave_latitudes
+from gasgiant.sim.profiles import build_profiles, select_lanes, select_wave_latitudes
 from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver
 from gasgiant.sim.vortices import generate_vortices
 
@@ -58,6 +58,7 @@ class Simulation:
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(p.seed, self.bands, p.bands, p.jets)
         self.vortices = generate_vortices(p.seed, self.bands, self.profiles, p.storms, p.poles)
+        self.lanes = select_lanes(p.seed, self.bands, p.bands.lane_density)
 
         self.profile_dyn = self.gpu.lut_texture(self.profiles.dyn_lut())
         self.profile_stamp = self.gpu.lut_texture(self.profiles.stamp_lut())
@@ -94,6 +95,7 @@ class Simulation:
             self.profiles = build_profiles(
                 new_params.seed, self.bands, new_params.bands, new_params.jets
             )
+            self.lanes = select_lanes(new_params.seed, self.bands, new_params.bands.lane_density)
             self.profile_dyn.write(self.profiles.dyn_lut().astype(np.float32).tobytes())
             self.profile_stamp.write(self.profiles.stamp_lut().astype(np.float32).tobytes())
             self.solver.params = new_params
@@ -174,6 +176,8 @@ class Simulation:
             p.appearance,
             detail_tex=detail_tex,
             detail_intensity=p.detail.intensity,
+            lanes=self.lanes,
+            warp=(s.warp_offset, p.bands.warp_amount, p.bands.warp_freq),
         )
 
     # -- preview -----------------------------------------------------------------------

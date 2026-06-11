@@ -289,6 +289,11 @@ class Solver:
         self.profiles = profiles
         self.dt = self._compute_dt()
 
+    @property
+    def warp_offset(self) -> tuple[float, float, float]:
+        """The seeded band-meander noise offset (derive-time lanes ride it)."""
+        return self._warp_offset
+
     # -- initialization ----------------------------------------------------------
 
     def init_tracers(self) -> None:

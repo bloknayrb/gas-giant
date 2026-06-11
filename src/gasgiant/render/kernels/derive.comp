@@ -8,6 +8,8 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
+#include "gasgiant.sim.kernels:noise3d.glsl"
+
 layout(rgba32f, binding = 0) writeonly uniform image2D out_color;
 layout(r32f, binding = 1) writeonly uniform image2D out_height;
 
@@ -34,6 +36,15 @@ uniform vec3 u_haze_color;
 uniform float u_contrast;
 uniform float u_saturation;
 uniform float u_gamma;
+
+// Thin dark lanes at jet cores, analytic (see profiles.select_lanes). The
+// lane rides the same meander warp as the band stamps so it wanders with
+// the bands instead of cutting straight through them.
+uniform int u_lane_count;
+uniform vec2 u_lanes[16];          // (latitude, strength)
+uniform vec3 u_warp_offset;
+uniform float u_warp_amount;
+uniform float u_warp_freq;
 
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -74,6 +85,23 @@ void main() {
     if (u_detail_intensity > 0.0) {
         dsyn = texture(u_detail, (vec2(px) + 0.5) / vec2(u_size)).r;
         col *= 1.0 + u_detail_intensity * 0.55 * (dsyn - 0.5);
+    }
+
+    // Thin dark lanes (before the post chain so haze veils them too). Width
+    // is resolution-aware: never narrower than ~1.5 output pixels.
+    float lane_dim = 0.0;
+    if (u_lane_count > 0) {
+        float cl = cos(lat);
+        vec3 sp = vec3(cl * cos(uv.x * 2.0 * PI - PI), sin(lat),
+                       cl * sin(uv.x * 2.0 * PI - PI));
+        float warp = fbm(sp * u_warp_freq + u_warp_offset, 3, 2.0, 0.5) * u_warp_amount;
+        float wl = lat + warp;
+        float lane_w = max(0.0035, 1.5 * PI / float(u_full_size.y));
+        for (int i = 0; i < u_lane_count; ++i) {
+            float dl = (wl - u_lanes[i].x) / lane_w;
+            lane_dim += u_lanes[i].y * exp(-dl * dl);
+        }
+        col *= 1.0 - clamp(lane_dim, 0.0, 0.5);
     }
 
     // Post chain: haze -> contrast -> saturation -> gamma.

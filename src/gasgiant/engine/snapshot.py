@@ -44,6 +44,9 @@ class ExportSnapshot:
     # Hero-storm centers at their drifted positions, (x, y, z, r_core) each:
     # the detail pass amplifies/winds filaments inside them.
     heroes: list[tuple[float, float, float, float]] = None  # type: ignore[assignment]
+    # Analytic lane lines and the meander warp they ride (derive-time).
+    lanes: list[tuple[float, float]] = None  # type: ignore[assignment]
+    warp: tuple[tuple[float, float, float], float, float] = ((0.0, 0.0, 0.0), 0.0, 3.0)
 
     @classmethod
     def capture(cls, sim) -> ExportSnapshot:  # sim: engine.Simulation
@@ -61,6 +64,8 @@ class ExportSnapshot:
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
             heroes=hero_centers(sim.vortices),
+            lanes=list(sim.lanes),
+            warp=(s.warp_offset, sim.params.bands.warp_amount, sim.params.bands.warp_freq),
         )
 
     def release(self) -> None:

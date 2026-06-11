@@ -60,6 +60,8 @@ class DetailSynth:
         prog["u_stretch"].value = params.flow_stretch
         prog["u_phases"].value = params.flow_phases
         prog["u_cell_amount"].value = params.cellular_amount
+        prog["u_striation_amount"].value = params.striation_amount
+        prog["u_striation_freq"].value = params.striation_frequency
         prog["u_offset"].value = tuple(rng.uniform(-100.0, 100.0, 3))
         out_tex.bind_to_image(0, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP

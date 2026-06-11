@@ -76,8 +76,56 @@ def test_fade_sector_flows_into_profiles():
 
 
 def test_new_band_fields_are_restart_tier():
-    for field in ("hue_jitter", "variance_amount", "faded_sector", "contrast_envelope"):
+    for field in ("hue_jitter", "variance_amount", "faded_sector", "contrast_envelope",
+                  "edge_diversity", "width_tail"):
         old = PlanetParams(seed=1)
         new = PlanetParams(seed=1)
         setattr(new.bands, field, 0.1)
         assert diff_tiers(old, new) == {Tier.RESTART}, field
+
+
+def test_lane_density_is_velocity_tier_and_striation_is_post():
+    old = PlanetParams(seed=1)
+    new = PlanetParams(seed=1)
+    new.bands.lane_density = 0.5
+    assert diff_tiers(old, new) == {Tier.VELOCITY}
+    new2 = PlanetParams(seed=1)
+    new2.detail.striation_amount = 0.5
+    assert diff_tiers(old, new2) == {Tier.POST}
+
+
+def test_select_lanes_density_and_determinism():
+    from gasgiant.sim.profiles import select_lanes
+
+    p = PlanetParams(seed=3)
+    bands = generate_bands(3, p.bands)
+    assert select_lanes(3, bands, 0.0) == []
+    full = select_lanes(3, bands, 1.0)
+    some = select_lanes(3, bands, 0.5)
+    assert 0 < len(some) <= len(full)
+    # Raising density only adds lanes; it never reshuffles existing ones.
+    assert set(some).issubset(set(full))
+    assert select_lanes(3, bands, 0.5) == some
+
+
+def test_width_tail_changes_widths_not_band_count():
+    p = PlanetParams(seed=9)
+    base = generate_bands(9, p.bands)
+    p.bands.width_tail = 0.8
+    tailed = generate_bands(9, p.bands)
+    assert len(base.edges) == len(tailed.edges)
+    assert not np.array_equal(base.edges[1:-1], tailed.edges[1:-1])
+    # Heavier tail: the width spread grows.
+    bw = -np.diff(base.edges)
+    tw = -np.diff(tailed.edges)
+    assert (tw.max() / tw.min()) > (bw.max() / bw.min())
+
+
+def test_edge_diversity_changes_stamp_transitions_only():
+    p = PlanetParams(seed=9)
+    bands = generate_bands(9, p.bands)
+    base = build_profiles(9, bands, p.bands, p.jets)
+    p.bands.edge_diversity = 1.0
+    varied = build_profiles(9, bands, p.bands, p.jets)
+    np.testing.assert_array_equal(base.u, varied.u)  # velocity untouched
+    assert not np.array_equal(base.t0_stamp, varied.t0_stamp)

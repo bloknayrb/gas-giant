@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from gasgiant.gl import GpuContext
 from gasgiant.palette import bake_lut, bake_rows
 from gasgiant.params.model import AppearanceParams, GradientStop
@@ -50,11 +52,25 @@ class MapDeriver:
         detail_intensity: float = 0.0,
         origin: tuple[int, int] = (0, 0),
         full_size: tuple[int, int] | None = None,
+        lanes: list[tuple[float, float]] | None = None,
+        warp: tuple[tuple[float, float, float], float, float] | None = None,
     ) -> None:
+        """lanes: (latitude, strength) thin dark lane lines; warp: the band
+        meander (offset, amount, freq) the lanes ride on."""
         if self._palette_tex is None:
             self.update_palettes(appearance)
         prog = self.prog
         size = color_out.size
+        lanes = lanes or []
+        packed = np.zeros((16, 2), dtype=np.float32)
+        for i, lane in enumerate(lanes[:16]):
+            packed[i] = lane
+        prog["u_lane_count"].value = min(len(lanes), 16)
+        prog["u_lanes"].write(packed.tobytes())
+        w_off, w_amount, w_freq = warp if warp is not None else ((0.0, 0.0, 0.0), 0.0, 3.0)
+        prog["u_warp_offset"].value = w_off
+        prog["u_warp_amount"].value = w_amount
+        prog["u_warp_freq"].value = w_freq
         prog["u_origin"].value = origin
         prog["u_full_size"].value = full_size if full_size is not None else size
         tracers.use(location=0)

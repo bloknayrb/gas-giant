@@ -39,6 +39,9 @@ uniform vec3 u_offset;
 uniform int u_hero_count;
 uniform vec4 u_heroes[3];
 
+uniform float u_striation_amount;
+uniform float u_striation_freq;
+
 const float PI = 3.14159265358979;
 const int SUBSTEPS = 6;
 const float TAU_BASE = 0.35;      // pseudo-time per unit stretch
@@ -121,6 +124,26 @@ void main() {
     float w_cell = u_cell_amount * (1.0 - belt) * (1.0 - speedN) * (1.0 - shearN);
 
     float d = 0.5 + 0.5 * streak * w_streak + 0.35 * (cells - 0.5) * w_cell;
+
+    // Intra-band striation: HIGH-frequency noise backtraced 2-3x further than
+    // the filament phases, so it stretches into thin ropey flow-parallel
+    // threads. Strictly analytic (backtrace + sphere noise) — no image-space
+    // blur, so the no-apron tile contract holds. Weighted toward belts and
+    // fast flow; attenuated when the across-flow wavelength approaches the
+    // output pixel size (the anisotropic stretch multiplies the across-flow
+    // frequency, which would otherwise alias at preview resolutions).
+    if (u_striation_amount > 0.0) {
+        float tau_s = u_stretch * TAU_BASE * 2.6 * (1.0 + 1.2 * hero);
+        vec2 srcS = backtraceLL(ll, tau_s);
+        float stria = fbm(spherePt(srcS) * u_striation_freq + u_offset.zxy, 3, 2.0, 0.5);
+        float stretch_est = 1.0 + 5.0 * speedN * u_stretch;
+        float wavelength_px = float(u_full_size.x)
+                            / max(u_striation_freq * 4.0 * stretch_est, 1.0);
+        float atten = smoothstep(1.5, 3.0, wavelength_px);
+        float w_stria = u_striation_amount * (0.3 + 0.7 * belt)
+                      * (0.25 + 0.75 * speedN) * atten;
+        d += 0.30 * stria * w_stria;
+    }
 
     // Equirect backtrace degrades toward the caps; fade to neutral there
     // (Phase 4 routes polar tiles through the patch velocity).

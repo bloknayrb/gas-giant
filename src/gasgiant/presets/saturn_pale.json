@@ -15,7 +15,10 @@
       "detail_freq": 10.0,
       "edge_softness": 0.028,
       "variance_amount": 0.03,
-      "contrast_envelope": 0.4
+      "contrast_envelope": 0.4,
+      "lane_density": 0.7,
+      "width_tail": 0.5,
+      "edge_diversity": 0.4
     },
     "waves": {
       "festoon_strength": 0.0,
