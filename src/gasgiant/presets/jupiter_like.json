@@ -529,7 +529,8 @@
       "barge_density": 1.2,
       "pearls_count": 7,
       "small_density": 1.2,
-      "stamp_contrast": 1.25
+      "stamp_contrast": 1.25,
+      "merge_rate": 0.7
     },
     "waves": {
       "festoon_strength": 1.2,

@@ -95,8 +95,24 @@ seeded zone latitude.
 
 ### Anticyclone mergers
 Same-sign ovals occasionally orbit each other and merge (BC + DE → BE → BA).
-*Deferred to the animation release* — primarily a time-domain phenomenon;
-the registry design (drifting vortex objects) is ready for it.
+*Implementation:* VEL+STAMP (`storms.merge_rate`, 0 = off) — converging
+same-sign ovals coalesce when their gap falls under ~1.5·rate·(r₁+r₂).
+The product conserves peak tangential velocity (S·r; impulse conservation
+would make it spin ~29% slower than its parents), with radius and velocity
+caps (filament shedding; the solver's CFL margin). Heroes ABSORB ovals
+bit-unchanged — the GRS shreds, it doesn't grow. A merge leaves a transient
+bright turbulent collar (`storms.merge_debris`, KIND_DEBRIS, ttl 250 steps)
+that the flow folds into filaments. Because natural differential zonal drift
+closes only ~0.05 rad per dev run, generation seeds kinematically-placed
+convergent companion pairs (subseed "mergers") targeting merge steps across
+the run, so finished maps show matured products AND live collars.
+TRIPWIRE: pearls and pre-sheared twins are protected ONLY by the strict
+converging gate (same exact latitude ⇒ closing rate exactly 0 under
+zonal-only drift, and pearls are additionally pearl+pearl-only). If
+meridional drift or mutual advection ever lands, that protection breaks —
+see tests/unit/test_mergers.py. Pre-merge co-orbiting remains deferred to
+the animation release (it would break the gate's purity and is invisible in
+stills).
 
 ## Waves and instabilities
 

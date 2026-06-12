@@ -529,7 +529,9 @@ def _seed_convergent_pairs(
     rate at the site via zonal_rate, draw a target merge step, and set the
     longitude gap so capture happens near that step. A fixed gap range cannot
     work — du/dphi at zone centers is ~1-2, an order short of closing a
-    Poisson-disc gap in 500 steps."""
+    Poisson-disc gap in 500 steps. Targets alternate early/late so finished
+    maps show both matured products and a still-live debris collar."""
+    pair_index = 0
     for center, width in zones:
         if rng.uniform() >= 0.5 * merge_rate:
             continue
@@ -564,12 +566,24 @@ def _seed_convergent_pairs(
             / max(np.cos(host.lat), 0.2)
         )
         closure = abs(drate) * dt  # rad of gap closed per step
-        if closure * 500.0 < 0.02:
-            # Flat shear: place just outside capture so any drift nudges it in.
-            gap = 1.1 * dlon_capture
+        # Alternate late targets (~120 steps before the end: the 250-step
+        # debris collar is still bright in the final still) with early ones
+        # (matured product drifts on). LATE FIRST: many runs seed only one
+        # pair, and the live collar is the showcase.
+        if pair_index % 2 == 0:
+            lo, hi = max(dev_steps - 220, 80), max(dev_steps - 80, 81)
         else:
-            target_step = int(rng.integers(80, min(421, max(dev_steps, 81))))
-            gap = 0.8 * dlon_capture + closure * target_step
+            lo, hi = 80, max(min(280, dev_steps), 81)
+        target_step = int(rng.integers(lo, hi + 1))
+        if closure * dev_steps < 0.02:
+            # Flat shear: place just outside capture so any drift nudges it in.
+            gap = 1.05 * dlon_capture
+        else:
+            # Spawn OUTSIDE capture by the distance closed in target_step
+            # steps (a sub-1.0 coefficient here would mean already-captured
+            # pairs merging at step 0).
+            gap = 1.02 * dlon_capture + closure * target_step
+        pair_index += 1
         # Converging side: the gap g = wrap(comp_lon - host_lon) evolves at
         # drate, so |g| shrinks iff sign(g) opposes it.
         signed_gap = -np.sign(drate) * gap if drate != 0.0 else gap
