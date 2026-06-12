@@ -248,6 +248,7 @@ class Solver:
                 if i == 2:
                     _set(prog, "u_relax_k", relax_k)
                     _set(prog, "u_replenish", p.turbulence.replenish_rate)
+                    _set(prog, "u_rim_contrast", p.storms.rim_contrast)
                     _set(prog, "u_warp_offset", self._warp_offset)
                     _set(prog, "u_warp_amount", p.bands.warp_amount)
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
@@ -279,6 +280,7 @@ class Solver:
             k = dom.k_init
             _set(k, "u_size", dom.size)
             _set(k, "u_rho_max", RHO_MAX)
+            _set(k, "u_rim_contrast", p.storms.rim_contrast)
             _set(k, "u_warp_offset", self._warp_offset)
             _set(k, "u_warp_amount", p.bands.warp_amount)
             _set(k, "u_warp_freq", p.bands.warp_freq)

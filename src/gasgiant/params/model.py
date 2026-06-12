@@ -319,6 +319,12 @@ class StormsParams(_Params):
                     "further limited by hero_radius (see validator) so the stamp "
                     "stays clear of the 63 deg exchange band",
     )
+    rim_contrast: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, ui="Storms",
+        description="Scales the hero storm's dark perimeter ring + bright collar "
+                    "(the Red Spot Hollow) amplitude; 1.0 = default, >1 deepens "
+                    "the rim contrast, 0 removes the ring/collar",
+    )
     oval_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
         description="White-oval anticyclone population multiplier",

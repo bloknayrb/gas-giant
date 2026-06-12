@@ -9,6 +9,7 @@ layout(std430, binding = 2) readonly buffer Vortices {
     vec4 vortex_data[];
 };
 uniform int u_vortex_count;
+uniform float u_rim_contrast;
 
 const float VKIND_HERO = 1.0;
 const float VKIND_BARGE = 2.0;
@@ -54,8 +55,8 @@ vec3 vortexStamp(vec3 p) {
                 // GRS anatomy: dark thin perimeter ring at the spot edge,
                 // bright collar (the Red Spot Hollow) outside it.
                 dT0 += b.w * core
-                     - 0.16 * exp(-(q - 1.0) * (q - 1.0) * 16.0)
-                     + 0.22 * exp(-(q - 1.55) * (q - 1.55) * 5.0);
+                     - 0.16 * u_rim_contrast * exp(-(q - 1.0) * (q - 1.0) * 16.0)
+                     + 0.22 * u_rim_contrast * exp(-(q - 1.55) * (q - 1.55) * 5.0);
             } else if (b.y == VKIND_POLAR) {
                 // Dark eye, dark body, and a bright pearly wisp annulus —
                 // neighboring annuli overlap into the chaotic bright
