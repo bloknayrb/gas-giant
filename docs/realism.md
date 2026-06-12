@@ -336,3 +336,72 @@ the B2.5 re-run; neither changes a verdict.
   raw-space problem — do NOT pad belt targets for assumed AgX losses);
   pale zones retain ≈ 0.49 (zone chroma is AgX-limited); the AgX white
   ceiling ≈ 0.787 makes the AgX-view zone-lightness gap structural.
+
+## v1.5 — emergent belt turbulence + GRS region
+
+Closes the two v1.4 FAIL axes (matched-scale texture density; GRS region).
+Code packets (all byte-identical at defaults, verified by the P0.5 GPU
+baseline-hash gate — `scripts/p05_baseline_hash.py`):
+
+- **P1** `turbulence.belt_replenish` / `belt_replenish_scale`: belt-gated extra
+  detail-tracer replenishment in `advect.comp` (the "emergent" lever — injected
+  noise advects/shears over the dev run into filaments).
+- **P2** `detail.belt_texture_fine`: a second iterated-backtrace fold octave
+  below the sim grid scale (render-side densification).
+- **P3a** `storms.hero_latitude` (pin the GRS; radius-coupled validator),
+  **P3b** `storms.rim_contrast` (perimeter-ring/collar amplitude),
+  **P3c** `storms.hero_aspect` (lon:lat elongation, ~2:1 real GRS, end-to-end).
+- **P4** collar `cos(q*28 + 5θ + 4·rj)` (integer odd m=5): zeroes the azimuthal
+  mean so the collar streamline no longer survives matched-scale area
+  downsampling as concentric rings.
+
+### Resolution-boundary evidence (T0, measured this pass)
+
+`scripts/t0_dev_timing.py` (jupiter_like): dev(500 @ 2048) = 2.80 s →
+implied tiled derive 36.20 s (16K all-on = 39.0 s). Only **2048/500 fits the
+40 s gate** (39.00 s); 3072/500 → 43.5 s, 4096/500 → 48.5 s — no higher sim
+resolution can fit (dev cost ∝ res², tiled derive is sim-res-independent).
+`scripts/t0_visual_4096.py`: widest-belt matched-scale band-pass RMS
+2048 = 0.01386 vs 4096 = 0.01398 (0.9 % — indistinguishable; ref 0.02294):
+higher grid resolution is **not** transformative for matched-scale density.
+The density gap is injection-frequency-limited, not grid-limited →
+**sim.resolution stays 2048** (Checkpoint A not triggered).
+
+### Pre-registered v1.5 targets (recorded BEFORE P5 tuning; scripts committed)
+
+Baselines measured on the v1.4 preset (v1.5 knobs at defaults), jupiter_like
+seed 4201 @ 8192, widest tropical belt (center −13.4°), `scripts/measure_v15.py`:
+
+- **TD-1 (necessary, not sufficient)** — band-pass RMS (DoG σ 1.5–4 px) on L at
+  width 640, widest-belt matched crop, ratio ours/ref. **Baseline 0.7253×**
+  (ours 0.0119, ref 0.01641; JPEG-q75 control on ours 0.01193 ≈ ours → ours is
+  not artificially sharp). Target: close ≥ half the gap to 1.0 → **ratio ≥ 0.863**.
+- **TD-2 (the gate)** — 3-judge blind panel, texture-density axis PASS.
+- **GRS-1 (render-integrity, not a realism target)** — `fit_ellipse_aspect` on
+  the rendered GRS within ±20 % of the input `hero_aspect`. **GRS-1b** ring
+  closure: max azimuthal gap < 45°, min depth ≥ 40 % of median.
+- **GRS-2 (supporting metric; ablation)** — collar ring ripple
+  (`ring_ripple_std`, 24 radial bins q∈[1,1.85], equal-θ sampling, 5-bin
+  moving-average detrend) at matched scale, same seed, hero_aspect=1/
+  rim_contrast=1. **Pre-registered gate: ablation ripple ≤ 30 % of the v1.4
+  collar.** *Measured: v1.4 collar 0.002176, v1.5 ablation 0.001936 → ratio
+  0.89 — MISS as a ≤30 % gate.* **Finding (recorded, not goal-shifted):** the
+  total-ripple metric is confounded by the INTENDED perimeter-ring + collar
+  Gaussians (the 0.16/0.22 stamp anatomy, σ_q ≈ 0.18–0.32), which P4 must keep.
+  Quadrature decomposition: the collar STREAMLINE that P4 targets is ~46 % of
+  the v1.4 ripple, and P4 zeroes its azimuthal mean exactly (analytic, plus the
+  `test_measure_grs` synthetic test: a θ-independent q·28 ring → high ripple,
+  the m=5θ-modulated ring → <0.3×). The 11 % total drop is what survives once
+  the intended anatomy (the larger, retained component) is included. The matched
+  -scale montage shows the collar reading as a soft halo, not a bullseye. **The
+  GRS realism verdict rests on GRS-3 (judges), per the plan; GRS-2 stands as a
+  recorded confounded miss.**
+- **GRS-3 (the gate)** — 3-judge blind panel, GRS-region axis PASS.
+- **ST-1** — hero pinned: 5/5 seeds, `generate_vortices()` hero lat =
+  hero_latitude exactly (verified, P3a).
+- **NR-1 (one-sided)** — no v1.4 metric moves AWAY from the reference by > 5 %
+  (zone_rgb, belt_rgb, contrast, masked belt-chroma, hue_spread); belt_L_std
+  guardrail final ratio ∈ [0.80, 1.15]×; height-map std within ±25 % of v1.4.
+  Band-structure + color-family rubric axes re-judged PASS.
+
+Misses stand as recorded — no goal-shifting (v1.4 rule).
