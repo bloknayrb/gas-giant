@@ -64,6 +64,73 @@ def test_cancellation_removes_partial_output(gpu, tmp_path):
     assert keep.read_text() == "precious"  # never touches the user's files
 
 
+def _emission_params() -> PlanetParams:
+    p = _params()
+    p.emission.thermal_strength = 0.6
+    p.emission.lightning_strength = 0.4
+    p.emission.aurora_strength = 0.5
+    return p
+
+
+def test_emission_export_round_trip(gpu, tmp_path):
+    import numpy as np
+
+    from gasgiant.export.manifest import read_manifest
+    from gasgiant.export.writers import read_exr_rgba
+    from gasgiant.validate import validate_mapset
+
+    sim = Simulation(_emission_params(), gpu)
+    out = tmp_path / "mapset"
+    run_export(sim, out)
+    assert (out / "emission.exr").is_file()
+    manifest = read_manifest(out)
+    entry = manifest["maps"]["emission"]
+    assert entry["channels"] == 4
+    assert entry["colorspace"] == "non-color"
+    assert len(entry["aurora_color"]) == 3
+    em = read_exr_rgba(out / "emission.exr")
+    assert em.shape == (1024, 2048, 4)
+    assert np.isfinite(em).all() and em.min() >= 0.0
+    assert em[..., :3].max() > 0.0 and em[..., 3].max() > 0.0
+    report = validate_mapset(out)
+    assert report.ok, report.summary()
+
+
+def test_emission_tiles_match_render_maps(gpu, tmp_path):
+    """The tiled emission must equal the one-shot render_maps emission —
+    the tile-apron contract extended to the new map."""
+    import numpy as np
+
+    from gasgiant.export.writers import read_exr_rgba
+
+    sim = Simulation(_emission_params(), gpu)
+    out = tmp_path / "mapset"
+    run_export(sim, out)
+    tiled = read_exr_rgba(out / "emission.exr")
+    whole = sim.render_maps(2048)["emission"]
+    np.testing.assert_array_equal(tiled, whole)
+
+
+def test_default_export_writes_no_emission(gpu, tmp_path):
+    from gasgiant.export.manifest import read_manifest
+
+    sim = Simulation(_params(), gpu)
+    out = tmp_path / "mapset"
+    run_export(sim, out)
+    assert not (out / "emission.exr").exists()
+    assert "emission" not in read_manifest(out)["maps"]
+
+
+def test_cancellation_removes_emission(gpu, tmp_path):
+    sim = Simulation(_emission_params(), gpu)
+    out = tmp_path / "mapset"
+    job = export_job(sim, out)
+    next(job)
+    next(job)
+    job.close()
+    assert not (out / "emission.exr").exists()
+
+
 def test_snapshot_isolates_export_from_live_edits(gpu, tmp_path):
     """Mutating live params mid-export must not affect the output."""
     import numpy as np

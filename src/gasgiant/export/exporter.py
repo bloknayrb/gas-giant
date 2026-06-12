@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from gasgiant.export.manifest import MANIFEST_FILENAME, build_manifest, write_manifest
-from gasgiant.export.writers import write_exr_gray, write_png16_rgb_u16
+from gasgiant.export.writers import write_exr_gray, write_exr_rgba, write_png16_rgb_u16
 from gasgiant.jobs import Progress
 from gasgiant.params.presets import to_preset_doc
 from gasgiant.render.detail import PolarRoute
@@ -55,14 +55,17 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
     ]
     total = len(tiles) + 2  # + encode + manifest
 
+    emission_on = params.emission.enabled
     color_full = np.empty((h, w, 3), dtype=np.uint16)
     height_full = np.empty((h, w), dtype=np.float32)
+    emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
 
     tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
     tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
     tile_detail = gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
+    tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
 
-    pool = ThreadPoolExecutor(max_workers=2)
+    pool = ThreadPoolExecutor(max_workers=3)
     futures: list[Future] = []
     completed = False
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +94,11 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 detail_intensity=params.detail.intensity,
                 origin=(x0, y0), full_size=(w, h),
                 lanes=snap.lanes, warp=snap.warp,
+                emission_out=tile_emission,
+                emission=params.emission if emission_on else None,
+                seed=params.seed,
+                profile_dyn=snap.profile_dyn,
+                profile_stamp=snap.profile_stamp,
             )
             color = gpu.read_texture(tile_color)[:th, :tw, :3]
             height = gpu.read_texture(tile_height)[:th, :tw, 0]
@@ -98,6 +106,10 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
             ).astype(np.uint16)
             height_full[y0 : y0 + th, x0 : x0 + tw] = height
+            if emission_on:
+                emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                    tile_emission
+                )[:th, :tw]
             yield Progress(i + 1, total, f"tile {i + 1}/{len(tiles)}")
 
         # Encode off-thread; keep yielding so the GUI stays live.
@@ -108,26 +120,40 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
             )
         )
         futures.append(pool.submit(write_exr_gray, out_dir / "height.exr", height_full))
+        if emission_on:
+            futures.append(
+                pool.submit(write_exr_rgba, out_dir / "emission.exr", emission_full)
+            )
         while not all(f.done() for f in futures):
             yield Progress(len(tiles) + 1, total, "encoding")
             time.sleep(0.01)
         for f in futures:
             f.result()  # surface worker exceptions
 
+        maps = {
+            "color": {
+                "file": "color.png", "format": "png16",
+                "colorspace": "srgb", "channels": 3,
+            },
+            "height": {
+                "file": "height.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 1,
+            },
+        }
+        if emission_on:
+            # RGB = thermal+lightning radiance; A = aurora intensity, hue
+            # applied at import (aurora_color travels in the manifest so the
+            # importer can tint it / lift it onto a shell).
+            maps["emission"] = {
+                "file": "emission.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "aurora_color": list(params.emission.aurora_color),
+            }
         manifest = build_manifest(
             name=params.name,
             seed=params.seed,
             resolution=(w, h),
-            maps={
-                "color": {
-                    "file": "color.png", "format": "png16",
-                    "colorspace": "srgb", "channels": 3,
-                },
-                "height": {
-                    "file": "height.exr", "format": "exr32f",
-                    "colorspace": "non-color", "channels": 1,
-                },
-            },
+            maps=maps,
             physical={
                 "radius_km": params.physical.radius_km,
                 "height_scale": params.physical.height_scale,
@@ -146,12 +172,14 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
         tile_color.release()
         tile_height.release()
         tile_detail.release()
+        if tile_emission is not None:
+            tile_emission.release()
         snap.release()
         if not completed:
             # Cancellation: remove only the files WE write (the user may have
             # picked a folder containing their own data), after the pool
             # drained so there are no Windows open-handle races.
-            for name in ("color.png", "height.exr", MANIFEST_FILENAME):
+            for name in ("color.png", "height.exr", "emission.exr", MANIFEST_FILENAME):
                 (out_dir / name).unlink(missing_ok=True)
             log.info("export cancelled; partial output removed")
 

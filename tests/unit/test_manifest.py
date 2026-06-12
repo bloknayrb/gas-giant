@@ -27,6 +27,25 @@ def test_build_validates_against_schema():
     assert m["projection"] == "equirectangular"
 
 
+def test_emission_entry_validates_against_schema():
+    m = build_manifest(
+        name="test",
+        seed=1,
+        resolution=(2048, 1024),
+        maps={
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "emission": {
+                "file": "emission.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "aurora_color": [0.85, 0.35, 0.60],
+            },
+        },
+        physical={"radius_km": 69911.0, "height_scale": 0.004, "height_midlevel": 0.5},
+        preset_doc=to_preset_doc(PlanetParams()),
+    )
+    assert m["maps"]["emission"]["aurora_color"] == [0.85, 0.35, 0.60]
+
+
 def test_invalid_manifest_rejected():
     import jsonschema
 

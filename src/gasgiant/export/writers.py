@@ -54,6 +54,18 @@ def write_exr_gray(path: Path, gray: np.ndarray) -> None:
         f.write(str(path))
 
 
+def write_exr_rgba(path: Path, rgba: np.ndarray) -> None:
+    """(H, W, 4) float32 (unbounded HDR) -> RGBA ZIP-compressed scanline EXR.
+    Grouped "RGBA" channels produce standard R/G/B/A planes on disk —
+    exactly what Blender's Image Texture expects."""
+    if rgba.ndim != 3 or rgba.shape[2] != 4:
+        raise ValueError(f"expected (H, W, 4) array, got {rgba.shape}")
+    header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
+    channels = {"RGBA": np.ascontiguousarray(rgba, dtype=np.float32)}
+    with OpenEXR.File(header, channels) as f:
+        f.write(str(path))
+
+
 def read_png16(path: Path) -> np.ndarray:
     """16-bit PNG -> float32 0..1; RGB order for color images, (H, W) for gray."""
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
@@ -70,4 +82,34 @@ def read_exr_gray(path: Path) -> np.ndarray:
     with OpenEXR.File(str(path)) as f:
         channels = f.channels()
         name = "Y" if "Y" in channels else next(iter(channels))
-        return np.asarray(channels[name].pixels, dtype=np.float32)
+        arr = np.asarray(channels[name].pixels, dtype=np.float32)
+    if arr.ndim != 2:
+        # The first-channel fallback would otherwise silently return an
+        # (H, W, C) plane group for a multi-channel file.
+        raise ValueError(f"{path}: expected a single-channel EXR, got {arr.shape}")
+    return arr
+
+
+def read_exr_rgba(path: Path) -> np.ndarray:
+    """RGBA EXR -> (H, W, 4) float32. Handles both a grouped "RGBA" plane
+    (our writer) and separate R/G/B/A channels (third-party files)."""
+    with OpenEXR.File(str(path)) as f:
+        channels = f.channels()
+        if "RGBA" in channels:
+            arr = np.asarray(channels["RGBA"].pixels, dtype=np.float32)
+        elif "RGB" in channels:
+            rgb = np.asarray(channels["RGB"].pixels, dtype=np.float32)
+            a = (np.asarray(channels["A"].pixels, dtype=np.float32)
+                 if "A" in channels else np.ones(rgb.shape[:2], np.float32))
+            arr = np.concatenate([rgb, a[..., None]], axis=-1)
+        else:
+            planes = [np.asarray(channels[c].pixels, dtype=np.float32)
+                      for c in ("R", "G", "B") if c in channels]
+            if len(planes) != 3:
+                raise ValueError(f"{path}: no RGB(A) channels found ({list(channels)})")
+            a = (np.asarray(channels["A"].pixels, dtype=np.float32)
+                 if "A" in channels else np.ones(planes[0].shape, np.float32))
+            arr = np.stack([*planes, a], axis=-1)
+    if arr.ndim != 3 or arr.shape[2] != 4:
+        raise ValueError(f"{path}: expected (H, W, 4), got {arr.shape}")
+    return arr

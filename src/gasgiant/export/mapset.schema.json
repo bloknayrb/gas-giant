@@ -44,7 +44,14 @@
           "format": { "enum": ["png16", "exr32f"] },
           "colorspace": { "enum": ["srgb", "non-color"] },
           "channels": { "type": "integer", "minimum": 1, "maximum": 4 },
-          "convention": { "type": "string" }
+          "convention": { "type": "string" },
+          "aurora_color": {
+            "description": "Emission map only: linear RGB hue the importer applies to the alpha-channel aurora intensity.",
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
         }
       }
     },

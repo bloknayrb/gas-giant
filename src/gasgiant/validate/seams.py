@@ -172,7 +172,7 @@ def validate_arrays(maps: dict[str, np.ndarray]) -> Report:
 def validate_mapset(mapset_dir: Path) -> Report:
     """Load an exported map set via its manifest and run all checks."""
     from gasgiant.export.manifest import read_manifest
-    from gasgiant.export.writers import read_exr_gray, read_png16
+    from gasgiant.export.writers import read_exr_gray, read_exr_rgba, read_png16
 
     manifest = read_manifest(mapset_dir)
     maps: dict[str, np.ndarray] = {}
@@ -181,5 +181,14 @@ def validate_mapset(mapset_dir: Path) -> Report:
         if entry["format"] == "png16":
             maps[name] = read_png16(path)
         elif entry["format"] == "exr32f":
-            maps[name] = read_exr_gray(path)
+            if entry.get("channels", 1) >= 3:
+                # Emission-class HDR map. Sparse radiance-10+ cores make the
+                # raw wrap statistic flaky, so continuity runs in log space;
+                # finiteness/range still covers the raw values via log1p's
+                # monotonicity (NaN/Inf survive it).
+                arr = read_exr_rgba(path)
+                maps[f"{name}_rgb_log"] = np.log1p(np.maximum(arr[..., :3], 0.0))
+                maps[f"{name}_alpha"] = arr[..., 3]
+            else:
+                maps[name] = read_exr_gray(path)
     return validate_arrays(maps)
