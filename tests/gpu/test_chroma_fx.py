@@ -132,5 +132,7 @@ def test_hue_variance_noop_at_epsilon_and_rotates_hue(gpu):
     assert not np.allclose(base, on, atol=2e-3)
     # Luminance-neutral: hue rotation in (a, b) leaves Oklab L unchanged up
     # to the gamut clamp, so mean luma must barely move.
-    luma = lambda img: (img[..., :3] @ np.array([0.2126, 0.7152, 0.0722])).mean()
+    def luma(img):
+        return (img[..., :3] @ np.array([0.2126, 0.7152, 0.0722])).mean()
+
     assert abs(float(luma(on) - luma(base))) < 0.01

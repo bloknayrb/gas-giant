@@ -81,6 +81,15 @@ There is no feedback from tracers to velocity, so the solver is
 unconditionally stable: the only failure modes are visual (washout — guarded
 by a variance test over 300 steps) and they are tested.
 
+The advect kernel binds samplers at fixed units in `solver._correct`:
+`u_src`/`u_vel`/`u_cur`/`u_back`/`u_profile_stamp` at 0–4, and (v1.5)
+`u_profile_dyn` at **unit 5** for the belt mask (its `.a` channel) used by
+`turbulence.belt_replenish`. moderngl trap: an *unassigned* sampler uniform
+defaults to unit 0 (= the forward tracers in pass 2), so every sampler must be
+explicitly bound even when its feature is guarded off — the belt-replenish
+block is `if (u_belt_replenish > 0.0)` but `u_profile_dyn` is bound
+unconditionally.
+
 ## Invalidation tiers
 
 Every parameter declares its tier in field metadata; the engine diffs

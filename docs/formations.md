@@ -68,6 +68,25 @@ bright collar, deflected surrounding flow, and a turbulent wake.
 *Implementation:* VEL — one to three large vortices (`storms.hero_*`) with a
 red T3 core stamp; collar ring and internal spiral EMERGE from rotation.
 
+*v1.5 GRS-placement knobs (preset-only, RESTART tier):*
+- `storms.hero_latitude` (`float | None`, default None) — pin the hero band to
+  an exact latitude (degrees) instead of the seed-jittered draw. Used by
+  jupiter_like = −22.5 (real GRS). Radius-coupled validator:
+  `|hero_latitude| ≤ 63 − 206.3·hero_radius` keeps the stamp clear of the
+  63° exchange floor. None = original seed-driven placement (default renders
+  unchanged).
+- `storms.hero_aspect` (default 1.0) — lon:lat elongation; 2.0 ≈ real GRS. An
+  elliptical-q (`q = ‖(p·ê_w/asp, p·n̂_w)‖ / rc`) elongates the streamfunction,
+  perimeter ring, collar, internal spiral, and `heroMask` detail boosts
+  coherently. `asp == 1.0` short-circuits to the exact circular path (the
+  byte-identity invariant for default renders). **LIMITs (recorded, isotropic
+  by design):** the wake across-width (`rc·1.6`) and merge-capture radius stay
+  circular even when the spot is elongated — only the wake *along*-window
+  scales with aspect.
+- `storms.rim_contrast` (default 1.0) — scales the hero perimeter-ring/collar
+  stamp amplitudes (the 0.16 / 0.22 constants in `vortex_stamp.glsl`). jupiter_
+  like = 1.5 (more pronounced GRS rim).
+
 ### Turbulent wakes
 Chaotic folded bright filaments trailing downstream of the big storms (the
 classic GRS wake). *Implementation:* VEL — a turbulence-amplification wedge
@@ -165,6 +184,23 @@ Chaotic folded bright/dark filament fields filling the cyclonic belts.
 advection (which keeps fronts crisp where plain semi-Lagrangian would smear
 them away).
 
+*v1.5 belt-density knobs:*
+- `turbulence.belt_replenish` / `belt_replenish_scale` (RESTART) — EXTRA
+  per-step T2 replenishment gated to the belt mask, at
+  `detail_freq·2·belt_replenish_scale`. The injected fine noise advects and
+  shears over the dev run into emergent filaments (the "emergent turbulence"
+  lever). jupiter_like = 0.07 / 2.0. The solver WARNs (not errors) when the
+  finest injection octave falls below ~2 cells at the sim resolution —
+  sub-Nyquist energy is dissipated/aliased by the MacCormack clamp.
+- `detail.belt_texture_fine` (POST) — a second iterated-backtrace fold octave
+  at output resolution (render-side densification below the sim grid scale).
+  jupiter_like = 1.5. **LIMIT (recorded, v1.5 acceptance):** these levers add
+  texture *energy* (TD-1 0.894×, belt_L_std 1.66× ref) but not folded-filament
+  *morphology* — matched-scale density still reads short of Jupiter to blind
+  judges. Morphology is the kinematic-vs-fluid boundary; a real vorticity
+  solver is the v1.6 path. Raising sim resolution does NOT help (advection
+  dissipation smooths matched-scale texture; verified 2048 vs 4096 = 0.9 %).
+
 ### Fine filaments / scooter clouds
 Wispy streaks riding the jets, visible at high resolution.
 *Implementation:* T2 detail tracer (replenished each step ≈ an
@@ -198,6 +234,11 @@ rotation sense (sign of its strength, carried per hero into the detail
 pass); fbm jig breaks the geometric regularity (`detail.hero_spiral`).
 The lanes are stationary in the hero frame — correct for stills; a time
 phase term is the one-line extension if an animation release needs it.
+*v1.5:* the collar streamline carries an integer odd azimuthal wavenumber
+(`cos(q·28 + 5θ + 4·rj)`, m=5) so its azimuthal mean is exactly zero — it no
+longer survives matched-scale area-downsampling as a concentric-ring bullseye
+(the v1.4 collar artifact). Odd m is orthogonal to the elliptical
+area-weighting's even harmonics, so the fix holds at `hero_aspect` ≠ 1.
 
 ### Storm-scale folded belt structure
 The mosaic's dominant belt texture lives at 0.5–3°: folded luminance

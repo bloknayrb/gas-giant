@@ -405,3 +405,90 @@ seed 4201 @ 8192, widest tropical belt (center −13.4°), `scripts/measure_v15.
   Band-structure + color-family rubric axes re-judged PASS.
 
 Misses stand as recorded — no goal-shifting (v1.4 rule).
+
+### v1.5 RESULTS (acceptance; shipped jupiter_like = variant A, seed default,
+@2048/@8192 vs PIA07782)
+
+Final tuned preset (variant A, user-selected over a dialed-back variant B that
+measured nearly identically): `belt_replenish` 0.07, `belt_replenish_scale`
+2.0, `belt_texture` 1.3, `belt_texture_fine` 1.5, `hero_latitude` −22.5,
+`hero_aspect` 2.0, `rim_contrast` 1.5, `hero_radius` 0.15, `sim.resolution`
+2048.
+
+| Target | Pre-registered | Result | Verdict |
+|---|---|---|---|
+| **TD-1** band-pass ratio | ≥ 0.863 (½-gap) | **0.894** (ours 0.01467 / ref 0.01641; JPEG-q75 ctrl 0.01469) | **MET** |
+| **TD-2** texture-density judges | 3-judge PASS | **FAIL 3-0** (morphology) | **MISS** |
+| **GRS-1** ellipse-fit aspect (non-target integrity) | within ±20 % of 2.0 → [1.60, 2.40] | **1.12** | MISS (metric limitation) |
+| **GRS-1b** ring closure / depth | gap < 45°, depth ≥ 0.40 | **gap 0.0°, depth 0.518** | **PASS** |
+| **GRS-2** ablation ripple (supporting) | ≤ 30 % of v1.4 collar | **0.89×** (confounded) | MISS (recorded) |
+| **GRS-3** GRS-region judges (the gate) | 3-judge PASS | **PASS 3-0** | **MET** |
+| **ST-1** hero pin | 5/5 seeds exact | **5/5** | **MET** |
+| **NR-1** hue_spread | no >5 % away-move | **+0.042 signed (away)** | MISS (intended GRS) |
+| **NR-1** zone/belt chroma | no >5 % away-move | ok / ok | **MET** |
+| **NR-1** belt_L_std guardrail | ratio ∈ [0.80, 1.15] | **1.66×** (v1.4 already 1.21×) | MISS (mis-calibrated band) |
+| **NR-1** height-map std | within ±25 % | **1.011×** | **MET** |
+| Band-structure axis (re-judge) | PASS | **FAIL 2-1** (contested) | MISS |
+| Color-family axis (re-judge) | PASS | **PASS 3-0** | **MET** |
+| Clip | 0 | **0.000 %** | **MET** |
+| Perf 16K all-on median-of-3 | ≤ 40 s | **36.14 s** | **MET** |
+| Full suite / ruff / lint-imports | green | **247 pass / clean / clean** | **MET** |
+| P0.5 default-output hashes | byte-identical | **3/3 default match**; jupiter advanced (intended retune) | **MET** |
+| Blender two-mapset import | all checks | **ok=true** (plain + emission/aurora) | **MET** |
+
+**Honest findings (recorded, not goal-shifted):**
+
+1. **Texture density (Axis 1) — the central miss.** TD-1 energy ratio is MET
+   (0.894) and belt_L_std OVERSHOOTS the reference (1.66× — see #2), yet TD-2
+   judges fail texture density 3-0. Both v1.5's added levers (P1 belt
+   replenishment, P2 iterated folds) raise *energy*, not *morphology*: the gap
+   the judges see is folded-filament structure, which is the kinematic-vs-fluid
+   boundary the plan drew for v1.6. Confirmed three ways this pass: (a) sim
+   resolution 2048→4096 is indistinguishable at matched scale (T0, 0.9 %); (b)
+   more flow/turbulence/sim-res SMOOTHS matched-scale texture via MacCormack
+   dissipation — the non-dissipative lever is output-resolution render folds;
+   (c) the A-vs-B variant render showed band/belt clarity is template/contrast-
+   driven, not texture-push-driven. **Scalar energy is not the gate; morphology
+   is, and morphology is sim-bound.**
+
+2. **belt_L_std guardrail band was mis-calibrated.** The pre-registered
+   [0.80, 1.15] ratio is exceeded by BOTH the v1.4 baseline (1.21×) and v1.5
+   (1.66×) under belt-latitude-mean aggregation — so the band cannot be a valid
+   gate (the baseline it was meant to protect already fails it). The shipped
+   NR-1 harness (`scripts/nr1_check.py`) instead reports `profile_signed`
+   signed distance and frames belt_L_std as the goal metric ("stays near ref");
+   under that operative measure it passes. The raw +38 % v1.4→v1.5 increase is
+   the intended Axis-1 direction. Recorded as a metric-spec mismatch surfaced at
+   acceptance, not a regression.
+
+3. **hue_spread NR-1 "regression" is 100 % intended GRS prominence.** The
+   GRS-only ablation reproduces the +0.042 move; the texture-only ablation is
+   byte-identical to v1.4. The reddish elongated hero against bluish
+   surroundings legitimately widens belt-zone hue spread — the GRS work
+   landing, not color drift.
+
+4. **GRS region (Axis 2) — gate MET, supporting metrics mixed.** GRS-3 judges
+   PASS 3-0 (v1.4 was a unanimous FAIL) and GRS-1b closure/depth pass. GRS-1
+   (1.12 vs 2.0) and GRS-2 (0.89×) miss, both with documented confounds: GRS-1's
+   fitter keys on a narrow circular-distance dark-ring band that under-recovers
+   elongation living in the lobe/spiral/color (judges + FYI montage confirm the
+   spot reads as elongated); GRS-2 is dominated by the *intended* perimeter-ring
+   + collar anatomy that P4 must keep (P4's collar streamline component IS
+   zeroed — `test_measure_grs` synthetic proof). Both are non-gate metrics by
+   the plan's own framing.
+
+**Net:** GRS region FIXED (the harder v1.4 FAIL axis); matched-scale texture
+density improved in energy and TD-1 but remains a judge FAIL on morphology —
+the recorded fluid-sim ceiling for v1.6. Color family held; band structure
+contested (template-driven, not a v1.5 lever). One byte-identity invariant
+(default-params output) verified intact across all v1.5 kernel recompiles.
+
+#### Superseded / corrected metric notes
+
+- The pre-registered **belt_L_std [0.80, 1.15] ratio band** is superseded by the
+  shipped harness's signed-distance guardrail (see finding #2); the raw band is
+  retained above only to document the mis-calibration.
+- The v1.4-era **angular-size gate** for the collar artifact is superseded by the
+  **azimuthal-mean** (integer odd m) criterion (P4) — area-downsampling kills
+  θ-dependent terms, so zeroing the azimuthal mean, not bounding angular size,
+  is what removes the matched-scale bullseye.
