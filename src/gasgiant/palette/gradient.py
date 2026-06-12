@@ -104,9 +104,13 @@ def _linear_to_srgb(c: np.ndarray) -> np.ndarray:
     return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1.0 / 2.4) - 0.055)
 
 
-def _srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
+def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
+    """(..., 3) sRGB in [0, 1] -> (..., 3) Oklab (L, a, b), float64."""
     lms = _srgb_to_linear(rgb.astype(np.float64)) @ _LMS_FROM_LIN.T
     return np.cbrt(lms) @ _OKLAB_FROM_LMS.T
+
+
+_srgb_to_oklab = srgb_to_oklab
 
 
 def _oklab_to_srgb(lab: np.ndarray) -> np.ndarray:

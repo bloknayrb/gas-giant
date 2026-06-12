@@ -13,16 +13,33 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from gasgiant.palette.reference import LatitudeProfile, latitude_profile, profile_distance
+from gasgiant.palette.reference import (
+    MEDIAN_KEYS,
+    VARIANCE_KEYS,
+    LatitudeProfile,
+    latitude_profile,
+    profile_distance,
+    profile_signed,
+)
 
 _STRIP_W = 72          # width of each color strip column, px
 _CURVE_W = 220         # width of the contrast-curve panel, px
 _MONTAGE_W = 1280
+
+# Common-resolution rule: level statistics (medians) are robust to resolution
+# mismatch and compare at the montage width; variance-type statistics are NOT
+# (the reference is a 4:2:0 JPEG whose chroma is native at half width, plus
+# block/ringing jitter) — they compare at the JPEG's chroma-native width,
+# where both images are equally band-limited and block artifacts partially
+# average out.
+_MEDIAN_W = 1280
+_VARIANCE_W = 640
 
 
 def _load_srgb(path: Path) -> np.ndarray:
@@ -56,6 +73,8 @@ def _to_u8(rgb: np.ndarray) -> np.ndarray:
 
 
 def _fit_width(img: np.ndarray, width: int) -> np.ndarray:
+    if img.shape[1] == width:
+        return img
     h = max(1, round(img.shape[0] * width / img.shape[1]))
     return cv2.resize(img, (width, h), interpolation=cv2.INTER_AREA)
 
@@ -92,6 +111,7 @@ def main() -> int:
     ap.add_argument("--res", type=int, default=2048, help="render width when target is a preset")
     ap.add_argument("--bins", type=int, default=90)
     ap.add_argument("--out", type=Path, default=Path("out/compare"))
+    ap.add_argument("--json", type=Path, default=None, help="dump metrics to this JSON file")
     args = ap.parse_args()
 
     if not args.reference.exists():
@@ -102,9 +122,21 @@ def main() -> int:
     ours, name = _load_target(args.target, args.res)
     ref = _load_srgb(args.reference)
 
-    p_ours = latitude_profile(ours, args.bins)
-    p_ref = latitude_profile(ref, args.bins)
-    dist = profile_distance(p_ours, p_ref)
+    # Level statistics at the median width; variance statistics at the
+    # JPEG-chroma-native width (see the common-resolution rule above).
+    p_ours = latitude_profile(_fit_width(ours, _MEDIAN_W), args.bins)
+    p_ref = latitude_profile(_fit_width(ref, _MEDIAN_W), args.bins)
+    pv_ours = latitude_profile(_fit_width(ours, _VARIANCE_W), args.bins)
+    pv_ref = latitude_profile(_fit_width(ref, _VARIANCE_W), args.bins)
+
+    dist_med = profile_distance(p_ours, p_ref)
+    dist_var = profile_distance(pv_ours, pv_ref)
+    dist = {k: dist_med[k] for k in MEDIAN_KEYS}
+    dist.update({k: dist_var[k] for k in VARIANCE_KEYS})
+    signed = profile_signed(pv_ours, pv_ref, lat_max=50.0)
+    signed_med = profile_signed(p_ours, p_ref, lat_max=50.0)
+    signed["zone_chroma"] = signed_med["zone_chroma"]
+    signed["belt_chroma"] = signed_med["belt_chroma"]
 
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -128,9 +160,28 @@ def main() -> int:
 
     print(f"montage:  {montage_path}")
     print(f"profiles: {profile_path}  (zone | belt | contrast, +90N at top)")
-    print("profile distance (mean abs, sRGB units / luminance):")
+    print(f"profile distance (mean abs; levels @{_MEDIAN_W}px, variance stats @{_VARIANCE_W}px):")
     for key, value in dist.items():
-        print(f"  {key:9s} {value:.4f}")
+        print(f"  {key:16s} {value:.4f}")
+    print("signed mean (ours - ref), |lat| <= 50:")
+    for key, value in signed.items():
+        print(f"  {key:16s} {value:+.4f}")
+
+    if args.json is not None:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "target": name,
+            "reference": str(args.reference),
+            "view": "raw",
+            "bins": args.bins,
+            "res": args.res,
+            "median_width": _MEDIAN_W,
+            "variance_width": _VARIANCE_W,
+            "distance": dist,
+            "signed": signed,
+        }
+        args.json.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+        print(f"json:     {args.json}")
     return 0
 
 
