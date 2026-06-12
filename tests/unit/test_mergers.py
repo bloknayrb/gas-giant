@@ -15,6 +15,7 @@ from gasgiant.sim.solver import compute_dt
 from gasgiant.sim.vortices import (
     _V_PEAK_COEF,
     KIND_BARGE,
+    KIND_DEBRIS,
     KIND_HERO,
     KIND_KH,
     KIND_OVAL,
@@ -22,6 +23,8 @@ from gasgiant.sim.vortices import (
     KIND_POLAR,
     MAX_VORTICES,
     MERGE_COOLDOWN,
+    MERGE_DEBRIS_LIFETIME,
+    MERGE_DEBRIS_RAMP,
     MERGE_MAX_R,
     MERGE_V_MAX,
     Vortex,
@@ -64,22 +67,35 @@ def _fields(reg):
     ]
 
 
+def _product(reg):
+    """The merge product: a live (non-transient) oval with a cooldown."""
+    out = [v for v in reg.vortices
+           if v.kind == KIND_OVAL and abs(v.strength) > 1e-6 and v.cooldown > 0]
+    assert len(out) == 1
+    return out[0]
+
+
 def test_converging_pair_merges():
     a, b = _converging_pair()
     reg = VortexRegistry([a, b])
     resolved = resolve_mergers(reg, _synth_profiles(), _storms())
     assert len(resolved) == 1
-    assert len(reg.vortices) == 1
-    prod = reg.vortices[0]
+    assert len(reg.vortices) == 2  # product + debris collar
+    prod = _product(reg)
     assert prod.kind == KIND_OVAL
     assert prod.cooldown == MERGE_COOLDOWN
+    debris = [v for v in reg.vortices if v.kind == KIND_DEBRIS]
+    assert len(debris) == 1
+    assert debris[0].strength == 0.0  # no psi contribution
+    assert debris[0].ttl == MERGE_DEBRIS_LIFETIME
+    assert debris[0].r_core == prod.r_core
 
 
 def test_conservation_uncapped():
     a, b = _converging_pair()
     reg = VortexRegistry([a, b])
     resolve_mergers(reg, _synth_profiles(), _storms())
-    prod = reg.vortices[0]
+    prod = _product(reg)
     # Peak-velocity conservation: S*r is the invariant.
     np.testing.assert_allclose(
         abs(prod.strength) * prod.r_core,
@@ -97,9 +113,8 @@ def test_seam_lon_interp():
     b = Vortex(0.33, -3.12, 0.03, 0.010, KIND_OVAL)
     reg = VortexRegistry([a, b])
     resolve_mergers(reg, _synth_profiles(-1.0), _storms())  # shear sign -> converging
-    assert len(reg.vortices) == 1
     # Product near the seam, NOT near lon 0 (naive mean of +3.12/-3.12).
-    assert abs(reg.vortices[0].lon) > 3.0
+    assert abs(_product(reg).lon) > 3.0
 
 
 def test_capped_branch_velocity_bounded():
@@ -107,7 +122,7 @@ def test_capped_branch_velocity_bounded():
     b = Vortex(0.33, -0.05, 0.07, 0.030, KIND_OVAL)
     reg = VortexRegistry([a, b])
     resolve_mergers(reg, _synth_profiles(), _storms())
-    prod = reg.vortices[0]
+    prod = _product(reg)
     assert prod.r_core == MERGE_MAX_R  # sqrt(2)*0.07 > cap
     assert _V_PEAK_COEF * abs(prod.strength) / prod.r_core <= MERGE_V_MAX + 1e-12
 
@@ -115,11 +130,11 @@ def test_capped_branch_velocity_bounded():
 def test_chain_merges_respect_velocity_cap():
     profiles = _synth_profiles()
     storms = _storms()
-    survivor = Vortex(0.30, 0.00, 0.055, 0.022, KIND_OVAL)
+    survivor = Vortex(0.30, 0.00, 0.055, 0.022, KIND_OVAL, cooldown=1)
     reg = VortexRegistry([survivor])
     for _ in range(6):
-        prod = reg.vortices[0]
-        prod.cooldown = 0  # bypass hysteresis: this test is about the caps
+        prod = _product(reg)
+        prod.cooldown = 1  # bypass hysteresis: this test is about the caps
         challenger = Vortex(
             prod.lat + 0.02, prod.lon - 0.04, 0.055,
             0.022 if prod.strength > 0 else -0.022, KIND_OVAL,
@@ -127,9 +142,10 @@ def test_chain_merges_respect_velocity_cap():
         reg.vortices.append(challenger)
         resolved = resolve_mergers(reg, profiles, storms)
         assert len(resolved) == 1
-        v_peak = _V_PEAK_COEF * abs(reg.vortices[0].strength) / reg.vortices[0].r_core
+        prod = _product(reg)
+        v_peak = _V_PEAK_COEF * abs(prod.strength) / prod.r_core
         assert v_peak <= MERGE_V_MAX + 1e-12
-        assert reg.vortices[0].r_core <= MERGE_MAX_R
+        assert prod.r_core <= MERGE_MAX_R
 
 
 def test_opposite_sign_never_merges():
@@ -183,9 +199,14 @@ def test_hero_absorbs_oval():
     reg = VortexRegistry([hero, oval])
     resolved = resolve_mergers(reg, _synth_profiles(), _storms())
     assert len(resolved) == 1 and resolved[0][2] is None
-    assert reg.vortices == [hero]
+    assert reg.vortices[0] is hero
     assert (hero.lat, hero.lon, hero.r_core, hero.strength, hero.tint,
             hero.brightness, hero.wake_dir) == before
+    # Shredded-victim debris at the victim's position and size.
+    debris = [v for v in reg.vortices if v.kind == KIND_DEBRIS]
+    assert len(debris) == 1
+    assert (debris[0].lat, debris[0].lon, debris[0].r_core) == (
+        oval.lat, oval.lon, oval.r_core)
 
 
 def test_hero_hero_never_merges():
@@ -221,8 +242,48 @@ def test_kind_constants_distinct():
     from gasgiant.sim.events import KIND_OUTBREAK
 
     kinds = [KIND_OVAL, KIND_HERO, KIND_BARGE, KIND_PEARL, KIND_KH, KIND_POLAR,
-             KIND_OUTBREAK]
+             KIND_OUTBREAK, KIND_DEBRIS]
     assert len(set(kinds)) == len(kinds)
+
+
+def test_debris_fades_in_decays_and_expires():
+    a, b = _converging_pair()
+    reg = VortexRegistry([a, b])
+    profiles = _synth_profiles()
+    resolve_mergers(reg, profiles, _storms())
+    debris = next(v for v in reg.vortices if v.kind == KIND_DEBRIS)
+    assert debris.brightness == 0.0  # spawns dark, ramps in (no target pop)
+
+    seen = []
+    for _ in range(MERGE_DEBRIS_LIFETIME + 1):
+        resolve_mergers(reg, profiles, _storms())
+        if debris in reg.vortices:
+            seen.append(debris.brightness)
+    assert all(v.kind != KIND_DEBRIS for v in reg.vortices)  # expired + removed
+    peak = max(seen)
+    assert peak > 0.5  # 0.9 * merge_debris(1.0) * stamp_contrast(1.0), ramped
+    assert seen[: MERGE_DEBRIS_RAMP - 1] == sorted(seen[: MERGE_DEBRIS_RAMP - 1])
+    assert seen[-1] < 0.1 * peak  # decayed to ~nothing before removal
+
+
+def test_debris_skipped_near_exchange_band():
+    lat0 = np.deg2rad(60.0)
+    a = Vortex(lat0, 0.00, 0.03, 0.012, KIND_OVAL)
+    b = Vortex(lat0 + 0.03, -0.05, 0.03, 0.010, KIND_OVAL)
+    reg = VortexRegistry([a, b])
+    resolved = resolve_mergers(reg, _synth_profiles(), _storms())
+    assert len(resolved) == 1  # the merge itself happens
+    assert all(v.kind != KIND_DEBRIS for v in reg.vortices)  # collar suppressed
+
+
+def test_debris_disabled_by_param():
+    a, b = _converging_pair()
+    reg = VortexRegistry([a, b])
+    storms = _storms()
+    storms.merge_debris = 0.0
+    resolved = resolve_mergers(reg, _synth_profiles(), storms)
+    assert len(resolved) == 1
+    assert all(v.kind != KIND_DEBRIS for v in reg.vortices)
 
 
 def test_greedy_one_merge_per_step_and_cooldown():
@@ -233,7 +294,7 @@ def test_greedy_one_merge_per_step_and_cooldown():
     profiles = _synth_profiles()
     resolved = resolve_mergers(reg, profiles, _storms())
     assert len(resolved) == 1  # the cluster does not collapse in one step
-    assert len(reg.vortices) == 2
+    assert len([v for v in reg.vortices if abs(v.strength) > 1e-6]) == 2
     # The product carries a cooldown: no second merge until it expires.
     merges = 0
     for _ in range(MERGE_COOLDOWN - 1):
@@ -283,14 +344,9 @@ def test_seeded_pairs_actually_merge():
         reg = generate_vortices(p.seed, bands, profiles, p.storms, p.poles,
                                 dt=dt, dev_steps=500)
         merges = 0
-        for i in range(500):
-            impulses_unused = advance_registry(  # noqa: F841
-                reg, profiles, dt, i, storms=p.storms
-            )
-        # Count via population: each peer merge nets -1 (M1: no debris yet).
-        reg2 = generate_vortices(p.seed, bands, profiles, p.storms, p.poles,
-                                 dt=dt, dev_steps=500)
-        merges = len(reg2.vortices) - len(reg.vortices)
+        for _ in range(500):  # mirrors advance_registry (events=None)
+            reg.drift(profiles, dt)
+            merges += len(resolve_mergers(reg, profiles, p.storms))
         assert merges >= 1, f"seed {seed}: no seeded pair merged"
         total += merges
     assert total >= 3

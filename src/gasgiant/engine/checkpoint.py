@@ -47,6 +47,7 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
         for name in _REG_FIELDS
     }
     reg["reg_cooldown"] = np.array([v.cooldown for v in vortices], dtype=np.int32)
+    reg["reg_ttl"] = np.array([v.ttl for v in vortices], dtype=np.int32)
     outbreak_links = np.full(len(s.events.outbreaks) if s.events else 0, -1, dtype=np.int32)
     if s.events is not None:
         index_of = {id(v): i for i, v in enumerate(vortices)}
@@ -96,10 +97,12 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
     n = int(data["reg_lat"].shape[0])
     cols = {name: data[f"reg_{name}"] for name in _REG_FIELDS}
     cooldown = data["reg_cooldown"] if "reg_cooldown" in data else np.zeros(n, np.int32)
+    ttl = data["reg_ttl"] if "reg_ttl" in data else np.full(n, -1, np.int32)
     s.vortices.vortices = [
         Vortex(
             **{name: float(cols[name][i]) for name in _REG_FIELDS},
             cooldown=int(cooldown[i]),
+            ttl=int(ttl[i]),
         )
         for i in range(n)
     ]

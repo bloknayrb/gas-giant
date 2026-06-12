@@ -36,6 +36,7 @@ KIND_PEARL = 3.0
 KIND_KH = 4.0
 KIND_POLAR = 5.0
 # 6.0 is KIND_OUTBREAK (events.py).
+KIND_DEBRIS = 7.0
 
 # -- merger constants (frozen into checkpoint GENERATION_VERSION 3) --------------
 # Capture when gap < COEF * merge_rate * (r1 + r2): at rate 1.0 an equal pair
@@ -55,6 +56,13 @@ MERGE_V_MAX = 0.40
 # psi = S*exp(-(d/r)^2) peaks tangentially at d = r/sqrt(2):
 # v_peak = sqrt(2)*exp(-1/2) * S / r.
 _V_PEAK_COEF = float(np.sqrt(2.0) * np.exp(-0.5))
+# Merger-debris collar: steps from merge to fully eroded, fade-in steps
+# (avoids a relax-target pop), peak stamp brightness, and the exchange-band
+# floor poleward of which no debris spawns (63-67 deg must stay storm-free).
+MERGE_DEBRIS_LIFETIME = 250
+MERGE_DEBRIS_RAMP = 15
+MERGE_DEBRIS_BRIGHT = 0.9
+_EXCHANGE_FLOOR = np.deg2rad(63.0)
 
 
 @dataclass
@@ -73,6 +81,9 @@ class Vortex:
     wake_dir: float = 0.0
     # CPU-only (never packed into the SSBO): merger hysteresis countdown.
     cooldown: int = 0
+    # CPU-only: remaining lifetime of transient entries (merger debris);
+    # -1 = immortal (every ordinary vortex).
+    ttl: int = -1
 
 
 @dataclass
@@ -180,6 +191,7 @@ def resolve_mergers(
     rate = storms.merge_rate
     if rate <= 0.0:
         return []
+    _age_transients(reg, storms)
     vs = reg.vortices
     for v in vs:  # hysteresis ages even on steps with no merges
         if v.cooldown > 0:
@@ -237,16 +249,54 @@ def resolve_mergers(
             hero, victim = (a, b) if a.kind == KIND_HERO else (b, a)
             removed.add(i if victim is vs[i] else j)
             resolved.append((hero, victim, None))
+            debris = _spawn_debris(victim.lat, victim.lon, victim.r_core, storms)
         else:
             removed.update((i, j))
             product = _merge_pair(a, b, profiles)
             products.append(product)
             resolved.append((a, b, product))
+            debris = _spawn_debris(product.lat, product.lon, product.r_core, storms)
+        if debris is not None:
+            products.append(debris)
     # One identity-based rebuild — never list.remove (dataclass == is field
     # equality and could drop the wrong entry). Products appended at the end
     # are same-step-ineligible by construction.
     reg.vortices = [v for idx, v in enumerate(vs) if idx not in removed] + products
     return resolved
+
+
+def _spawn_debris(lat: float, lon: float, r_core: float, storms: StormsParams) -> Vortex | None:
+    """The transient turbulent collar a fresh merger leaves behind: a
+    zero-strength registry entry (no psi) whose bright ring stamp the ambient
+    flow folds into filaments while it decays. The Outbreak mechanism, reused.
+    Skipped near the 63-67 deg nesting exchange band, which must stay
+    storm-free (the ring stamp reaches ~3*r_core)."""
+    if storms.merge_debris <= 0.0:
+        return None
+    if abs(lat) + 3.0 * r_core > _EXCHANGE_FLOOR:
+        return None
+    return Vortex(lat, lon, r_core, 0.0, KIND_DEBRIS,
+                  tint=0.0, brightness=0.0,  # ramps in via _age_transients
+                  ttl=MERGE_DEBRIS_LIFETIME)
+
+
+def _age_transients(reg: VortexRegistry, storms: StormsParams) -> None:
+    """Decrement debris ttl; brightness = base * fade-in * fade-out, removed
+    at expiry. Deterministic — pure function of ttl + params."""
+    base = MERGE_DEBRIS_BRIGHT * storms.merge_debris * storms.stamp_contrast
+    expired = False
+    for v in reg.vortices:
+        if v.ttl < 0:
+            continue
+        v.ttl -= 1
+        if v.ttl <= 0:
+            expired = True
+            continue
+        age = MERGE_DEBRIS_LIFETIME - v.ttl
+        ramp_in = min(age / MERGE_DEBRIS_RAMP, 1.0)
+        v.brightness = base * ramp_in * (v.ttl / MERGE_DEBRIS_LIFETIME)
+    if expired:
+        reg.vortices = [v for v in reg.vortices if v.ttl != 0]
 
 
 def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
