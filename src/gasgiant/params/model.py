@@ -16,10 +16,11 @@ stays GUI-agnostic in fact, not just in name.
 
 from __future__ import annotations
 
+import statistics
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MAX_BANDS = 40
 
@@ -92,6 +93,55 @@ def default_palette_rows() -> list[PaletteRow]:
     return [PaletteRow(latitude=0.0, stops=list(DEFAULT_PALETTE))]
 
 
+class BandTemplate(_Params):
+    """Explicit band skeleton: edge latitudes (degrees, strictly descending,
+    +-90 endpoints, interior within +-76 -- the polar cap systems own the
+    rest) with per-band color-index values and cloud-top heights.
+
+    Values and heights are used VERBATIM: none of the seeded value seasoning
+    (value_contrast scaling, value/hue jitter) applies on the template path,
+    because every consumer re-derives zone/belt identity as
+    ``values < median(values)`` from the final numbers -- jitter on both a
+    value and the median can silently flip a band's identity. Verbatim
+    values make identity deterministic; the validator requires the derived
+    identity mask to strictly alternate zone/belt. (An odd-count template
+    with belts in the majority can never satisfy the convention -- the
+    median IS the top belt value then; merge or split to an even count.)"""
+
+    edges_deg: list[float]
+    values: list[float]
+    heights: list[float]
+
+    @model_validator(mode="after")
+    def _validate(self) -> BandTemplate:
+        e = self.edges_deg
+        n = len(e) - 1
+        if n < 2:
+            raise ValueError("template needs at least 2 bands")
+        if n > MAX_BANDS:
+            raise ValueError(f"template has {n} bands; the cap is {MAX_BANDS}")
+        if e[0] != 90.0 or e[-1] != -90.0:
+            raise ValueError("edges_deg must start at +90 and end at -90")
+        if any(b >= a for a, b in zip(e, e[1:], strict=False)):
+            raise ValueError("edges_deg must be strictly descending")
+        if any(abs(x) > 76.0 for x in e[1:-1]):
+            raise ValueError(
+                "interior edges must lie within +-76 deg (polar caps own the rest)"
+            )
+        if len(self.values) != n or len(self.heights) != n:
+            raise ValueError("values/heights need len(edges_deg) - 1 entries")
+        if any(not 0.0 <= v <= 1.0 for v in self.values + self.heights):
+            raise ValueError("values/heights must lie in [0, 1]")
+        med = statistics.median(self.values)
+        mask = [v < med for v in self.values]
+        if any(a == b for a, b in zip(mask, mask[1:], strict=False)):
+            raise ValueError(
+                "zone/belt identity (values < median) must strictly alternate; "
+                "adjust values (odd belts-majority layouts cannot satisfy it)"
+            )
+        return self
+
+
 class BandsParams(_Params):
     count: int = pfield(
         14, tier=Tier.RESTART, lo=2, hi=MAX_BANDS, rand=(6, 24), ui="Bands",
@@ -159,6 +209,13 @@ class BandsParams(_Params):
     detail_freq: float = pfield(
         12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, ui="Bands",
         description="Small-scale noise spatial frequency",
+    )
+    template: BandTemplate | None = pfield(
+        None, tier=Tier.RESTART, ui="Bands",
+        description="Explicit band skeleton (edge latitudes + per-band values/"
+                    "heights) replacing the seeded layout; preset-only -- value "
+                    "seasoning (value_contrast, hue_jitter, width knobs) is "
+                    "inert when set",
     )
 
 

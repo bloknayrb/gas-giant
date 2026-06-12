@@ -36,6 +36,8 @@ class BandLayout:
 
 
 def generate_bands(seed: int, params: BandsParams) -> BandLayout:
+    if params.template is not None:
+        return _bands_from_template(seed, params.template)
     rng = subseed(seed, "bands")
     count = params.count
 
@@ -73,6 +75,25 @@ def generate_bands(seed: int, params: BandsParams) -> BandLayout:
         edges=edges.astype(np.float32),
         values=values.astype(np.float32),
         heights=np.clip(heights, 0.0, 1.0).astype(np.float32),
+        fade_sector=_select_fade_sector(seed, edges, values),
+    )
+
+
+def _bands_from_template(seed: int, template) -> BandLayout:
+    """The explicit-skeleton path: edges/values/heights verbatim (validated
+    by BandTemplate -- identity alternation, descending edges, extents).
+    NO value seasoning runs here: consumers re-derive zone/belt identity
+    from `values < median(values)`, and jitter on both a value and the
+    median can flip a band's class -- verbatim values keep it deterministic.
+    Fade-sector selection still applies (its own seed stream; works off any
+    edges/values); warp, edge softness/diversity, and detail noise are
+    applied downstream of the layout and are unaffected."""
+    edges = np.deg2rad(np.asarray(template.edges_deg, dtype=np.float64))
+    values = np.asarray(template.values, dtype=np.float64)
+    return BandLayout(
+        edges=edges.astype(np.float32),
+        values=values.astype(np.float32),
+        heights=np.asarray(template.heights, dtype=np.float32),
         fade_sector=_select_fade_sector(seed, edges, values),
     )
 

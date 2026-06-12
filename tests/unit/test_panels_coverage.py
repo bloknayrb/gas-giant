@@ -4,6 +4,11 @@ This is the static guard against fields silently rendering as disabled text
 (a tuple field without "color" in its name, a list shape the editor doesn't
 know, ...). It imports panels for the pure leaf_kind classifier only — no
 GUI is created.
+
+Deliberate exception: "optional_model" (bands.template) is preset-only data
+that intentionally renders as informational text — leaf_kind classifies it
+explicitly, so it still counts as covered rather than silently falling
+through.
 """
 
 from __future__ import annotations

@@ -69,9 +69,17 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
     """Which widget _draw_leaf renders for this field, or None if it has no
     widget. Kept as a pure function so a static test can assert every leaf
     in PlanetParams is renderable without opening a GUI."""
+    import types
     from enum import StrEnum
+    from typing import Union, get_args, get_origin
 
     ann = info.annotation
+    if get_origin(ann) in (Union, types.UnionType):
+        inner = [a for a in get_args(ann) if a is not type(None)]
+        if len(inner) == 1 and isinstance(inner[0], type) and issubclass(inner[0], BaseModel):
+            # Optional nested model (bands.template): preset-only data, shown
+            # as informational text -- _draw_leaf's fallback branch.
+            return "optional_model"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -133,6 +141,8 @@ def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
         changed = _draw_stops(label, value)
     elif kind == "palette_rows":
         changed = _draw_palette_rows(label, value)
+    elif kind == "optional_model":
+        imgui.text_disabled(f"{label}: {'set (preset-only)' if value else 'none'}")
     else:
         imgui.text_disabled(f"{label}: {value!r}")
 
