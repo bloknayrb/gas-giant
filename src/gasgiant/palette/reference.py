@@ -173,14 +173,19 @@ def chroma_restored_rgb(
 
 # Stop positions and the luminance windows each is fitted from (pixel-level
 # anchor fits). 5 stops match the hand-extended factory rows' structure.
+# The 5-stop ENDPOINT windows are luminance TAILS, not quartiles: storm
+# stamps map T0 to the gradient endpoints, and endpoint stops fitted from
+# windows overlapping the interior ones compress the very range the stamps
+# live in (the v1.4 audit's invisible-ovals/pearls/barges root cause —
+# tracer deltas were strong, the palette top end was flat).
 STOP_WINDOWS: dict[int, tuple[tuple[float, tuple[float, float]], ...]] = {
     3: ((0.0, (0.0, 0.25)), (0.5, (0.375, 0.625)), (1.0, (0.75, 1.0))),
     5: (
-        (0.0, (0.0, 0.25)),
+        (0.0, (0.0, 0.12)),
         (0.25, (0.125, 0.375)),
         (0.5, (0.375, 0.625)),
         (0.75, (0.625, 0.875)),
-        (1.0, (0.75, 1.0)),
+        (1.0, (0.88, 1.0)),
     ),
 }
 
@@ -213,6 +218,31 @@ def anchor_fit(
             color = np.median(rgb[_quartile_sel(lum, lo, hi)], axis=0)
         out.append((pos, color))
     return out
+
+
+def expand_stop_span(
+    fitted: list[tuple[float, np.ndarray]], min_span: float
+) -> list[tuple[float, np.ndarray]]:
+    """Expand a fitted row's Oklab-L span about its mean when the source
+    window is blur-flattened. The reference map's poleward latitudes are
+    projection-blurred (the quartile windows converge), which fits
+    near-constant gradients that crush ALL T0 dynamic range downstream —
+    banding, storm stamps, polar cyclones; PIA21641 shows the real polar
+    dynamic range is anything but flat. Per-stop hue/chroma are preserved;
+    only the L deviations scale. No-op when the span already clears the
+    floor (low-latitude rows are untouched)."""
+    colors = np.array([c for _, c in fitted], dtype=np.float32)
+    lab = srgb_to_oklab(colors)
+    span = float(lab[:, 0].max() - lab[:, 0].min())
+    if span >= min_span or span <= 1e-6:
+        return fitted
+    mean_l = float(lab[:, 0].mean())
+    lab[:, 0] = mean_l + (lab[:, 0] - mean_l) * (min_span / span)
+    out = _oklab_to_srgb(lab)
+    return [
+        (pos, np.clip(out[i], 0.0, 1.0).astype(np.float32))
+        for i, (pos, _) in enumerate(fitted)
+    ]
 
 
 def _moving_mean(x: np.ndarray, win: int) -> np.ndarray:

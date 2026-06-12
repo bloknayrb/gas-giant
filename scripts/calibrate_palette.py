@@ -42,7 +42,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from gasgiant.palette.reference import anchor_fit, latitude_profile
+from gasgiant.palette.reference import anchor_fit, expand_stop_span, latitude_profile
 
 _DEFAULT_ANCHORS = (-65.0, -40.0, -15.0, 10.0, 40.0, 65.0)
 _DEFAULT_WINDOW_DEG = 9.0  # half-width of the latitude window sampled per anchor
@@ -67,6 +67,7 @@ def calibrate(
     fit_mode: str = "median",
     chroma_pct: float = 0.6,
     stops: int = 3,
+    min_l_span: float = 0.0,
 ) -> dict:
     profile = latitude_profile(img, bins)
 
@@ -86,6 +87,8 @@ def calibrate(
             # Pixel-level fit (chroma-restore needs member pixels, which the
             # profile aggregates cannot provide; 5-stop uses it too).
             fitted = anchor_fit(img, anchor, window_deg, fit_mode, chroma_pct, stops)
+        if min_l_span > 0.0:
+            fitted = expand_stop_span(fitted, min_l_span)
         rows.append(
             {
                 "latitude": anchor,
@@ -138,6 +141,12 @@ def main() -> int:
         help="stops per fitted row (5 = the factory rows' structure, at "
              "positions 0/.25/.5/.75/1)",
     )
+    ap.add_argument(
+        "--min-l-span", type=float, default=0.0,
+        help="minimum Oklab-L span per fitted row; rows below it (the ref's "
+             "projection-blurred poleward windows) get their L deviations "
+             "expanded about the mean -- hue/chroma per stop preserved",
+    )
     ap.add_argument("--out", type=Path, default=None, help="write JSON here instead of stdout")
     ap.add_argument(
         "--write", type=Path, default=None,
@@ -153,6 +162,7 @@ def main() -> int:
     doc = calibrate(
         _load_srgb(args.reference), anchors, args.bins, args.window,
         fit_mode=args.fit_mode, chroma_pct=args.chroma_pct, stops=args.stops,
+        min_l_span=args.min_l_span,
     )
 
     if args.write is not None:

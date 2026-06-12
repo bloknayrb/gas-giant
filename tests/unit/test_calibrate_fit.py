@@ -80,3 +80,28 @@ def test_anchor_fit_empty_window_falls_back_to_nearest_rows():
     fitted = anchor_fit(img, 89.0, 0.001, mode="median", stops=3)
     assert len(fitted) == 3
     assert all(np.all(np.isfinite(c)) for _, c in fitted)
+
+
+def test_expand_stop_span_floors_flat_rows_and_keeps_good_ones():
+    from gasgiant.palette.reference import expand_stop_span
+
+    flat = [
+        (0.0, np.array([0.50, 0.50, 0.52], dtype=np.float32)),
+        (0.5, np.array([0.52, 0.52, 0.54], dtype=np.float32)),
+        (1.0, np.array([0.54, 0.54, 0.56], dtype=np.float32)),
+    ]
+    out = expand_stop_span(flat, 0.14)
+    lab = srgb_to_oklab(np.array([c for _, c in out]))
+    span = float(lab[:, 0].max() - lab[:, 0].min())
+    assert span >= 0.135  # floor reached (gamut clip tolerance)
+    # Mean L preserved (expansion is about the mean, not a brightening).
+    lab_in = srgb_to_oklab(np.array([c for _, c in flat]))
+    assert abs(float(lab[:, 0].mean() - lab_in[:, 0].mean())) < 0.02
+    # Hue direction per stop preserved (a, b unchanged up to clip).
+    np.testing.assert_allclose(lab[:, 1:], lab_in[:, 1:], atol=5e-3)
+
+    wide = [
+        (0.0, np.array([0.30, 0.25, 0.20], dtype=np.float32)),
+        (1.0, np.array([0.85, 0.83, 0.80], dtype=np.float32)),
+    ]
+    assert expand_stop_span(wide, 0.14) is wide  # untouched, identity
