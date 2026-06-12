@@ -379,7 +379,11 @@ void main() {
             // Collar streamlines: thin turbulent rings hugging the rim.
             float wino = smoothstep(0.98, 1.12, q) * (1.0 - smoothstep(1.5, 1.85, q));
             float rj = fbm(pc * (u_freq * 0.9) + u_offset_spiral.zxy, 2, 2.0, 0.5);
-            sp += 0.55 * wino * cos(q * 28.0 + 3.0 * rj);
+            // m=5 (odd) gives zero azimuthal mean: odd m is orthogonal to
+            // even harmonics from elliptical area-weighting, so the
+            // downsampled azimuthal mean is exactly 0. Integer m keeps
+            // cos branch-cut continuous at theta=±π (5θ jumps by 10π).
+            sp += 0.55 * wino * cos(q * 28.0 + 5.0 * theta + 4.0 * rj);
         }
         d += 0.22 * u_hero_spiral * clamp(sp, -1.5, 1.5);
     }
