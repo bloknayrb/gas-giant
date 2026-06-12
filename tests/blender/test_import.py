@@ -4,9 +4,10 @@ Run inside Blender:
     blender --background --factory-startup --python tests/blender/test_import.py -- <mapset_dir>
 
 Registers the add-on from source, imports the map set with each combination
-that matters, and asserts the scene contents. Writes PASS/FAIL JSON to
-tests/blender/result.json (background Blender via the Store launcher has no
-usable stdout).
+that matters, and asserts the scene contents. An optional second mapset dir
+(exported with nonzero emission strengths) drives the emission-wiring and
+aurora-shell checks. Writes PASS/FAIL JSON to tests/blender/result.json
+(background Blender via the Store launcher has no usable stdout).
 """
 
 from __future__ import annotations
@@ -24,9 +25,10 @@ def main() -> dict:
 
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     if not argv:
-        raise RuntimeError("usage: ... -- <mapset_dir>")
+        raise RuntimeError("usage: ... -- <mapset_dir> [<emission_mapset_dir>]")
     mapset = Path(argv[0]) / "mapset.json"
     assert mapset.is_file(), f"missing {mapset}"
+    emission_mapset = Path(argv[1]) / "mapset.json" if len(argv) > 1 else None
 
     addon_root = Path(__file__).resolve().parents[2] / "blender_addon"
     sys.path.insert(0, str(addon_root))
@@ -86,6 +88,53 @@ def main() -> dict:
     if adaptive is None and hasattr(planet2, "cycles"):
         adaptive = getattr(planet2.cycles, "use_adaptive_subdivision", False)
     checks["adaptive_subdivision"] = bool(adaptive)
+
+    # Emission map absent: no emission texture node, default emission black.
+    em_nodes = [
+        n for n in nodes
+        if n.type == "TEX_IMAGE" and n.image
+        and Path(n.image.filepath).name.lower() == "emission.exr"
+    ]
+    checks["no_emission_node_without_map"] = not em_nodes
+
+    if emission_mapset is not None:
+        result = bpy.ops.import_scene.gasgiant(
+            filepath=str(emission_mapset), atmosphere_mode="NONE",
+            emission_strength=2.0,
+        )
+        checks["emission_import_finished"] = result == {"FINISHED"}
+        planet3 = bpy.context.active_object
+        nodes3 = planet3.data.materials[0].node_tree.nodes
+        em3 = [
+            n for n in nodes3
+            if n.type == "TEX_IMAGE" and n.image
+            and Path(n.image.filepath).name.lower() == "emission.exr"
+        ]
+        checks["emission_node_present"] = len(em3) == 1
+        if em3:
+            img = em3[0].image
+            checks["emission_channel_packed"] = img.alpha_mode == "CHANNEL_PACKED"
+            bsdf3 = next(n for n in nodes3 if n.type == "BSDF_PRINCIPLED")
+            em_color = bsdf3.inputs.get("Emission Color") or bsdf3.inputs.get("Emission")
+            checks["emission_color_linked"] = bool(em_color and em_color.is_linked)
+            em_str = bsdf3.inputs.get("Emission Strength")
+            checks["emission_strength_set"] = bool(em_str and em_str.default_value == 2.0)
+
+        # Aurora shell variant: the alpha-driven shell exists, and the
+        # surface no longer adds the aurora term (no vector-math chain).
+        result = bpy.ops.import_scene.gasgiant(
+            filepath=str(emission_mapset), atmosphere_mode="NONE",
+            aurora_shell=True,
+        )
+        checks["aurora_shell_import_finished"] = result == {"FINISHED"}
+        shell_au = next((o for o in objs if "_aurora" in o.name), None)
+        checks["aurora_shell_created"] = shell_au is not None
+        if shell_au is not None:
+            au_nodes = shell_au.data.materials[0].node_tree.nodes
+            checks["aurora_shell_emission"] = any(n.type == "EMISSION" for n in au_nodes)
+            checks["aurora_shell_transparent"] = any(
+                n.type == "BSDF_TRANSPARENT" for n in au_nodes
+            )
 
     return checks
 

@@ -65,6 +65,15 @@ def set_colorspace(image: bpy.types.Image, kind: str) -> None:
     # than failing the whole import.
 
 
+def set_channel_packed(image: bpy.types.Image) -> None:
+    """Mark an image's alpha as CHANNEL-PACKED data. Blender defaults EXR to
+    Premultiplied: with an independent data mask in A (the emission map's
+    aurora), the alpha-association path would scale/divide RGB by that
+    near-zero mask and corrupt the whole map."""
+    with contextlib.suppress(TypeError, AttributeError):
+        image.alpha_mode = "CHANNEL_PACKED"
+
+
 def find_input(node: bpy.types.Node, *names: str) -> bpy.types.NodeSocket | None:
     """Socket lookup tolerant of the 4.0/5.0 socket renames."""
     for name in names:

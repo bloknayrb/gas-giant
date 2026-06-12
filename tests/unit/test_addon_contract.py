@@ -55,6 +55,37 @@ def test_vendored_reader_accepts_exporter_output(tmp_path):
     assert doc["physical"]["radius_km"] == 69911.0
 
 
+def test_vendored_reader_resolves_emission_with_aurora_color(tmp_path):
+    reader = _load_vendored_reader()
+    manifest = build_manifest(
+        name="contract",
+        seed=42,
+        resolution=(2048, 1024),
+        maps={
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "emission": {
+                "file": "emission.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "aurora_color": [0.85, 0.35, 0.60],
+            },
+        },
+        physical={"radius_km": 69911.0, "height_scale": 0.004, "height_midlevel": 0.5},
+        preset_doc=to_preset_doc(PlanetParams()),
+    )
+    write_manifest(tmp_path, manifest)
+    (tmp_path / "color.png").write_bytes(b"")
+    (tmp_path / "emission.exr").write_bytes(b"")
+    doc = reader.read_mapset(tmp_path)
+    assert reader.map_path(doc, "emission").name == "emission.exr"
+    assert doc["maps"]["emission"]["aurora_color"] == [0.85, 0.35, 0.60]
+
+
+def test_vendored_reader_emission_absent_is_none(tmp_path):
+    reader = _load_vendored_reader()
+    doc = reader.read_mapset(_write_mapset(tmp_path))
+    assert reader.map_path(doc, "emission") is None
+
+
 def test_vendored_reader_tolerates_unknown_keys(tmp_path):
     reader = _load_vendored_reader()
     path = _write_mapset(tmp_path) / "mapset.json"

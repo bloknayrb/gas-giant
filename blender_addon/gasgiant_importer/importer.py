@@ -64,6 +64,18 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
     )
     limb_darkening: FloatProperty(name="Limb darkening", default=0.45, min=0.0, max=1.0)
     limb_haze: FloatProperty(name="Limb haze", default=0.3, min=0.0, max=1.0)
+    emission_strength: FloatProperty(
+        name="Emission strength", default=1.0, min=0.0, soft_max=10.0,
+        description="Multiplier on the emission map (thermal glow, lightning, "
+        "aurora). Night-side renders often want to push this without "
+        "re-exporting. Needs Cycles to actually light the scene",
+    )
+    aurora_shell: BoolProperty(
+        name="Aurora on shell", default=False,
+        description="Lift the emission map's aurora (alpha channel) onto a "
+        "transparent shell at ~1.03 R instead of the cloud surface — the "
+        "real aurora sits ~1000 km up. Dayside-negligible, not sun-gated",
+    )
     longitude_offset: FloatProperty(
         name="Longitude offset", subtype="ANGLE", default=0.0,
         description="Rotate the planet so the feature you care about faces the camera",
@@ -86,11 +98,20 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
 
         color_path = manifest_schema.map_path(doc, "color")
         height_path = manifest_schema.map_path(doc, "height")
+        emission_path = manifest_schema.map_path(doc, "emission")
         color_img = bpy.data.images.load(str(color_path), check_existing=True)
         height_img = (
             bpy.data.images.load(str(height_path), check_existing=True)
             if height_path is not None
             else None
+        )
+        emission_img = (
+            bpy.data.images.load(str(emission_path), check_existing=True)
+            if emission_path is not None
+            else None
+        )
+        aurora_color = tuple(
+            doc["maps"].get("emission", {}).get("aurora_color", (0.85, 0.35, 0.60))
         )
 
         physical = doc["physical"]
@@ -126,8 +147,21 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
             limb_darkening=self.limb_darkening,
             limb_haze=self.limb_haze,
             haze_color=tuple(doc.get("atmosphere_hint", {}).get("rim_color", (0.6, 0.7, 1.0))),
+            emission_img=emission_img,
+            emission_strength=self.emission_strength,
+            aurora_color=aurora_color,
+            aurora_on_surface=not self.aurora_shell,
         )
         planet.data.materials.append(mat)
+
+        if emission_img is not None and self.aurora_shell:
+            aurora = atmosphere.build_aurora_shell(
+                f"{doc['name']}_aurora", self.radius, emission_img,
+                aurora_color=aurora_color,
+                strength=self.emission_strength,
+                clearance=clearance,
+            )
+            aurora.parent = rig
 
         if self.use_displacement:
             compat.enable_adaptive_subdivision(planet, context.scene)

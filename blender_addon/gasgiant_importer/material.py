@@ -83,6 +83,10 @@ def build_planet_material(
     limb_darkening: float,
     limb_haze: float,
     haze_color: tuple[float, float, float],
+    emission_img: bpy.types.Image | None = None,
+    emission_strength: float = 1.0,
+    aurora_color: tuple[float, float, float] = (0.85, 0.35, 0.60),
+    aurora_on_surface: bool = True,
 ) -> bpy.types.Material:
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
@@ -165,6 +169,46 @@ def build_planet_material(
             normal_in = compat.find_input(bsdf, "Normal")
             if normal_in is not None:
                 links.new(bump.outputs["Normal"], normal_in)
+
+    if emission_img is not None:
+        tex_em = _new(nodes, "ShaderNodeTexImage", -250, -560)
+        tex_em.image = emission_img
+        tex_em.extension = "REPEAT"
+        compat.set_colorspace(emission_img, "non-color")
+        # Alpha is an independent data mask (aurora intensity), not coverage:
+        # without CHANNEL_PACKED the premultiplied path corrupts the RGB.
+        compat.set_channel_packed(emission_img)
+        if uv_socket is not None:
+            links.new(uv_socket, tex_em.inputs["Vector"])
+        em_src = tex_em.outputs["Color"]
+        if aurora_on_surface:
+            # + alpha * aurora_color (the importer's shell mode lifts the
+            # aurora off the surface instead and sets aurora_on_surface=False).
+            scale = _new(nodes, "ShaderNodeVectorMath", -60, -560)
+            scale.operation = "SCALE"
+            scale.inputs[0].default_value = aurora_color
+            links.new(tex_em.outputs["Alpha"], scale.inputs["Scale"])
+            add = _new(nodes, "ShaderNodeVectorMath", 100, -560)
+            add.operation = "ADD"
+            links.new(em_src, add.inputs[0])
+            links.new(scale.outputs["Vector"], add.inputs[1])
+            em_src = add.outputs["Vector"]
+        em_color = compat.find_input(bsdf, "Emission Color", "Emission")
+        em_strength = compat.find_input(bsdf, "Emission Strength")
+        if em_color is not None:
+            links.new(em_src, em_color)
+            if em_strength is not None:
+                em_strength.default_value = emission_strength
+        else:
+            # Exotic future socket rename: a separate Emission shader added
+            # to the surface — never a silent drop of the map.
+            emit = _new(nodes, "ShaderNodeEmission", 60, -700)
+            links.new(em_src, emit.inputs["Color"])
+            emit.inputs["Strength"].default_value = emission_strength
+            add_sh = _new(nodes, "ShaderNodeAddShader", 260, -700)
+            links.new(bsdf.outputs[0], add_sh.inputs[0])
+            links.new(emit.outputs[0], add_sh.inputs[1])
+            links.new(add_sh.outputs[0], output.inputs["Surface"])
 
     compat.set_displacement_method(mat, use_displacement)
     return mat

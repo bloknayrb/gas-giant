@@ -14,7 +14,7 @@ from __future__ import annotations
 import bpy
 
 from . import compat
-from .material import _new
+from .material import _new, _spherical_uv_nodes
 
 
 def _shell_object(name: str, radius: float, segments: int) -> bpy.types.Object:
@@ -60,6 +60,60 @@ def build_volume_atmosphere(
     if aniso is not None:
         aniso.default_value = 0.55
     links.new(scatter.outputs[0], output.inputs["Volume"])
+
+    compat.set_transparent_render_method(mat)
+    shell.data.materials.append(mat)
+    return shell
+
+
+def build_aurora_shell(
+    name: str,
+    radius: float,
+    emission_img: bpy.types.Image,
+    *,
+    aurora_color: tuple[float, float, float],
+    strength: float,
+    clearance: float,
+) -> bpy.types.Object:
+    """A transparent shell at ~1.03 R emitting the emission map's
+    alpha-channel aurora — the real aurora sits ~1000 km above the cloud
+    deck, so baking it into the surface reads wrong at the terminator.
+    NOTE: emission is not sun-gated; the arc is dayside-NEGLIGIBLE at
+    default strength against the lit disc, not dayside-clean."""
+    shell = _shell_object(name, radius * 1.03 + clearance, 96)
+
+    mat = bpy.data.materials.new(f"{name}_aurora")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nodes, links = nt.nodes, nt.links
+    bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf is not None:
+        nodes.remove(bsdf)
+    output = next(n for n in nodes if n.type == "OUTPUT_MATERIAL")
+
+    uv_socket = _spherical_uv_nodes(nt)
+    tex = _new(nodes, "ShaderNodeTexImage", -250, 0)
+    tex.image = emission_img
+    tex.extension = "REPEAT"
+    compat.set_colorspace(emission_img, "non-color")
+    compat.set_channel_packed(emission_img)
+    links.new(uv_socket, tex.inputs["Vector"])
+
+    fac = _new(nodes, "ShaderNodeMath", -60, 0)
+    fac.operation = "MINIMUM"
+    links.new(tex.outputs["Alpha"], fac.inputs[0])
+    fac.inputs[1].default_value = 1.0
+
+    emission = _new(nodes, "ShaderNodeEmission", -60, -180)
+    emission.inputs["Color"].default_value = (*aurora_color, 1.0)
+    emission.inputs["Strength"].default_value = 3.0 * strength
+
+    transparent = _new(nodes, "ShaderNodeBsdfTransparent", -60, 140)
+    mix = _new(nodes, "ShaderNodeMixShader", 140, 0)
+    links.new(fac.outputs[0], mix.inputs["Fac"])
+    links.new(transparent.outputs[0], mix.inputs[1])
+    links.new(emission.outputs[0], mix.inputs[2])
+    links.new(mix.outputs[0], output.inputs["Surface"])
 
     compat.set_transparent_render_method(mat)
     shell.data.materials.append(mat)
