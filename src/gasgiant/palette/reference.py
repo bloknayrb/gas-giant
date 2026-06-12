@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from gasgiant.palette.gradient import srgb_to_oklab
+from gasgiant.palette.gradient import _oklab_to_srgb, srgb_to_oklab
 
 # Rec. 709 luma weights.
 _LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
@@ -139,6 +139,80 @@ def latitude_profile(img: np.ndarray, bins: int = 90) -> LatitudeProfile:
         lat, zone, belt, med, p5, p95, std,
         z_c, b_c, z_cs, b_cs, z_ls, b_ls, b_cp, hue, tex,
     )
+
+
+def chroma_restored_rgb(
+    rgb: np.ndarray,
+    lum: np.ndarray,
+    lo_q: float,
+    hi_q: float,
+    chroma_pct: float = 0.6,
+) -> np.ndarray:
+    """Quartile color with chroma restored to the chroma_pct percentile of
+    the quartile MEMBERS. Median L and the median (a, b) direction give a
+    robust lightness/hue; the chroma magnitude is re-inflated because
+    per-channel medians of a hue-spread population regress toward gray.
+
+    Restoring magnitude along the robust hue direction cannot latch onto a
+    chromatic minority and flip hue (fitting the top-chroma sub-quartile
+    could — e.g. festoon blue inside a belt). Guard: when the median member
+    chroma is below the gray floor the hue direction is noise (polar grays)
+    and the plain per-channel median is returned instead."""
+    sel = _quartile_sel(lum, lo_q, hi_q)
+    members = rgb[sel]
+    lab = srgb_to_oklab(members)
+    c_members = np.hypot(lab[:, 1], lab[:, 2])
+    if np.median(c_members) < _GRAY_CHROMA_FLOOR:
+        return np.median(members, axis=0)
+    big_l = np.median(lab[:, 0])
+    hue = np.arctan2(np.median(lab[:, 2]), np.median(lab[:, 1]))
+    c = np.quantile(c_members, chroma_pct)
+    lab_out = np.array([[big_l, c * np.cos(hue), c * np.sin(hue)]])
+    return _oklab_to_srgb(lab_out)[0]
+
+
+# Stop positions and the luminance windows each is fitted from (pixel-level
+# anchor fits). 5 stops match the hand-extended factory rows' structure.
+STOP_WINDOWS: dict[int, tuple[tuple[float, tuple[float, float]], ...]] = {
+    3: ((0.0, (0.0, 0.25)), (0.5, (0.375, 0.625)), (1.0, (0.75, 1.0))),
+    5: (
+        (0.0, (0.0, 0.25)),
+        (0.25, (0.125, 0.375)),
+        (0.5, (0.375, 0.625)),
+        (0.75, (0.625, 0.875)),
+        (1.0, (0.75, 1.0)),
+    ),
+}
+
+
+def anchor_fit(
+    img: np.ndarray,
+    anchor_deg: float,
+    window_deg: float,
+    mode: str = "median",
+    chroma_pct: float = 0.6,
+    stops: int = 3,
+) -> list[tuple[float, np.ndarray]]:
+    """Fit (pos, rgb) gradient stops for one anchor latitude directly from
+    the pixel rows within +-window_deg (latitude_profile only exposes
+    per-bin aggregates; the chroma-restored fit needs member pixels)."""
+    h = img.shape[0]
+    lat = 90.0 - (np.arange(h) + 0.5) / h * 180.0
+    rows = np.abs(lat - anchor_deg) <= window_deg
+    if not rows.any():
+        nearest = np.argsort(np.abs(lat - anchor_deg))[: max(3, h // 30)]
+        rows = np.zeros(h, dtype=bool)
+        rows[nearest] = True
+    rgb = img[rows].reshape(-1, 3).astype(np.float32)
+    lum = rgb @ _LUMA
+    out: list[tuple[float, np.ndarray]] = []
+    for pos, (lo, hi) in STOP_WINDOWS[stops]:
+        if mode == "chroma-restore":
+            color = chroma_restored_rgb(rgb, lum, lo, hi, chroma_pct)
+        else:
+            color = np.median(rgb[_quartile_sel(lum, lo, hi)], axis=0)
+        out.append((pos, color))
+    return out
 
 
 MEDIAN_KEYS = ("zone_rgb", "belt_rgb", "contrast", "zone_chroma", "belt_chroma")

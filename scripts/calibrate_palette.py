@@ -16,13 +16,21 @@ JSON:
 Fitting happens in display sRGB (pre-AgX); the Blender Cycles render
 remains the saturation gate.
 
+``--fit-mode chroma-restore`` replaces the per-channel quartile medians
+(which regress toward gray over a hue-spread population) with
+chroma-restored fits: median Oklab L and hue direction, chroma magnitude
+re-inflated to the ``--chroma-pct`` percentile of the quartile members.
+``--stops 5`` fits the 5-stop row structure the factory presets use.
+
 Output goes to stdout by default; ``--write PRESET`` merges the fitted
 palette_rows into a preset file (requires preset format 2 / palette_rows —
 Phase A; until then use --out to save the JSON).
 
 Usage:
   uv run python scripts/calibrate_palette.py --reference refs/PIA07782.jpg
-  uv run python scripts/calibrate_palette.py --anchors -60,-25,0,25,60 --out out/calib.json
+  uv run python scripts/calibrate_palette.py --anchors -60 -25 0 25 60 --out out/calib.json
+  uv run python scripts/calibrate_palette.py --fit-mode chroma-restore --stops 5 \
+      --anchors -65 -45 -28 -15 -5 8 18 32 50 65 --write src/gasgiant/presets/jupiter_like.json
 """
 
 from __future__ import annotations
@@ -34,7 +42,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from gasgiant.palette.reference import latitude_profile
+from gasgiant.palette.reference import anchor_fit, latitude_profile
 
 _DEFAULT_ANCHORS = (-65.0, -40.0, -15.0, 10.0, 40.0, 65.0)
 _DEFAULT_WINDOW_DEG = 9.0  # half-width of the latitude window sampled per anchor
@@ -56,22 +64,32 @@ def calibrate(
     anchors: tuple[float, ...],
     bins: int,
     window_deg: float = _DEFAULT_WINDOW_DEG,
+    fit_mode: str = "median",
+    chroma_pct: float = 0.6,
+    stops: int = 3,
 ) -> dict:
     profile = latitude_profile(img, bins)
 
     rows = []
     for anchor in sorted(anchors):
-        sel = np.abs(profile.lat_deg - anchor) <= window_deg
-        if not sel.any():
-            sel = np.argsort(np.abs(profile.lat_deg - anchor))[:3]
+        if fit_mode == "median" and stops == 3:
+            # Original profile-aggregate fit, byte-stable for default flags.
+            sel = np.abs(profile.lat_deg - anchor) <= window_deg
+            if not sel.any():
+                sel = np.argsort(np.abs(profile.lat_deg - anchor))[:3]
+            fitted = [
+                (0.0, np.median(profile.belt_rgb[sel], axis=0)),
+                (0.5, np.median(profile.median_rgb[sel], axis=0)),
+                (1.0, np.median(profile.zone_rgb[sel], axis=0)),
+            ]
+        else:
+            # Pixel-level fit (chroma-restore needs member pixels, which the
+            # profile aggregates cannot provide; 5-stop uses it too).
+            fitted = anchor_fit(img, anchor, window_deg, fit_mode, chroma_pct, stops)
         rows.append(
             {
                 "latitude": anchor,
-                "stops": [
-                    {"pos": 0.0, "color": _rgb(np.median(profile.belt_rgb[sel], axis=0))},
-                    {"pos": 0.5, "color": _rgb(np.median(profile.median_rgb[sel], axis=0))},
-                    {"pos": 1.0, "color": _rgb(np.median(profile.zone_rgb[sel], axis=0))},
-                ],
+                "stops": [{"pos": pos, "color": _rgb(color)} for pos, color in fitted],
             }
         )
 
@@ -97,14 +115,28 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--reference", type=Path, default=Path("refs/PIA07782.jpg"))
     ap.add_argument(
-        "--anchors",
-        default=",".join(str(a) for a in _DEFAULT_ANCHORS),
-        help="comma-separated anchor latitudes in signed degrees",
+        "--anchors", nargs="+", type=float, default=list(_DEFAULT_ANCHORS),
+        help="anchor latitudes in signed degrees (space-separated)",
     )
     ap.add_argument("--bins", type=int, default=90)
     ap.add_argument(
         "--window", type=float, default=_DEFAULT_WINDOW_DEG,
         help="half-width (deg) of the latitude window sampled per anchor",
+    )
+    ap.add_argument(
+        "--fit-mode", choices=("median", "chroma-restore"), default="median",
+        help="chroma-restore: median Oklab L/hue with member-chroma percentile "
+             "magnitude (medians of a hue-spread population regress toward gray)",
+    )
+    ap.add_argument(
+        "--chroma-pct", type=float, default=0.6,
+        help="member-chroma percentile restored by chroma-restore (pick once, "
+             "then freeze; tune residuals via appearance.chroma_scale instead)",
+    )
+    ap.add_argument(
+        "--stops", type=int, choices=(3, 5), default=3,
+        help="stops per fitted row (5 = the factory rows' structure, at "
+             "positions 0/.25/.5/.75/1)",
     )
     ap.add_argument("--out", type=Path, default=None, help="write JSON here instead of stdout")
     ap.add_argument(
@@ -117,8 +149,11 @@ def main() -> int:
         raise SystemExit(
             f"error: reference {args.reference} not found — run scripts/fetch_references.py first"
         )
-    anchors = tuple(float(a) for a in args.anchors.split(","))
-    doc = calibrate(_load_srgb(args.reference), anchors, args.bins, args.window)
+    anchors = tuple(float(a) for a in args.anchors)
+    doc = calibrate(
+        _load_srgb(args.reference), anchors, args.bins, args.window,
+        fit_mode=args.fit_mode, chroma_pct=args.chroma_pct, stops=args.stops,
+    )
 
     if args.write is not None:
         from gasgiant.params.presets import load_preset, save_preset
