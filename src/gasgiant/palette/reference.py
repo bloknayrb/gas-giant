@@ -215,6 +215,105 @@ def anchor_fit(
     return out
 
 
+def _moving_mean(x: np.ndarray, win: int) -> np.ndarray:
+    """Centered moving average with edge replication (odd win). A moving
+    MEDIAN would snap to the majority class inside bands wider than half the
+    window (the EZ is ~20 deg) and zero the classification signal exactly
+    where it matters; the mean interpolates instead."""
+    half = win // 2
+    padded = np.concatenate([np.full(half, x[0]), x, np.full(half, x[-1])])
+    return np.convolve(padded, np.ones(win) / win, mode="valid")
+
+
+def band_template_arrays(
+    img: np.ndarray,
+    max_bands: int = 18,
+    min_width_deg: float = 2.0,
+    lat_extent: float = 76.0,
+) -> dict[str, np.ndarray]:
+    """Extract a band skeleton from a cylindrical reference image.
+
+    Per-row median luminance, smoothed (~1.5 deg), classified zone/belt
+    against a wide (~45 deg) moving-mean baseline; class transitions give
+    edge latitudes. Bands narrower than min_width_deg are merged 3-way into
+    their (same-class) neighbors, weakest-first; the same merge trims the
+    count to max_bands and forces an EVEN count (the `values < median`
+    identity convention cannot represent belts-majority odd layouts).
+
+    Returns plain arrays only — no dependency on gasgiant.params; callers
+    map band luminance into color-index/height space themselves:
+      edges_deg  (n+1,) descending from +90 to -90 (interior <= lat_extent)
+      band_lum   (n,)   median smoothed row luminance per band
+      is_zone    (n,)   bool, brighter-than-baseline class
+    """
+    h = img.shape[0]
+    deg_per_row = 180.0 / h
+    lat = 90.0 - (np.arange(h) + 0.5) * deg_per_row
+    row_med = np.median(img.astype(np.float32) @ _LUMA, axis=1)
+    win = max(3, int(round(1.5 / deg_per_row)) | 1)
+    smooth = np.convolve(row_med, np.ones(win) / win, mode="same")
+    base = _moving_mean(smooth, max(3 * win, int(round(45.0 / deg_per_row)) | 1))
+
+    rows = np.where(np.abs(lat) <= lat_extent)[0]
+    cls = smooth[rows] > base[rows]
+    flips = np.where(cls[1:] != cls[:-1])[0]
+    # Band spans as row-index ranges [start, stop) over `rows`.
+    starts = np.concatenate([[0], flips + 1])
+    stops = np.concatenate([flips + 1, [len(rows)]])
+
+    def _lum(s: int, e: int) -> float:
+        return float(np.median(smooth[rows[s:e]]))
+
+    bands = [
+        {"s": int(s), "e": int(e), "zone": bool(cls[s]), "lum": _lum(s, e)}
+        for s, e in zip(starts, stops, strict=False)
+    ]
+
+    def _width(b: dict) -> float:
+        return (b["e"] - b["s"]) * deg_per_row
+
+    def _weakness(b: dict) -> float:
+        span = rows[b["s"]:b["e"]]
+        contrast = float(np.abs(smooth[span] - base[span]).mean())
+        return _width(b) * max(contrast, 1e-6)
+
+    def _merge_one(idx: int) -> None:
+        # 3-way merge: neighbors share a class (alternation), so removing
+        # band idx folds it and both neighbors into one band of their class.
+        lo, hi = max(idx - 1, 0), min(idx + 1, len(bands) - 1)
+        merged = {
+            "s": bands[lo]["s"], "e": bands[hi]["e"],
+            "zone": bands[lo]["zone"] if lo != idx else not bands[idx]["zone"],
+            "lum": 0.0,
+        }
+        merged["lum"] = _lum(merged["s"], merged["e"])
+        bands[lo:hi + 1] = [merged]
+
+    while len(bands) > 2:
+        narrow = [i for i, b in enumerate(bands) if _width(b) < min_width_deg]
+        if narrow:
+            _merge_one(min(narrow, key=lambda i: _weakness(bands[i])))
+        elif len(bands) > max_bands:
+            # Interior merge removes 2 bands and preserves parity.
+            interior = range(1, len(bands) - 1)
+            _merge_one(min(interior, key=lambda i: _weakness(bands[i])))
+        elif len(bands) % 2 == 1:
+            # Parity fix must be an EDGE merge (removes exactly 1 band).
+            _merge_one(min((0, len(bands) - 1), key=lambda i: _weakness(bands[i])))
+        else:
+            break
+
+    edges = [90.0]
+    for prev, nxt in zip(bands[:-1], bands[1:], strict=False):
+        edges.append(float(0.5 * (lat[rows[prev["e"] - 1]] + lat[rows[nxt["s"]]])))
+    edges.append(-90.0)
+    return {
+        "edges_deg": np.asarray(edges, dtype=np.float64),
+        "band_lum": np.asarray([b["lum"] for b in bands], dtype=np.float64),
+        "is_zone": np.asarray([b["zone"] for b in bands], dtype=bool),
+    }
+
+
 MEDIAN_KEYS = ("zone_rgb", "belt_rgb", "contrast", "zone_chroma", "belt_chroma")
 VARIANCE_KEYS = (
     "zone_chroma_std", "belt_chroma_std", "zone_L_std", "belt_L_std",
