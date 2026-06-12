@@ -3,6 +3,7 @@ output resolution, from the baked velocity and tracer textures."""
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,13 @@ _KERNELS = "gasgiant.render.kernels"
 _GROUP = 16
 
 
+def _set(prog: moderngl.ComputeShader, name: str, value) -> None:
+    """Guarded uniform set: tolerates uniforms absent from this program
+    variant (the non-DETAIL_FX program) or pruned by the driver."""
+    with contextlib.suppress(KeyError):
+        prog[name].value = value
+
+
 @dataclass
 class PolarRoute:
     """Patch velocity + tracer textures for routed polar backtraces."""
@@ -33,7 +41,17 @@ class PolarRoute:
 class DetailSynth:
     def __init__(self, gpu: GpuContext) -> None:
         self.gpu = gpu
-        self.prog = gpu.compute(_KERNELS, "detail.comp")
+        # Default program eagerly (its text is the pre-FX kernel, so neutral
+        # defaults stay byte-identical by construction); the DETAIL_FX
+        # variant compiles lazily on first selection (mirrors MapDeriver).
+        self._progs: dict[bool, moderngl.ComputeShader] = {}
+        self.prog = self._program(fx=False)
+
+    def _program(self, fx: bool) -> moderngl.ComputeShader:
+        if fx not in self._progs:
+            defines = {"DETAIL_FX": "1"} if fx else None
+            self._progs[fx] = self.gpu.compute(_KERNELS, "detail.comp", defines=defines)
+        return self._progs[fx]
 
     def synthesize(
         self,
@@ -53,8 +71,13 @@ class DetailSynth:
         polar: patch velocity/tracer textures — when given, polar backtraces
         route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
-        prog = self.prog
+        fx_on = params.intermittency > 0.0
+        prog = self._program(fx=fx_on)
         size = out_tex.size
+        if fx_on:
+            _set(prog, "u_intermittency", params.intermittency)
+            rng_gate = subseed(seed, "detail-intermittency")
+            _set(prog, "u_offset_gate", tuple(rng_gate.uniform(-100.0, 100.0, 3)))
         if polar is not None:
             prog["u_polar_route"].value = 1
             polar.vel_n.use(location=3)

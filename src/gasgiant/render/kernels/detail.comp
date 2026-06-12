@@ -61,6 +61,14 @@ uniform float u_striation_amount;
 uniform float u_striation_freq;
 uniform float u_polar_stipple;
 
+#ifdef DETAIL_FX
+// Longitudinal intermittency gate. The non-DETAIL_FX variant strips this
+// block at the GLSL-preprocessor level, so neutral-default output stays
+// identical by construction (the EMISSION/CHROMA_FX mechanism).
+uniform float u_intermittency;
+uniform vec3 u_offset_gate;       // subseed("detail-intermittency")
+#endif
+
 const float PI = 3.14159265358979;
 const int SUBSTEPS = 6;
 const float TAU_BASE = 0.35;      // pseudo-time per unit stretch
@@ -205,6 +213,27 @@ void main() {
     w_cell = u_cell_amount * (1.0 - belt) * (1.0 - speedN) * (1.0 - shearN)
            * (1.0 - 0.6 * routeW);  // the caps are not quiet zone interiors
 
+#ifdef DETAIL_FX
+    // Intermittency: nothing above varies texture density ALONG a belt
+    // (shearN is a 1-D latitude profile, speedN/T2 are low-frequency), so
+    // interiors read uniform where the real mosaic alternates violent
+    // folded patches with calm laminar runs. One low-frequency fbm gates
+    // the filament/striation weights; busy patches overshoot above 1 so
+    // mean texture energy stays roughly constant. Cells are NOT gated.
+    float gate = 1.0;
+    if (u_intermittency > 0.0) {
+        // Advect the gate field along the flow so patches elongate with
+        // it; muted where polar routing makes the equirect velocity junk.
+        vec2 llg = ll;
+        float adv = 0.5 * (1.0 - routeW);
+        llg.x -= adv * vel.x / max(cos(ll.y), 0.05);
+        llg.y -= adv * vel.y;
+        float g = fbm(spherePt(llg) * (u_freq * 0.22) + u_offset_gate, 3, 2.0, 0.5);
+        gate = mix(1.0, 0.25 + 1.45 * smoothstep(-0.25, 0.45, g), u_intermittency);
+    }
+    w_streak *= gate;
+#endif
+
     float d = 0.5 + 0.5 * streak * w_streak + 0.35 * (cells - 0.5) * w_cell;
 
     // Intra-band striation: HIGH-frequency noise backtraced 2-3x further than
@@ -217,6 +246,9 @@ void main() {
         float atten = smoothstep(1.5, 3.0, wavelength_px);
         float w_stria = u_striation_amount * (0.3 + 0.7 * max(belt, routeW * 0.5))
                       * (0.25 + 0.75 * speedN) * atten;
+#ifdef DETAIL_FX
+        w_stria *= gate;
+#endif
         d += 0.30 * stria * w_stria;
     }
 

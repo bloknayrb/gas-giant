@@ -350,6 +350,13 @@ class DetailParams(_Params):
         description="Bright granular storm speckle (popcorn) poleward of ~55 deg "
                     "(the band-to-mottle transition character)",
     )
+    intermittency: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail",
+        description="Longitudinal patchiness of the filament/striation texture: "
+                    "violent folded patches abutting calm laminar runs (the real "
+                    "mosaic's chaos is intermittent, not uniform). No rand: a "
+                    "draw here would reshuffle every later randomize draw",
+    )
 
 
 class PoleStyle(StrEnum):
