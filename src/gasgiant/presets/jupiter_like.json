@@ -721,7 +721,8 @@
         0.61
       ],
       "polar_tint_strength": 0.68,
-      "polar_tint_start_lat": 56.0
+      "polar_tint_start_lat": 56.0,
+      "hue_variance": 0.18
     },
     "detail": {
       "intensity": 0.95,

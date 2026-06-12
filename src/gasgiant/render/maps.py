@@ -37,10 +37,14 @@ def chroma_uniforms(seed: int, appearance: AppearanceParams) -> dict[str, object
     and every export tile by construction."""
     rng = subseed(seed, "chroma-variance")
     offset = tuple(float(x) for x in rng.uniform(-100.0, 100.0, 3))
+    rng_hue = subseed(seed, "hue-variance")
+    hue_offset = tuple(float(x) for x in rng_hue.uniform(-100.0, 100.0, 3))
     return {
         "u_chroma_scale": appearance.chroma_scale,
         "u_chroma_variance": appearance.chroma_variance,
         "u_chroma_offset": offset,
+        "u_hue_variance": appearance.hue_variance,
+        "u_hue_offset": hue_offset,
     }
 
 
@@ -149,7 +153,9 @@ class MapDeriver:
         # the preview never shows) the preview uses the FX variant whenever
         # the params are active — selection depends on appearance only.
         chroma_on = (
-            appearance.chroma_scale != 1.0 or appearance.chroma_variance > 0.0
+            appearance.chroma_scale != 1.0
+            or appearance.chroma_variance > 0.0
+            or appearance.hue_variance > 0.0  # silent-no-op trap: must be here
         )
         prog = self._program(emission=emission_on, chroma_fx=chroma_on)
         size = color_out.size

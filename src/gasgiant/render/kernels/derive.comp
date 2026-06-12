@@ -59,6 +59,12 @@ uniform float u_polar_tint_start;  // |lat| radians
 uniform float u_chroma_scale;
 uniform float u_chroma_variance;
 uniform vec3 u_chroma_offset;      // subseed("chroma-variance")
+// Iso-luminance hue drift: a luminance-keyed palette gradient cannot
+// express differently-hued material at the same L by construction (the
+// hue_spread shortfall's root cause; calibration-side per-stop hue
+// fitting already exists and cannot move the within-bin statistic).
+uniform float u_hue_variance;      // radians of max hue rotation
+uniform vec3 u_hue_offset;         // subseed("hue-variance")
 #endif
 
 #ifdef EMISSION
@@ -181,6 +187,19 @@ void main() {
         }
         vec3 lab = srgb_to_oklab(col);
         lab.yz *= cscale;
+        if (u_hue_variance > 0.0) {
+            // Band-confined drift field (same anisotropy as the chroma
+            // drift, own offset); rotation in (a, b) is luminance-neutral
+            // and stays inside the oklab_to_srgb gamut clamps.
+            float hlon = uv.x * 2.0 * PI - PI;
+            float hcl = cos(lat);
+            vec3 hsp = vec3(hcl * cos(hlon), sin(lat), hcl * sin(hlon));
+            float theta = u_hue_variance
+                        * fbm(hsp * vec3(0.9, 4.0, 0.9) + u_hue_offset, 3, 2.0, 0.5);
+            float cs = cos(theta);
+            float sn = sin(theta);
+            lab.yz = vec2(lab.y * cs - lab.z * sn, lab.y * sn + lab.z * cs);
+        }
         col = oklab_to_srgb(lab);
     }
 #endif

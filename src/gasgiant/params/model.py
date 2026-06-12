@@ -514,6 +514,13 @@ class AppearanceParams(_Params):
                     "of more/less saturated material varying slowly with "
                     "longitude (the reference's saturated-pocket texture)",
     )
+    hue_variance: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=0.35, ui="Appearance",
+        description="Iso-luminance Oklab hue drift (radians of max rotation): "
+                    "differently-hued material at the same lightness, which a "
+                    "luminance-keyed palette gradient cannot express -- the "
+                    "hue-diversity lever the realism metrics name",
+    )
     polar_tint_color: tuple[float, float, float] = pfield(
         (0.42, 0.50, 0.58), tier=Tier.POST, ui="Appearance",
         description="Polar cap tint (Juno blue-gray); applied where cloud tops "

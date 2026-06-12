@@ -120,3 +120,17 @@ def test_chroma_params_are_post_tier():
     b.appearance.chroma_scale = 1.4
     b.appearance.chroma_variance = 0.2
     assert diff_tiers(a, b) == {Tier.POST}
+
+
+def test_hue_variance_noop_at_epsilon_and_rotates_hue(gpu):
+    base = Simulation(_quick_params(), gpu).render_maps(256)["color"]
+    eps = Simulation(_quick_params(hue_variance=1e-6), gpu).render_maps(256)["color"]
+    assert np.allclose(base, eps, atol=2e-3), np.abs(base - eps).max()
+
+    on = Simulation(_quick_params(hue_variance=0.3), gpu).render_maps(256)["color"]
+    assert np.all(np.isfinite(on))
+    assert not np.allclose(base, on, atol=2e-3)
+    # Luminance-neutral: hue rotation in (a, b) leaves Oklab L unchanged up
+    # to the gamut clamp, so mean luma must barely move.
+    luma = lambda img: (img[..., :3] @ np.array([0.2126, 0.7152, 0.0722])).mean()
+    assert abs(float(luma(on) - luma(base))) < 0.01
