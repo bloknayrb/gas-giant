@@ -291,6 +291,8 @@
     "detail": {
       "intensity": 0.15,
       "cellular_amount": 0.15,
+      "striation_amount": 0.35,
+      "striation_frequency": 128.0,
       "polar_stipple": 0.35
     },
     "emission": {

@@ -516,11 +516,11 @@
         }
       ],
       "polar_tint_color": [
-        0.4,
-        0.49,
-        0.58
+        0.36,
+        0.46,
+        0.61
       ],
-      "polar_tint_strength": 0.55,
+      "polar_tint_strength": 0.68,
       "polar_tint_start_lat": 56.0
     },
     "storms": {
