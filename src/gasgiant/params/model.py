@@ -421,6 +421,20 @@ class DetailParams(_Params):
                     "winds in the hero's actual rotation sense. Stationary in "
                     "the hero frame — fine for stills",
     )
+    belt_texture: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        description="Storm-scale folded luminance structure inside belts "
+                    "(0.5-3 deg, flow-backtraced so patches fold with the "
+                    "flow) + a belt floor for the fine filaments; the v1.4 "
+                    "audit's dominant texture gap on broad-band layouts",
+    )
+    mottle: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        description="Temperate lace mottle (35-60 deg): granular bright "
+                    "rings, dark dots, and lacy folds where banding gives "
+                    "way -- the reference's mid-latitude storm-flecked "
+                    "character",
+    )
 
 
 class PoleStyle(StrEnum):

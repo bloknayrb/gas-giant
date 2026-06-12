@@ -157,3 +157,46 @@ def test_hero_spiral_render_is_seam_clean(gpu):
     maps = sim.render_maps(512)
     report = validate_arrays({"color": maps["color"], "height": maps["height"]})
     assert report.ok, report.problems
+
+
+def test_belt_texture_noop_at_epsilon_and_adds_belt_structure(gpu):
+    base = _synth_detail_field(gpu, _quick_params())
+    eps = _synth_detail_field(gpu, _quick_params(belt_texture=1e-6))
+    assert np.allclose(base, eps, atol=1e-3)
+
+    on = _synth_detail_field(gpu, _quick_params(belt_texture=1.0))
+    assert np.all(np.isfinite(on))
+    # The fold term + filament floor raise detail variance where belt_mask
+    # is set; globally the variance must rise and the field must change.
+    assert not np.array_equal(base, on)
+    assert float(on.std()) > float(base.std()) * 1.05
+
+
+def test_mottle_noop_at_epsilon_and_is_latitude_windowed(gpu):
+    base = _synth_detail_field(gpu, _quick_params())
+    eps = _synth_detail_field(gpu, _quick_params(mottle=1e-6))
+    assert np.allclose(base, eps, atol=1e-3)
+
+    on = _synth_detail_field(gpu, _quick_params(mottle=1.2))
+    assert np.all(np.isfinite(on))
+    h = on.shape[0]
+    # 40-55 deg rows gain energy...
+    band = slice(int((90 - 55) / 180 * h), int((90 - 40) / 180 * h))
+    assert float(np.abs(on[band] - base[band]).mean()) > 1e-3
+    # ...the equatorial tenth is untouched by the window (byte-equality is
+    # valid because both renders force the SAME FX program).
+    eq = slice(int(0.45 * h), int(0.55 * h))
+    on_eq = _synth_detail_field(gpu, _quick_params(mottle=1.2, intermittency=1e-6))
+    base_eq = _synth_detail_field(gpu, _quick_params(mottle=1e-6, intermittency=1e-6))
+    np.testing.assert_array_equal(on_eq[eq], base_eq[eq])
+
+
+def test_new_detail_knobs_are_post_tier():
+    from gasgiant.engine.invalidation import diff_tiers
+    from gasgiant.params.model import Tier
+
+    a = PlanetParams()
+    b = a.model_copy(deep=True)
+    b.detail.belt_texture = 0.7
+    b.detail.mottle = 0.5
+    assert diff_tiers(a, b) == {Tier.POST}

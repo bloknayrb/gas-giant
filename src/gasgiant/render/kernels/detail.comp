@@ -73,6 +73,13 @@ uniform vec3 u_offset_spiral;     // subseed("detail-hero-spiral")
 // Rotation sense per hero, sign(strength) — deliberately NOT packed into
 // u_heroes.w so heroMask and the default program text stay untouched.
 uniform float u_hero_spin[3];
+// Storm-scale folded structure inside belts + temperate lace mottle (the
+// v1.4 audit's two biggest texture gaps: the filament masks are jet-gated
+// and a reference-aligned broad-band layout puts band interiors far from
+// any jet; and nothing at all textures the 35-60 deg regime).
+uniform float u_belt_texture;
+uniform float u_mottle;
+uniform vec3 u_offset_mottle;     // subseed("detail-mottle")
 #endif
 
 const float PI = 3.14159265358979;
@@ -238,6 +245,11 @@ void main() {
         gate = mix(1.0, 0.25 + 1.45 * smoothstep(-0.25, 0.45, g), u_intermittency);
     }
     w_streak *= gate;
+    // Belt floor for the fine filaments: band interiors on a broad-band
+    // layout sit far from any jet, so the shear/speed gate starves them.
+    // Additive, NO clamp: w_streak legitimately exceeds 1 near heroes (the
+    // 1+1.4*hero factor) and clamping would change the default behavior.
+    w_streak += u_belt_texture * 0.45 * belt * gate * (1.0 - routeW);
 #endif
 
     float d = 0.5 + 0.5 * streak * w_streak + 0.35 * (cells - 0.5) * w_cell;
@@ -259,6 +271,43 @@ void main() {
     }
 
 #ifdef DETAIL_FX
+    // Storm-scale folded structure: the mosaic's dominant belt texture
+    // lives at 0.5-3 deg — far below the filament frequency — and emerges
+    // from real turbulence folding. Mid-frequency noise sampled at a
+    // BACKTRACED position folds with the flow exactly like the filaments
+    // do, so the patches read flow-structured, not airbrushed-on. Gated by
+    // the intermittency field so violent patches abut calm runs.
+    if (u_belt_texture > 0.0 && routeW < 1.0 && belt > 0.02) {
+        // belt-mask guard: the backtrace is the cost; zones skip it.
+        vec2 srcF = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 1.6);
+        float fold = fbm(spherePt(srcF) * (u_freq * 0.30) + u_offset_gate.yzx,
+                         4, 2.0, 0.5);
+        // Gain note: derive applies the field at intensity*0.55, so a
+        // ref-like +-20-30% belt luminance swing needs d driven hard; the
+        // final [0,1] clamp bounds it and fbm rarely saturates.
+        d += 0.78 * u_belt_texture * fold * belt * gate * (1.0 - routeW);
+    }
+
+    // Temperate lace mottle (35-60 deg): the reference's mid-high latitudes
+    // are dense storm-flecked filament mottle — bright granule rings, dark
+    // dots, lacy folds — where bands give way. A short backtrace gives the
+    // lace its flow character (the equirect velocity is valid here; routing
+    // only starts at 66 deg).
+    if (u_mottle > 0.0) {
+        float aw = smoothstep(0.52, 0.70, abs(ll.y))
+                 * (1.0 - smoothstep(1.10, 1.22, abs(ll.y)));
+        if (aw > 0.0) {
+            vec2 srcM = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 0.8);
+            vec3 pm = spherePt(srcM);
+            float granule = clamp(0.45 - worleyF1(pm * (u_freq * 0.7)
+                                                  + u_offset_mottle), 0.0, 1.0) * 2.0;
+            float dots = clamp(0.30 - worleyF1(pm * (u_freq * 1.1)
+                                               + u_offset_mottle.zxy), 0.0, 1.0) * 2.0;
+            float lace = fbm(pm * (u_freq * 0.5) + u_offset_mottle.yzx, 3, 2.0, 0.5);
+            d += u_mottle * aw * (0.30 * granule - 0.22 * dots + 0.18 * lace);
+        }
+    }
+
     // Hero internal spiral lanes (the Juno-close-up GRS look): tightly
     // wound log-spiral lanes peaking mid-radius (the center stays calm and
     // bright, and the window fades before the q~1.0 dark perimeter ring so

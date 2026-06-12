@@ -235,7 +235,10 @@ def _build_crops(sim, ours: np.ndarray, args) -> list[dict]:
     centers = 0.5 * (edges[:-1] + edges[1:])
     widths = edges[:-1] - edges[1:]
     is_belt = values < np.median(values)
-    lowmid = np.abs(centers) < 50.0
+    # Prefer the tropical belts (NEB/SEB analogs): the widest belt on a
+    # reference layout is a high-latitude mottle band where detail is
+    # legitimately muted -- judging texture there mis-grades the feature.
+    lowmid = np.abs(centers) < 35.0
 
     def widest(mask) -> int:
         cand = np.where(mask & lowmid)[0]
@@ -432,9 +435,10 @@ def _build_crops(sim, ours: np.ndarray, args) -> list[dict]:
         ("texture_striation", belt_mid,
          "Striation: fine along-flow thread texture inside belts."),
     ):
+        lon0 = 58.0 if feature == "texture_striation" else 10.0  # distinct evidence
         emit(
             feature, claim, "advisory",
-            _crop_deg(ours, lat_c + 6.0, lat_c - 6.0, 10.0, 34.0),
+            _crop_deg(ours, lat_c + 6.0, lat_c - 6.0, lon0, lon0 + 24.0),
             None,
             note="ours-only at native scale; no reference at this ground "
                  "resolution covers a generic band interior -- presence/"
