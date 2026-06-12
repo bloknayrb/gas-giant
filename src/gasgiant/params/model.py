@@ -436,6 +436,12 @@ class DetailParams(_Params):
                     "flow) + a belt floor for the fine filaments; the v1.4 "
                     "audit's dominant texture gap on broad-band layouts",
     )
+    belt_texture_fine: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        description="Finer sub-grid belt fold octave: a second flow-aligned "
+                    "backtrace hop folds mid-frequency noise below the sim "
+                    "grid scale, densifying belt texture at matched scale",
+    )
     mottle: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
         description="Temperate lace mottle (35-60 deg): granular bright "

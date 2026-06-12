@@ -78,6 +78,7 @@ uniform float u_hero_spin[3];
 // and a reference-aligned broad-band layout puts band interiors far from
 // any jet; and nothing at all textures the 35-60 deg regime).
 uniform float u_belt_texture;
+uniform float u_belt_texture_fine;
 uniform float u_mottle;
 uniform vec3 u_offset_mottle;     // subseed("detail-mottle")
 #endif
@@ -286,6 +287,18 @@ void main() {
         // ref-like +-20-30% belt luminance swing needs d driven hard; the
         // final [0,1] clamp bounds it and fbm rarely saturates.
         d += 0.78 * u_belt_texture * fold * belt * gate * (1.0 - routeW);
+    }
+
+    // Finer sub-grid belt octave (v1.5): a SECOND flow-aligned backtrace hop
+    // (iterated, not a single longer hop) folds mid-frequency noise below the
+    // sim grid scale, so belt texture densifies at matched scale. Same belt/
+    // route gating as the coarse fold.
+    if (u_belt_texture_fine > 0.0 && routeW < 1.0 && belt > 0.02) {
+        vec2 s1 = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 1.2);
+        vec2 s2 = backtraceLL(u_vel, 0, s1, u_stretch * TAU_BASE * 1.2);
+        float fold2 = fbm(spherePt(s2) * (u_freq * 0.85) + u_offset_gate.zxy,
+                          3, 2.0, 0.5);
+        d += 0.62 * u_belt_texture_fine * fold2 * belt * gate * (1.0 - routeW);
     }
 
     // Temperate lace mottle (35-60 deg): the reference's mid-high latitudes

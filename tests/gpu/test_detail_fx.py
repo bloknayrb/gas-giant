@@ -199,4 +199,26 @@ def test_new_detail_knobs_are_post_tier():
     b = a.model_copy(deep=True)
     b.detail.belt_texture = 0.7
     b.detail.mottle = 0.5
+    b.detail.belt_texture_fine = 0.9
     assert diff_tiers(a, b) == {Tier.POST}
+
+
+def test_belt_texture_fine_noop_at_epsilon_and_adds_structure(gpu):
+    # Force the FX variant in both arms via a tiny intermittency so we compare
+    # the same compiled program (mirrors the mottle test pattern at lines 189-191).
+    base = _synth_detail_field(gpu, _quick_params(intermittency=1e-6))
+    eps = _synth_detail_field(gpu, _quick_params(belt_texture_fine=1e-6,
+                                                 intermittency=1e-6))
+    assert np.allclose(base, eps, atol=1e-3)
+
+    on = _synth_detail_field(gpu, _quick_params(belt_texture_fine=1.0,
+                                                intermittency=1e-6))
+    assert np.all(np.isfinite(on))
+    assert not np.array_equal(base, on)
+    assert float(on.std()) > float(base.std()) * 1.05
+
+
+def test_belt_texture_fine_zero_routes_to_default_program(gpu):
+    base = Simulation(_quick_params(), gpu).render_maps(256)["color"]
+    zero = Simulation(_quick_params(belt_texture_fine=0.0), gpu).render_maps(256)["color"]
+    np.testing.assert_array_equal(base, zero)
