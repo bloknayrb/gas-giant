@@ -92,6 +92,14 @@ quartile is a mixture containing pastel material whose chroma does drop
 through AgX. The render-quartile measurement is the one tuning uses —
 and it must be re-measured whenever the palette changes.
 
+## Measured perf calibration (16K all-maps, RTX 3070)
+
+The detail retune (frequency 64, flow_stretch 1.3, striation 0.8@160,
+intensity 0.75) is cost-neutral: 33.5 s vs the v1.2 33.8 s — frequency and
+stretch change WHAT the same fbm calls sample, not how many. One extra
+flow phase costs **+1.7 s** (35.2 s at phases=4), falsifying the planning
+assumption of +4–5 s/phase — which is why jupiter_like ships flow_phases 4.
+
 ## Tuning protocol
 
 - Texture judgement happens on **≥4K renders only**: the striation layer at
