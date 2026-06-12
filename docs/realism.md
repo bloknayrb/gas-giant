@@ -194,6 +194,29 @@ streamline striations (floored too low); popcorn high-cloud clusters
 Both sweeps note: the ref map's featureless poles are partly projection
 blur — PIA21641 is the polar ground truth, and ours is far from it.
 
+### Pre-registered v1.4 targets (recorded at the template commit, BEFORE
+### the post-template measurement; baseline = post-B0 @2048)
+
+Counterfactual alignment ceilings (identity-matched monotone latitude warp
+of the post-B0 profile onto the template's band positions — 10/12 ref bands
+matched; the −57.5° belt and −78.5° polar zone are unmatched ceiling
+limitations). Targets = 70% of each metric's OWN ceiling:
+
+| metric | post-B0 | warp ceiling | target |
+|---|---|---|---|
+| zone_rgb | 0.0673 | −29.5 % | ≤ 0.0534 |
+| belt_rgb | 0.0766 | −25.2 % | ≤ 0.0631 |
+| contrast | 0.0618 | −2.7 % (alignment cannot move it) | no regression > 2 % |
+| belt_chroma | 0.0117 | −14.3 % | ≤ 0.0105 |
+
+(a) Band-level de-alternation: post-B0 residual sign-change count 6 over 9
+template bands (|lat| ≤ 50°) → target ≤ 3; masked mean |belt_chroma|
+residual 0.0137 → ≤ 0.0082 (−40%).
+(c) Variance floors (ratio-to-ref, script-side): belt_chroma_std ≥ 0.58×,
+zone_chroma_std ≥ 0.40×, belt_L_std ≥ 0.55×.
+(d) hue_spread re-measured post-recalibration; the hue_variance shader knob
+is built only if still < 60% of ref.
+
 ### Harness notes
 
 Crops 20/22 shared one file (belt-filament and striation boxes
