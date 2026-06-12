@@ -162,10 +162,12 @@ class Simulation:
         height_tex: moderngl.Texture,
         emission_tex: moderngl.Texture | None = None,
     ) -> None:
-        """emission_tex=None (the preview path) selects the non-EMISSION
-        program variant — the GUI never displays emission, and the variant's
-        preprocessed source is the pre-emission kernel, so neutral defaults
-        stay byte-identical by construction."""
+        """emission_tex=None (the preview path) selects a non-EMISSION
+        program variant — the GUI never displays emission, and disabled
+        features preprocess OUT of the kernel, so neutral defaults stay
+        byte-identical by construction. Chroma FX is different: it affects
+        the displayed color, so the deriver picks the CHROMA_FX variant
+        from the appearance params alone — preview included."""
         s = self.solver
         p = self.params
         detail_tex = None

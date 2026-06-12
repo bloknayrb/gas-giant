@@ -416,6 +416,19 @@ class AppearanceParams(_Params):
         1.0, tier=Tier.POST, lo=0.4, hi=2.5, ui="Appearance",
         description="Final tone-curve gamma on the color map",
     )
+    chroma_scale: float = pfield(
+        1.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Appearance",
+        description="Oklab chroma multiplier on the final color (1 = off) — "
+                    "perceptual saturation, recommended over 'saturation' "
+                    "(an sRGB luma mix). No rand: adding a draw would "
+                    "reshuffle every later randomize draw",
+    )
+    chroma_variance: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=0.5, ui="Appearance",
+        description="Longitudinal within-band chroma drift: bands hold pockets "
+                    "of more/less saturated material varying slowly with "
+                    "longitude (the reference's saturated-pocket texture)",
+    )
     polar_tint_color: tuple[float, float, float] = pfield(
         (0.42, 0.50, 0.58), tier=Tier.POST, ui="Appearance",
         description="Polar cap tint (Juno blue-gray); applied where cloud tops "

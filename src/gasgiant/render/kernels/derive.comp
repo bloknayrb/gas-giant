@@ -50,6 +50,17 @@ uniform vec3 u_polar_tint_color;
 uniform float u_polar_tint_strength;
 uniform float u_polar_tint_start;  // |lat| radians
 
+#ifdef CHROMA_FX
+// Oklab chroma scaling + longitudinal within-band chroma drift. The
+// non-CHROMA_FX variant strips this whole block (including the inlined
+// oklab.glsl), so neutral-default output stays identical at the
+// GLSL-preprocessor level — the same mechanism as EMISSION.
+#include "oklab.glsl"
+uniform float u_chroma_scale;
+uniform float u_chroma_variance;
+uniform vec3 u_chroma_offset;      // subseed("chroma-variance")
+#endif
+
 #ifdef EMISSION
 // Emission map (night-side glow): RGB = thermal + lightning linear radiance,
 // A = aurora intensity (hue applied at import — the aurora is 1000 km above
@@ -152,6 +163,27 @@ void main() {
     col = (col - 0.5) * contrast + 0.5;
     float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
     col = mix(vec3(luma), col, u_saturation * (1.0 - u_haze_amount * 0.4));
+#ifdef CHROMA_FX
+    {
+        // Input clamp is load-bearing (oklab input domain) and commutes
+        // with the gamma-stage clamp below, so scale 1.0 / variance 0 is a
+        // no-op in exact arithmetic.
+        col = clamp(col, 0.0, 1.0);
+        float cscale = u_chroma_scale;
+        if (u_chroma_variance > 0.0) {
+            float clon = uv.x * 2.0 * PI - PI;
+            float ccl = cos(lat);
+            vec3 csp = vec3(ccl * cos(clon), sin(lat), ccl * sin(clon));
+            // Anisotropy mirrors band_mod.glsl band variance: slow along
+            // longitude, band-confined across latitude.
+            float drift = fbm(csp * vec3(0.9, 4.0, 0.9) + u_chroma_offset, 3, 2.0, 0.5);
+            cscale *= 1.0 + u_chroma_variance * drift;  // >= 0.55 by param ranges
+        }
+        vec3 lab = srgb_to_oklab(col);
+        lab.yz *= cscale;
+        col = oklab_to_srgb(lab);
+    }
+#endif
     col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / max(u_gamma, 1e-3)));
 
     float height = clamp(

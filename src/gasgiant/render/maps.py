@@ -31,6 +31,19 @@ def _set(prog: moderngl.ComputeShader, name: str, value) -> None:
         prog[name].value = value
 
 
+def chroma_uniforms(seed: int, appearance: AppearanceParams) -> dict[str, object]:
+    """Pure seed-derived chroma-drift placement (fresh subseed stream) plus
+    the scale/variance values; identical for the preview path, render_maps,
+    and every export tile by construction."""
+    rng = subseed(seed, "chroma-variance")
+    offset = tuple(float(x) for x in rng.uniform(-100.0, 100.0, 3))
+    return {
+        "u_chroma_scale": appearance.chroma_scale,
+        "u_chroma_variance": appearance.chroma_variance,
+        "u_chroma_offset": offset,
+    }
+
+
 def emission_uniforms(seed: int, emission: EmissionParams) -> dict[str, object]:
     """Pure seed-derived emission placement: noise offsets and magnetic-pole
     unit vectors. Fresh subseed streams; identical for the preview path,
@@ -64,14 +77,29 @@ def emission_uniforms(seed: int, emission: EmissionParams) -> dict[str, object]:
 class MapDeriver:
     def __init__(self, gpu: GpuContext) -> None:
         self.gpu = gpu
-        # Two program variants: the non-EMISSION one preprocesses to the
-        # pre-emission kernel text, so neutral defaults stay byte-identical
-        # by construction rather than by hope (recompiling a changed kernel
-        # can shift FP scheduling on BOTH sides of an off/on comparison).
-        self.prog = gpu.compute(_KERNELS, "derive.comp")
-        self.prog_emission = gpu.compute(_KERNELS, "derive.comp", defines={"EMISSION": "1"})
+        # Program variants keyed by (EMISSION, CHROMA_FX): each disabled
+        # feature preprocesses OUT of the kernel text, so neutral defaults
+        # stay byte-identical by construction rather than by hope
+        # (recompiling a changed kernel can shift FP scheduling on BOTH
+        # sides of an off/on comparison). The two default variants compile
+        # eagerly (their absence would only surface at first use);
+        # FX variants compile lazily on first selection.
+        self._progs: dict[tuple[bool, bool], moderngl.ComputeShader] = {}
+        self.prog = self._program(emission=False, chroma_fx=False)
+        self.prog_emission = self._program(emission=True, chroma_fx=False)
         self._palette_tex: moderngl.Texture | None = None
         self._storm_tex: moderngl.Texture | None = None
+
+    def _program(self, emission: bool, chroma_fx: bool) -> moderngl.ComputeShader:
+        key = (emission, chroma_fx)
+        if key not in self._progs:
+            defines: dict[str, str] = {}
+            if emission:
+                defines["EMISSION"] = "1"
+            if chroma_fx:
+                defines["CHROMA_FX"] = "1"
+            self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
+        return self._progs[key]
 
     def update_palettes(self, appearance: AppearanceParams) -> None:
         for tex in (self._palette_tex, self._storm_tex):
@@ -117,7 +145,13 @@ class MapDeriver:
             and profile_dyn is not None
             and profile_stamp is not None
         )
-        prog = self.prog_emission if emission_on else self.prog
+        # Chroma FX affects the displayed color, so (unlike emission, which
+        # the preview never shows) the preview uses the FX variant whenever
+        # the params are active — selection depends on appearance only.
+        chroma_on = (
+            appearance.chroma_scale != 1.0 or appearance.chroma_variance > 0.0
+        )
+        prog = self._program(emission=emission_on, chroma_fx=chroma_on)
         size = color_out.size
         lanes = lanes or []
         packed = np.zeros((16, 2), dtype=np.float32)
@@ -157,6 +191,9 @@ class MapDeriver:
         prog["u_contrast"].value = appearance.contrast
         prog["u_saturation"].value = appearance.saturation
         prog["u_gamma"].value = appearance.gamma
+        if chroma_on:
+            for name, value in chroma_uniforms(seed, appearance).items():
+                _set(prog, name, value)
         color_out.bind_to_image(0, read=False, write=True)
         height_out.bind_to_image(1, read=False, write=True)
         if emission_on:
