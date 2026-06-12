@@ -292,6 +292,10 @@
       "intensity": 0.15,
       "cellular_amount": 0.15,
       "polar_stipple": 0.35
+    },
+    "emission": {
+      "aurora_strength": 0.3,
+      "aurora_pole_offset": 0.0
     }
   }
 }

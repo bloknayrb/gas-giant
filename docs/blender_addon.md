@@ -33,6 +33,23 @@ exported folder. Options in the import panel:
 - **Create demo scene** — sun lamp at 0.25° angular size, black world,
   framed camera, AgX view transform: first renders look right.
 
+## Emission (night-side glow)
+
+If the map set was exported with any `emission.*_strength` nonzero, the
+importer wires `emission.exr` into the Principled "Emission Color"
+(channel-packed alpha — the EXR's alpha is an aurora data mask, not
+coverage). Options:
+
+- **Emission strength** — multiplier applied at import; night-side renders
+  often want 2–10 without re-exporting. Cycles is required for the emission
+  to actually light the scene (EEVEE shows it but doesn't illuminate
+  without raytracing).
+- **Aurora on shell** — lifts the aurora (alpha channel × the manifest's
+  `aurora_color`) onto a transparent shell at ~1.03 R instead of the cloud
+  surface; it stands off the limb like the real thing. The shell emission
+  is not sun-gated: dayside-negligible at default strength, not
+  dayside-clean. For lit-only shots simply export with strengths 0.
+
 ## Version compatibility
 
 `compat.py` is the only file that branches on `bpy.app.version`. Verified

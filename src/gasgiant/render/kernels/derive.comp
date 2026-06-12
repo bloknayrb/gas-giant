@@ -203,7 +203,10 @@ void main() {
             act *= 1.0 - smoothstep(0.5, 0.7, t.a);   // anticyclone cores: dry
             act += 0.2 * min(max(-t.a, 0.0), 0.25);   // cyclonic wakes: bonus,
             // clamped — festoon plumes reach T3 -0.8 and must not dominate
-            float cluster = max(snoise(sp2 * 14.0 + u_li_offset), 0.0);
+            // Thresholded cluster field: most of the belt has NO flashes;
+            // they concentrate into distinct storm cells (an un-thresholded
+            // field scattered them into an even starfield — calibration).
+            float cluster = smoothstep(0.15, 0.65, snoise(sp2 * 14.0 + u_li_offset));
             float gate = u_li_density * act * cluster;
             if (gate > 1e-3) {
                 float s = snoise(sp2 * 100.0 + u_li_offset.zxy * 1.7);

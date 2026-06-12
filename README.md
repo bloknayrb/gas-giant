@@ -4,7 +4,8 @@ Procedural gas giant texture map generator. A GPU "sim-advected procedural"
 engine — a physically motivated velocity field (alternating zonal jets,
 injected storm vortices, shear-driven turbulence) through which cloud tracer
 fields are advected — produces seamless equirectangular map sets (16-bit
-color + float height) for wrapping on a sphere, plus a Blender extension
+color + float height, plus an optional HDR emission map: thermal hot-spot
+glow, lightning, aurora) for wrapping on a sphere, plus a Blender extension
 that imports a map set as a ready-to-render planet with material, atmosphere,
 and demo scene.
 

@@ -544,6 +544,10 @@
     },
     "turbulence": {
       "kh_amplitude": 0.6
+    },
+    "emission": {
+      "thermal_strength": 0.35,
+      "lightning_strength": 0.15
     }
   }
 }

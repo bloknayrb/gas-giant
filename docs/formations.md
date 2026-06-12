@@ -132,7 +132,11 @@ the characteristic hooks (`wave_stamp.glsl`).
 ### 5-µm hot spots
 Compact cloud-free holes between festoons at the wave troughs — the deepest
 visible levels. *Implementation:* STAMP — sharp T1/T0 depressions at the
-troughs (`waves.hotspot_depth`); these drive the (future) emission map.
+troughs (`waves.hotspot_depth`); these drive the emission map's thermal
+component (`emission.thermal_strength`): the glow is gated on the cloud-gap
+ANOMALY versus the band stamp, so hot-spot chains blaze (HDR, ~16x the faint
+belt glimmer — real 5-µm maps span ~50:1), barges and polar cyclone
+interiors glow (JIRAM-consistent), and undisturbed belts barely read.
 
 ### Saturn ribbon wave
 A thin dark wavy ribbon meandering along one mid-latitude jet (~47°N).
@@ -207,6 +211,24 @@ storms mostly hidden — versus Jupiter's vivid contrast. *Implementation:*
 POST — the `appearance.haze_amount` knob blends color toward a haze tint,
 compresses contrast and saturation, and flattens height relief. This single
 axis is the main Jupiter ↔ Saturn slider.
+
+### Lightning storm glow (emission map)
+Galileo/Juno see lightning clustered in cyclonic belts and at high
+latitudes — never in the great anticyclones. *Implementation:* POST
+(`emission.lightning_strength`) — RGB of the emission map: a thresholded
+low-frequency cluster field groups flashes into storm cells; one spark
+field yields sparse HDR cores (radiance ~25) plus soft "light pools under
+the deck" halos. Gated by the jet profile's belt mask + a poleward ramp,
+suppressed in anticyclone cores, all field-space (tile-apron-safe).
+
+### Aurora ovals (emission map)
+Wobbled patchy rings at ~10–20° from the magnetic poles. *Implementation:*
+POST (`emission.aurora_*`) — the emission map's ALPHA channel carries the
+intensity; the importer tints it (manifest `aurora_color`, pink H/H₂ by
+default — oxygen green is impossible in a hydrogen atmosphere) and can lift
+it onto a transparent shell at ~1.03 R (`aurora_shell`), where it stands
+off the limb like the real thing. Saturn's magnetic axis is aligned:
+`saturn_pale` uses `aurora_pole_offset: 0`.
 
 ### Vortex rims / collars
 Bright halos or dark rings around the large ovals. *Implementation:* STAMP —

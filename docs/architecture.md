@@ -102,16 +102,34 @@ only sim-resolution snapshot textures + analytic noise, so tiles need no
 apron), assemble per map directly in final dtype on the CPU, then encode in
 a thread pool. The GUI runs one slice per frame with progress + cancel
 (cancellation removes only the files we wrote); the CLI drains the same
-generator. Measured: 16384×8192 color+height in ~32 s on an RTX 3070
-(encode-bound).
+generator. Maps: 16-bit color PNG + float32 height EXR, plus a float32
+RGBA emission EXR (thermal hot-spot glow + lightning in RGB, aurora
+intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
+16384×8192 with all maps in ~34 s on an RTX 3070 (encode-bound).
 
 **Detail synthesis** is advected-coordinate noise (positions backtraced
 through the baked velocity for staggered pseudo-times, high-frequency sphere
 noise sampled there → noise stretched and folded by the flow), masked by the
 detail tracer and shear/speed, blended with Worley convective cells in quiet
-zones. Known limitation: the detail pass currently fades to neutral poleward
-of ~56° (it backtraces through the equirect velocity only); routing polar
-tiles through the patch velocities is future work.
+zones. Poleward of 66–72° the backtrace routes through the polar patch
+velocities (feather mixes noise values, never positions), so the caps carry
+real texture instead of fading to neutral (v1.1).
+
+## Checkpoints
+
+`engine/checkpoint.py` saves a compressed .npz: the generating preset,
+`generation_version` (= 3), step counters (including the VELOCITY-edit
+adaptation window), the three tracer textures, AND the vortex registry as
+per-field float64 arrays + outbreak links — serialized, not replayed,
+because live registry evolution (events, mergers) is not a pure function of
+(seed, step) once mid-run edits enter. Loading rebuilds the sim from the
+preset (bands/profiles/jets are seed-deterministic), overwrites tracers, and
+swaps in the saved registry. A `generation_version` mismatch is refused
+loudly: stale tracers would pair with differently-generated state. The live
+step path advances the registry through one shared function
+(`sim/advance.py: advance_registry` — events, drift, mergers) so any future
+registry evolution lands in exactly one place. This is the foundation for
+the planned animation exporter (restore → step k → export per frame).
 
 ## GUI
 
