@@ -740,8 +740,8 @@
       "polar_stipple": 0.8,
       "intermittency": 0.65,
       "hero_spiral": 0.55,
-      "belt_texture": 1.05,
-      "belt_texture_fine": 1.4,
+      "belt_texture": 1.3,
+      "belt_texture_fine": 1.5,
       "mottle": 0.85
     },
     "emission": {
