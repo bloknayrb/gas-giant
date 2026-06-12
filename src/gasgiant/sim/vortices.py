@@ -416,6 +416,8 @@ def generate_vortices(
             break
         center, _w = tropical[rng.integers(0, len(tropical))]
         lat = float(np.clip(center + rng.normal(0.0, 0.02), -MAX_VORTEX_LAT, MAX_VORTEX_LAT))
+        if storms.hero_latitude is not None:
+            lat = float(np.deg2rad(storms.hero_latitude))
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
         s = _ambient_sign(profiles, lat) * storms.hero_strength * 0.045
         u_here = float(np.interp(-lat, -profiles.lat, profiles.u))

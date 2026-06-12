@@ -312,6 +312,13 @@ class StormsParams(_Params):
     hero_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Storms",
     )
+    hero_latitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, ui="Storms",
+        description="Pin the hero storm to this latitude (degrees); preset-only. "
+                    "None = seeded tropical-zone placement. The effective range is "
+                    "further limited by hero_radius (see validator) so the stamp "
+                    "stays clear of the 63 deg exchange band",
+    )
     oval_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
         description="White-oval anticyclone population multiplier",
@@ -356,6 +363,19 @@ class StormsParams(_Params):
         description="Brightness of the transient turbulent collar a fresh "
                     "merger leaves behind (inert while merge_rate is 0)",
     )
+
+    @model_validator(mode="after")
+    def _validate_hero_latitude(self) -> StormsParams:
+        if self.hero_latitude is not None:
+            cap = 63.0 - 206.3 * self.hero_radius
+            if abs(self.hero_latitude) > cap:
+                raise ValueError(
+                    f"hero_latitude={self.hero_latitude} exceeds the radius-coupled "
+                    f"limit +-{cap:.1f} deg (hero_radius={self.hero_radius}); the stamp "
+                    f"would smear into the 63 deg storm-free exchange band. Lower "
+                    f"hero_latitude or hero_radius."
+                )
+        return self
 
 
 class WavesParams(_Params):
