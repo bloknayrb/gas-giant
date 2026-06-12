@@ -69,6 +69,29 @@ detail intermittency) rather than pushing global saturation.
 contrast 0.0767 — those were computed at native resolutions; the small
 shift here is the common-resolution protocol, not an output change.)
 
+## v1.2 baseline (AgX view: agx_view(ours) vs the reference as-loaded)
+
+`--view agx` applies `gasgiant.palette.agx.agx_view` (the repo's own AgX
+approximation, ported from app/shaders/agx.glsl and pinned to it by a GPU
+cross-validation test) to OUR render only. These are the confirmatory
+acceptance denominators; raw view stays the cross-history series.
+
+Distances: zone_rgb 0.0897, belt_rgb 0.0813, contrast 0.0856,
+zone_chroma 0.0097, belt_chroma 0.0090, zone_chroma_std 0.0037,
+belt_chroma_std 0.0044, zone_L_std 0.0093, belt_L_std 0.0103,
+belt_chroma_p95 0.0145, hue_spread 0.0490, texture_energy 0.0101.
+
+Signed (ours − ref, |lat| ≤ 50°): zone_chroma −0.0065, belt_chroma
+−0.0083, belt_chroma_std −0.0057, belt_L_std −0.0120, belt_chroma_p95
+−0.0179, hue_spread −0.0840, texture_energy −0.0136.
+
+**Measured AgX chroma retention of the v1.2 render** (quartile medians,
+|lat| ≤ 50°): **belt 0.677, zone 0.564**. Note this is lower than the
+spot-color belt figures quoted below (0.92–1.16): a real render's belt
+quartile is a mixture containing pastel material whose chroma does drop
+through AgX. The render-quartile measurement is the one tuning uses —
+and it must be re-measured whenever the palette changes.
+
 ## Tuning protocol
 
 - Texture judgement happens on **≥4K renders only**: the striation layer at

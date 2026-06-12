@@ -19,6 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gasgiant.palette.agx import agx_constants_checksum, agx_view, quartile_chroma_retention
 from gasgiant.palette.reference import (
     MEDIAN_KEYS,
     VARIANCE_KEYS,
@@ -112,6 +113,12 @@ def main() -> int:
     ap.add_argument("--bins", type=int, default=90)
     ap.add_argument("--out", type=Path, default=Path("out/compare"))
     ap.add_argument("--json", type=Path, default=None, help="dump metrics to this JSON file")
+    ap.add_argument(
+        "--view", choices=("raw", "agx"), default="raw",
+        help="agx: apply the repo's AgX approximation to OUR render before "
+             "comparing (display-vs-display; the reference is a display-"
+             "referred photo product and is never transformed)",
+    )
     args = ap.parse_args()
 
     if not args.reference.exists():
@@ -121,6 +128,13 @@ def main() -> int:
 
     ours, name = _load_target(args.target, args.res)
     ref = _load_srgb(args.reference)
+
+    retention = quartile_chroma_retention(ours)
+    ours_label = f"ours: {name}"
+    if args.view == "agx":
+        ours = agx_view(ours)
+        name = f"{name}_agx"
+        ours_label = f"ours (AgX approx): {name}"
 
     # Level statistics at the median width; variance statistics at the
     # JPEG-chroma-native width (see the common-resolution rule above).
@@ -140,7 +154,7 @@ def main() -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
 
-    ours_fit = _label(_fit_width(ours, _MONTAGE_W), f"ours: {name}")
+    ours_fit = _label(_fit_width(ours, _MONTAGE_W), ours_label)
     ref_fit = _label(_fit_width(ref, _MONTAGE_W), f"reference: {args.reference.name}")
     montage = np.concatenate([ours_fit, np.ones((6, _MONTAGE_W, 3), np.float32), ref_fit])
     montage_path = args.out / f"{name}_montage.png"
@@ -166,17 +180,23 @@ def main() -> int:
     print("signed mean (ours - ref), |lat| <= 50:")
     for key, value in signed.items():
         print(f"  {key:16s} {value:+.4f}")
+    print(
+        f"AgX chroma retention of ours (re-measure after any palette change): "
+        f"belt {retention['belt']:.3f}  zone {retention['zone']:.3f}"
+    )
 
     if args.json is not None:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "target": name,
             "reference": str(args.reference),
-            "view": "raw",
+            "view": args.view,
             "bins": args.bins,
             "res": args.res,
             "median_width": _MEDIAN_W,
             "variance_width": _VARIANCE_W,
+            "agx_checksum": agx_constants_checksum(),
+            "agx_chroma_retention": retention,
             "distance": dist,
             "signed": signed,
         }
