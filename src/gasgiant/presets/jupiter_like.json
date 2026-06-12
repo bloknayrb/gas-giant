@@ -545,7 +545,8 @@
       "striation_frequency": 160.0,
       "cellular_amount": 0.7,
       "polar_stipple": 0.8,
-      "intermittency": 0.65
+      "intermittency": 0.65,
+      "hero_spiral": 0.6
     },
     "turbulence": {
       "kh_amplitude": 0.6

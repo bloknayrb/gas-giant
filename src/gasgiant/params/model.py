@@ -357,6 +357,13 @@ class DetailParams(_Params):
                     "mosaic's chaos is intermittent, not uniform). No rand: a "
                     "draw here would reshuffle every later randomize draw",
     )
+    hero_spiral: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        description="Tightly wound internal spiral lanes inside hero storms "
+                    "(the Juno-close-up GRS look) plus collar streamlines; "
+                    "winds in the hero's actual rotation sense. Stationary in "
+                    "the hero frame — fine for stills",
+    )
 
 
 class PoleStyle(StrEnum):

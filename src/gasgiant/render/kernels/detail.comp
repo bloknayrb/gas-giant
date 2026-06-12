@@ -62,11 +62,17 @@ uniform float u_striation_freq;
 uniform float u_polar_stipple;
 
 #ifdef DETAIL_FX
-// Longitudinal intermittency gate. The non-DETAIL_FX variant strips this
-// block at the GLSL-preprocessor level, so neutral-default output stays
-// identical by construction (the EMISSION/CHROMA_FX mechanism).
+// Longitudinal intermittency gate + hero internal spiral lanes. The
+// non-DETAIL_FX variant strips this block at the GLSL-preprocessor level,
+// so neutral-default output stays identical by construction (the
+// EMISSION/CHROMA_FX mechanism).
 uniform float u_intermittency;
 uniform vec3 u_offset_gate;       // subseed("detail-intermittency")
+uniform float u_hero_spiral;
+uniform vec3 u_offset_spiral;     // subseed("detail-hero-spiral")
+// Rotation sense per hero, sign(strength) — deliberately NOT packed into
+// u_heroes.w so heroMask and the default program text stay untouched.
+uniform float u_hero_spin[3];
 #endif
 
 const float PI = 3.14159265358979;
@@ -251,6 +257,48 @@ void main() {
 #endif
         d += 0.30 * stria * w_stria;
     }
+
+#ifdef DETAIL_FX
+    // Hero internal spiral lanes (the Juno-close-up GRS look): tightly
+    // wound log-spiral lanes peaking mid-radius (the center stays calm and
+    // bright, and the window fades before the q~1.0 dark perimeter ring so
+    // the analytic term never fights the stamp), plus circumferential
+    // collar streamlines between the perimeter ring and the q~1.55 bright
+    // collar. Stationary in the hero frame — fine for stills; a +omega*t
+    // phase term is the one-line fix if animation ever needs it.
+    if (u_hero_spiral > 0.0) {
+        float sp = 0.0;
+        for (int i = 0; i < u_hero_count; ++i) {
+            vec3 c = u_heroes[i].xyz;
+            float rc = max(u_heroes[i].w, 1e-4);
+            float q = acos(clamp(dot(pc, c), -1.0, 1.0)) / rc;
+            if (q < 0.05 || q >= 1.9) continue;  // atan(0,0) guard + early-out
+            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);   // local west
+            float ewl = length(ew);
+            if (ewl < 1e-4) continue;                   // degenerate polar guard
+            vec3 e1 = ew / ewl;
+            vec3 e2 = cross(c, e1);   // right-handed: theta CCW viewed from outside
+            float theta = atan(dot(pc, e2), dot(pc, e1));
+            // Winding sense pinned EMPIRICALLY against the backtraced
+            // filament winding (S>0 is a clockwise vortex in this psi
+            // convention). m=2 must stay integer: at theta = +-pi the
+            // 2*theta term jumps by exactly 4*pi while jig/log are
+            // continuous in position, so cos is branch-cut continuous.
+            float k = -20.0 * u_hero_spin[i];
+            float qc = max(q, 0.08);
+            float jig = fbm(pc * (u_freq * 1.5) + u_offset_spiral, 3, 2.0, 0.5);
+            float lane = cos(2.0 * theta + k * log(qc) + 2.4 * jig)
+                       * (0.55 + 0.45 * jig);
+            float win = smoothstep(0.12, 0.34, q) * (1.0 - smoothstep(0.72, 0.98, q));
+            sp += win * lane;
+            // Collar streamlines: thin turbulent rings hugging the rim.
+            float wino = smoothstep(0.98, 1.12, q) * (1.0 - smoothstep(1.5, 1.85, q));
+            float rj = fbm(pc * (u_freq * 0.9) + u_offset_spiral.zxy, 2, 2.0, 0.5);
+            sp += 0.55 * wino * cos(q * 28.0 + 3.0 * rj);
+        }
+        d += 0.22 * u_hero_spiral * clamp(sp, -1.5, 1.5);
+    }
+#endif
 
     // Legacy cap fade, only when routing is off.
     if (u_polar_route == 0) {

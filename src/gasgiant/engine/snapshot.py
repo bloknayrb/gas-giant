@@ -22,12 +22,21 @@ if TYPE_CHECKING:
     from gasgiant.sim.vortices import VortexRegistry
 
 
-def hero_centers(registry: VortexRegistry) -> list[tuple[float, float, float, float]]:
-    """(x, y, z, r_core) of each hero storm at its current drifted position."""
+def hero_centers(
+    registry: VortexRegistry,
+) -> list[tuple[float, float, float, float, float]]:
+    """(x, y, z, r_core, spin) of each hero storm at its current drifted
+    position. spin = sign(strength): the hero's actual rotation sense
+    (seed-dependent via the ambient shear — NOT a function of hemisphere),
+    which the detail pass needs to wind the analytic spiral lanes the same
+    way the backtraced filaments wind."""
     out = []
     for v in registry.heroes():
         cl = math.cos(v.lat)
-        out.append((cl * math.cos(v.lon), math.sin(v.lat), cl * math.sin(v.lon), v.r_core))
+        out.append((
+            cl * math.cos(v.lon), math.sin(v.lat), cl * math.sin(v.lon),
+            v.r_core, 1.0 if v.strength >= 0.0 else -1.0,
+        ))
     return out
 
 
@@ -44,9 +53,9 @@ class ExportSnapshot:
     profile_stamp: moderngl.Texture
     patch_rho_max: float
     blend_band: tuple[float, float]
-    # Hero-storm centers at their drifted positions, (x, y, z, r_core) each:
-    # the detail pass amplifies/winds filaments inside them.
-    heroes: list[tuple[float, float, float, float]] = None  # type: ignore[assignment]
+    # Hero-storm centers at their drifted positions, (x, y, z, r_core, spin)
+    # each: the detail pass amplifies/winds filaments inside them.
+    heroes: list[tuple[float, float, float, float, float]] = None  # type: ignore[assignment]
     # Analytic lane lines and the meander warp they ride (derive-time).
     lanes: list[tuple[float, float]] = None  # type: ignore[assignment]
     warp: tuple[tuple[float, float, float], float, float] = ((0.0, 0.0, 0.0), 0.0, 3.0)

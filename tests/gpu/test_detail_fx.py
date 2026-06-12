@@ -46,12 +46,15 @@ def _synth_detail_field(gpu, params, size=(1024, 512)) -> np.ndarray:
     """Run DetailSynth directly (the composed color map mixes in the
     ungated cells and the T2-tracer term, which drown the gated filament
     signal in a ratio statistic)."""
+    from gasgiant.engine.snapshot import hero_centers
+
     sim = Simulation(params, gpu)
     s = sim.solver
     out = gpu.texture2d(size, 1, "f4", linear=True)
     sim.detail_synth.synthesize(
         params.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
         sim.profile_dyn, out, params.detail,
+        heroes=hero_centers(sim.vortices),
     )
     field = gpu.read_texture(out)[..., 0]
     out.release()
@@ -90,6 +93,67 @@ def test_intermittency_adds_longitudinal_patchiness_not_tone(gpu):
 
 def test_intermittency_render_is_seam_clean(gpu):
     sim = Simulation(_quick_params(intermittency=0.9), gpu)
+    maps = sim.render_maps(512)
+    report = validate_arrays({"color": maps["color"], "height": maps["height"]})
+    assert report.ok, report.problems
+
+
+# -- hero spiral -------------------------------------------------------------------
+
+
+def test_hero_spiral_zero_routes_to_default_program(gpu):
+    base = Simulation(_quick_params(), gpu).render_maps(256)["color"]
+    zero = Simulation(_quick_params(hero_spiral=0.0), gpu).render_maps(256)["color"]
+    np.testing.assert_array_equal(base, zero)
+
+
+def test_hero_spiral_without_heroes_is_noop(gpu):
+    """hero_spiral > 0 forces the FX variant, so this is a cross-variant
+    comparison (atol, not byte-equality)."""
+    p_base = _quick_params()
+    p_base.storms.hero_count = 0
+    p_spiral = _quick_params(hero_spiral=1.0)
+    p_spiral.storms.hero_count = 0
+    base = Simulation(p_base, gpu).render_maps(256)["color"]
+    spiral = Simulation(p_spiral, gpu).render_maps(256)["color"]
+    assert np.allclose(base, spiral, atol=1e-3), np.abs(base - spiral).max()
+
+
+def test_hero_spiral_localized_to_hero_window(gpu):
+    """Pinned configuration: intermittency 1e-6 in BOTH renders (same FX
+    program, identical gate path), only hero_spiral varies. The q >= 1.9
+    early-out adds exactly 0.0 outside the window, so far pixels are
+    byte-equal; inside they differ."""
+    base = _synth_detail_field(gpu, _quick_params(intermittency=1e-6))
+    spiral = _synth_detail_field(
+        gpu, _quick_params(intermittency=1e-6, hero_spiral=1.2)
+    )
+    sim = Simulation(_quick_params(), gpu)
+    heroes = sim.vortices.heroes()
+    assert heroes, "seed 42 must seed a hero for this test"
+
+    h, w = base.shape
+    lat = (0.5 - (np.arange(h) + 0.5) / h) * np.pi
+    lon = ((np.arange(w) + 0.5) / w) * 2.0 * np.pi - np.pi
+    cl = np.cos(lat)[:, None]
+    px = cl * np.cos(lon)[None, :]
+    py = np.sin(lat)[:, None] * np.ones((1, w))
+    pz = cl * np.sin(lon)[None, :]
+    inside = np.zeros((h, w), dtype=bool)
+    for v in heroes:
+        c = np.array([
+            np.cos(v.lat) * np.cos(v.lon), np.sin(v.lat), np.cos(v.lat) * np.sin(v.lon)
+        ])
+        q = np.arccos(np.clip(px * c[0] + py * c[1] + pz * c[2], -1, 1)) / v.r_core
+        inside |= q < 1.9
+
+    np.testing.assert_array_equal(base[~inside], spiral[~inside])
+    assert not np.array_equal(base[inside], spiral[inside])
+    assert np.all(np.isfinite(spiral))
+
+
+def test_hero_spiral_render_is_seam_clean(gpu):
+    sim = Simulation(_quick_params(hero_spiral=1.0, intermittency=0.65), gpu)
     maps = sim.render_maps(512)
     report = validate_arrays({"color": maps["color"], "height": maps["height"]})
     assert report.ok, report.problems

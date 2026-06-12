@@ -63,21 +63,31 @@ class DetailSynth:
         params: DetailParams,
         origin: tuple[int, int] = (0, 0),
         full_size: tuple[int, int] | None = None,
-        heroes: list[tuple[float, float, float, float]] | None = None,
+        heroes: list[tuple[float, float, float, float, float]] | None = None,
         polar: PolarRoute | None = None,
     ) -> None:
-        """heroes: up to 3 (x, y, z, r_core) hero-storm centers; the detail
-        amplitude and winding time grow inside them (internal spirals).
+        """heroes: up to 3 (x, y, z, r_core, spin) hero-storm centers; the
+        detail amplitude and winding time grow inside them, and the
+        DETAIL_FX spiral lanes wind in the spin (= sign(strength)) sense.
+        4-tuples are tolerated (spin defaults +1).
         polar: patch velocity/tracer textures — when given, polar backtraces
         route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
-        fx_on = params.intermittency > 0.0
+        fx_on = params.intermittency > 0.0 or params.hero_spiral > 0.0
         prog = self._program(fx=fx_on)
         size = out_tex.size
         if fx_on:
             _set(prog, "u_intermittency", params.intermittency)
             rng_gate = subseed(seed, "detail-intermittency")
             _set(prog, "u_offset_gate", tuple(rng_gate.uniform(-100.0, 100.0, 3)))
+            _set(prog, "u_hero_spiral", params.hero_spiral)
+            rng_spiral = subseed(seed, "detail-hero-spiral")
+            _set(prog, "u_offset_spiral", tuple(rng_spiral.uniform(-100.0, 100.0, 3)))
+            spins = np.zeros(3, dtype=np.float32)
+            for i, h in enumerate((heroes or [])[:3]):
+                spins[i] = h[4] if len(h) > 4 else 1.0
+            with contextlib.suppress(KeyError):
+                prog["u_hero_spin"].write(spins.tobytes())
         if polar is not None:
             prog["u_polar_route"].value = 1
             polar.vel_n.use(location=3)
@@ -106,7 +116,7 @@ class DetailSynth:
         packed = np.zeros((3, 4), dtype=np.float32)
         n_heroes = 0
         for h in (heroes or [])[:3]:
-            packed[n_heroes] = h
+            packed[n_heroes] = h[:4]  # (x, y, z, r_core); h[4] is the spin
             n_heroes += 1
         prog["u_hero_count"].value = n_heroes
         prog["u_heroes"].write(packed.tobytes())
