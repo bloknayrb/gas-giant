@@ -125,7 +125,7 @@ def _crop_deg(img: np.ndarray, lat0: float, lat1: float,
     x1f = (lon1 + 180.0) / 360.0 * w
     if x1f <= x0f:
         x1f += w
-    x0 = int(np.floor(x0f))
+    x0 = int(np.floor(x0f)) % w  # boxes past the date line -> wrap, not an empty slice
     span = max(1, int(round(x1f - x0f)))
     if x0 + span <= w:
         return img[y0:y1, x0:x0 + span]
