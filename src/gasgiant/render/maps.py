@@ -3,13 +3,15 @@ One kernel serves the live preview and export."""
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from gasgiant.gl import GpuContext
 from gasgiant.palette import bake_lut, bake_rows
-from gasgiant.params.model import AppearanceParams, GradientStop
+from gasgiant.params.model import AppearanceParams, EmissionParams, GradientStop
+from gasgiant.params.seeds import subseed
 
 if TYPE_CHECKING:
     import moderngl
@@ -22,10 +24,52 @@ def _stops(stops: list[GradientStop]) -> list[tuple[float, tuple[float, float, f
     return [(s.pos, s.color) for s in stops]
 
 
+def _set(prog: moderngl.ComputeShader, name: str, value) -> None:
+    """Guarded uniform set: tolerates uniforms absent from this program
+    variant (the non-EMISSION program) or pruned by the driver."""
+    with contextlib.suppress(KeyError):
+        prog[name].value = value
+
+
+def emission_uniforms(seed: int, emission: EmissionParams) -> dict[str, object]:
+    """Pure seed-derived emission placement: noise offsets and magnetic-pole
+    unit vectors. Fresh subseed streams; identical for the preview path,
+    render_maps, and every export tile by construction."""
+    rng_li = subseed(seed, "emission-lightning")
+    li_offset = tuple(float(x) for x in rng_li.uniform(-100.0, 100.0, 3))
+    rng_au = subseed(seed, "emission-aurora")
+    au_offset = tuple(float(x) for x in rng_au.uniform(-100.0, 100.0, 3))
+    tilt = float(np.deg2rad(emission.aurora_pole_offset))
+    lon_n = float(rng_au.uniform(-np.pi, np.pi))
+    lon_s = float(rng_au.uniform(-np.pi, np.pi))
+    st, ct = np.sin(tilt), np.cos(tilt)
+    return {
+        "u_th_color": emission.thermal_color,
+        "u_th_strength": emission.thermal_strength,
+        "u_th_threshold": emission.thermal_threshold,
+        "u_th_hdr": emission.thermal_hdr,
+        "u_li_color": emission.lightning_color,
+        "u_li_strength": emission.lightning_strength,
+        "u_li_density": emission.lightning_density,
+        "u_li_offset": li_offset,
+        "u_au_strength": emission.aurora_strength,
+        "u_au_radius": float(np.deg2rad(emission.aurora_radius)),
+        "u_au_width": float(np.deg2rad(emission.aurora_width)),
+        "u_au_pole_n": (float(st * np.cos(lon_n)), float(ct), float(st * np.sin(lon_n))),
+        "u_au_pole_s": (float(st * np.cos(lon_s)), float(-ct), float(st * np.sin(lon_s))),
+        "u_au_offset": au_offset,
+    }
+
+
 class MapDeriver:
     def __init__(self, gpu: GpuContext) -> None:
         self.gpu = gpu
+        # Two program variants: the non-EMISSION one preprocesses to the
+        # pre-emission kernel text, so neutral defaults stay byte-identical
+        # by construction rather than by hope (recompiling a changed kernel
+        # can shift FP scheduling on BOTH sides of an off/on comparison).
         self.prog = gpu.compute(_KERNELS, "derive.comp")
+        self.prog_emission = gpu.compute(_KERNELS, "derive.comp", defines={"EMISSION": "1"})
         self._palette_tex: moderngl.Texture | None = None
         self._storm_tex: moderngl.Texture | None = None
 
@@ -54,12 +98,26 @@ class MapDeriver:
         full_size: tuple[int, int] | None = None,
         lanes: list[tuple[float, float]] | None = None,
         warp: tuple[tuple[float, float, float], float, float] | None = None,
+        emission_out: moderngl.Texture | None = None,
+        emission: EmissionParams | None = None,
+        seed: int = 0,
+        profile_dyn: moderngl.Texture | None = None,
+        profile_stamp: moderngl.Texture | None = None,
     ) -> None:
         """lanes: (latitude, strength) thin dark lane lines; warp: the band
-        meander (offset, amount, freq) the lanes ride on."""
+        meander (offset, amount, freq) the lanes ride on. Passing emission_out
+        + an enabled EmissionParams selects the EMISSION program variant
+        (which also needs the profile LUT textures for its gates)."""
         if self._palette_tex is None:
             self.update_palettes(appearance)
-        prog = self.prog
+        emission_on = (
+            emission_out is not None
+            and emission is not None
+            and emission.enabled
+            and profile_dyn is not None
+            and profile_stamp is not None
+        )
+        prog = self.prog_emission if emission_on else self.prog
         size = color_out.size
         lanes = lanes or []
         packed = np.zeros((16, 2), dtype=np.float32)
@@ -101,6 +159,14 @@ class MapDeriver:
         prog["u_gamma"].value = appearance.gamma
         color_out.bind_to_image(0, read=False, write=True)
         height_out.bind_to_image(1, read=False, write=True)
+        if emission_on:
+            profile_dyn.use(location=6)
+            _set(prog, "u_profile_dyn", 6)
+            profile_stamp.use(location=7)
+            _set(prog, "u_profile_stamp", 7)
+            for name, value in emission_uniforms(seed, emission).items():
+                _set(prog, name, value)
+            emission_out.bind_to_image(2, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP
         gy = (size[1] + _GROUP - 1) // _GROUP
         prog.run(gx, gy, 1)

@@ -41,6 +41,7 @@ class ExportSnapshot:
     vel_n: moderngl.Texture
     vel_s: moderngl.Texture
     profile_dyn: moderngl.Texture
+    profile_stamp: moderngl.Texture
     patch_rho_max: float
     blend_band: tuple[float, float]
     # Hero-storm centers at their drifted positions, (x, y, z, r_core) each:
@@ -65,6 +66,7 @@ class ExportSnapshot:
             vel_n=gpu.clone_texture(s.north.vel_tex),
             vel_s=gpu.clone_texture(s.south.vel_tex),
             profile_dyn=gpu.clone_texture(sim.profile_dyn),
+            profile_stamp=gpu.clone_texture(sim.profile_stamp),
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
             heroes=hero_centers(sim.vortices),
@@ -74,5 +76,6 @@ class ExportSnapshot:
 
     def release(self) -> None:
         for tex in (self.tracers_eq, self.tracers_n, self.tracers_s,
-                    self.vel_eq, self.vel_n, self.vel_s, self.profile_dyn):
+                    self.vel_eq, self.vel_n, self.vel_s,
+                    self.profile_dyn, self.profile_stamp):
             tex.release()

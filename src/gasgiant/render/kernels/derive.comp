@@ -50,6 +50,31 @@ uniform vec3 u_polar_tint_color;
 uniform float u_polar_tint_strength;
 uniform float u_polar_tint_start;  // |lat| radians
 
+#ifdef EMISSION
+// Emission map (night-side glow): RGB = thermal + lightning linear radiance,
+// A = aurora intensity (hue applied at import — the aurora is 1000 km above
+// the cloud deck, so the importer can lift it onto a shell). The non-EMISSION
+// program variant strips this whole block: the disabled path preprocesses to
+// the pre-emission kernel, keeping neutral-default output identical.
+layout(rgba32f, binding = 2) writeonly uniform image2D out_emission;
+uniform sampler2D u_profile_stamp;  // (t0, t1, polar_fade, -): anomaly gate
+uniform sampler2D u_profile_dyn;    // (u, psi, shear, belt_mask): lightning
+uniform vec3  u_th_color;
+uniform float u_th_strength;
+uniform float u_th_threshold;
+uniform float u_th_hdr;
+uniform vec3  u_li_color;
+uniform float u_li_strength;
+uniform float u_li_density;
+uniform vec3  u_li_offset;          // subseed("emission-lightning")
+uniform float u_au_strength;
+uniform float u_au_radius;          // radians
+uniform float u_au_width;           // radians
+uniform vec3  u_au_pole_n;          // magnetic pole unit vectors (y = axis)
+uniform vec3  u_au_pole_s;
+uniform vec3  u_au_offset;          // subseed("emission-aurora")
+#endif
+
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= u_size.x || px.y >= u_size.y) return;
@@ -138,4 +163,72 @@ void main() {
 
     imageStore(out_color, px, vec4(col, 1.0));
     imageStore(out_height, px, vec4(height, 0.0, 0.0, 0.0));
+
+#ifdef EMISSION
+    {
+        float elon = uv.x * 2.0 * PI - PI;
+        float ecl = cos(lat);
+        vec3 sp2 = vec3(ecl * cos(elon), sin(lat), ecl * sin(elon));
+        vec3 emis = vec3(0.0);
+
+        // (a) Thermal: 5-um glow where the cloud deck is DEPRESSED relative
+        // to the band stamp, sampled at the same meander-warped latitude the
+        // stamps were laid down at (so band edges don't ghost). Hot-spot
+        // chains and barge/cyclone interiors are 0.2-0.4 anomalies; the
+        // undisturbed belt floor is ~0 by construction — belts glimmer via
+        // the faint deck term, they never reach the HDR term.
+        if (u_th_strength > 0.0) {
+            float ewarp = fbm(sp2 * u_warp_freq + u_warp_offset, 3, 2.0, 0.5)
+                        * u_warp_amount;
+            float su = clamp((0.5 * PI - (lat + ewarp)) / PI, 0.0, 1.0);
+            float stamp_t1 = texture(u_profile_stamp, vec2(su, 0.5)).g;
+            float anomaly = max(stamp_t1 - t.g, 0.0);
+            float deck = 0.05 * smoothstep(0.05, 0.15, anomaly);
+            float hot = u_th_hdr
+                      * smoothstep(u_th_threshold, u_th_threshold + 0.14, anomaly);
+            emis += u_th_color * (u_th_strength * (deck + hot) * (1.0 - u_haze_amount));
+        }
+
+        // (b) Lightning: cyclonic belts + high latitudes (the Juno
+        // distribution), never anticyclone cores (the GRS is famously dry).
+        // Strictly field-space (tile-apron-safe): ONE spark field yields both
+        // the sparse HDR cores and their soft halos; a low-frequency cluster
+        // field groups them into storm cells lit from below.
+        if (u_li_strength > 0.0) {
+            float belt = texture(
+                u_profile_dyn, vec2(clamp((0.5 * PI - lat) / PI, 0.0, 1.0), 0.5)).a;
+            float turb = (u_detail_intensity > 0.0)
+                ? clamp(abs(dsyn - 0.5) * 2.0 + 0.4, 0.0, 1.0) : 0.7;
+            float act = clamp(belt * turb + smoothstep(0.96, 1.22, abs(lat)), 0.0, 1.0);
+            act *= 1.0 - smoothstep(0.5, 0.7, t.a);   // anticyclone cores: dry
+            act += 0.2 * min(max(-t.a, 0.0), 0.25);   // cyclonic wakes: bonus,
+            // clamped — festoon plumes reach T3 -0.8 and must not dominate
+            float cluster = max(snoise(sp2 * 14.0 + u_li_offset), 0.0);
+            float gate = u_li_density * act * cluster;
+            if (gate > 1e-3) {
+                float s = snoise(sp2 * 100.0 + u_li_offset.zxy * 1.7);
+                float t_hi = mix(0.88, 0.70, gate);  // Ashima snoise tops ~0.85
+                float lcore = 25.0 * smoothstep(t_hi, t_hi + 0.03, s);
+                float lhalo = 1.5 * smoothstep(t_hi - 0.14, t_hi, s);
+                emis += u_li_color * (u_li_strength * (lcore + lhalo) * act);
+            }
+        }
+
+        // (c) Aurora: wobbled ring at u_au_radius from each magnetic pole,
+        // patchy arc brightness. Intensity only, in alpha.
+        float au = 0.0;
+        if (u_au_strength > 0.0) {
+            float wob = fbm(sp2 * 3.0 + u_au_offset, 3, 2.0, 0.5);
+            float along = 0.55 + 0.45 * fbm(sp2 * 8.0 + u_au_offset.yzx, 2, 2.0, 0.5);
+            for (int hemi = 0; hemi < 2; ++hemi) {
+                vec3 mp = (hemi == 0) ? u_au_pole_n : u_au_pole_s;
+                float rho = acos(clamp(dot(sp2, mp), -1.0, 1.0));
+                float r0 = u_au_radius * (1.0 + 0.22 * wob);
+                float dr = (rho - r0) / u_au_width;
+                au += u_au_strength * along * exp(-dr * dr);
+            }
+        }
+        imageStore(out_emission, px, vec4(emis, au));
+    }
+#endif
 }

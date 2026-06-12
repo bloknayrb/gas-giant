@@ -156,7 +156,16 @@ class Simulation:
             self._detail_tex = self.gpu.texture2d(size, 1, "f4", linear=True)
         return self._detail_tex
 
-    def _derive(self, color_tex: moderngl.Texture, height_tex: moderngl.Texture) -> None:
+    def _derive(
+        self,
+        color_tex: moderngl.Texture,
+        height_tex: moderngl.Texture,
+        emission_tex: moderngl.Texture | None = None,
+    ) -> None:
+        """emission_tex=None (the preview path) selects the non-EMISSION
+        program variant — the GUI never displays emission, and the variant's
+        preprocessed source is the pre-emission kernel, so neutral defaults
+        stay byte-identical by construction."""
         s = self.solver
         p = self.params
         detail_tex = None
@@ -187,6 +196,11 @@ class Simulation:
             detail_intensity=p.detail.intensity,
             lanes=self.lanes,
             warp=(s.warp_offset, p.bands.warp_amount, p.bands.warp_freq),
+            emission_out=emission_tex,
+            emission=p.emission if emission_tex is not None else None,
+            seed=p.seed,
+            profile_dyn=self.profile_dyn,
+            profile_stamp=self.profile_stamp,
         )
 
     # -- preview -----------------------------------------------------------------------
@@ -222,11 +236,21 @@ class Simulation:
         w = width or self.params.export.width
         color_tex = self.gpu.texture2d((w, w // 2), 4, "f4")
         height_tex = self.gpu.texture2d((w, w // 2), 1, "f4")
+        # Allocated only when enabled (a 16K rgba32f texture is 2 GB).
+        emission_tex = (
+            self.gpu.texture2d((w, w // 2), 4, "f4")
+            if self.params.emission.enabled else None
+        )
         try:
-            self._derive(color_tex, height_tex)
+            self._derive(color_tex, height_tex, emission_tex)
             color = self.gpu.read_texture(color_tex)
             height = self.gpu.read_texture(height_tex)[..., 0]
+            out = {"color": color, "height": height}
+            if emission_tex is not None:
+                out["emission"] = self.gpu.read_texture(emission_tex)
         finally:
             color_tex.release()
             height_tex.release()
-        return {"color": color, "height": height}
+            if emission_tex is not None:
+                emission_tex.release()
+        return out
