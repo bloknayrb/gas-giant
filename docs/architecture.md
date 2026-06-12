@@ -105,7 +105,19 @@ a thread pool. The GUI runs one slice per frame with progress + cancel
 generator. Maps: 16-bit color PNG + float32 height EXR, plus a float32
 RGBA emission EXR (thermal hot-spot glow + lightning in RGB, aurora
 intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
-16384×8192 with all maps in ~34 s on an RTX 3070 (encode-bound).
+16384×8192 with all maps and all FX variants on in ~31 s on an RTX 3070
+(encode-bound).
+
+**Program variants.** Optional shader features are preprocessor-gated and
+cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX) —
+up to four programs — and detail.comp per DETAIL_FX
+(intermittency/hero-spiral). A disabled feature preprocesses OUT of the
+kernel text, so neutral-default output is identical by construction rather
+than by hoping the compiler doesn't reschedule FP around untaken branches;
+forced-variant no-op tests (epsilon parameter values) pin each variant.
+Unlike emission (which the preview never displays), the CHROMA_FX and
+DETAIL_FX variants run in the GUI preview whenever their params are active
+— they affect the displayed color.
 
 **Detail synthesis** is advected-coordinate noise (positions backtraced
 through the baked velocity for staggered pseudo-times, high-frequency sphere

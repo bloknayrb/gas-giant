@@ -13,8 +13,11 @@ Modeled on the visible cloud formations of Jupiter and Saturn: zones and
 belts with meandering boundaries, alternating jets, GRS-class anticyclones
 with turbulent wakes, white ovals, brown barges, strings of pearls,
 Kelvin–Helmholtz billows, festoons and hot spots, convective outbreaks,
-Saturn's ribbon, Jupiter's polar cyclone clusters, and Saturn's polar
-hexagon. The full catalog and how each is implemented: `docs/formations.md`.
+vortex mergers with debris collars, GRS internal spiral lanes, intermittent
+belt turbulence, Saturn's ribbon, Jupiter's polar cyclone clusters, and
+Saturn's polar hexagon. The full catalog and how each is implemented:
+`docs/formations.md`. Color and texture are calibrated against NASA
+reference maps with chroma-aware per-latitude metrics: `docs/realism.md`.
 
 ## Requirements
 

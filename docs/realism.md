@@ -100,6 +100,50 @@ stretch change WHAT the same fbm calls sample, not how many. One extra
 flow phase costs **+1.7 s** (35.2 s at phases=4), falsifying the planning
 assumption of +4–5 s/phase — which is why jupiter_like ships flow_phases 4.
 
+## v1.3 final (after the chroma-restored recalibration + variance tuning)
+
+Raw view, jupiter_like @2048 vs PIA07782 (same protocol as the baselines):
+
+| metric | v1.2 | v1.3 | note |
+|---|---|---|---|
+| zone_rgb | 0.1016 | 0.0679 | −33 % |
+| belt_rgb | 0.0858 | 0.0747 | −13 % |
+| contrast | 0.0790 | 0.0610 | −23 % |
+| belt_chroma (signed) | −0.0017 | +0.0008 | deficit eliminated |
+| zone_chroma (signed) | +0.0007 | −0.0013 | level matched |
+| belt_chroma_std ratio | 0.38× ref | 0.65× ref | ±25 % target missed, see below |
+| zone_chroma_std ratio | 0.31× | 0.46× | |
+| belt_L_std ratio | ~0.60× | 0.63× | |
+| belt_chroma_p95 ratio | — | 0.93× | guardrail ≤1.15 ✓ |
+| hue_spread ratio | ~0.37× | 0.43× | advisory criterion, missed |
+| clip fraction | 0 | 0 | anti-cartoon ✓ |
+
+Honest findings recorded for the next pass:
+
+- **The per-bin |belt_chroma| distance is band-ALIGNMENT-dominated**: the
+  residual alternates sign band-by-band (±0.02 in adjacent 10° bands)
+  because our procedural band layout doesn't coincide with the real
+  NEB/SEB latitudes. No contiguous ≥15° span → the per-latitude envelope
+  rule does NOT fire; the meaningful chroma-level statistic is the signed
+  mean (now ≈ 0). Distance-style chroma criteria are not achievable
+  without aligning band layout to the reference — out of scope.
+- **Within-quartile std ratios plateau ≈ 0.65** (chroma_variance 0.35,
+  variance_amount 0.18): the per-bin luminance-quartile membership
+  re-selects under drift, absorbing part of the spread, and the
+  reference's remaining within-quartile spread is storm-scale texture
+  rather than slow drift. Pushing the drift knobs further blotches band
+  definition without reading closer. The lever for the residual is
+  finer storm-scale structure, not color drift.
+- **AgX-view zone chroma deficit (−0.0079) is structural**: zone retention
+  ≈ 0.55 through AgX; recovering it would need ~2× oversaturated raw
+  zones, violating the raw guardrails. Documented, not chased.
+- **hue_spread (0.43× ref)**: no shader knob rotates hue; the
+  chroma-restored fit uses one hue direction per stop. The lever is
+  per-stop hue diversity in the palette rows (future work).
+
+Perf: 16K all-maps, all FX on (chroma + intermittency + spiral + emission):
+**31.1 s median of 3** (v1.2: 33.8 s; gate 40 s).
+
 ## Tuning protocol
 
 - Texture judgement happens on **≥4K renders only**: the striation layer at

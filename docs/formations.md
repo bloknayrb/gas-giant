@@ -180,6 +180,36 @@ quiet regions read as fuzz. *Implementation:* DETAIL — 3D Worley cellular
 texture weighted into low-shear, low-speed zone interiors
 (`detail.cellular_amount`).
 
+### Intermittent turbulence patches
+The real mosaic's belt chaos is intermittent — violent folded patches abut
+calm laminar runs; uniform texture density reads synthetic.
+*Implementation:* DETAIL — a low-frequency flow-advected fbm gate
+multiplies the filament/striation weights (calm ~0.25× to busy ~1.7×, mean
+energy roughly constant; `detail.intermittency`). The emission lightning
+gate keys off the same field, so flashes concentrate into the busy patches.
+
+### GRS internal spiral lanes
+Juno close-ups show tightly wound thin lanes inside the Great Red Spot,
+peaking mid-radius around a calm bright center.
+*Implementation:* DETAIL — analytic log-spiral lanes (m=2, ~6–7 lane
+crossings along a radius) + collar streamlines between the perimeter ring
+and the bright collar, windowed to the hero and wound in the hero's actual
+rotation sense (sign of its strength, carried per hero into the detail
+pass); fbm jig breaks the geometric regularity (`detail.hero_spiral`).
+The lanes are stationary in the hero frame — correct for stills; a time
+phase term is the one-line extension if an animation release needs it.
+
+### Within-band color richness
+Bands in the reference hold pockets of more/less saturated material and
+slow lightness patching along longitude; uniform band color reads flat.
+*Implementation:* POST — `appearance.chroma_variance` drifts an Oklab
+chroma multiplier longitudinally (band-confined fbm), and
+`bands.variance_amount` drifts the palette lookup (lightness axis);
+`appearance.chroma_scale` is the global perceptual-saturation knob. The
+palette itself is fitted with chroma-restored quartile statistics
+(`scripts/calibrate_palette.py --fit-mode chroma-restore`) because plain
+per-channel medians of a hue-spread population regress toward gray.
+
 ## Polar formations (the patch domains)
 
 The poles are simulated in two square azimuthal-equidistant patches (uniform
