@@ -91,7 +91,7 @@
     },
     "storms": {
       "hero_count": 1,
-      "hero_radius": 0.1,
+      "hero_radius": 0.13,
       "hero_strength": 1.0,
       "oval_density": 1.6,
       "barge_density": 1.2,
@@ -116,15 +116,15 @@
         "style": "cyclone_cluster",
         "cyclone_count": 8,
         "polygon_sides": 6,
-        "strength": 1.0,
-        "field_density": 1.0
+        "strength": 1.35,
+        "field_density": 1.4
       },
       "south": {
         "style": "cyclone_cluster",
         "cyclone_count": 5,
         "polygon_sides": 6,
-        "strength": 1.0,
-        "field_density": 1.0
+        "strength": 1.35,
+        "field_density": 1.4
       }
     },
     "appearance": {
@@ -733,7 +733,7 @@
       "striation_frequency": 160.0,
       "polar_stipple": 0.8,
       "intermittency": 0.65,
-      "hero_spiral": 0.6,
+      "hero_spiral": 0.55,
       "belt_texture": 1.05,
       "mottle": 0.85
     },
