@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gasgiant.sim.vortices import resolve_mergers
+
 if TYPE_CHECKING:
+    from gasgiant.params.model import StormsParams
     from gasgiant.sim.events import EventSchedule
     from gasgiant.sim.profiles import LatProfiles
     from gasgiant.sim.vortices import VortexRegistry
@@ -23,6 +26,7 @@ def advance_registry(
     dt: float,
     step_index: int,
     events: EventSchedule | None = None,
+    storms: StormsParams | None = None,
 ) -> list[tuple[float, float, float, float]]:
     """Advance the vortex registry by one step; returns the active outbreak
     outflow impulses as (lon, lat, radius, strength) for the velocity kernel."""
@@ -30,4 +34,6 @@ def advance_registry(
     if events is not None:
         impulses = events.apply(step_index, registry)
     registry.drift(profiles, dt)
+    if storms is not None and storms.merge_rate > 0.0:
+        resolve_mergers(registry, profiles, storms)
     return impulses

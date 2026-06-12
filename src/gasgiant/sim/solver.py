@@ -43,6 +43,15 @@ BLEND_BAND = (np.deg2rad(64.0), np.deg2rad(67.0))  # derive-time feather
 # Estimated peak tangential speed contributed by vortices.
 _VORTEX_SPEED_MARGIN = 0.45
 
+
+def compute_dt(resolution: int, dt_scale: float, profiles_max_speed: float) -> float:
+    """The advection timestep (~1.2 cells of jet displacement per step).
+    Module-level so registry generation (seeded merger pairs) can target
+    merge steps with the same dt the solver will actually use."""
+    cell = 2.0 * np.pi / resolution
+    max_speed = max(profiles_max_speed + _VORTEX_SPEED_MARGIN, 0.3)
+    return float(dt_scale * 1.2 * cell / max_speed)
+
 DOMAIN_EQUIRECT = 0
 DOMAIN_NORTH = 1
 DOMAIN_SOUTH = 2
@@ -162,9 +171,9 @@ class Solver:
     # -- configuration ---------------------------------------------------------
 
     def _compute_dt(self) -> float:
-        cell = 2.0 * np.pi / self.equirect.size[0]
-        max_speed = max(self.profiles.max_speed + _VORTEX_SPEED_MARGIN, 0.3)
-        return float(self.params.sim.dt_scale * 1.2 * cell / max_speed)
+        return compute_dt(
+            self.equirect.size[0], self.params.sim.dt_scale, self.profiles.max_speed
+        )
 
     def _wave_uniforms(self, prog: moderngl.ComputeShader) -> None:
         p = self.params
@@ -321,7 +330,8 @@ class Solver:
         for _ in range(n):
             # 1. Events (outbreak spawn/decay), vortex drift, SSBO refresh.
             impulses = advance_registry(
-                self.vortices, self.profiles, self.dt, self.step_index, self.events
+                self.vortices, self.profiles, self.dt, self.step_index,
+                self.events, self.params.storms,
             )
             ssbo_data = self.vortices.pack_ssbo()
             if ssbo_data.nbytes > self._ssbo.size:

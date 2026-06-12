@@ -25,7 +25,7 @@ from gasgiant.render.maps import MapDeriver
 from gasgiant.sim.bands import generate_bands
 from gasgiant.sim.events import EventSchedule
 from gasgiant.sim.profiles import build_profiles, select_lanes, select_wave_latitudes
-from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver
+from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver, compute_dt
 from gasgiant.sim.vortices import generate_vortices
 
 if TYPE_CHECKING:
@@ -57,7 +57,11 @@ class Simulation:
         p = self.params
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(p.seed, self.bands, p.bands, p.jets)
-        self.vortices = generate_vortices(p.seed, self.bands, self.profiles, p.storms, p.poles)
+        self.vortices = generate_vortices(
+            p.seed, self.bands, self.profiles, p.storms, p.poles,
+            dt=compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed),
+            dev_steps=p.sim.dev_steps,
+        )
         self.lanes = select_lanes(p.seed, self.bands, p.bands.lane_density)
 
         self.profile_dyn = self.gpu.lut_texture(self.profiles.dyn_lut())

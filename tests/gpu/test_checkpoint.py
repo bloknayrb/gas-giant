@@ -107,6 +107,32 @@ def test_velocity_edit_checkpoint_restores_adaptation(gpu, tmp_path):
     )
 
 
+def test_merger_checkpoint_round_trips_cooldowns(gpu, tmp_path):
+    """With mergers enabled, the serialized registry (incl. cooldown) must
+    restore exactly and continue bit-identically."""
+    p = PlanetParams(seed=42)
+    p.sim.resolution = 512
+    p.sim.dev_steps = 400
+    p.storms.merge_rate = 0.7
+    sim = Simulation(p, gpu)
+    sim.solver.step(200)  # past the earliest seeded merge targets
+
+    path = tmp_path / "mergers.npz"
+    save_checkpoint(sim, path)
+    restored = load_checkpoint(path, gpu)
+
+    assert _registry_fields(restored) == _registry_fields(sim)
+    assert [v.cooldown for v in restored.solver.vortices.vortices] == [
+        v.cooldown for v in sim.solver.vortices.vortices
+    ]
+    sim.solver.step(30)
+    restored.solver.step(30)
+    assert _registry_fields(restored) == _registry_fields(sim)
+    np.testing.assert_array_equal(
+        restored.tracers.read_current(), sim.tracers.read_current()
+    )
+
+
 def test_checkpoint_from_older_generation_is_refused(gpu, tmp_path):
     """A checkpoint pairs saved tracers with a registry replayed from the
     seed; if the generation algorithms changed since, it must refuse loudly

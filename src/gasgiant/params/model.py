@@ -279,6 +279,18 @@ class StormsParams(_Params):
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.8, 1.3), ui="Storms",
         description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
     )
+    merge_rate: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.8), ui="Storms",
+        description="Anticyclone merger aggressiveness: converging same-sign "
+                    "ovals coalesce when their gap falls under ~1.5*rate*(r1+r2), "
+                    "and generation seeds convergent pairs so mergers actually "
+                    "occur during the dev run (0 = off, the v1.1 behavior)",
+    )
+    merge_debris: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, ui="Storms",
+        description="Brightness of the transient turbulent collar a fresh "
+                    "merger leaves behind (inert while merge_rate is 0)",
+    )
 
 
 class WavesParams(_Params):

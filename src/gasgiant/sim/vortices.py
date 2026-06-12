@@ -35,6 +35,26 @@ KIND_BARGE = 2.0
 KIND_PEARL = 3.0
 KIND_KH = 4.0
 KIND_POLAR = 5.0
+# 6.0 is KIND_OUTBREAK (events.py).
+
+# -- merger constants (frozen into checkpoint GENERATION_VERSION 3) --------------
+# Capture when gap < COEF * merge_rate * (r1 + r2): at rate 1.0 an equal pair
+# captures at separation 3r, matching the classic ~3.3a critical merger
+# distance for equal Gaussian vortices.
+MERGE_CAPTURE_COEF = 1.5
+# Steps a merge product is ineligible for further merging (chain mergers stay
+# a visible multi-step process instead of one-step cluster collapse).
+MERGE_COOLDOWN = 25
+# Product radius cap: excess area reads as filament shedding. Below the
+# default hero radius (0.10); kind never becomes HERO regardless.
+MERGE_MAX_R = 0.08
+# Peak tangential speed cap for merge products: the solver's dt budgets
+# _VORTEX_SPEED_MARGIN = 0.45 for vortices and never recomputes, so chain
+# merges must not push v_peak past the CFL assumption.
+MERGE_V_MAX = 0.40
+# psi = S*exp(-(d/r)^2) peaks tangentially at d = r/sqrt(2):
+# v_peak = sqrt(2)*exp(-1/2) * S / r.
+_V_PEAK_COEF = float(np.sqrt(2.0) * np.exp(-0.5))
 
 
 @dataclass
@@ -51,6 +71,8 @@ class Vortex:
     brightness: float = 0.0
     # Downstream direction of the ambient jet (heroes: wake side), +1 east.
     wake_dir: float = 0.0
+    # CPU-only (never packed into the SSBO): merger hysteresis countdown.
+    cooldown: int = 0
 
 
 @dataclass
@@ -92,11 +114,139 @@ class VortexRegistry:
         if not self.vortices:
             return
         lats = np.array([v.lat for v in self.vortices])
-        u = np.interp(-lats, -profiles.lat, profiles.u)  # profile lats descending
-        dlon = u / np.maximum(np.cos(lats), 0.2) * dt
+        dlon = zonal_rate(profiles, lats) * dt
         for v, d in zip(self.vortices, dlon, strict=True):
             if v.kind != KIND_POLAR:
                 v.lon = float((v.lon + d + np.pi) % (2 * np.pi) - np.pi)
+
+
+def zonal_rate(profiles: LatProfiles, lats: np.ndarray) -> np.ndarray:
+    """d(lon)/dt of the zonal drift at the given latitudes — THE drift formula,
+    shared by drift(), the merger converging gate, and seeded-pair placement
+    so they can never disagree. profiles.lat is DESCENDING and np.interp
+    silently returns garbage on descending xp, hence the negated axis."""
+    u = np.interp(-lats, -profiles.lat, profiles.u)
+    return u / np.maximum(np.cos(lats), 0.2)
+
+
+def _merge_pair(a: Vortex, b: Vortex, profiles: LatProfiles) -> Vortex:
+    """Coalesce two same-sign peers. Conserves PEAK TANGENTIAL VELOCITY
+    (S*r), not the psi-impulse (S*r^2): impulse conservation makes the
+    product spin ~29% slower than its parents and erode fastest — the
+    showcase oval would be the planet's mushiest. With S*r conserved an
+    equal pair keeps v_peak exactly; core vorticity falls x1/sqrt(2),
+    which reads as filamentation loss. Peak psi <= sqrt(2)*max|S| is still
+    below the pre-merge superposed peak, so the merge instant de-escalates."""
+    w1 = abs(a.strength) * a.r_core * a.r_core
+    w2 = abs(b.strength) * b.r_core * b.r_core
+    wt = w1 + w2
+    r_new = min(float(np.hypot(a.r_core, b.r_core)), MERGE_MAX_R)
+    s_mag = (abs(a.strength) * a.r_core + abs(b.strength) * b.r_core) / r_new
+    s_mag = min(s_mag, MERGE_V_MAX * r_new / _V_PEAK_COEF)
+    sign = 1.0 if a.strength > 0.0 else -1.0
+    lat = (w1 * a.lat + w2 * b.lat) / wt
+    dlon = (b.lon - a.lon + np.pi) % (2.0 * np.pi) - np.pi  # shortest arc
+    lon = (a.lon + (w2 / wt) * dlon + np.pi) % (2.0 * np.pi) - np.pi
+    u_here = float(np.interp(-lat, -profiles.lat, profiles.u))
+    return Vortex(
+        float(lat), float(lon), r_new, sign * s_mag, KIND_OVAL,
+        tint=(w1 * a.tint + w2 * b.tint) / wt,
+        brightness=(w1 * a.brightness + w2 * b.brightness) / wt,
+        wake_dir=1.0 if u_here >= 0.0 else -1.0,
+        cooldown=MERGE_COOLDOWN,
+    )
+
+
+def resolve_mergers(
+    reg: VortexRegistry, profiles: LatProfiles, storms: StormsParams
+) -> list[tuple[Vortex, Vortex, Vortex | None]]:
+    """Coalesce converging same-sign ovals/pearls; heroes absorb ovals.
+    RNG-free and a pure function of (registry, profiles, params), so a
+    restored checkpoint steps identically to the live run. Returns the
+    resolved (a, b, product) triples — product None for hero absorption,
+    where a is the hero and b the shredded victim. (Seed stream name
+    reserved for future asymmetric debris: "mergers".)
+
+    Kind rules are a WHITELIST: OVAL+OVAL and PEARL+PEARL peer-merge
+    (cross-kind pearl merges would let a drifting zone oval eat the
+    deliberately even string); HERO absorbs OVAL, bit-unchanged (the GRS
+    shreds small ovals into filaments rather than growing); every other
+    kind — barges, KH, polar, outbreaks, debris — is inert.
+
+    The CONVERGING GATE is the load-bearing protection: drift is purely
+    zonal, so pairs at the same exact latitude (pearls; pre-sheared
+    small-storm twins) have bit-identical drift rates, a closing rate of
+    exactly 0.0, and must FAIL the strict > 0 test."""
+    rate = storms.merge_rate
+    if rate <= 0.0:
+        return []
+    vs = reg.vortices
+    for v in vs:  # hysteresis ages even on steps with no merges
+        if v.cooldown > 0:
+            v.cooldown -= 1
+    n = len(vs)
+    if n < 2:
+        return []
+
+    lat = np.array([v.lat for v in vs])
+    lon = np.array([v.lon for v in vs])
+    r = np.array([v.r_core for v in vs])
+    s = np.array([v.strength for v in vs])
+    kind = np.array([v.kind for v in vs])
+    cool = np.array([v.cooldown for v in vs])
+
+    live = np.abs(s) > 1e-6  # outbreaks/debris are zero-strength
+    peer_kind = (kind == KIND_OVAL) | (kind == KIND_PEARL)
+    if not (peer_kind & live).any():
+        return []
+
+    cl = np.cos(lat)
+    p3 = np.stack([cl * np.cos(lon), np.sin(lat), cl * np.sin(lon)], axis=1)
+    d = np.arccos(np.clip(p3 @ p3.T, -1.0, 1.0))
+
+    peer = peer_kind[:, None] & peer_kind[None, :] & (kind[:, None] == kind[None, :])
+    absorb = (kind[:, None] == KIND_HERO) & (kind[None, :] == KIND_OVAL)
+    eligible = (peer | absorb | absorb.T) & live[:, None] & live[None, :]
+    same_sign = (s[:, None] * s[None, :]) > 0.0
+    no_cool = (cool[:, None] == 0) & (cool[None, :] == 0)
+    capture = MERGE_CAPTURE_COEF * rate * (r[:, None] + r[None, :])
+
+    rates = zonal_rate(profiles, lat)
+    gap = (lon[None, :] - lon[:, None] + np.pi) % (2.0 * np.pi) - np.pi
+    closing = -np.sign(gap) * (rates[None, :] - rates[:, None])  # symmetric
+
+    mask = eligible & same_sign & no_cool & (d < capture) & (closing > 0.0)
+    iu = np.triu_indices(n, k=1)
+    hits = np.nonzero(mask[iu])[0]
+    if hits.size == 0:
+        return []
+    ii, jj = iu[0][hits], iu[1][hits]
+    order = np.lexsort((jj, ii, d[ii, jj]))  # greedy by (distance, i, j)
+
+    consumed: set[int] = set()
+    removed: set[int] = set()
+    products: list[Vortex] = []
+    resolved: list[tuple[Vortex, Vortex, Vortex | None]] = []
+    for k in order:
+        i, j = int(ii[k]), int(jj[k])
+        if i in consumed or j in consumed:
+            continue
+        consumed.update((i, j))
+        a, b = vs[i], vs[j]
+        if a.kind == KIND_HERO or b.kind == KIND_HERO:
+            hero, victim = (a, b) if a.kind == KIND_HERO else (b, a)
+            removed.add(i if victim is vs[i] else j)
+            resolved.append((hero, victim, None))
+        else:
+            removed.update((i, j))
+            product = _merge_pair(a, b, profiles)
+            products.append(product)
+            resolved.append((a, b, product))
+    # One identity-based rebuild — never list.remove (dataclass == is field
+    # equality and could drop the wrong entry). Products appended at the end
+    # are same-step-ineligible by construction.
+    reg.vortices = [v for idx, v in enumerate(vs) if idx not in removed] + products
+    return resolved
 
 
 def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
@@ -200,6 +350,8 @@ def generate_vortices(
     profiles: LatProfiles,
     storms: StormsParams,
     poles: PolesParams | None = None,
+    dt: float | None = None,
+    dev_steps: int = 0,
 ) -> VortexRegistry:
     rng = subseed(seed, "storms")
     reg = VortexRegistry()
@@ -301,7 +453,88 @@ def generate_vortices(
         )
 
     _enforce_cap(reg)
+
+    # Convergent companion pairs: natural differential zonal drift closes only
+    # ~0.03-0.07 rad over a dev run — far less than the Poisson-disc spacing —
+    # so without seeding, mergers essentially never occur. Seeded AFTER the cap
+    # so a host can never be cap-dropped out from under its companion.
+    if storms.merge_rate > 0.0 and dt is not None and dev_steps > 0:
+        _seed_convergent_pairs(
+            reg, subseed(seed, "mergers"), zones, profiles,
+            storms.merge_rate, dt, dev_steps,
+        )
     return reg
+
+
+def _seed_convergent_pairs(
+    reg: VortexRegistry,
+    rng: np.random.Generator,
+    zones: list[tuple[float, float]],
+    profiles: LatProfiles,
+    merge_rate: float,
+    dt: float,
+    dev_steps: int,
+) -> None:
+    """Spawn companion ovals placed KINEMATICALLY: measure the actual closure
+    rate at the site via zonal_rate, draw a target merge step, and set the
+    longitude gap so capture happens near that step. A fixed gap range cannot
+    work — du/dphi at zone centers is ~1-2, an order short of closing a
+    Poisson-disc gap in 500 steps."""
+    for center, width in zones:
+        if rng.uniform() >= 0.5 * merge_rate:
+            continue
+        hosts = [
+            v for v in reg.vortices
+            if v.kind == KIND_OVAL and abs(v.lat - center) < 0.5 * width
+        ]
+        if not hosts:
+            continue
+        host = hosts[int(rng.integers(0, len(hosts)))]
+        u01 = float(rng.uniform(0.0, 1.0))
+        r_c = 0.018 + (0.045 - 0.018) * u01 * u01
+        # Dead-zone clamp: below merge_rate = 1/3 a half-(r1+r2) lat offset
+        # exceeds the capture radius and the pair could never merge.
+        capture = MERGE_CAPTURE_COEF * merge_rate * (host.r_core + r_c)
+        dlat = min(0.5 * (host.r_core + r_c), 0.75 * capture)
+        # Pick the lat side with the faster differential drift.
+        cands = np.clip(
+            np.array([host.lat + dlat, host.lat - dlat]),
+            -MAX_VORTEX_LAT, MAX_VORTEX_LAT,
+        )
+        rates = zonal_rate(profiles, np.append(cands, host.lat))
+        drates = rates[:2] - rates[2]
+        pick = int(np.argmax(np.abs(drates)))
+        comp_lat = float(cands[pick])
+        drate = float(drates[pick])
+        # Longitude gap at which capture occurs, given the fixed lat offset
+        # (small-angle: d^2 ~ dlat^2 + (cos(lat)*dlon)^2).
+        dlat_actual = comp_lat - host.lat
+        dlon_capture = float(
+            np.sqrt(max(capture**2 - dlat_actual**2, 0.0))
+            / max(np.cos(host.lat), 0.2)
+        )
+        closure = abs(drate) * dt  # rad of gap closed per step
+        if closure * 500.0 < 0.02:
+            # Flat shear: place just outside capture so any drift nudges it in.
+            gap = 1.1 * dlon_capture
+        else:
+            target_step = int(rng.integers(80, min(421, max(dev_steps, 81))))
+            gap = 0.8 * dlon_capture + closure * target_step
+        # Converging side: the gap g = wrap(comp_lon - host_lon) evolves at
+        # drate, so |g| shrinks iff sign(g) opposes it.
+        signed_gap = -np.sign(drate) * gap if drate != 0.0 else gap
+        comp_lon = float((host.lon + signed_gap + np.pi) % (2.0 * np.pi) - np.pi)
+        sign = 1.0 if host.strength > 0.0 else -1.0
+        # Match the host's stamp treatment (stamp_contrast already applied to
+        # the base population by the time companions spawn).
+        reg.vortices.append(
+            Vortex(comp_lat, comp_lon, r_c, sign * 0.012 * (r_c / 0.03),
+                   KIND_OVAL, tint=host.tint, brightness=host.brightness)
+        )
+    # Atomic trim: if companions pushed past the cap, drop companions (the
+    # newest entries) — never a host — so no orphan halves distort anything.
+    while len(reg.vortices) > MAX_VORTICES:
+        reg.vortices.pop()
 
 
 def _veil(lat: float) -> float:
