@@ -87,12 +87,17 @@
       "relax_tau": 350.0,
       "replenish_rate": 0.015,
       "kh_amplitude": 0.6,
-      "kh_wavenumber": 24
+      "kh_wavenumber": 24,
+      "belt_replenish": 0.07,
+      "belt_replenish_scale": 2.0
     },
     "storms": {
       "hero_count": 1,
-      "hero_radius": 0.13,
+      "hero_radius": 0.15,
       "hero_strength": 1.0,
+      "hero_latitude": -22.5,
+      "rim_contrast": 1.5,
+      "hero_aspect": 2.0,
       "oval_density": 1.6,
       "barge_density": 1.2,
       "pearls_count": 7,
@@ -715,14 +720,14 @@
       "gamma": 1.0,
       "chroma_scale": 1.0,
       "chroma_variance": 0.35,
+      "hue_variance": 0.18,
       "polar_tint_color": [
         0.36,
         0.46,
         0.61
       ],
       "polar_tint_strength": 0.68,
-      "polar_tint_start_lat": 56.0,
-      "hue_variance": 0.18
+      "polar_tint_start_lat": 56.0
     },
     "detail": {
       "intensity": 0.95,
@@ -736,6 +741,7 @@
       "intermittency": 0.65,
       "hero_spiral": 0.55,
       "belt_texture": 1.05,
+      "belt_texture_fine": 1.4,
       "mottle": 0.85
     },
     "emission": {
