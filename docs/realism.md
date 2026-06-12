@@ -217,6 +217,50 @@ zone_chroma_std ≥ 0.40×, belt_L_std ≥ 0.55×.
 (d) hue_spread re-measured post-recalibration; the hue_variance shader knob
 is built only if still < 60% of ref.
 
+### v1.4 re-audit (post-template; seed 4201; full 3-judge panel, one
+### self-cropping with independent quantitative probes)
+
+Hypothesis test against the pre-registered targets:
+
+| target | result | verdict |
+|---|---|---|
+| zone_rgb ≤ 0.0534 | 0.0359 | **HIT** (beat the warp ceiling — recalibration stacked) |
+| belt_rgb ≤ 0.0631 | 0.0644 | marginal miss (+2 %) |
+| contrast: no regression > 2 % | 0.0741 (+19.9 %) | **MISS** — diagnosis below |
+| belt_chroma ≤ 0.0105 | 0.0100 | HIT |
+| (a) sign changes ≤ 3 | 6 → 4 | near miss (de-alternation real, one flip left) |
+| (a) masked mean residual ≤ 0.0082 | 0.0058 (−58 %) | **HIT** |
+| (c) belt_chroma_std ≥ 0.58× | 0.612× | HIT |
+| (c) zone_chroma_std ≥ 0.40× | 0.309× | MISS |
+| (c) belt_L_std ≥ 0.55× | 0.472× | MISS |
+| (d) hue_spread ≥ 0.60× | 0.579× | fires → hue_variance gets built |
+
+**Shared diagnosis for the misses** (judge-confirmed + verified by direct
+probes on the 8K render): (1) the recalibrated palette rows at anchors
+inside the ref's blur/mottle-dominated regions (66°, −57.5°, −78.5°) are
+near-constant — quartile windows there have tiny spread — which crushes
+T0 dynamic range: high-lat banding, polar cyclones, and storm stamps all
+render through nearly-flat gradients; (2) the detail layer's filament
+masks are gated on jet speed/shear, and the template's broad bands put
+their interiors far from any jet (the old 16-band layout had a jet every
+~10°) — NEB-analog interior at native 8K is near-featureless where the
+v1.3 render showed filaments. Both are levers in the authorized fix set,
+not goal-shifts: contrast/L_std/zone_chroma_std re-measured at acceptance.
+
+Re-audit verdict consensus (3 judges, majority per discrepancy):
+band skeleton MATCH (all three: alignment achieved; "GRS sits at a
+plausible SEB-flank latitude"); global color family close at low-mid lat
+(judge-3 probes: NEB within ~10 BGR units, EZ within ~5); remaining gaps
+ranked unanimously: (1) turbulent texture invisible planet-wide on the
+new layout, (2) vortex rendering (GRS rim/moat/elongation; ovals/pearls/
+barges at or below visibility; "concentric ripple rings" artifact = the
+collar-streamline term standing out in the calm new context), (3) belt
+saturation + within-band contrast, (4) polar clusters (flat palette rows
++ tint flatten the patch sim's content), (5) festoons orange-not-blue +
+hotspots absent. GRS size graded undersized at matched scale (hero
+radius vs the ref's ~12° oval). Lanes-gap verdict from pass 1 stands
+(now removed). KH/meander: amplitude/wavenumber TUNE verdicts stand.
+
 ### Harness notes
 
 Crops 20/22 shared one file (belt-filament and striation boxes
