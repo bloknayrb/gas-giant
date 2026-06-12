@@ -22,7 +22,7 @@
       "variance_amount": 0.18,
       "faded_sector": 0.55,
       "contrast_envelope": 0.6,
-      "lane_density": 0.45,
+      "lane_density": 0.0,
       "edge_diversity": 0.55,
       "width_tail": 0.35,
       "detail_freq": 14.0
