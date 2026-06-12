@@ -72,8 +72,12 @@ class EventSchedule:
             if age < 0:
                 continue
             if age > LIFETIME:
-                if ob.vortex is not None and ob.vortex in registry.vortices:
-                    registry.vortices.remove(ob.vortex)
+                if ob.vortex is not None:
+                    # Identity-based removal: dataclass == is field equality, so
+                    # list.remove could drop a different but field-equal vortex.
+                    registry.vortices = [
+                        v for v in registry.vortices if v is not ob.vortex
+                    ]
                     ob.vortex = None
                 continue
             if ob.vortex is None:

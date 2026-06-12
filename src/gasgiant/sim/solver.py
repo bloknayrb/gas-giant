@@ -21,6 +21,7 @@ import numpy as np
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import PlanetParams, PoleParams, PoleStyle
 from gasgiant.params.seeds import subseed
+from gasgiant.sim.advance import advance_registry
 from gasgiant.sim.profiles import LatProfiles
 from gasgiant.sim.tracers import TracerState
 from gasgiant.sim.vortices import VortexRegistry
@@ -319,10 +320,9 @@ class Solver:
         ctx = self.gpu.ctx
         for _ in range(n):
             # 1. Events (outbreak spawn/decay), vortex drift, SSBO refresh.
-            impulses: list[tuple[float, float, float, float]] = []
-            if self.events is not None:
-                impulses = self.events.apply(self.step_index, self.vortices)
-            self.vortices.drift(self.profiles, self.dt)
+            impulses = advance_registry(
+                self.vortices, self.profiles, self.dt, self.step_index, self.events
+            )
             ssbo_data = self.vortices.pack_ssbo()
             if ssbo_data.nbytes > self._ssbo.size:
                 self._ssbo.orphan(ssbo_data.nbytes)
