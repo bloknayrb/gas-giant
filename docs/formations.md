@@ -199,6 +199,43 @@ pass); fbm jig breaks the geometric regularity (`detail.hero_spiral`).
 The lanes are stationary in the hero frame — correct for stills; a time
 phase term is the one-line extension if an animation release needs it.
 
+### Storm-scale folded belt structure
+The mosaic's dominant belt texture lives at 0.5–3°: folded luminance
+patches far above the filament frequency, emerging from real turbulence.
+*Implementation:* DETAIL — mid-frequency fbm sampled at flow-BACKTRACED
+positions (folds with the flow like the filaments) + an additive
+filament-weight floor inside belts (`detail.belt_texture`); gated by the
+intermittency field so violent patches abut calm runs. Added in v1.4: a
+reference-aligned broad-band layout puts band interiors far from any jet,
+starving the shear/speed-gated masks.
+
+### Temperate lace mottle
+The 35–60° latitudes are dense storm-flecked mottle — bright granule
+rings, dark dots, lacy folds — where banding gives way (the audit's
+largest missing class). *Implementation:* DETAIL — two Worley scales +
+fbm lace at a short backtrace, latitude-windowed (`detail.mottle`).
+
+### Reference band template
+Band edge latitudes/values/heights taken VERBATIM from a cylindrical
+reference (`bands.template`, extracted by
+`scripts/audit_features.py --extract-template`): the "Jupiter replica"
+path. No value seasoning runs on it (consumers re-derive zone/belt
+identity from `values < median`, and jitter can flip a band's class);
+warp/edge softness/diversity still apply. Seeds vary storms and texture
+on the fixed skeleton — same planet, different weather.
+
+### Thin dark lanes (STYLE note)
+PIA07782 shows nothing like clean unbroken analytic lane lines — real
+thin dark features are sim-scale belts roughed up by flow. jupiter_like
+ships `lane_density 0`; the feature is truthful on Saturn (saturn_pale
+0.7), whose fine banding really is that uniform.
+
+### Iso-luminance hue drift
+Bands hold differently-hued material at the same lightness, which a
+luminance-keyed palette gradient cannot express by construction.
+*Implementation:* POST — `appearance.hue_variance` rotates Oklab (a, b)
+by a band-confined drift field (luminance-neutral).
+
 ### Within-band color richness
 Bands in the reference hold pockets of more/less saturated material and
 slow lightness patching along longitude; uniform band color reads flat.

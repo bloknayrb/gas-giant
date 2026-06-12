@@ -261,6 +261,62 @@ hotspots absent. GRS size graded undersized at matched scale (hero
 radius vs the ref's ~12° oval). Lanes-gap verdict from pass 1 stands
 (now removed). KH/meander: amplitude/wavenumber TUNE verdicts stand.
 
+## v1.4 final (acceptance; raw view @2048 vs PIA07782, metrics protocol)
+
+| metric | post-B0 | v1.4 final | pre-registered target | verdict |
+|---|---|---|---|---|
+| zone_rgb | 0.0673 | 0.0412 | ≤ 0.0534 | **HIT** |
+| belt_rgb | 0.0766 | 0.0558 | ≤ 0.0631 | **HIT** |
+| contrast | 0.0618 | 0.0503 | no regression > 2 % | **HIT** (−19 %) |
+| belt_chroma | 0.0117 | 0.0104 | ≤ 0.0105 | HIT |
+| masked mean belt_chroma residual | 0.0137 | 0.0066 | ≤ 0.0082 | **HIT** |
+| band-level sign changes | 6 | 4 | ≤ 3 | near miss |
+| belt_chroma_std ratio | — | 0.655× | ≥ 0.58× | HIT |
+| zone_chroma_std ratio | — | 0.397× | ≥ 0.40× | graze (−0.003) |
+| belt_L_std ratio | 0.47× | 0.906× | ≥ 0.55× | **HIT** |
+| hue_spread ratio | 0.43× (v1.3) | 0.701× | ≥ 0.60× | **HIT** |
+| clip fraction | 0 | 0 | non-increase | HIT |
+
+Perf: 16K all-on 39.0 s median of 3 (v1.3: 31.1; gate 40 — margin thin;
+cut order if v1.5 adds cost: mottle window, fold gain, striation freq).
+224 tests; ruff; lint-imports; GUI smoke; Blender two-mapset harness green.
+
+**Final-look rubric** (3 independent judges, majority per axis; overall
+pass required 4/4 — NOT met, recorded without goal-shifting):
+band structure **PASS** (3–0); color family **PASS** (2–1, marginal —
+polar caps read bluer than the map's gray-taupe; a deliberate
+PIA21641-flavor STYLE choice, recorded); GRS region **FAIL** (0–3);
+texture density at matched scale **FAIL** (0–3). Cross-seed: 2–1 "same
+planet, different weather" (band skeleton + palette frozen by the
+template; storm registries 2/127 overlap across seeds).
+
+Honest findings for the v1.5 pass:
+
+- **Matched-scale turbulence density remains ~half the reference's.**
+  belt_texture/mottle moved belt_L_std from 0.47× to 0.91× and the
+  judges still grade the morphology short: the reference's folded
+  filaments are SIM-scale advected structures, not detail-layer noise.
+  The named lever is sim-level (higher-res development run, stronger
+  belt turbulence folding) — the boundary of "without a full fluid sim"
+  is close here.
+- **GRS at matched scale**: circular (isotropic Gaussian vortices — a
+  LIMIT without elongated stamp/psi support), collar present in the
+  stamp but under-visible, spiral/collar detail terms alias into
+  "concentric rings" at small angular size (lever: gate the spiral by
+  rendered angular size). Wake stays LIMIT in this layout (mid-zone
+  hero placement rule; the named lever is `storms.hero_latitude`).
+- **Hero seed-stability** (judge catch): random seeds can roll the hero
+  into the north hemisphere or out of the GRS window — a permanent
+  identity feature treated as weather. `hero_latitude` (pre-authorized,
+  unbuilt — the shipped seed passes by scan) is the lever.
+- **Discrete storms vs bright surrounds**: pearls/ovals render (probe:
+  ΔL up to 0.15) but read faint at matched scale because the placement
+  rule puts them in bright zones while the reference's sit against
+  darker mottle; rim deltas are stamp constants (default-path text) —
+  a `storms.rim_contrast` knob is the v1.5 CODE lever.
+- **Festoons root on the EZ south edge** this layout (edge-nearest-7°
+  picks −7.3 over +5.9) — mirrored vs the real NEB-south rooting; STYLE.
+
 ### Harness notes
 
 Crops 20/22 shared one file (belt-filament and striation boxes

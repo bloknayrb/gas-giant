@@ -100,7 +100,7 @@
       "outbreak_count": 1,
       "outbreak_strength": 1.0,
       "small_density": 1.2,
-      "stamp_contrast": 1.25,
+      "stamp_contrast": 1.5,
       "merge_rate": 0.7,
       "merge_debris": 1.0
     },
