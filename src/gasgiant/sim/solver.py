@@ -253,6 +253,23 @@ class Solver:
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
                     _set(prog, "u_detail_offset", self._detail_offset)
                     _set(prog, "u_detail_freq", p.bands.detail_freq)
+                    _set(prog, "u_belt_replenish", p.turbulence.belt_replenish)
+                    _set(prog, "u_belt_scale", p.turbulence.belt_replenish_scale)
+                    if dom.kind == DOMAIN_EQUIRECT and p.turbulence.belt_replenish > 0.0:
+                        import math
+                        scale = p.turbulence.belt_replenish_scale
+                        finest_wavelen = 1.5 / (p.bands.detail_freq * 2.0 * scale)
+                        nyquist = 8.0 * (2.0 * math.pi / p.sim.resolution)
+                        if scale > 1.0 and finest_wavelen < nyquist:
+                            import warnings
+                            warnings.warn(
+                                f"belt_replenish_scale={scale}: finest injection octave "
+                                f"(~{finest_wavelen:.4f} noise-units) is below ~2 cells at "
+                                f"resolution {p.sim.resolution} "
+                                f"(detail_freq={p.bands.detail_freq}); "
+                                f"sub-Nyquist energy will be dissipated/aliased.",
+                                stacklevel=2,
+                            )
                     self._band_mod_uniforms(prog)
                     if dom.kind != DOMAIN_EQUIRECT:
                         self._poly_uniforms(prog, pole)
@@ -410,6 +427,8 @@ class Solver:
         _set(prog, "u_back", 3)
         self.profile_stamp.use(location=4)
         _set(prog, "u_profile_stamp", 4)
+        self.profile_dyn.use(location=5)
+        _set(prog, "u_profile_dyn", 5)
         _set(prog, "u_dt", +self.dt)
         _set(prog, "u_turb_time", turb_time)
         _set(prog, "u_vortex_count", len(self.vortices.vortices))

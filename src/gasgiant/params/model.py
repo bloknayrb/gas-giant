@@ -290,6 +290,14 @@ class TurbulenceParams(_Params):
         24, tier=Tier.VELOCITY, lo=4, hi=80, rand=(14, 40), ui="Turbulence",
         description="KH billow longitudinal wavenumber",
     )
+    belt_replenish: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=0.08, ui="Turbulence",
+        description="Extra fine detail-noise replenished per step inside belts (emergent filaments)",  # noqa: E501
+    )
+    belt_replenish_scale: float = pfield(
+        2.0, tier=Tier.RESTART, lo=1.0, hi=4.0, ui="Turbulence",
+        description="Belt replenishment frequency multiplier relative to the base detail frequency",
+    )
 
 
 class StormsParams(_Params):

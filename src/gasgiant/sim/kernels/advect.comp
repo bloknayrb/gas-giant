@@ -48,6 +48,9 @@ uniform float u_warp_freq;
 uniform vec3 u_detail_offset;
 uniform float u_detail_freq;
 uniform float u_turb_time;      // evolves the replenishment noise
+uniform float u_belt_replenish; // extra belt-gated detail replenish per step
+uniform float u_belt_scale;     // belt replenish frequency multiplier
+uniform sampler2D u_profile_dyn; // (.a = belt mask)
 
 #if PASS == 2 && DOMAIN != 0
 // Polygonal polar jet ring: part of the relaxation target on patches
@@ -214,6 +217,19 @@ void main() {
         4, 2.0, 0.5
     );
     result.z = mix(result.z, fresh, u_replenish);
+
+    // Belt-gated fine replenishment (v1.5): extra higher-frequency evolving
+    // noise injected only inside belts; advects/shears into filaments.
+    if (u_belt_replenish > 0.0) {
+        float beltm = texture(u_profile_dyn, latProfileUV(ll.y)).a;
+        if (beltm > 0.02) {
+            float fine = 0.5 + 0.5 * fbm(
+                p * (u_detail_freq * 2.0 * u_belt_scale) + u_detail_offset.yxz
+                  + vec3(u_turb_time, 0.0, 0.0),
+                3, 2.0, 0.5);
+            result.z = mix(result.z, fine, u_belt_replenish * beltm);
+        }
+    }
 
     // T3 tint relaxes toward the live vortex + wave tint stamps: cores and
     // festoon roots stay colored while they exist, advected trails decay.
