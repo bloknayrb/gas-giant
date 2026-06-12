@@ -84,7 +84,22 @@ void main() {
         vec4 b = vortex_data[3 * i + 1];
         float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
         float rc = a.w;
-        float q = d / rc;
+        float asp = vortex_data[3 * i + 2].y;
+        float q;
+        if (asp == 1.0) {
+            q = d / rc;
+        } else {
+            vec3 c = a.xyz;
+            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
+            float ewl = length(ew);
+            if (ewl < 1e-4) {
+                q = d / rc;
+            } else {
+                vec3 e1 = ew / ewl;
+                vec3 e2 = cross(c, e1);
+                q = length(vec2(dot(p, e1) / asp, dot(p, e2))) / rc;
+            }
+        }
         if (q < 4.0) {
             psi += b.x * exp(-q * q);
         }
@@ -97,7 +112,7 @@ void main() {
             float dlon = mod(ll.x - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;  // positive = downstream
             float across = (ll.y - vlat) / max(rc * 1.6, 1e-4);
-            if (along > rc * 0.5 && along < rc * 7.0) {
+            if (along > rc * 0.5 * asp && along < rc * 7.0) {
                 wake += exp(-across * across) * (1.0 - along / (rc * 7.0));
             }
         }

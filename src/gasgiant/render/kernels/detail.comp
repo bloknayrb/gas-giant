@@ -56,6 +56,7 @@ uniform vec3 u_offset;
 // and winding time. NOT the vortex SSBO — just centers/radii (xyz, r_core).
 uniform int u_hero_count;
 uniform vec4 u_heroes[3];
+uniform float u_hero_aspect[3];
 
 uniform float u_striation_amount;
 uniform float u_striation_freq;
@@ -99,8 +100,24 @@ vec2 eqUV(vec2 ll) {
 float heroMask(vec3 p) {
     float m = 0.0;
     for (int i = 0; i < u_hero_count; ++i) {
-        float d = acos(clamp(dot(p, u_heroes[i].xyz), -1.0, 1.0));
-        float q = d / max(u_heroes[i].w * 1.4, 1e-4);
+        vec3 c = u_heroes[i].xyz;
+        float rc = max(u_heroes[i].w * 1.4, 1e-4);
+        float asp = u_hero_aspect[i];
+        float d = acos(clamp(dot(p, c), -1.0, 1.0));
+        float q;
+        if (asp == 1.0) {
+            q = acos(clamp(dot(p, c), -1.0, 1.0)) / rc;
+        } else {
+            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
+            float ewl = length(ew);
+            if (ewl < 1e-4) {
+                q = acos(clamp(dot(p, c), -1.0, 1.0)) / rc;
+            } else {
+                vec3 e1 = ew / ewl;
+                vec3 e2 = cross(c, e1);
+                q = length(vec2(dot(p, e1) / asp, dot(p, e2))) / rc;
+            }
+        }
         m += exp(-q * q);
     }
     return clamp(m, 0.0, 1.0);
@@ -333,13 +350,19 @@ void main() {
         for (int i = 0; i < u_hero_count; ++i) {
             vec3 c = u_heroes[i].xyz;
             float rc = max(u_heroes[i].w, 1e-4);
-            float q = acos(clamp(dot(pc, c), -1.0, 1.0)) / rc;
-            if (q < 0.05 || q >= 1.9) continue;  // atan(0,0) guard + early-out
-            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);   // local west
+            float asp = u_hero_aspect[i];
+            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);   // local west / longitude
             float ewl = length(ew);
             if (ewl < 1e-4) continue;                   // degenerate polar guard
             vec3 e1 = ew / ewl;
-            vec3 e2 = cross(c, e1);   // right-handed: theta CCW viewed from outside
+            vec3 e2 = cross(c, e1);
+            float q;
+            if (asp == 1.0) {
+                q = acos(clamp(dot(pc, c), -1.0, 1.0)) / rc;   // EXACT existing
+            } else {
+                q = length(vec2(dot(pc, e1) / asp, dot(pc, e2))) / rc;
+            }
+            if (q < 0.05 || q >= 1.9) continue;        // same window, now elliptical
             float theta = atan(dot(pc, e2), dot(pc, e1));
             // Winding sense pinned EMPIRICALLY against the backtraced
             // filament winding (S>0 is a clockwise vortex in this psi

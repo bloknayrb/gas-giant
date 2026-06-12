@@ -26,7 +26,22 @@ vec3 vortexStamp(vec3 p) {
         vec4 a = vortex_data[3 * i];
         vec4 b = vortex_data[3 * i + 1];
         float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
-        float q = d / a.w;
+        float asp = vortex_data[3 * i + 2].y;
+        float q;
+        if (asp == 1.0) {
+            q = d / a.w;
+        } else {
+            vec3 c = a.xyz;
+            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
+            float ewl = length(ew);
+            if (ewl < 1e-4) {
+                q = d / a.w;
+            } else {
+                vec3 e1 = ew / ewl;
+                vec3 e2 = cross(c, e1);
+                q = length(vec2(dot(p, e1) / asp, dot(p, e2))) / a.w;
+            }
+        }
         if (q < 3.0) {
             float core = exp(-q * q);
             if (b.y == VKIND_DEBRIS) {
@@ -83,7 +98,7 @@ vec3 vortexStamp(vec3 p) {
             float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;
             float across = (plat - vlat) / max(rc * 1.6, 1e-4);
-            if (along > rc * 0.5 && along < rc * 6.0) {
+            if (along > rc * 0.5 * asp && along < rc * 6.0) {
                 float w = exp(-across * across) * (1.0 - along / (rc * 6.0));
                 dT0 += 0.16 * w;   // bright churned clouds
                 dT3 -= 0.20 * w;   // cool gray-white, not belt-colored

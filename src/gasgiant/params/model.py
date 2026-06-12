@@ -325,6 +325,13 @@ class StormsParams(_Params):
                     "(the Red Spot Hollow) amplitude; 1.0 = default, >1 deepens "
                     "the rim contrast, 0 removes the ring/collar",
     )
+    hero_aspect: float = pfield(
+        1.0, tier=Tier.RESTART, lo=1.0, hi=3.0, ui="Storms",
+        description="Hero storm lon:lat elongation (real GRS ~2:1); 1.0 = round. "
+                    "Stretches the stamp, perimeter ring, collar, spiral lanes "
+                    "and detail mask along longitude. Wake across-width and "
+                    "merge capture stay isotropic (recorded LIMITs)",
+    )
     oval_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
         description="White-oval anticyclone population multiplier",

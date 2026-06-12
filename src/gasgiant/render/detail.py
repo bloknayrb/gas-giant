@@ -63,13 +63,13 @@ class DetailSynth:
         params: DetailParams,
         origin: tuple[int, int] = (0, 0),
         full_size: tuple[int, int] | None = None,
-        heroes: list[tuple[float, float, float, float, float]] | None = None,
+        heroes: list[tuple[float, float, float, float, float, float]] | None = None,
         polar: PolarRoute | None = None,
     ) -> None:
-        """heroes: up to 3 (x, y, z, r_core, spin) hero-storm centers; the
+        """heroes: up to 3 (x, y, z, r_core, spin, aspect) hero-storm centers; the
         detail amplitude and winding time grow inside them, and the
         DETAIL_FX spiral lanes wind in the spin (= sign(strength)) sense.
-        4-tuples are tolerated (spin defaults +1).
+        6-tuples carry aspect; shorter tuples default aspect 1.0.
         polar: patch velocity/tracer textures — when given, polar backtraces
         route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
@@ -123,12 +123,15 @@ class DetailSynth:
         prog["u_origin"].value = origin
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)
+        aspects = np.ones(3, dtype=np.float32)   # default 1.0 -> exact short-circuit
         n_heroes = 0
         for h in (heroes or [])[:3]:
-            packed[n_heroes] = h[:4]  # (x, y, z, r_core); h[4] is the spin
+            packed[n_heroes] = h[:4]
+            aspects[n_heroes] = h[5] if len(h) > 5 else 1.0
             n_heroes += 1
         prog["u_hero_count"].value = n_heroes
         prog["u_heroes"].write(packed.tobytes())
+        prog["u_hero_aspect"].write(aspects.tobytes())
         vel_tex.use(location=0)
         prog["u_vel"].value = 0
         tracers_tex.use(location=1)

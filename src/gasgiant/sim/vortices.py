@@ -79,6 +79,8 @@ class Vortex:
     brightness: float = 0.0
     # Downstream direction of the ambient jet (heroes: wake side), +1 east.
     wake_dir: float = 0.0
+    # lon:lat elongation of the iso-contours (heroes only; 1.0 = round).
+    aspect: float = 1.0
     # CPU-only (never packed into the SSBO): merger hysteresis countdown.
     cooldown: int = 0
     # CPU-only: remaining lifetime of transient entries (merger debris);
@@ -95,14 +97,15 @@ class VortexRegistry:
 
     def pack_ssbo(self) -> np.ndarray:
         """(N, 12) float32, three vec4 per vortex:
-        [x, y, z, r_core], [strength, kind, tint, brightness], [wake_dir, 0, 0, 0].
+        [x, y, z, r_core], [strength, kind, tint, brightness], [wake_dir, aspect, 0, 0].
         Vectorized: this runs every sim step."""
         n = len(self.vortices)
         if n == 0:
             return np.zeros((1, 12), dtype=np.float32)
         fields = np.array(
             [
-                (v.lat, v.lon, v.r_core, v.strength, v.kind, v.tint, v.brightness, v.wake_dir)
+                (v.lat, v.lon, v.r_core, v.strength, v.kind,
+                 v.tint, v.brightness, v.wake_dir, v.aspect)
                 for v in self.vortices
             ],
             dtype=np.float64,
@@ -116,6 +119,7 @@ class VortexRegistry:
         out[:, 3] = fields[:, 2]
         out[:, 4:8] = fields[:, 3:7]
         out[:, 8] = fields[:, 7]
+        out[:, 9] = fields[:, 8]
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -424,7 +428,8 @@ def generate_vortices(
         reg.vortices.append(
             Vortex(lat, float(rng.uniform(-np.pi, np.pi)), r, s, KIND_HERO,
                    tint=0.9, brightness=0.05,
-                   wake_dir=1.0 if u_here >= 0.0 else -1.0)
+                   wake_dir=1.0 if u_here >= 0.0 else -1.0,
+                   aspect=storms.hero_aspect)
         )
 
     # White ovals: anticyclones in zones, power-law sizes, Poisson-disc lons.
