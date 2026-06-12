@@ -144,6 +144,62 @@ Honest findings recorded for the next pass:
 Perf: 16K all-maps, all FX on (chroma + intermittency + spiral + emission):
 **31.1 s median of 3** (v1.2: 33.8 s; gate 40 s).
 
+## v1.4 feature audit — pass 1 (pre-template; seed 4257, 8K render)
+
+Instrument: `scripts/audit_features.py` (dual-scale crop pairs, manifest in
+`out/audit/`). Judged by the implementer + one independent blind judge
+(crops + claims, no verdicts shared); two independent reverse-pass agents
+enumerated the reference's feature classes by grid sweep, blind to the
+codebase. Verdicts are per discrepancy; band-coupled verdicts are
+PROVISIONAL (the band template re-audit re-grades them).
+
+### Forward pass (formations.md claims vs reference)
+
+| feature | verdict | evidence |
+|---|---|---|
+| band layout (count/widths/EZ) | BUILD (provisional) | ~12+ jittered bands vs ref's few broad belts + wide EZ; the known alignment residual |
+| high-lat (40–60°) regime | BUILD | ref: dense lace-filament mottle with embedded ovals/rims; ours: featureless smooth gradient. Largest single gap after belts |
+| belt interior (matched scale) | BUILD/LIMIT | ref belts are wall-to-wall folded filament chaos AT MATCHED SCALE (lum std 28 vs our 13); not a fine-texture issue |
+| zone interior | TUNE | ours isotropic fuzz; ref smooth + long soft along-flow streaks |
+| thin dark lanes | confirmed remove | uniform unbroken pencil lines; nothing like it in the ref (user-confirmed; commit 3) |
+| GRS | TUNE+CODE | salmon level plausible; core near-circular vs ref 1.8:1; band edge runs straight THROUGH the storm (no deflection/moat); orange confined to small donut |
+| GRS wake | BUILD (provisional) | absent at matched scale (hero sits in a pale quiet zone this seed) |
+| GRS internal spiral | TUNE | lanes present but read annular/concentric; too faint; (a lane line slices the storm — fixed by commit 3) |
+| white ovals | CODE-SMALL | largest ovals have near-zero visual signature: no compact edge, no dark rim. Ref: crisp rimmed white dots in lines |
+| brown barges | CODE-SMALL | render as faint WARM blotches — wrong sign (ref: darker than belt), no cigar geometry |
+| string of pearls | CODE-SMALL | invisible even at native res (confirmed by debug strip); placed but unrendered |
+| merger debris | N/A | none alive at run end this seed |
+| festoons | CODE-SMALL+TUNE | streamers read warm tan vs ref's blue-gray (hue offset wrong direction); droop instead of sweeping with shear |
+| 5-µm hot spots | CODE-SMALL | no compact dark holes distinguishable |
+| KH billows | TUNE | scallop train present but faint; no curl-over/rollup |
+| meander | TUNE | wanders (claim satisfied) but amplitude low, spectrum jitter-dominated vs ref's coherent wavenumber 5–20 swings. Closest to MATCH |
+| outbreaks | N/A-OFF | ref shows one live white plume + wake; argues for outbreak_count ≥ 1 |
+| belt filaments (native) | TUNE | present; uniform/laminar — folded violence absent |
+| zone cells (native) | TUNE | present, very low amplitude |
+| striation (native) | TUNE | present faintly |
+| intermittency (native) | TUNE | busy/calm alternation present; dynamic range a fraction of claim |
+| polar south | BUILD | ref: cyclone ring with spiral arms, popcorn clusters, warm collar→blue transition; ours: near-featureless pale disk, faint smudges, off-center clump |
+| polar north | BUILD | smooth gradient, zero discrete cyclones visible |
+| global color balance | TUNE | belt-zone color offset ~half ref's (pale tan vs ochre-against-blue-white) |
+
+### Reverse pass (reference classes with no/weak counterpart)
+
+MISSING or visually absent: temperate lace-filament mottle regime (both
+sweeps' top finding); braided "rope" band (~+38°); dark grey-blue spot
+chains (+20/+35°); double/multi-stranded belts; band-hero deflection
+(SEB hooks around the GRS + white moat); GRS elongation; large diffuse
+color-anomaly patches (faded_sector exists but weak); zone laminar
+streamline striations (floored too low); popcorn high-cloud clusters
+(close-up scale). Implemented-but-OFF: convective plumes (ref shows one).
+Both sweeps note: the ref map's featureless poles are partly projection
+blur — PIA21641 is the polar ground truth, and ours is far from it.
+
+### Harness notes
+
+Crops 20/22 shared one file (belt-filament and striation boxes
+coincided); white_oval_2's crop was anomalously blurred. Both noted for
+the B2.5 re-run; neither changes a verdict.
+
 ## Tuning protocol
 
 - Texture judgement happens on **≥4K renders only**: the striation layer at
