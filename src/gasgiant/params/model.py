@@ -431,6 +431,80 @@ class AppearanceParams(_Params):
     )
 
 
+class EmissionParams(_Params):
+    """Emission map components (night-side glow for Blender emission
+    shading). All-zero strengths disable the map: no emission.exr is
+    written and manifest consumers tolerate its absence. Values are linear
+    radiance multipliers (the EXR is float32 HDR; AgX rolls strong emitters
+    off into bloomable hotspots). No rand on the strengths: emission is
+    invisible in the GUI preview, so seeded randomization silently enabling
+    it would surprise at export time."""
+
+    thermal_strength: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
+        description="5-micron thermal glow through cloud gaps (gated on the "
+                    "cloud-top DEPRESSION vs the band stamp: hot-spot chains "
+                    "blaze, barges glow, belts glimmer, zones stay dark)",
+    )
+    thermal_color: tuple[float, float, float] = pfield(
+        (1.0, 0.36, 0.08), tier=Tier.POST, ui="Emission",
+        description="Ember red-orange; linear radiance hue",
+    )
+    thermal_threshold: float = pfield(
+        0.18, tier=Tier.POST, lo=0.05, hi=0.5, ui="Emission",
+        description="Cloud-gap anomaly where the HDR hot-spot term begins "
+                    "(higher = only the deepest holes blaze)",
+    )
+    thermal_hdr: float = pfield(
+        16.0, tier=Tier.POST, lo=1.0, hi=40.0, ui="Emission",
+        description="Radiance of the deepest hot spots relative to the faint "
+                    "belt glow (real 5-micron maps span ~50:1)",
+    )
+    lightning_strength: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
+        description="Frozen lightning-flash clusters in cyclonic belts and "
+                    "at high latitudes (the Juno look: light pools under the "
+                    "deck plus sparse HDR cores)",
+    )
+    lightning_color: tuple[float, float, float] = pfield(
+        (0.72, 0.82, 1.0), tier=Tier.POST, ui="Emission",
+    )
+    lightning_density: float = pfield(
+        0.5, tier=Tier.POST, lo=0.0, hi=1.0, ui="Emission",
+    )
+    aurora_strength: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
+        description="Auroral ovals around the (offset) magnetic poles; "
+                    "written to the emission map's ALPHA channel so the "
+                    "importer can lift it onto a shell",
+    )
+    aurora_color: tuple[float, float, float] = pfield(
+        (0.85, 0.35, 0.60), tier=Tier.POST, ui="Emission",
+        description="H/H2 emission is pink-magenta (Earth's oxygen green "
+                    "is impossible in a hydrogen atmosphere)",
+    )
+    aurora_radius: float = pfield(
+        14.0, tier=Tier.POST, lo=5.0, hi=25.0, ui="Emission",
+        description="Oval angular radius from the magnetic pole, degrees",
+    )
+    aurora_width: float = pfield(
+        2.5, tier=Tier.POST, lo=0.5, hi=8.0, ui="Emission",
+    )
+    aurora_pole_offset: float = pfield(
+        8.0, tier=Tier.POST, lo=0.0, hi=20.0, ui="Emission",
+        description="Magnetic-pole tilt from the rotation pole, degrees "
+                    "(longitude seeded); Saturn's axis is aligned: use 0",
+    )
+
+    @property
+    def enabled(self) -> bool:
+        return (
+            self.thermal_strength > 0.0
+            or self.lightning_strength > 0.0
+            or self.aurora_strength > 0.0
+        )
+
+
 class PhysicalParams(_Params):
     """Real-world scale hints passed through to the Blender importer."""
 
@@ -465,6 +539,7 @@ class PlanetParams(_Params):
     poles: PolesParams = Field(default_factory=PolesParams)
     appearance: AppearanceParams = Field(default_factory=AppearanceParams)
     detail: DetailParams = Field(default_factory=DetailParams)
+    emission: EmissionParams = Field(default_factory=EmissionParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
     export: ExportParams = Field(default_factory=ExportParams)
 
