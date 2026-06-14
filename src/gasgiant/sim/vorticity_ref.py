@@ -95,6 +95,61 @@ def laplacian_sphere(
     return inv_cos2 * d2_lam + d2_phi - tan_col * d1_phi
 
 
+def laplacian_patch(
+    psi: NDArray[np.floating],
+    rho_max: float,
+) -> NDArray[np.floating]:
+    """Discrete spherical Laplacian on an azimuthal-equidistant polar patch.
+
+    The patch grid is Cartesian (s, t) in radians, s,t ∈ [−rho_max, rho_max],
+    where rho = |(s,t)| is the colatitude (geodesic distance from the pole) and
+    theta = atan2(t, s) is the longitude. The AE projection preserves radial
+    distance, so the sphere metric is ds² = drho² + sin²rho dtheta² — the pole
+    (rho→0) is REGULAR (no 1/cosφ singularity; that is why the patches exist).
+
+    The Laplace-Beltrami ∇²ψ = ψ_ρρ + cot(rho)·ψ_ρ + ψ_θθ/sin²rho, expressed in
+    (s,t) via e_r=(s,t)/rho, ψ_ρ=(s·ψ_s+t·ψ_t)/rho, ψ_θθ=(t²ψ_ss−2st·ψ_st+
+    s²ψ_tt)−rho·ψ_ρ, gives:
+
+        ∇²ψ = c_ss·ψ_ss + c_tt·ψ_tt + c_st·ψ_st + c_g·(s·ψ_s + t·ψ_t)/rho
+        c_ss = s²/rho² + t²/sin²rho
+        c_tt = t²/rho² + s²/sin²rho
+        c_st = 2·s·t·(1/rho² − 1/sin²rho)
+        c_g  = cot(rho) − rho/sin²rho
+
+    All coefficients are finite as rho→0 (→ flat ψ_ss+ψ_tt). Boundary pixels are
+    clamped. POLE_SIGN does not enter (Laplacian is independent of N/S).
+    """
+    psi = np.asarray(psi, dtype=float)
+    n = psi.shape[0]
+    dstep = 2.0 * rho_max / n        # st-radians per pixel
+
+    # st at pixel centers.
+    idx = (np.arange(n) + 0.5) / n * 2.0 - 1.0   # [-1+.., 1-..]
+    s = (idx * rho_max)[np.newaxis, :] * np.ones((n, 1))   # varies along x (cols)
+    t = (idx * rho_max)[:, np.newaxis] * np.ones((1, n))   # varies along y (rows)
+    rho = np.hypot(s, t)
+    rho = np.maximum(rho, 1e-6)
+    sinr = np.maximum(np.sin(rho), 1e-6)
+
+    # Central differences (clamp boundaries by edge replication).
+    pe = np.pad(psi, 1, mode="edge")
+    ps = (pe[1:-1, 2:] - pe[1:-1, :-2]) / (2.0 * dstep)        # ∂/∂s (cols = x)
+    pt = (pe[2:, 1:-1] - pe[:-2, 1:-1]) / (2.0 * dstep)        # ∂/∂t (rows = y)
+    pss = (pe[1:-1, 2:] - 2.0 * psi + pe[1:-1, :-2]) / dstep**2
+    ptt = (pe[2:, 1:-1] - 2.0 * psi + pe[:-2, 1:-1]) / dstep**2
+    pst = (pe[2:, 2:] - pe[2:, :-2] - pe[:-2, 2:] + pe[:-2, :-2]) / (4.0 * dstep**2)
+
+    inv_r2 = 1.0 / rho**2
+    inv_s2 = 1.0 / sinr**2
+    c_ss = s**2 * inv_r2 + t**2 * inv_s2
+    c_tt = t**2 * inv_r2 + s**2 * inv_s2
+    c_st = 2.0 * s * t * (inv_r2 - inv_s2)
+    c_g = (np.cos(rho) / sinr) - rho * inv_s2
+    psi_rho = (s * ps + t * pt) / rho
+    return c_ss * pss + c_tt * ptt + c_st * pst + c_g * psi_rho
+
+
 # ---------------------------------------------------------------------------
 # 2. Zonal-wind vorticity
 # ---------------------------------------------------------------------------

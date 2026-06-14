@@ -31,9 +31,35 @@ import pytest
 from gasgiant.sim.vorticity_ref import (
     coriolis,
     jet_vorticity,
+    laplacian_patch,
     laplacian_sphere,
     vortex_omega_ref,
 )
+
+
+def test_laplacian_patch_spherical_harmonic_eigenvalues():
+    """v1.6 Phase B (P6): the azimuthal-equidistant patch Laplacian recovers
+    ∇²Y_l^m = −l(l+1)·Y on a polar patch, for BOTH a zonal and an azimuthal
+    harmonic — locking the AE-metric coefficients + the pole regularity."""
+    n = 256
+    rho_max = np.radians(34.0)
+    idx = (np.arange(n) + 0.5) / n * 2.0 - 1.0
+    s = (idx * rho_max)[np.newaxis, :] * np.ones((n, 1))
+    t = (idx * rho_max)[:, np.newaxis] * np.ones((1, n))
+    rho = np.hypot(s, t)
+    theta = np.arctan2(t, s)
+    interior = (rho < np.radians(30.0)) & (rho > np.radians(3.0))
+
+    # Zonal Y_2^0 ∝ 3cos²ρ − 1  (tests the radial/cot term + pole regularity).
+    y0 = 3.0 * np.cos(rho) ** 2 - 1.0
+    ev0 = np.median((laplacian_patch(y0, rho_max) / y0)[interior & (np.abs(y0) > 0.3)])
+    assert abs(ev0 - (-6.0)) < 0.3, f"zonal eigenvalue {ev0:.3f} != -6"
+
+    # Azimuthal Y_2^2 ∝ sin²ρ·cos(2θ)  (tests the 1/sin²ρ azimuthal term).
+    y2 = np.sin(rho) ** 2 * np.cos(2.0 * theta)
+    m2 = interior & (np.abs(y2) > 0.05)
+    ev2 = np.median((laplacian_patch(y2, rho_max) / y2)[m2])
+    assert abs(ev2 - (-6.0)) < 0.3, f"azimuthal eigenvalue {ev2:.3f} != -6"
 
 # ---------------------------------------------------------------------------
 # Grid helpers
