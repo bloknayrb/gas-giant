@@ -50,8 +50,14 @@ void main() {
     // Coriolis: f = f0·sin(lat).
     float f = coriolis(ll.y, u_coriolis_f0);
 
-    // Absolute vorticity q = ω_jet + ω_vortex + f.
-    float q = omega_jet + omega_vort + f;
+    // Phase-A polar confinement: the eddy (relative) vorticity is evolved only
+    // equatorward — poleward of ~55° the 1/cosφ jet-vorticity and the spherical
+    // Laplacian metric blow up (and the poles are kinematic in Phase A). Ramp
+    // the relative part to 0 over 50°→60° so q→f (smooth, bounded) at the caps.
+    float confine = 1.0 - smoothstep(radians(50.0), radians(60.0), abs(ll.y));
+
+    // Absolute vorticity q = (ω_jet + ω_vortex)·confine + f.
+    float q = (omega_jet + omega_vort) * confine + f;
 
     imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
 }

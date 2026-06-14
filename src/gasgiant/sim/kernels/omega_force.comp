@@ -25,6 +25,11 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
+// Runtime ω magnitude ceiling (steady state is ~O(10); this only caps the
+// startup transient to keep the warm-started ψ finite).
+#define OMEGA_CEILING 60.0
+
+#include "noise3d.glsl"
 #include "common.glsl"
 #include "laplacian.glsl"
 
@@ -42,6 +47,10 @@ uniform int   u_vortex_count;
 uniform float u_coriolis_f0;
 uniform float u_relax_tau;    // vort_relax_tau (steps); 0 disables nudging
 uniform float u_hypervisc;    // vort_hypervisc (ν₄ scale)
+uniform float u_vort_inject;  // eddy-vorticity injection amplitude; 0 disables
+uniform float u_inject_freq;  // injection fbm frequency (noise units)
+uniform vec3  u_turb_offset;  // seeded noise offset (deterministic)
+uniform float u_turb_time;    // advances the injection noise between steps
 
 // SSBO declared before vortex_omega.glsl (which uses vortex_data and u_vortex_count).
 layout(std430, binding = 2) readonly buffer Vortices {
@@ -68,10 +77,33 @@ void main() {
     float omega_jet  = texture(u_profile_omega, latProfileUV(ll.y)).r;
     float omega_vort = vortexOmegaAccum(p);
     float f          = coriolis(ll.y, u_coriolis_f0);
-    float q_target   = omega_jet + omega_vort + f;
+    // Phase-A polar confinement (matches omega_init): evolve the relative
+    // vorticity only equatorward; q_target → f at the caps.
+    float confine    = 1.0 - smoothstep(radians(50.0), radians(60.0), abs(ll.y));
+    float q_target   = (omega_jet + omega_vort) * confine + f;
 
     if (u_relax_tau > 0.0) {
         q += (q_target - q) / u_relax_tau;
+    }
+    // Hard polar damping: poleward of the confine band, pull the relative
+    // vorticity ω_rel = q − f rapidly to 0 so no polar eddy can grow (the slow
+    // 1/τ_ω nudge alone is insufficient against the metric blow-up there).
+    q = f + (q - f) * mix(0.5, 1.0, confine);
+
+    // Runtime magnitude ceiling: the closed-loop startup transient can briefly
+    // overshoot far above the ~O(10) steady state; an unclamped excursion
+    // overflows the warm-started ψ to a STICKY NaN. Clamp keeps it finite; the
+    // steady state sits well below the ceiling so it is inactive post-transient.
+    q = clamp(q, -OMEGA_CEILING, OMEGA_CEILING);
+
+    // Broadband eddy-vorticity injection (the emergent-turbulence source): a
+    // signed evolving fbm added to the RELATIVE vorticity each step. The jet
+    // shear stretches and folds it into filaments; without it the smooth
+    // zonally-symmetric jets never fold (no eddy source). Applied after the
+    // nudge so the nudge (1/τ_ω) only slowly re-smooths the injected eddies.
+    if (u_vort_inject > 0.0) {
+        vec3 np = p * u_inject_freq + u_turb_offset + vec3(0.0, u_turb_time, 0.0);
+        q += u_vort_inject * fbm(np, 4, 2.0, 0.5);
     }
     imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
 
@@ -82,8 +114,17 @@ void main() {
     // We apply laplacianPsi once more to get ∇⁴ω_rel, then negate and scale.
     if (u_hypervisc > 0.0) {
         float lap2 = laplacianPsi(u_lap_omega_rel, px, u_size);
-        q += u_hypervisc * (-lap2);
+        // GRID-NORMALIZE: laplacianPsi divides by Δ² per application, so ∇⁴ has
+        // a Nyquist eigenvalue ≈ 64/Δ⁴ (~7e8 at 512). An un-normalized explicit
+        // q += ν₄·(−∇⁴ω) is ~9 orders over the stability limit and blows the
+        // grid mode up (more ν₄ = worse). Scale by Δ⁴/64 so u_hypervisc is the
+        // per-step damping FRACTION of the Nyquist mode (stable for <2, default
+        // 0.5). Δ = π/H (equirect; ω is confined equatorward where cosφ≈1).
+        float dphi = PI / float(u_size.y);
+        float dx4 = (dphi * dphi * dphi * dphi) / 64.0;
+        q += u_hypervisc * (-lap2) * dx4;
     }
+    q = clamp(q, -OMEGA_CEILING, OMEGA_CEILING);
     imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
 #endif
 }

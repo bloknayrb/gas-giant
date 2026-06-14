@@ -506,6 +506,13 @@ class SolverParams(_Params):
     coriolis_f0: float = pfield(2.0, tier=Tier.RESTART, lo=0.0, hi=20.0, ui="Solver",
         description="Planetary vorticity magnitude f0 in f=f0*sin(lat); "
                     "sets the Rhines/band scale (vorticity mode)")
+    vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, ui="Solver",
+        description="Broadband eddy-vorticity injection amplitude per step; the "
+                    "jet shear folds it into filaments (the emergent-turbulence "
+                    "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
+    vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, ui="Solver",
+        description="Eddy-injection frequency as a multiple of bands.detail_freq "
+                    "(vorticity mode)")
 
     @model_validator(mode="after")
     def _validate_sor_omega(self) -> SolverParams:

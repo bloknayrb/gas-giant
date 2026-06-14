@@ -31,15 +31,17 @@ from gasgiant.params.presets import load_factory_preset  # noqa: E402
 # fold before re-pinning) and solver.coriolis_f0 (sets the PV-gradient / whether
 # jets are barotropically unstable and shed folds). Tracer forcing reduced
 # (weak relax + no isotropic replenish) so a folding velocity can imprint.
-_BASE = {"sim.dev_steps": 1000, "turbulence.relax_tau": 2000.0,
-         "turbulence.replenish_rate": 0.0}
+# Eddy-injection amplitude sweep in a fold-friendly regime (long vort_relax_tau,
+# low hypervisc, weak tracer re-smoothing so the folding velocity imprints).
+_BASE = {"sim.dev_steps": 800, "turbulence.relax_tau": 2000.0,
+         "turbulence.replenish_rate": 0.0, "solver.vort_relax_tau": 800.0,
+         "solver.vort_hypervisc": 0.3, "solver.coriolis_f0": 6.0,
+         "solver.vort_inject_scale": 0.5}
 CONFIGS = [
-    ("vt600_f2",   {**_BASE, "solver.vort_relax_tau": 600.0, "solver.coriolis_f0": 2.0}),
-    ("vt2000_f2",  {**_BASE, "solver.vort_relax_tau": 2000.0, "solver.coriolis_f0": 2.0}),
-    ("vt2000_f8",  {**_BASE, "solver.vort_relax_tau": 2000.0, "solver.coriolis_f0": 8.0}),
-    ("vt2000_f16", {**_BASE, "solver.vort_relax_tau": 2000.0, "solver.coriolis_f0": 16.0}),
-    ("vt2000_f8_lovisc", {**_BASE, "solver.vort_relax_tau": 2000.0,
-                          "solver.coriolis_f0": 8.0, "solver.vort_hypervisc": 0.2}),
+    ("inject_0.0", {**_BASE, "solver.vort_inject": 0.0}),
+    ("inject_0.5", {**_BASE, "solver.vort_inject": 0.5}),
+    ("inject_1.5", {**_BASE, "solver.vort_inject": 1.5}),
+    ("inject_3.0", {**_BASE, "solver.vort_inject": 3.0}),
 ]
 
 

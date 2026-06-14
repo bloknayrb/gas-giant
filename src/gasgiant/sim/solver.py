@@ -263,6 +263,11 @@ class Solver:
             k_recover=k_recover, k_sor_red=k_sor_red, k_sor_black=k_sor_black,
             k_feather=k_feather,
         )
+        # Set size / f0 / etc. uniforms on every ω kernel — WITHOUT this the
+        # advect/force/lap/SOR kernels have u_size=(0,0) and return immediately
+        # (no-ops), so the per-step ping-pong just shuffles q⁰ and zero and ω
+        # never evolves.
+        self._omega_static_uniforms(state)
         # Initialise q⁰ immediately.
         self._omega_init(state)
         return state
@@ -302,7 +307,7 @@ class Solver:
         k.run(gx, gy, 1)
         ctx.memory_barrier()
 
-    def _omega_step(self, state: _OmegaState) -> None:
+    def _omega_step(self, state: _OmegaState, turb_time: float = 0.0) -> None:
         """Evolve ω one step: MacCormack advection + forcing + hyperviscosity."""
         ctx = self.gpu.ctx
         p = self.params
@@ -373,6 +378,10 @@ class Solver:
         _set(kf0, "u_coriolis_f0", p.solver.coriolis_f0)
         _set(kf0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(kf0, "u_hypervisc", p.solver.vort_hypervisc)
+        _set(kf0, "u_vort_inject", p.solver.vort_inject)
+        _set(kf0, "u_inject_freq", p.bands.detail_freq * p.solver.vort_inject_scale)
+        _set(kf0, "u_turb_offset", self._turb_offset)
+        _set(kf0, "u_turb_time", turb_time)
         state.out.bind_to_image(0, read=False, write=True)
         kf0.run(gx, gy, 1)
         ctx.memory_barrier()
@@ -653,7 +662,7 @@ class Solver:
             state = self._omega_state
 
             # a. Advance absolute vorticity q one step.
-            self._omega_step(state)
+            self._omega_step(state, turb_time)
 
             # b. Recover ω_rel = q − f into state.omega_rel.
             kr = state.k_recover
