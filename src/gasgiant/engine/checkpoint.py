@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from gasgiant.params.model import SolverType
 from gasgiant.params.presets import load_preset_doc, to_preset_doc
 from gasgiant.sim.vortices import Vortex
 
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
 # 3 = v1.2: the vortex registry is serialized into the checkpoint (older
 # checkpoints carried no registry state and relied on drift-only replay,
 # which mis-restored outbreak-bearing or mid-edit runs).
-GENERATION_VERSION = 3
+# 4 = v1.6: vorticity-solver prognostic state (omega field + warm-start psi)
+# serialized for vorticity-mode round-trip.
+GENERATION_VERSION = 4
 
 # Registry scalar fields serialized per vortex. float64: the "restored
 # registry is identical" guarantee is exact-round-trip, and pack_ssbo computes
@@ -54,6 +57,13 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
         for j, ob in enumerate(s.events.outbreaks):
             if ob.vortex is not None:
                 outbreak_links[j] = index_of.get(id(ob.vortex), -1)
+    # Vorticity mode: also save the prognostic ω field (state.cur, the advected
+    # absolute-vorticity q) and the warm-start ψ (dom.psi_tex, last solved+feathered).
+    # These keys are absent in kinematic checkpoints (absent-key-tolerant on load).
+    vort_extra: dict = {}
+    if sim.params.solver.type == SolverType.VORTICITY and s._omega_state is not None:
+        vort_extra["omega_eq"] = sim.gpu.read_texture(s._omega_state.cur)
+        vort_extra["psi_eq"] = sim.gpu.read_texture(s.equirect.psi_tex)
     np.savez_compressed(
         path,
         preset=json.dumps(to_preset_doc(sim.params)),
@@ -65,6 +75,7 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
         tracers_s=sim.gpu.read_texture(s.south.tracers.cur),
         outbreak_links=outbreak_links,
         **reg,
+        **vort_extra,
     )
 
 
@@ -111,5 +122,22 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
         for j, ob in enumerate(s.events.outbreaks):
             idx = int(links[j]) if j < len(links) else -1
             ob.vortex = s.vortices.vortices[idx] if 0 <= idx < n else None
+
+    # Vorticity mode: restore the prognostic ω field and warm-start ψ so the
+    # next step advects exactly the saved q and warm-starts from the saved ψ.
+    # Keys are absent in kinematic checkpoints — guard tolerantly.
+    if (
+        params.solver.type == SolverType.VORTICITY
+        and s._omega_state is not None
+        and "omega_eq" in data
+        and "psi_eq" in data
+    ):
+        s._omega_state.cur.write(
+            np.ascontiguousarray(data["omega_eq"], dtype=np.float32).tobytes()
+        )
+        s.equirect.psi_tex.write(
+            np.ascontiguousarray(data["psi_eq"], dtype=np.float32).tobytes()
+        )
+
     sim._tracers_changed = True
     return sim
