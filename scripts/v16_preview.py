@@ -51,8 +51,11 @@ def main():
     p = load_factory_preset("jupiter_like")
     p.solver.type = SolverType.VORTICITY
     p.sim.dev_steps = 600
-    p.turbulence.relax_tau = 2000.0
-    p.turbulence.replenish_rate = 0.0
+    # Detail replenishment ON (the folding velocity braids the fine structure
+    # into filaments; the earlier repl=0 config bare-streaked). Weaker tracer
+    # relaxation so the folded structure persists.
+    p.turbulence.relax_tau = 800.0
+    p.turbulence.replenish_rate = 0.02
     p.solver.vort_relax_tau = 250.0
     p.solver.vort_hypervisc = 1.0
     p.solver.coriolis_f0 = 6.0
@@ -77,9 +80,11 @@ def main():
     ])
     cv2.imwrite(str(OUT / "belt_compare.png"), strip)
 
-    # Full vorticity map (downscaled).
-    full = _u8(rgb_vort_full[..., :3])
-    full = cv2.resize(full, (1600, 800), interpolation=cv2.INTER_AREA)
+    # Full vorticity map: raw (native, no label — for artifact analysis) +
+    # labeled downscale (for human viewing).
+    full_raw = _u8(rgb_vort_full[..., :3])
+    cv2.imwrite(str(OUT / "vorticity_fullmap_raw.png"), full_raw)
+    full = cv2.resize(full_raw, (1600, 800), interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(OUT / "vorticity_fullmap.png"), _label(full, "v1.6 VORTICITY full equirect"))
 
     print(f"v1.5 coher={ck:.4f}  vorticity coher={cv:.4f}")
