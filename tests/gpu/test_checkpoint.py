@@ -156,21 +156,14 @@ def test_checkpoint_from_older_generation_is_refused(gpu, tmp_path):
     assert GENERATION_VERSION >= 2
 
 
-@pytest.mark.xfail(
-    reason="v1.6 WIP: the no-op-uniforms fix made ω genuinely evolve, exposing "
-    "that the checkpoint does not yet byte-exactly capture the dynamic + "
-    "magnitude-clamped ω/ψ state (a few cells differ by <=0.03 after resume). "
-    "To be restored to assert_array_equal once the closed-loop instability is "
-    "stabilized (the residual ~clamp-saturated low-frequency mode) in the "
-    "P3-repair follow-up.",
-    strict=False,
-)
 def test_vorticity_checkpoint_round_trip(gpu, tmp_path):
-    """Vorticity mode: checkpoint must round-trip ω + warm-start ψ so that
-    continuing from the restored sim is byte-identical to continuing the
-    original. The advected absolute-vorticity field and the warm-start ψ are
-    PROGNOSTIC state — without them a resumed run diverges immediately."""
+    """Vorticity mode: checkpoint must round-trip ω + warm-start ψ for ALL THREE
+    domains so that continuing from the restored sim is byte-identical to
+    continuing the original.  The advected absolute-vorticity field and the
+    warm-start ψ are PROGNOSTIC state — without them a resumed run diverges
+    immediately.  This test must PASS byte-exact (assert_array_equal, not allclose)."""
     from gasgiant.params.model import SolverType
+    from gasgiant.sim.solver import DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH
 
     p = PlanetParams(seed=77)
     p.sim.resolution = 512
@@ -189,11 +182,13 @@ def test_vorticity_checkpoint_round_trip(gpu, tmp_path):
     np.testing.assert_array_equal(
         restored.tracers.read_current(), sim.tracers.read_current()
     )
-    # ω field must also be byte-identical.
-    np.testing.assert_array_equal(
-        gpu.read_texture(restored.solver._omega_state.cur),
-        gpu.read_texture(sim.solver._omega_state.cur),
-    )
+
+    # ω field must be byte-identical for ALL three domains immediately after restore.
+    for kind in (DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH):
+        np.testing.assert_array_equal(
+            gpu.read_texture(restored.solver._omega_states[kind].cur),
+            gpu.read_texture(sim.solver._omega_states[kind].cur),
+        ), f"omega mismatch for domain {kind} immediately after restore"
 
     # Continuing both sims another 10 steps must stay byte-identical:
     # this proves the warm-start ψ and ω serialization are sufficient.
@@ -202,7 +197,8 @@ def test_vorticity_checkpoint_round_trip(gpu, tmp_path):
     np.testing.assert_array_equal(
         restored.tracers.read_current(), sim.tracers.read_current()
     )
-    np.testing.assert_array_equal(
-        gpu.read_texture(restored.solver._omega_state.cur),
-        gpu.read_texture(sim.solver._omega_state.cur),
-    )
+    for kind in (DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH):
+        np.testing.assert_array_equal(
+            gpu.read_texture(restored.solver._omega_states[kind].cur),
+            gpu.read_texture(sim.solver._omega_states[kind].cur),
+        ), f"omega mismatch for domain {kind} after 10 more steps"
