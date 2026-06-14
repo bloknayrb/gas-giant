@@ -513,6 +513,10 @@ class SolverParams(_Params):
     vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, ui="Solver",
         description="Eddy-injection frequency as a multiple of bands.detail_freq "
                     "(vorticity mode)")
+    vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, ui="Solver",
+        description="Linear (Rayleigh) drag fraction on relative vorticity per "
+                    "step; absorbs the 2D inverse-cascade energy that piles up at "
+                    "large scales (0 = off). Vorticity mode.")
 
     @model_validator(mode="after")
     def _validate_sor_omega(self) -> SolverParams:

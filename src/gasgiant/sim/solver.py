@@ -382,6 +382,7 @@ class Solver:
         _set(kf0, "u_inject_freq", p.bands.detail_freq * p.solver.vort_inject_scale)
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
+        _set(kf0, "u_vort_drag", p.solver.vort_drag)
         state.out.bind_to_image(0, read=False, write=True)
         kf0.run(gx, gy, 1)
         ctx.memory_barrier()
