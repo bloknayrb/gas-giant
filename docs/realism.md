@@ -492,3 +492,108 @@ contested (template-driven, not a v1.5 lever). One byte-identity invariant
   **azimuthal-mean** (integer odd m) criterion (P4) — area-downsampling kills
   θ-dependent terms, so zeroing the azimuthal mean, not bounding angular size,
   is what removes the matched-scale bullseye.
+
+## v1.6 — vorticity-streamfunction fluid solver
+
+Closes the v1.5 texture-density MISS (Axis 1): the kinematic solver categorically
+cannot fold tracers into the "wall-to-wall folded filament" belt morphology the
+judges see in the reference — that structure requires a real prognostic fluid.
+v1.6 adds an opt-in vorticity-streamfunction solver (`solver.type = vorticity`)
+and ships it as the new `jupiter_vorticity` factory preset. The kinematic path
+(`jupiter_like`) is byte-identical to v1.5.
+
+### The solver
+
+Advects **absolute vorticity** q = ω + f (f = f₀ · sin φ, Coriolis) by
+semi-Lagrangian MacCormack (three passes: forward, backward, corrector + 2×2
+limiter) — the same MacCormack framework as the tracer advect, compiled into a
+separate scalar R32F pipeline (`omega_advect.comp`). After advection:
+
+1. **Nudge** toward q\_target = ω\_jet + ω\_vortex + f (`omega_force.comp`
+   SUBPASS 0): ω\_jet from a new `profile_omega` LUT (anti-derivative of the
+   jet-shear profile); ω\_vortex = analytic Gaussian-Laplacian contributed by
+   each vortex in the SSBO. Nudge rate = 1/vort\_relax\_tau per step.
+2. **Biharmonic hyperviscosity** on ω\_rel = q − f only (`omega_force.comp`
+   SUBPASS 1), grid-normalized so `vort_hypervisc` is the per-step Nyquist-mode
+   damping fraction.
+3. **Recover** ω\_rel = q − f (`omega_recover.comp`).
+4. **Solve** ∇²ψ = +ω\_rel by fixed-iteration red-black SOR (`poisson_sor.comp`,
+   `poisson_iters` × (red + black)), producing the updated ψ.
+5. **Velocity** is derived from ψ by the unchanged `velocity.comp` kernel.
+
+Sign convention: ω ≡ ζ = +∇²ψ (consistent with the existing ψ-velocity pairing
+u = −∂ψ/∂φ, v = (1/cosφ)∂ψ/∂λ).
+
+Runs on all three domains. The polar-patch Poisson uses an AE-metric Laplacian
+(9-point stencil with c\_ss, c\_tt, c\_st cross-derivative, and c\_g radial terms;
+regular at the pole by construction). Cross-domain ψ-coupling proved **unnecessary**:
+the shared jet-profile nudge target and the per-step tracer exchange already produce
+continuous full-sphere output without any inter-domain ψ boundary condition — an
+adversarial polar judge found no seam.
+
+Optional broadband eddy injection (`vort_inject`, default 0) adds a signed evolving
+fbm to ω\_rel each step; exploration found that **eddy injection does not drive
+folding** — the jet shear itself generates the filament dynamics. It is shipped at 0.
+
+### New knobs (SolverParams, RESTART tier)
+
+| knob | preset | effect |
+|---|---|---|
+| `solver.type` | `vorticity` | opt-in (default `kinematic` = v1.5) |
+| `solver.coriolis_f0` | 3.0 | f₀ in f = f₀ · sin φ; lower → more barotropic instability / eddy-shedding |
+| `solver.vort_relax_tau` | 600.0 | nudge timescale (steps); longer → folds persist |
+| `solver.vort_hypervisc` | 0.6 | grid-scale dissipation (Nyquist-mode fraction) |
+| `solver.vort_inject` | 0.0 | broadband eddy injection — found not to drive folding; off |
+| `solver.vort_inject_scale` | 0.5 | injection frequency relative to `bands.detail_freq` |
+| `solver.vort_drag` | 0.0 | linear Rayleigh drag on ω\_rel per step; off |
+| `solver.poisson_iters` | 48 | fixed SOR iterations per step |
+| `solver.sor_omega` | 1.7 | SOR over-relaxation factor ∈ (1, 2) |
+
+### P5 gate result
+
+**Blind 3-judge forced-choice panel (`jupiter_vorticity` vs `jupiter_like` v1.5,
+belt crop matched to PIA07782 scale): 3-0 for vorticity (2 HIGH, 1 MEDIUM
+confidence).** Judges saw folded filament structure that v1.5 could not produce.
+
+Orientation coherence metric (DoG-filtered belt crop, PIA07782 reference):
+
+| | coher |
+|---|---|
+| real PIA07782 reference | 0.62 |
+| `jupiter_vorticity` v1.6 | **0.384** |
+| `jupiter_like` v1.5 kinematic | 0.14 |
+
+Multiple adversarial visual passes: realism graded "better than v1.5," 7/10;
+eddies fold with scale separation. Full-sphere poles clean, no seam between
+equirect and polar domains. Belt ceiling-fraction 0.14 %; polar-only clamp ~5 %.
+Deterministic (byte-exact same-machine); checkpoint round-trips byte-exact.
+303 tests pass.
+
+### Honest findings (recorded, not goal-shifted)
+
+1. **Small-oval / barge density.** Strong eddy turbulence dissipates small
+   stamped vortices rapidly; the dense "string of pearls" field the reference
+   shows does not appear. Tension: eddy-richness and small-vortex persistence
+   are opposed in this regime.
+2. **Shear-line eddy-shedding is partial.** Eddies curl and shed near the large
+   ovals, but long laminar belt boundaries do not shed a continuous train of
+   closed vortices. The reference's full shear instability is not reproduced.
+3. **Coherence metric is necessary, not sufficient.** The `coher` statistic
+   measures orientation coherence; it cannot capture full turbulent realism.
+   The blind judge panel is the gate; 0.384 is an improvement benchmark, not
+   a pass/fail threshold.
+4. **Bands/contrast softer than the reference.** The belt-color contrast at
+   matched scale remains below PIA07782 levels.
+5. **Testing discipline note.** An early Phase-A omega test suite passed while
+   the solver was effectively a no-op (uniforms were never set). Gate
+   strengthening after the miss: tests now verify param-responsiveness,
+   that ω evolves over steps, and production-regime boundedness. Recorded as
+   a test-design lesson, not a goal-shift.
+
+### Perf
+
+The 16K export performance gate was lifted for v1.6; the vorticity solve adds
+~45 s at 16K resolution (total ~81.6 s vs ~36 s kinematic). The kinematic
+default (`jupiter_like`) is unchanged at ~36 s. The vorticity preset uses
+`sim.resolution = 4096` (vs 2048 kinematic) to give the fluid adequate grid
+resolution for filament formation.
