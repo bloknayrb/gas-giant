@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from gasgiant.gl import GpuContext
-from gasgiant.params.model import PlanetParams, PoleParams, PoleStyle
+from gasgiant.params.model import PlanetParams, PoleParams, PoleStyle, SolverType
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
 from gasgiant.sim.profiles import LatProfiles
@@ -363,15 +363,9 @@ class Solver:
             for dom in self.domains:
                 gx, gy = dom.groups()
 
-                # 2. Rebuild psi (turbulence time advances BETWEEN steps).
-                k = dom.k_psi
-                _set(k, "u_vortex_count", len(self.vortices.vortices))
-                _set(k, "u_turb_time", turb_time)
-                self.profile_dyn.use(location=0)
-                _set(k, "u_profile_dyn", 0)
-                dom.psi_tex.bind_to_image(0, read=False, write=True)
-                k.run(gx, gy, 1)
-                ctx.memory_barrier()
+                # 2. Produce psi for this step (kinematic analytic rebuild, or
+                #    vorticity solve in vorticity mode — see _produce_psi).
+                self._produce_psi(dom, turb_time, gx, gy)
 
                 # 3. Frozen velocity for all three MacCormack passes.
                 dom.psi_tex.use(location=0)
@@ -400,6 +394,23 @@ class Solver:
             # 5. One-way nesting exchange.
             self._exchange()
             self.step_index += 1
+
+    def _produce_psi(self, dom, turb_time, gx, gy):
+        """Write dom.psi_tex for this step. Kinematic: analytic rebuild
+        (psi.comp). Vorticity (P3+): advect omega + Poisson-solve psi."""
+        if self.params.solver.type == SolverType.KINEMATIC:
+            ctx = self.gpu.ctx
+            k = dom.k_psi
+            _set(k, "u_vortex_count", len(self.vortices.vortices))
+            _set(k, "u_turb_time", turb_time)
+            self.profile_dyn.use(location=0)
+            _set(k, "u_profile_dyn", 0)
+            dom.psi_tex.bind_to_image(0, read=False, write=True)
+            k.run(gx, gy, 1)
+            ctx.memory_barrier()
+        else:
+            raise NotImplementedError(
+                "vorticity solver is implemented in packet P3")
 
     def _advect(
         self, dom: Domain, pass_index: int, src: moderngl.Texture,
