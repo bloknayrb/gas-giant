@@ -1,0 +1,43 @@
+#version 430
+// psi_feather.comp — Blend SOR-solved ψ with analytic ψ over polar feather.
+//
+// blended = mix(psi_solved, psi_analytic, alpha(lat))
+//
+// where alpha smoothsteps from 0 → 1 over |lat| ∈ [50°, 60°]:
+//   alpha = 0  at |lat| ≤ 50°  (pure vorticity-solved)
+//   alpha = 1  at |lat| ≥ 60°  (pure analytic kinematic)
+//
+// Writes the blended result to out_psi.
+// DOMAIN == 0 ONLY.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+uniform sampler2D u_psi_solved;    // R32F — from SOR Poisson solve
+uniform sampler2D u_psi_analytic;  // R32F — from psi.comp (kinematic)
+
+uniform ivec2 u_size;
+
+layout(r32f, binding = 0) writeonly uniform image2D out_psi;
+
+const float LAT_LO = 50.0 * PI / 180.0;   // 50 degrees in radians
+const float LAT_HI = 60.0 * PI / 180.0;   // 60 degrees in radians
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    float abs_lat = abs(ll.y);
+
+    // smoothstep ramp: 0 equatorward of LAT_LO, 1 poleward of LAT_HI.
+    float alpha = smoothstep(LAT_LO, LAT_HI, abs_lat);
+
+    float psi_s = texelFetch(u_psi_solved,   px, 0).r;
+    float psi_a = texelFetch(u_psi_analytic, px, 0).r;
+
+    float blended = mix(psi_s, psi_a, alpha);
+
+    imageStore(out_psi, px, vec4(blended, 0.0, 0.0, 0.0));
+}

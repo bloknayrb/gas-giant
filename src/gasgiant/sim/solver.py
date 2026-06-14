@@ -103,18 +103,30 @@ class _OmegaState:
     out: moderngl.Texture
     # Scratch R32F for ∇²ω_rel (used between omega_force subpasses).
     lap_scratch: moderngl.Texture
+    # P3b: additional textures for Poisson solve + feather blend.
+    omega_rel: moderngl.Texture             # ω_rel = q − f  (R32F)
+    psi_analytic: moderngl.Texture          # analytic kinematic ψ  (R32F)
+    psi_work: moderngl.Texture              # SOR working ψ  (R32F, read/write)
     # Kernels
     k_init: moderngl.ComputeShader          # omega_init.comp
     k_adv: list[moderngl.ComputeShader]     # omega_advect.comp PASS 0,1,2
     k_force0: moderngl.ComputeShader        # omega_force.comp SUBPASS 0 (nudge)
     k_lap: moderngl.ComputeShader           # omega_lap.comp (∇²ω_rel)
     k_force1: moderngl.ComputeShader        # omega_force.comp SUBPASS 1 (hypervisc)
+    # P3b kernels
+    k_recover: moderngl.ComputeShader       # omega_recover.comp (q→ω_rel)
+    k_sor_red: moderngl.ComputeShader       # poisson_sor.comp COLOR=0
+    k_sor_black: moderngl.ComputeShader     # poisson_sor.comp COLOR=1
+    k_feather: moderngl.ComputeShader       # psi_feather.comp
 
     def commit(self) -> None:
         self.cur, self.out = self.out, self.cur
 
     def release(self) -> None:
-        for tex in (self.cur, self.fwd, self.back, self.out, self.lap_scratch):
+        for tex in (
+            self.cur, self.fwd, self.back, self.out, self.lap_scratch,
+            self.omega_rel, self.psi_analytic, self.psi_work,
+        ):
             tex.release()
 
 
@@ -217,8 +229,11 @@ class Solver:
         back       = r32f(size)
         out        = r32f(size)
         lap_scratch = r32f(size)
+        omega_rel   = r32f(size)
+        psi_analytic = r32f(size)
+        psi_work    = r32f(size)
         # All omega textures periodic in x (equirect).
-        for tex in (cur, fwd, back, out, lap_scratch):
+        for tex in (cur, fwd, back, out, lap_scratch, omega_rel, psi_analytic, psi_work):
             tex.repeat_x = True
 
         k_init = gpu.compute(_KERNELS, "omega_init.comp", defines=eq_defines)
@@ -232,11 +247,21 @@ class Solver:
         k_lap    = gpu.compute(_KERNELS, "omega_lap.comp",  defines=eq_defines)
         k_force1 = gpu.compute(_KERNELS, "omega_force.comp",
                                defines={**eq_defines, "SUBPASS": "1"})
+        # P3b kernels.
+        k_recover   = gpu.compute(_KERNELS, "omega_recover.comp", defines=eq_defines)
+        k_sor_red   = gpu.compute(_KERNELS, "poisson_sor.comp",
+                                  defines={**eq_defines, "COLOR": "0"})
+        k_sor_black = gpu.compute(_KERNELS, "poisson_sor.comp",
+                                  defines={**eq_defines, "COLOR": "1"})
+        k_feather   = gpu.compute(_KERNELS, "psi_feather.comp", defines=eq_defines)
 
         state = _OmegaState(
             cur=cur, fwd=fwd, back=back, out=out, lap_scratch=lap_scratch,
+            omega_rel=omega_rel, psi_analytic=psi_analytic, psi_work=psi_work,
             k_init=k_init, k_adv=k_adv,
             k_force0=k_force0, k_lap=k_lap, k_force1=k_force1,
+            k_recover=k_recover, k_sor_red=k_sor_red, k_sor_black=k_sor_black,
+            k_feather=k_feather,
         )
         # Initialise q⁰ immediately.
         self._omega_init(state)
@@ -252,6 +277,13 @@ class Solver:
             _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
+        # P3b static uniforms.
+        _set(state.k_recover, "u_size", size)
+        _set(state.k_recover, "u_coriolis_f0", p.solver.coriolis_f0)
+        for k in (state.k_sor_red, state.k_sor_black):
+            _set(k, "u_size", size)
+            _set(k, "u_sor_omega", p.solver.sor_omega)
+        _set(state.k_feather, "u_size", size)
 
     def _omega_init(self, state: _OmegaState) -> None:
         """Dispatch omega_init.comp to write q⁰ into state.cur."""
@@ -605,11 +637,11 @@ class Solver:
         """Write dom.psi_tex for this step.
 
         KINEMATIC mode: analytic streamfunction rebuild via psi.comp (v1.5).
-        VORTICITY mode, equirect domain (P3a): advance ω one step, then write
-          psi_tex via the same analytic kinematic path as KINEMATIC mode.
-          This keeps velocity kinematic in P3a — the Poisson ψ-from-ω solve
-          is deferred to P3b.  Polar patch domains always use the kinematic
-          path regardless of solver.type.
+        VORTICITY mode, equirect domain (P3b): advance ω one step, recover
+          ω_rel = q−f, run the analytic psi into a temp buffer, warm-start
+          from the previous solved ψ, run SOR Poisson iterations, feather-blend
+          with analytic ψ over 50–60°, and write result to dom.psi_tex.
+        Polar patch domains always use the kinematic analytic path.
         """
         ctx = self.gpu.ctx
 
@@ -618,11 +650,69 @@ class Solver:
             and dom.kind == DOMAIN_EQUIRECT
             and self._omega_state is not None
         ):
-            self._omega_step(self._omega_state)
+            state = self._omega_state
 
-        # Write psi_tex analytically (kinematic path) for ALL domains in P3a.
-        # This keeps velocity unchanged; the Poisson inversion (P3b) will
-        # replace this line with a SOR solve for the equirect domain only.
+            # a. Advance absolute vorticity q one step.
+            self._omega_step(state)
+
+            # b. Recover ω_rel = q − f into state.omega_rel.
+            kr = state.k_recover
+            state.cur.use(location=0)
+            _set(kr, "u_omega", 0)
+            state.omega_rel.bind_to_image(0, read=False, write=True)
+            kr.run(gx, gy, 1)
+            ctx.memory_barrier()
+
+            # c. Analytic kinematic ψ → state.psi_analytic (for feather blend).
+            k = dom.k_psi
+            _set(k, "u_vortex_count", len(self.vortices.vortices))
+            _set(k, "u_turb_time", turb_time)
+            self.profile_dyn.use(location=0)
+            _set(k, "u_profile_dyn", 0)
+            state.psi_analytic.bind_to_image(0, read=False, write=True)
+            k.run(gx, gy, 1)
+            ctx.memory_barrier()
+
+            # d. Warm-start psi_work from dom.psi_tex (previous step's solved ψ).
+            #    Copy dom.psi_tex → state.psi_work via a simple blit kernel.
+            #    We reuse the analytic psi path: on the very first step psi_tex
+            #    holds the analytic init from _static_uniforms → init_tracers,
+            #    and on subsequent steps it holds the previous solved ψ.
+            self._copy_psi_to_work(dom, state, gx, gy)
+
+            # e. SOR Poisson solve: poisson_iters red+black sweeps.
+            n_iters = self.params.solver.poisson_iters
+            state.omega_rel.use(location=0)
+            _set(state.k_sor_red,   "u_omega_rel", 0)
+            _set(state.k_sor_black, "u_omega_rel", 0)
+            for _ in range(n_iters):
+                # Red sweep.
+                state.psi_work.bind_to_image(0, read=True, write=True)
+                state.k_sor_red.run(gx, gy, 1)
+                ctx.memory_barrier()
+                # Black sweep.
+                state.psi_work.bind_to_image(0, read=True, write=True)
+                state.k_sor_black.run(gx, gy, 1)
+                ctx.memory_barrier()
+
+            # f. Feather blend: mix(psi_work, psi_analytic, alpha(lat)) → dom.psi_tex.
+            kf = state.k_feather
+            state.psi_work.use(location=0)
+            _set(kf, "u_psi_solved", 0)
+            state.psi_analytic.use(location=1)
+            _set(kf, "u_psi_analytic", 1)
+            dom.psi_tex.bind_to_image(0, read=False, write=True)
+            kf.run(gx, gy, 1)
+            ctx.memory_barrier()
+
+            # Also copy the solved (pre-blend) ψ back into psi_work so next
+            # step's warm-start is the full-domain solved field.
+            # (We actually warm-start from psi_tex which is the blended result;
+            #  that is fine — psi_tex IS the definitive ψ for this step and the
+            #  equatorial region where SOR matters is pure-solved there too.)
+            return
+
+        # Kinematic analytic path (all patch domains, and KINEMATIC mode).
         k = dom.k_psi
         _set(k, "u_vortex_count", len(self.vortices.vortices))
         _set(k, "u_turb_time", turb_time)
@@ -630,6 +720,36 @@ class Solver:
         _set(k, "u_profile_dyn", 0)
         dom.psi_tex.bind_to_image(0, read=False, write=True)
         k.run(gx, gy, 1)
+        ctx.memory_barrier()
+
+    def _copy_psi_to_work(self, dom: Domain, state: _OmegaState,
+                          gx: int, gy: int) -> None:
+        """Copy dom.psi_tex into state.psi_work (warm-start for SOR).
+
+        Compiled once and cached on first call.
+        """
+        ctx = self.gpu.ctx
+        if not hasattr(self, "_k_psi_copy"):
+            # Inline a minimal copy shader — no #include needed.
+            src = (
+                "#version 430\n"
+                "layout(local_size_x = 16, local_size_y = 16) in;\n"
+                "uniform sampler2D u_src;\n"
+                "uniform ivec2 u_size;\n"
+                "layout(r32f, binding = 0) writeonly uniform image2D out_dst;\n"
+                "void main() {\n"
+                "    ivec2 px = ivec2(gl_GlobalInvocationID.xy);\n"
+                "    if (px.x >= u_size.x || px.y >= u_size.y) return;\n"
+                "    float v = texelFetch(u_src, px, 0).r;\n"
+                "    imageStore(out_dst, px, vec4(v, 0.0, 0.0, 0.0));\n"
+                "}\n"
+            )
+            self._k_psi_copy = ctx.compute_shader(src)
+            _set(self._k_psi_copy, "u_size", self.equirect.size)
+        dom.psi_tex.use(location=0)
+        _set(self._k_psi_copy, "u_src", 0)
+        state.psi_work.bind_to_image(0, read=False, write=True)
+        self._k_psi_copy.run(gx, gy, 1)
         ctx.memory_barrier()
 
     def _advect(
@@ -717,6 +837,39 @@ class Solver:
             yi = np.clip(((t / RHO_MAX) * 0.5 + 0.5) * n, 0, n - 1).astype(int)
             diffs.append(eq[j, :, 0] - npatch[yi, xi, 0])
         return float(np.sqrt(np.mean(np.concatenate(diffs) ** 2)))
+
+    def feather_psi_continuity(self) -> float:
+        """Max gradient discontinuity in ψ (or derived velocity) across the
+        50–60° polar feather band on the equirect domain.
+
+        Computes the finite-difference magnitude of ∂ψ/∂φ (proxy for u wind)
+        across the band 48–62° latitude, then reports the peak absolute value
+        of the second-difference (a proxy for the velocity-gradient jump across
+        the blend transition).  Returns a scalar; values below ~0.5 indicate a
+        smooth feather.
+        """
+        psi = self.gpu.read_texture(self.equirect.psi_tex)  # (H, W, 1)
+        psi_2d = psi[..., 0]  # (H, W)
+        h, w = psi_2d.shape
+
+        # Latitude of each row (descending, row 0 = north pole).
+        rows = np.arange(h)
+        lats = np.pi / 2.0 - (rows + 0.5) / h * np.pi
+
+        # Select rows covering 48–62° latitude (both hemispheres).
+        abs_lats = np.abs(lats)
+        band = np.where((abs_lats > np.deg2rad(48.0)) & (abs_lats < np.deg2rad(62.0)))[0]
+        if band.size < 4:
+            return 0.0
+
+        dphi = np.pi / h
+        # First difference (∂ψ/∂φ proxy, row-to-row).
+        d1 = np.diff(psi_2d[band, :], axis=0) / dphi  # (len(band)-1, W)
+        if d1.shape[0] < 2:
+            return 0.0
+        # Second difference across the band (detects slope discontinuity).
+        d2 = np.abs(np.diff(d1, axis=0))  # (len(band)-2, W)
+        return float(d2.max())
 
     def release(self) -> None:
         for dom in self.domains:
