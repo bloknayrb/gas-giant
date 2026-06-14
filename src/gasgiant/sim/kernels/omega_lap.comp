@@ -1,0 +1,74 @@
+#version 430
+// omega_lap.comp — Computes ∇²ω_rel into a scratch texture.
+//
+// Called between omega_force SUBPASS 0 and SUBPASS 1:
+//   ω_rel = q − f
+//   ∇²ω_rel = laplacianPsi(ω_rel)
+//
+// The result is stored in out_lap so omega_force SUBPASS 1 can compute
+// ∇⁴ω_rel = ∇²(∇²ω_rel) without reading and writing the same texture.
+//
+// DOMAIN == 0 ONLY.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "laplacian.glsl"
+
+// Current absolute vorticity q (R32F).
+uniform sampler2D u_omega;
+
+uniform ivec2 u_size;
+uniform float u_coriolis_f0;
+
+layout(r32f, binding = 0) writeonly uniform image2D out_lap;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    // Compute ω_rel = q − f at this pixel.
+    // We need ω_rel across the stencil.  We can't call laplacianPsi on a
+    // derived field directly without a temp buffer — but we CAN compute ∇²q
+    // and ∇²f separately then subtract, since ∇²(q−f) = ∇²q − ∇²f.
+    // However f = f0·sin(lat) is smooth, so we just compute ∇²ω_rel directly
+    // by subtracting f from q at each stencil point before differencing.
+    // This gives exact ∇²ω_rel without a separate buffer for ω_rel.
+
+    vec2 ll = lonlatAt(px, u_size);
+    float f_c = u_coriolis_f0 * sin(ll.y);
+
+    int W = u_size.x;
+    int H = u_size.y;
+
+    float dlam = 2.0 * PI / float(W);
+    float dphi = PI / float(H);
+
+    // Helper: ω_rel at a neighbouring pixel = q[px] − f0·sin(lat[px]).
+    // lat[px] = +π/2 − (px.y+0.5)/H · π
+    #define WREL(ix, iy) \
+        (texelFetch(u_omega, ivec2(wrapX((ix), W), clampY((iy), H)), 0).r \
+         - u_coriolis_f0 * sin(0.5 * PI - (float(clampY((iy), H)) + 0.5) / float(H) * PI))
+
+    float lat = 0.5 * PI - (float(px.y) + 0.5) / float(H) * PI;
+    float cosl = max(cos(lat), 0.017);
+    float tanl = tan(lat);
+
+    float c   = WREL(px.x,     px.y);
+    float xp1 = WREL(px.x + 1, px.y);
+    float xm1 = WREL(px.x - 1, px.y);
+    float yp1 = WREL(px.x,     px.y + 1);
+    float ym1 = WREL(px.x,     px.y - 1);
+
+    #undef WREL
+
+    float d2_lam = (xp1 - 2.0 * c + xm1) / (dlam * dlam);
+    float lon_term = d2_lam / (cosl * cosl);
+
+    float d2_phi = (yp1 - 2.0 * c + ym1) / (dphi * dphi);
+    float d1_phi_desc = (yp1 - ym1) / (2.0 * dphi);
+    float tan_term = tanl * d1_phi_desc;
+
+    float lap_wrel = lon_term + d2_phi + tan_term;
+    imageStore(out_lap, px, vec4(lap_wrel, 0.0, 0.0, 0.0));
+}

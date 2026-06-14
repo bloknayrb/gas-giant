@@ -1,0 +1,89 @@
+#version 430
+// omega_force.comp — Vorticity forcing + biharmonic hyperviscosity.
+//
+// Applied after the three MacCormack advection passes.  Two operator-split
+// sub-passes selected by SUBPASS:
+//
+//   SUBPASS 0 — Nudging:
+//     q_target = ω_jet + ω_vortex + f  (recomputed at current vortex positions)
+//     q += (q_target − q) / τ_ω        (τ_ω = vort_relax_tau, in steps)
+//     Writes q to out_omega.
+//
+//   SUBPASS 1 — Biharmonic hyperviscosity on ω_rel ONLY:
+//     ω_rel = q − f
+//     ∇²ω_rel computed from u_omega_rel (a pre-computed temp texture)
+//     q += ν₄ · (−∇⁴ω_rel)   where ∇⁴ = −laplacianPsi(laplacianPsi(·))
+//     Writes q to out_omega.
+//
+//   The caller dispatches both SUBPASS 0 and SUBPASS 1 with memory_barrier
+//   between them.  Between SUBPASS 0 and 1 an intermediate CPU step computes
+//   ∇²ω_rel via a separate omega_lap.comp kernel (also compiled here via
+//   SUBPASS==-1).  We use three kernels total to keep the tanφ sign correct
+//   and avoid reading/writing the same texture in one dispatch.
+//
+// DOMAIN == 0 ONLY.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "laplacian.glsl"
+
+// Current absolute vorticity q (R32F, read).
+uniform sampler2D u_omega;
+
+// Profile LUT: r = ω_jet.
+uniform sampler2D u_profile_omega;
+
+// Intermediate ∇²ω_rel texture (SUBPASS 1 only).
+uniform sampler2D u_lap_omega_rel;
+
+uniform ivec2 u_size;
+uniform int   u_vortex_count;
+uniform float u_coriolis_f0;
+uniform float u_relax_tau;    // vort_relax_tau (steps); 0 disables nudging
+uniform float u_hypervisc;    // vort_hypervisc (ν₄ scale)
+
+// SSBO declared before vortex_omega.glsl (which uses vortex_data and u_vortex_count).
+layout(std430, binding = 2) readonly buffer Vortices {
+    vec4 vortex_data[];
+};
+
+// Include after declarations they depend on.
+#include "vortex_omega.glsl"
+
+layout(r32f, binding = 0) writeonly uniform image2D out_omega;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    vec3 p  = spherePoint(ll);
+
+    float q = texelFetch(u_omega, px, 0).r;
+
+#if SUBPASS == 0
+    // ---- nudging sub-pass --------------------------------------------------
+    // Recompute target absolute vorticity at current vortex positions.
+    float omega_jet  = texture(u_profile_omega, latProfileUV(ll.y)).r;
+    float omega_vort = vortexOmegaAccum(p);
+    float f          = coriolis(ll.y, u_coriolis_f0);
+    float q_target   = omega_jet + omega_vort + f;
+
+    if (u_relax_tau > 0.0) {
+        q += (q_target - q) / u_relax_tau;
+    }
+    imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
+
+#elif SUBPASS == 1
+    // ---- hyperviscosity sub-pass -------------------------------------------
+    // Apply ν₄ · (−∇⁴ω_rel) = ν₄ · (−∇²(∇²ω_rel)).
+    // u_lap_omega_rel holds ∇²ω_rel pre-computed by the caller (omega_lap.comp).
+    // We apply laplacianPsi once more to get ∇⁴ω_rel, then negate and scale.
+    if (u_hypervisc > 0.0) {
+        float lap2 = laplacianPsi(u_lap_omega_rel, px, u_size);
+        q += u_hypervisc * (-lap2);
+    }
+    imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
+#endif
+}

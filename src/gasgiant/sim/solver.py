@@ -93,6 +93,31 @@ class Domain:
         self.vel_tex.release()
 
 
+@dataclass
+class _OmegaState:
+    """Ping-pong textures and compiled kernels for the equirect ω field."""
+    # Two R32F textures (ping-pong) holding absolute vorticity q.
+    cur: moderngl.Texture
+    fwd: moderngl.Texture
+    back: moderngl.Texture
+    out: moderngl.Texture
+    # Scratch R32F for ∇²ω_rel (used between omega_force subpasses).
+    lap_scratch: moderngl.Texture
+    # Kernels
+    k_init: moderngl.ComputeShader          # omega_init.comp
+    k_adv: list[moderngl.ComputeShader]     # omega_advect.comp PASS 0,1,2
+    k_force0: moderngl.ComputeShader        # omega_force.comp SUBPASS 0 (nudge)
+    k_lap: moderngl.ComputeShader           # omega_lap.comp (∇²ω_rel)
+    k_force1: moderngl.ComputeShader        # omega_force.comp SUBPASS 1 (hypervisc)
+
+    def commit(self) -> None:
+        self.cur, self.out = self.out, self.cur
+
+    def release(self) -> None:
+        for tex in (self.cur, self.fwd, self.back, self.out, self.lap_scratch):
+            tex.release()
+
+
 class Solver:
     def __init__(
         self,
@@ -104,6 +129,7 @@ class Solver:
         profile_stamp_tex: moderngl.Texture,
         wave_lats: tuple[float, float] = (0.12, 0.82),
         events: object | None = None,
+        profile_omega_tex: moderngl.Texture | None = None,
     ) -> None:
         self.gpu = gpu
         self.params = params
@@ -113,6 +139,7 @@ class Solver:
         self.profile_stamp = profile_stamp_tex
         self.wave_lats = wave_lats
         self.events = events
+        self.profile_omega = profile_omega_tex
 
         w = params.sim.resolution
         n = patch_resolution(w)
@@ -136,6 +163,13 @@ class Solver:
         self.step_index = 0
         self.dt = self._compute_dt()
         self._ssbo = gpu.ssbo(vortices.pack_ssbo(), binding=2)
+
+        # Vorticity-mode state (equirect domain only; built regardless of
+        # solver.type so the uniforms path doesn't branch at compile time).
+        self._omega_state: _OmegaState | None = None
+        if params.solver.type == SolverType.VORTICITY:
+            self._omega_state = self._build_omega_state()
+
         self._static_uniforms()
 
     def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
@@ -167,6 +201,178 @@ class Solver:
             ],
             k_init=gpu.compute(_KERNELS, "init.comp", defines=defines),
         )
+
+    def _build_omega_state(self) -> _OmegaState:
+        """Build textures and kernels for the equirect vorticity field."""
+        gpu = self.gpu
+        size = self.equirect.size
+        eq_defines = {"DOMAIN": "0"}
+
+        def r32f(sz):
+            return gpu.texture2d(sz, 1, "f4",
+                                 data=np.zeros((sz[1], sz[0], 1), np.float32))
+
+        cur        = r32f(size)
+        fwd        = r32f(size)
+        back       = r32f(size)
+        out        = r32f(size)
+        lap_scratch = r32f(size)
+        # All omega textures periodic in x (equirect).
+        for tex in (cur, fwd, back, out, lap_scratch):
+            tex.repeat_x = True
+
+        k_init = gpu.compute(_KERNELS, "omega_init.comp", defines=eq_defines)
+        k_adv = [
+            gpu.compute(_KERNELS, "omega_advect.comp",
+                        defines={**eq_defines, "PASS": str(i)})
+            for i in range(3)
+        ]
+        k_force0 = gpu.compute(_KERNELS, "omega_force.comp",
+                               defines={**eq_defines, "SUBPASS": "0"})
+        k_lap    = gpu.compute(_KERNELS, "omega_lap.comp",  defines=eq_defines)
+        k_force1 = gpu.compute(_KERNELS, "omega_force.comp",
+                               defines={**eq_defines, "SUBPASS": "1"})
+
+        state = _OmegaState(
+            cur=cur, fwd=fwd, back=back, out=out, lap_scratch=lap_scratch,
+            k_init=k_init, k_adv=k_adv,
+            k_force0=k_force0, k_lap=k_lap, k_force1=k_force1,
+        )
+        # Initialise q⁰ immediately.
+        self._omega_init(state)
+        return state
+
+    def _omega_static_uniforms(self, state: _OmegaState) -> None:
+        """Set size / f0 uniforms that never change after build."""
+        size = self.equirect.size
+        p = self.params
+        for k in [state.k_init, *state.k_adv, state.k_force0, state.k_lap, state.k_force1]:
+            _set(k, "u_size", size)
+        for k in [state.k_init, state.k_force0, state.k_lap, state.k_force1]:
+            _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
+        _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
+        _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
+
+    def _omega_init(self, state: _OmegaState) -> None:
+        """Dispatch omega_init.comp to write q⁰ into state.cur."""
+        ctx = self.gpu.ctx
+        k = state.k_init
+        size = self.equirect.size
+        _set(k, "u_size", size)
+        _set(k, "u_vortex_count", len(self.vortices.vortices))
+        _set(k, "u_coriolis_f0", self.params.solver.coriolis_f0)
+        if self.profile_omega is not None:
+            self.profile_omega.use(location=0)
+            _set(k, "u_profile_omega", 0)
+        self._ssbo.bind_to_storage_buffer(2)
+        state.cur.bind_to_image(0, read=False, write=True)
+        gx, gy = self.equirect.groups()
+        k.run(gx, gy, 1)
+        ctx.memory_barrier()
+
+    def _omega_step(self, state: _OmegaState) -> None:
+        """Evolve ω one step: MacCormack advection + forcing + hyperviscosity."""
+        ctx = self.gpu.ctx
+        p = self.params
+        gx, gy = self.equirect.groups()
+        vel_tex = self.equirect.vel_tex  # frozen kinematic velocity (P3a)
+
+        # Bind SSBO for vortex contributions.
+        self._ssbo.bind_to_storage_buffer(2)
+
+        # MacCormack pass 0 (forward).
+        k0 = state.k_adv[0]
+        state.cur.use(location=0)
+        _set(k0, "u_src", 0)
+        vel_tex.use(location=1)
+        _set(k0, "u_vel", 1)
+        # Unused samplers still bound (determinism).
+        state.cur.use(location=2)
+        _set(k0, "u_cur", 2)
+        state.cur.use(location=3)
+        _set(k0, "u_back", 3)
+        _set(k0, "u_dt", +self.dt)
+        state.fwd.bind_to_image(0, read=False, write=True)
+        k0.run(gx, gy, 1)
+        ctx.memory_barrier()
+
+        # MacCormack pass 1 (backward).
+        k1 = state.k_adv[1]
+        state.fwd.use(location=0)
+        _set(k1, "u_src", 0)
+        vel_tex.use(location=1)
+        _set(k1, "u_vel", 1)
+        state.cur.use(location=2)
+        _set(k1, "u_cur", 2)
+        state.cur.use(location=3)
+        _set(k1, "u_back", 3)
+        _set(k1, "u_dt", -self.dt)
+        state.back.bind_to_image(0, read=False, write=True)
+        k1.run(gx, gy, 1)
+        ctx.memory_barrier()
+
+        # MacCormack pass 2 (correct).
+        k2 = state.k_adv[2]
+        state.fwd.use(location=0)
+        _set(k2, "u_src", 0)
+        vel_tex.use(location=1)
+        _set(k2, "u_vel", 1)
+        state.cur.use(location=2)
+        _set(k2, "u_cur", 2)
+        state.back.use(location=3)
+        _set(k2, "u_back", 3)
+        _set(k2, "u_dt", +self.dt)
+        state.out.bind_to_image(0, read=False, write=True)
+        k2.run(gx, gy, 1)
+        ctx.memory_barrier()
+        state.commit()  # cur <- out (out becomes scratch)
+
+        # Forcing / nudging (SUBPASS 0): q += (q_target − q) / τ_ω.
+        kf0 = state.k_force0
+        state.cur.use(location=0)
+        _set(kf0, "u_omega", 0)
+        if self.profile_omega is not None:
+            self.profile_omega.use(location=1)
+            _set(kf0, "u_profile_omega", 1)
+        # u_lap_omega_rel not used in SUBPASS 0; bind to something safe.
+        state.cur.use(location=2)
+        _set(kf0, "u_lap_omega_rel", 2)
+        _set(kf0, "u_vortex_count", len(self.vortices.vortices))
+        _set(kf0, "u_coriolis_f0", p.solver.coriolis_f0)
+        _set(kf0, "u_relax_tau", p.solver.vort_relax_tau)
+        _set(kf0, "u_hypervisc", p.solver.vort_hypervisc)
+        state.out.bind_to_image(0, read=False, write=True)
+        kf0.run(gx, gy, 1)
+        ctx.memory_barrier()
+        state.commit()  # cur <- out
+
+        # Compute ∇²ω_rel into lap_scratch.
+        kl = state.k_lap
+        state.cur.use(location=0)
+        _set(kl, "u_omega", 0)
+        _set(kl, "u_coriolis_f0", p.solver.coriolis_f0)
+        state.lap_scratch.bind_to_image(0, read=False, write=True)
+        kl.run(gx, gy, 1)
+        ctx.memory_barrier()
+
+        # Hyperviscosity (SUBPASS 1): q += ν₄ · (−∇⁴ω_rel).
+        kf1 = state.k_force1
+        state.cur.use(location=0)
+        _set(kf1, "u_omega", 0)
+        # u_profile_omega not used in SUBPASS 1; bind to something safe.
+        if self.profile_omega is not None:
+            self.profile_omega.use(location=1)
+            _set(kf1, "u_profile_omega", 1)
+        state.lap_scratch.use(location=2)
+        _set(kf1, "u_lap_omega_rel", 2)
+        _set(kf1, "u_vortex_count", len(self.vortices.vortices))
+        _set(kf1, "u_coriolis_f0", p.solver.coriolis_f0)
+        _set(kf1, "u_relax_tau", p.solver.vort_relax_tau)
+        _set(kf1, "u_hypervisc", p.solver.vort_hypervisc)
+        state.out.bind_to_image(0, read=False, write=True)
+        kf1.run(gx, gy, 1)
+        ctx.memory_barrier()
+        state.commit()  # cur is now the final advanced q
 
     # -- configuration ---------------------------------------------------------
 
@@ -396,21 +602,35 @@ class Solver:
             self.step_index += 1
 
     def _produce_psi(self, dom, turb_time, gx, gy):
-        """Write dom.psi_tex for this step. Kinematic: analytic rebuild
-        (psi.comp). Vorticity (P3+): advect omega + Poisson-solve psi."""
-        if self.params.solver.type == SolverType.KINEMATIC:
-            ctx = self.gpu.ctx
-            k = dom.k_psi
-            _set(k, "u_vortex_count", len(self.vortices.vortices))
-            _set(k, "u_turb_time", turb_time)
-            self.profile_dyn.use(location=0)
-            _set(k, "u_profile_dyn", 0)
-            dom.psi_tex.bind_to_image(0, read=False, write=True)
-            k.run(gx, gy, 1)
-            ctx.memory_barrier()
-        else:
-            raise NotImplementedError(
-                "vorticity solver is implemented in packet P3")
+        """Write dom.psi_tex for this step.
+
+        KINEMATIC mode: analytic streamfunction rebuild via psi.comp (v1.5).
+        VORTICITY mode, equirect domain (P3a): advance ω one step, then write
+          psi_tex via the same analytic kinematic path as KINEMATIC mode.
+          This keeps velocity kinematic in P3a — the Poisson ψ-from-ω solve
+          is deferred to P3b.  Polar patch domains always use the kinematic
+          path regardless of solver.type.
+        """
+        ctx = self.gpu.ctx
+
+        if (
+            self.params.solver.type == SolverType.VORTICITY
+            and dom.kind == DOMAIN_EQUIRECT
+            and self._omega_state is not None
+        ):
+            self._omega_step(self._omega_state)
+
+        # Write psi_tex analytically (kinematic path) for ALL domains in P3a.
+        # This keeps velocity unchanged; the Poisson inversion (P3b) will
+        # replace this line with a SOR solve for the equirect domain only.
+        k = dom.k_psi
+        _set(k, "u_vortex_count", len(self.vortices.vortices))
+        _set(k, "u_turb_time", turb_time)
+        self.profile_dyn.use(location=0)
+        _set(k, "u_profile_dyn", 0)
+        dom.psi_tex.bind_to_image(0, read=False, write=True)
+        k.run(gx, gy, 1)
+        ctx.memory_barrier()
 
     def _advect(
         self, dom: Domain, pass_index: int, src: moderngl.Texture,
@@ -502,3 +722,6 @@ class Solver:
         for dom in self.domains:
             dom.release()
         self._ssbo.release()
+        if self._omega_state is not None:
+            self._omega_state.release()
+            self._omega_state = None

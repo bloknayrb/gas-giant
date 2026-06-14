@@ -17,6 +17,7 @@ import numpy as np
 
 from gasgiant.params.model import BandsParams, JetsParams
 from gasgiant.params.seeds import subseed
+from gasgiant.sim import vorticity_ref
 from gasgiant.sim.bands import BandLayout
 
 PROFILE_SAMPLES = 2048
@@ -38,6 +39,10 @@ class LatProfiles:
     max_speed: float
     # (lat_lo, lat_hi, lon, halfwidth) of the faded sector, radians.
     fade_sector: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    # (N,) relative vorticity of the jets: ω_jet = −(1/cosφ) d(u cosφ)/dφ
+    # vorticity_ref.jet_vorticity uses ascending lat; we store in descending
+    # order (same as self.lat) so the LUT v-coordinate matches latProfileUV.
+    omega_jet: np.ndarray = None  # type: ignore[assignment]
 
     def dyn_lut(self) -> np.ndarray:
         """(N, 4) float32: u, psi, shear_norm, belt_mask."""
@@ -50,6 +55,16 @@ class LatProfiles:
         fade = polar_fade(self.lat)
         zero = np.zeros_like(self.lat)
         return np.stack([self.t0_stamp, self.t1_stamp, fade, zero], axis=1).astype(np.float32)
+
+    def omega_lut(self) -> np.ndarray:
+        """(N, 4) float32 LUT for upload via gpu.lut_texture.
+
+        R channel = ω_jet (relative vorticity of the zonal jets).
+        G/B/A = 0 (reserved for future vorticity-mode fields).
+        """
+        omega = self.omega_jet if self.omega_jet is not None else np.zeros_like(self.lat)
+        zero = np.zeros_like(self.lat)
+        return np.stack([omega, zero, zero, zero], axis=1).astype(np.float32)
 
 
 def polar_fade(lat: np.ndarray) -> np.ndarray:
@@ -105,6 +120,14 @@ def build_profiles(
     )
     t0, t1, belt = _stamp_profiles(lat, bands, bands_params, soft_mult)
 
+    # Compute ω_jet APPEND-ONLY after all seeded draws above.
+    # vorticity_ref.jet_vorticity expects ascending lat; lat here is descending,
+    # so we flip, compute, then flip back to match the descending LUT convention.
+    lat_asc = lat[::-1]
+    u_asc = u[::-1]
+    omega_jet_asc = vorticity_ref.jet_vorticity(u_asc, lat_asc)
+    omega_jet = omega_jet_asc[::-1].copy()  # back to descending order
+
     return LatProfiles(
         lat=lat,
         u=u,
@@ -115,6 +138,7 @@ def build_profiles(
         t1_stamp=t1,
         max_speed=float(np.abs(u).max()),
         fade_sector=bands.fade_sector,
+        omega_jet=omega_jet,
     )
 
 
