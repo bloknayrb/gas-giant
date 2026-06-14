@@ -73,7 +73,7 @@ def main():
     strip = np.vstack([
         _label(_u8(ref_crop), "REFERENCE (PIA07782)  coher=0.62"),
         _label(_u8(kin_crop), f"v1.5 KINEMATIC  coher={ck:.3f}"),
-        _label(_u8(vort_crop), f"v1.6 VORTICITY  coher={cv:.3f}  (belt field clean; ~5% polar clamp)"),
+        _label(_u8(vort_crop), f"v1.6 VORTICITY  coher={cv:.3f}  (belt clean; ~5% polar clamp)"),
     ])
     cv2.imwrite(str(OUT / "belt_compare.png"), strip)
 
