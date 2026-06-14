@@ -50,15 +50,17 @@ def main():
     # Vorticity (current fold-friendly config; honest = the one that shows folds).
     p = load_factory_preset("jupiter_like")
     p.solver.type = SolverType.VORTICITY
-    p.sim.dev_steps = 600
-    # Detail replenishment ON (the folding velocity braids the fine structure
-    # into filaments; the earlier repl=0 config bare-streaked). Weaker tracer
-    # relaxation so the folded structure persists.
+    # Eddy-rich config: hi-res for mid-scale dynamic range; lower f0 = weaker
+    # beta-stabilization -> more barotropic instability -> jets shed eddies;
+    # longer vort persistence + less hyperviscosity so eddies survive/roll up;
+    # detail replenishment ON so the folding velocity braids fine structure.
+    p.sim.resolution = 4096
+    p.sim.dev_steps = 700
     p.turbulence.relax_tau = 800.0
     p.turbulence.replenish_rate = 0.02
-    p.solver.vort_relax_tau = 250.0
-    p.solver.vort_hypervisc = 1.0
-    p.solver.coriolis_f0 = 6.0
+    p.solver.vort_relax_tau = 600.0
+    p.solver.vort_hypervisc = 0.6
+    p.solver.coriolis_f0 = 3.0
     p.solver.vort_inject = 0.0
     sim = Simulation(p, gpu)
     rgb_vort_full = sim.render_maps(2048)["color"]
