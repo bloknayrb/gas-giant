@@ -1,35 +1,13 @@
 #version 430
 // poisson_sor.comp — Red-black SOR Poisson solve for ψ: ∇²ψ = +ω.
 //
-// Rearranges the discrete spherical Laplacian from laplacian.glsl to update
-// ψ at (i,j) from its neighbours, then applies SOR over-relaxation.
+// DOMAIN == 0 (equirect): 5-point stencil inversion (tanφ split, 1/cos²φ metric).
+// DOMAIN != 0 (AE patch): 9-point stencil inversion (c_ss, c_tt axes + c_st cross
+//   + c_g radial; cross and radial terms go entirely to RHS, center coeff is
+//   −2·(c_ss + c_tt)/dstep²).
 //
 // Checkerboard update: compile with COLOR=0 (red) or COLOR=1 (black).
 // A cell at pixel (px.x, px.y) updates only when ((px.x + px.y) & 1) == COLOR.
-//
-// The Laplacian from laplacian.glsl is:
-//   ∇²ψ = (1/cos²φ)·(xp1 − 2c + xm1)/Δλ²
-//          + (yp1 − 2c + ym1)/Δφ²
-//          + tanφ·(yp1 − ym1)/(2Δφ)
-//
-// Setting ∇²ψ = ω and solving for center c:
-//   c · (−2/(Δλ²·cos²φ) − 2/Δφ²)
-//   = ω
-//   − (xp1 + xm1)/(Δλ²·cos²φ)
-//   − yp1·(1/Δφ² + tanφ/(2Δφ))
-//   − ym1·(1/Δφ² − tanφ/(2Δφ))
-//
-// => c_gs = [rhs_nbrs − ω] / center_coeff
-//    where center_coeff = −2/(Δλ²·cos²φ) − 2/Δφ²  (negative)
-//    and   rhs_nbrs     = (xp1 + xm1)/(Δλ²·cos²φ)
-//                         + yp1·(1/Δφ² + tanφ/(2Δφ))
-//                         + ym1·(1/Δφ² − tanφ/(2Δφ))
-//
-// SOR: ψ_new = (1 − ω_sor)·c_old + ω_sor·c_gs
-//
-// Sign convention: ω ≡ ζ = +∇²ψ  (Poisson equation is ∇²ψ = +ω).
-// Grid convention: row y=0 = north pole, y increases southward (descending lat).
-// DOMAIN == 0 ONLY.
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -54,42 +32,83 @@ void main() {
     int W = u_size.x;
     int H = u_size.y;
 
+    float omega = texelFetch(u_omega_rel, px, 0).r;
+    float c_old = imageLoad(psi_work, px).r;
+
+#if DOMAIN == 0
+    // ---- Equirect (5-point stencil) ---------------------------------------
     float dlam = 2.0 * PI / float(W);
     float dphi = PI / float(H);
 
     // Pixel-centre latitude (descending: row 0 = north pole).
-    float lat = 0.5 * PI - (float(px.y) + 0.5) / float(H) * PI;
+    float lat  = 0.5 * PI - (float(px.y) + 0.5) / float(H) * PI;
     float cosl = max(cos(lat), 0.017);
     float tanl = tan(lat);
 
-    // Stencil coefficients (matching laplacian.glsl exactly).
     float inv_cos2   = 1.0 / (cosl * cosl);
-    float w_lam      = inv_cos2 / (dlam * dlam);   // weight for xp1, xm1
-    float w_phi      = 1.0 / (dphi * dphi);         // symmetric φ weight
-    float w_tan_half = tanl / (2.0 * dphi);          // ±tanφ/(2Δφ) split
+    float w_lam      = inv_cos2 / (dlam * dlam);
+    float w_phi      = 1.0 / (dphi * dphi);
+    float w_tan_half = tanl / (2.0 * dphi);
 
-    // Center coefficient (sum of all center-pixel weights from the stencil):
-    //   −2·w_lam (from xp1 − 2c + xm1 term)
-    //   −2·w_phi (from yp1 − 2c + ym1 term)
     float center_coeff = -2.0 * w_lam - 2.0 * w_phi;
 
-    // Neighbour values.
     float xp1 = imageLoad(psi_work, ivec2(wrapX(px.x + 1, W), clampY(px.y,     H))).r;
     float xm1 = imageLoad(psi_work, ivec2(wrapX(px.x - 1, W), clampY(px.y,     H))).r;
     float yp1 = imageLoad(psi_work, ivec2(wrapX(px.x,     W), clampY(px.y + 1, H))).r;
     float ym1 = imageLoad(psi_work, ivec2(wrapX(px.x,     W), clampY(px.y - 1, H))).r;
 
-    // RHS: neighbour contributions (move them to the right-hand side).
     float rhs_nbrs = w_lam * (xp1 + xm1)
                    + (w_phi + w_tan_half) * yp1
                    + (w_phi - w_tan_half) * ym1;
 
-    // RHS source: ω at centre pixel.
-    float omega = texelFetch(u_omega_rel, px, 0).r;
+#else
+    // ---- AE polar patch (9-point stencil) ---------------------------------
+    float dstep = 2.0 * u_rho_max / float(W);
 
-    // Gauss-Seidel update: solve center_coeff·c = omega − rhs_nbrs
-    // => c_gs = (omega − rhs_nbrs) / center_coeff
-    float c_old = imageLoad(psi_work, px).r;
+    vec2 st = patchStFromPix(vec2(px) + 0.5, u_size);
+    float s = st.x;
+    float t = st.y;
+
+    float rho  = max(length(st), 1e-6);
+    float sinr = max(sin(rho), 1e-6);
+    float rho2 = rho * rho;
+    float sin2 = sinr * sinr;
+
+    float c_ss = s*s/rho2 + t*t/sin2;
+    float c_tt = t*t/rho2 + s*s/sin2;
+    float c_st = 2.0*s*t*(1.0/rho2 - 1.0/sin2);
+    float c_g  = cos(rho)/sinr - rho/sin2;
+
+    // Center coefficient: only c_ss and c_tt contribute (cross+radial → RHS).
+    float center_coeff = -2.0*(c_ss + c_tt)/(dstep*dstep);
+
+    // 5-point neighbors.
+    float xp1 = imageLoad(psi_work, ivec2(wrapX(px.x + 1, W), clampY(px.y,     H))).r;
+    float xm1 = imageLoad(psi_work, ivec2(wrapX(px.x - 1, W), clampY(px.y,     H))).r;
+    float yp1 = imageLoad(psi_work, ivec2(wrapX(px.x,     W), clampY(px.y + 1, H))).r;
+    float ym1 = imageLoad(psi_work, ivec2(wrapX(px.x,     W), clampY(px.y - 1, H))).r;
+
+    // 4 corners for cross-derivative ψ_st.
+    float xp1yp1 = imageLoad(psi_work, ivec2(wrapX(px.x+1, W), clampY(px.y+1, H))).r;
+    float xp1ym1 = imageLoad(psi_work, ivec2(wrapX(px.x+1, W), clampY(px.y-1, H))).r;
+    float xm1yp1 = imageLoad(psi_work, ivec2(wrapX(px.x-1, W), clampY(px.y+1, H))).r;
+    float xm1ym1 = imageLoad(psi_work, ivec2(wrapX(px.x-1, W), clampY(px.y-1, H))).r;
+
+    float psi_st  = (xp1yp1 - xp1ym1 - xm1yp1 + xm1ym1) / (4.0*dstep*dstep);
+
+    // Radial gradient terms.
+    float psi_s = (xp1 - xm1) / (2.0 * dstep);
+    float psi_t = (yp1 - ym1) / (2.0 * dstep);
+    float psi_rho_term = c_g * (s*psi_s + t*psi_t) / rho;
+
+    // RHS: all neighbor contributions (c_ss and c_tt ±1 terms, c_st corners, c_g radial).
+    float rhs_nbrs = c_ss*(xp1 + xm1)/(dstep*dstep)
+                   + c_tt*(yp1 + ym1)/(dstep*dstep)
+                   + c_st * psi_st
+                   + psi_rho_term;
+#endif
+
+    // Gauss-Seidel update: center_coeff·c = omega − rhs_nbrs
     float c_gs  = (omega - rhs_nbrs) / center_coeff;
 
     // SOR blend.

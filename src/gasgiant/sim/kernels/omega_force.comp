@@ -21,7 +21,7 @@
 //   SUBPASS==-1).  We use three kernels total to keep the tanφ sign correct
 //   and avoid reading/writing the same texture in one dispatch.
 //
-// DOMAIN == 0 ONLY.
+// DOMAIN == 0 (equirect) and DOMAIN != 0 (polar patches).
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -78,9 +78,13 @@ void main() {
     float omega_jet  = texture(u_profile_omega, latProfileUV(ll.y)).r;
     float omega_vort = vortexOmegaAccum(p);
     float f          = coriolis(ll.y, u_coriolis_f0);
-    // Phase-A polar confinement (matches omega_init): evolve the relative
-    // vorticity only equatorward; q_target → f at the caps.
-    float confine    = 1.0 - smoothstep(radians(50.0), radians(60.0), abs(ll.y));
+    // Phase-B polar confinement (matches omega_init): equirect evolves equatorward,
+    // patches evolve poleward.
+#if DOMAIN == 0
+    float confine    = 1.0 - smoothstep(radians(60.0), radians(64.0), abs(ll.y));
+#else
+    float confine    = smoothstep(radians(60.0), radians(67.0), abs(ll.y));
+#endif
     float q_target   = (omega_jet + omega_vort) * confine + f;
 
     if (u_relax_tau > 0.0) {
@@ -122,25 +126,29 @@ void main() {
     // We apply laplacianPsi once more to get ∇⁴ω_rel, then negate and scale.
     if (u_hypervisc > 0.0) {
         float lap2 = laplacianPsi(u_lap_omega_rel, px, u_size);
-        // GRID-NORMALIZE: laplacianPsi divides by Δ² per application, so ∇⁴ has
-        // a Nyquist eigenvalue ≈ 64/Δ⁴ (~7e8 at 512). An un-normalized explicit
-        // q += ν₄·(−∇⁴ω) is ~9 orders over the stability limit and blows the
-        // grid mode up (more ν₄ = worse). Scale by Δ⁴/64 so u_hypervisc is the
-        // per-step damping FRACTION of the Nyquist mode (stable for <2, default
-        // 0.5). Δ = π/H (equirect; ω is confined equatorward where cosφ≈1).
+        // GRID-NORMALIZE: scale by Δ⁴/64 so u_hypervisc is the per-step damping
+        // fraction of the Nyquist mode.  Δ is the local grid step in radians:
+        //   equirect: Δ = π/H  (lat step in radians)
+        //   patch:    Δ = 2·u_rho_max/W  (st step in radians)
+#if DOMAIN == 0
         float dphi = PI / float(u_size.y);
         float dx4 = (dphi * dphi * dphi * dphi) / 64.0;
+#else
+        float dstep = 2.0 * u_rho_max / float(u_size.x);
+        float dx4 = (dstep * dstep * dstep * dstep) / 64.0;
+#endif
         q += u_hypervisc * (-lap2) * dx4;
     }
-    // Final polar gate: hard-confine the relative vorticity to 0 poleward of the
-    // 50–60° band so q→f at the caps. The SOR/hyperviscosity 1/cos²φ metric
-    // amplifies poleward (where the poles are kinematic + feathered out anyway);
-    // without this gate that amplification saturates the magnitude clamp. Run as
-    // the LAST force op so it overrides anything hyperviscosity injected poleward.
+    // Final polar gate: hard-confine the relative vorticity in the non-active region.
+    // Equirect: confine to 0 poleward; patches: confine to 0 near apron.
     {
-        float f       = coriolis(ll.y, u_coriolis_f0);
-        float confine = 1.0 - smoothstep(radians(50.0), radians(60.0), abs(ll.y));
-        q = f + (q - f) * confine;
+        float f_gate   = coriolis(ll.y, u_coriolis_f0);
+#if DOMAIN == 0
+        float confine_gate = 1.0 - smoothstep(radians(60.0), radians(64.0), abs(ll.y));
+#else
+        float confine_gate = smoothstep(radians(60.0), radians(67.0), abs(ll.y));
+#endif
+        q = f_gate + (q - f_gate) * confine_gate;
     }
     q = clamp(q, -OMEGA_CEILING, OMEGA_CEILING);
     imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));

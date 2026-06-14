@@ -1,14 +1,15 @@
 #version 430
-// psi_feather.comp — Blend SOR-solved ψ with analytic ψ over polar feather.
+// psi_feather.comp — Blend SOR-solved ψ with analytic ψ over the feather region.
 //
-// blended = mix(psi_solved, psi_analytic, alpha(lat))
+// DOMAIN == 0 (equirect):
+//   alpha smoothsteps 0→1 over |lat| ∈ [60°, 64°].
+//   alpha=0: pure vorticity-solved; alpha=1: pure analytic.
+//   Poleward of 64° is pure analytic (patches cover the caps).
 //
-// where alpha smoothsteps from 0 → 1 over |lat| ∈ [50°, 60°]:
-//   alpha = 0  at |lat| ≤ 50°  (pure vorticity-solved)
-//   alpha = 1  at |lat| ≥ 60°  (pure analytic kinematic)
-//
-// Writes the blended result to out_psi.
-// DOMAIN == 0 ONLY.
+// DOMAIN != 0 (AE patch):
+//   alpha smoothsteps 1→0 over |lat| ∈ [60°, 67°].
+//   alpha=1 near apron (equatorward), alpha=0 near pole.
+//   Equatorward of 60° (rho > ~30°) is pure analytic (equirect covers it).
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -21,9 +22,6 @@ uniform ivec2 u_size;
 
 layout(r32f, binding = 0) writeonly uniform image2D out_psi;
 
-const float LAT_LO = 50.0 * PI / 180.0;   // 50 degrees in radians
-const float LAT_HI = 60.0 * PI / 180.0;   // 60 degrees in radians
-
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= u_size.x || px.y >= u_size.y) return;
@@ -31,8 +29,15 @@ void main() {
     vec2 ll = lonlatAt(px, u_size);
     float abs_lat = abs(ll.y);
 
-    // smoothstep ramp: 0 equatorward of LAT_LO, 1 poleward of LAT_HI.
-    float alpha = smoothstep(LAT_LO, LAT_HI, abs_lat);
+#if DOMAIN == 0
+    // Equirect: blend toward analytic POLEWARD of the active band.
+    // alpha=0 equatorward (pure solved), alpha=1 poleward of 64° (pure analytic).
+    float alpha = smoothstep(radians(60.0), radians(64.0), abs_lat);
+#else
+    // Patch: blend toward analytic EQUATORWARD of the active band (near outer apron).
+    // alpha=0 near pole (pure solved), alpha=1 near apron (equatorward edge → analytic).
+    float alpha = 1.0 - smoothstep(radians(60.0), radians(67.0), abs_lat);
+#endif
 
     float psi_s = texelFetch(u_psi_solved,   px, 0).r;
     float psi_a = texelFetch(u_psi_analytic, px, 0).r;

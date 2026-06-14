@@ -16,7 +16,9 @@
 //    is handled by a separate omega_force.comp kernel after all three passes.
 //  - 2×2 scalar min/max clamp (essential: q is unbounded/sign-indefinite).
 //
-// DOMAIN == 0 ONLY (equirect). wrapX / clampY from common.glsl.
+// DOMAIN == 0 (equirect) and DOMAIN != 0 (polar patches). wrapX / clampY
+// from common.glsl are already domain-branched; fetchQ is correct for both
+// domains once the DOMAIN define is passed at compile time.
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -40,11 +42,12 @@ float fetchQ(sampler2D tex, int x, int y) {
     return texelFetch(tex, ivec2(wrapX(x, u_size.x), clampY(y, u_size.y)), 0).r;
 }
 
-// RK2 backtrace — equirect spherical metric (mirrors advect.comp).
+// RK2 backtrace — equirect spherical metric or AE patch metric.
 vec2 backtrace(vec2 pixPos, float dt) {
     vec2 size  = vec2(u_size);
     vec2 uvSc  = 1.0 / size;
 
+#if DOMAIN == 0
     vec2 ll = vec2(
         (pixPos.x / size.x) * 2.0 * PI - PI,
         0.5 * PI - (pixPos.y / size.y) * PI
@@ -66,6 +69,15 @@ vec2 backtrace(vec2 pixPos, float dt) {
         (dest.x + PI) / (2.0 * PI) * size.x,
         (0.5 * PI - dest.y) / PI * size.y
     );
+#else
+    // Patch space is Cartesian (in st radians) — no pole singularity.
+    vec2 st = patchStFromPix(pixPos, u_size);
+    vec2 vel = texture(u_vel, pixPos * uvSc).rg;
+    vec2 stMid = st - 0.5 * dt * patchVelocity(st, vel);
+    vec2 velMid = texture(u_vel, patchPixFromSt(stMid, u_size) * uvSc).rg;
+    vec2 stDest = st - dt * patchVelocity(stMid, velMid);
+    return patchPixFromSt(stDest, u_size);
+#endif
 }
 
 // Catmull-Rom weight vector for fractional offset t.

@@ -176,11 +176,15 @@ class Solver:
         self.dt = self._compute_dt()
         self._ssbo = gpu.ssbo(vortices.pack_ssbo(), binding=2)
 
-        # Vorticity-mode state (equirect domain only; built regardless of
-        # solver.type so the uniforms path doesn't branch at compile time).
-        self._omega_state: _OmegaState | None = None
+        # Vorticity-mode state — one per domain (built only in VORTICITY mode).
+        self._omega_states: dict[int, _OmegaState] | None = None
+        self._omega_state: _OmegaState | None = None  # alias for equirect (compat)
         if params.solver.type == SolverType.VORTICITY:
-            self._omega_state = self._build_omega_state()
+            self._omega_states = {
+                dom.kind: self._build_omega_state(dom)
+                for dom in self.domains
+            }
+            self._omega_state = self._omega_states[DOMAIN_EQUIRECT]
 
         self._static_uniforms()
 
@@ -214,46 +218,46 @@ class Solver:
             k_init=gpu.compute(_KERNELS, "init.comp", defines=defines),
         )
 
-    def _build_omega_state(self) -> _OmegaState:
-        """Build textures and kernels for the equirect vorticity field."""
+    def _build_omega_state(self, domain: Domain) -> _OmegaState:
+        """Build textures and kernels for the vorticity field of one domain."""
         gpu = self.gpu
-        size = self.equirect.size
-        eq_defines = {"DOMAIN": "0"}
+        size = domain.size
+        dom_defines = {"DOMAIN": str(domain.kind)}
+        # Patch textures do NOT wrap in x (AE patch clamps both axes).
+        wrap = domain.kind == DOMAIN_EQUIRECT
 
         def r32f(sz):
-            return gpu.texture2d(sz, 1, "f4",
-                                 data=np.zeros((sz[1], sz[0], 1), np.float32))
+            t = gpu.texture2d(sz, 1, "f4",
+                              data=np.zeros((sz[1], sz[0], 1), np.float32))
+            t.repeat_x = wrap
+            return t
 
-        cur        = r32f(size)
-        fwd        = r32f(size)
-        back       = r32f(size)
-        out        = r32f(size)
+        cur         = r32f(size)
+        fwd         = r32f(size)
+        back        = r32f(size)
+        out         = r32f(size)
         lap_scratch = r32f(size)
         omega_rel   = r32f(size)
         psi_analytic = r32f(size)
         psi_work    = r32f(size)
-        # All omega textures periodic in x (equirect).
-        for tex in (cur, fwd, back, out, lap_scratch, omega_rel, psi_analytic, psi_work):
-            tex.repeat_x = True
 
-        k_init = gpu.compute(_KERNELS, "omega_init.comp", defines=eq_defines)
+        k_init = gpu.compute(_KERNELS, "omega_init.comp", defines=dom_defines)
         k_adv = [
             gpu.compute(_KERNELS, "omega_advect.comp",
-                        defines={**eq_defines, "PASS": str(i)})
+                        defines={**dom_defines, "PASS": str(i)})
             for i in range(3)
         ]
         k_force0 = gpu.compute(_KERNELS, "omega_force.comp",
-                               defines={**eq_defines, "SUBPASS": "0"})
-        k_lap    = gpu.compute(_KERNELS, "omega_lap.comp",  defines=eq_defines)
+                               defines={**dom_defines, "SUBPASS": "0"})
+        k_lap    = gpu.compute(_KERNELS, "omega_lap.comp",  defines=dom_defines)
         k_force1 = gpu.compute(_KERNELS, "omega_force.comp",
-                               defines={**eq_defines, "SUBPASS": "1"})
-        # P3b kernels.
-        k_recover   = gpu.compute(_KERNELS, "omega_recover.comp", defines=eq_defines)
+                               defines={**dom_defines, "SUBPASS": "1"})
+        k_recover   = gpu.compute(_KERNELS, "omega_recover.comp", defines=dom_defines)
         k_sor_red   = gpu.compute(_KERNELS, "poisson_sor.comp",
-                                  defines={**eq_defines, "COLOR": "0"})
+                                  defines={**dom_defines, "COLOR": "0"})
         k_sor_black = gpu.compute(_KERNELS, "poisson_sor.comp",
-                                  defines={**eq_defines, "COLOR": "1"})
-        k_feather   = gpu.compute(_KERNELS, "psi_feather.comp", defines=eq_defines)
+                                  defines={**dom_defines, "COLOR": "1"})
+        k_feather   = gpu.compute(_KERNELS, "psi_feather.comp", defines=dom_defines)
 
         state = _OmegaState(
             cur=cur, fwd=fwd, back=back, out=out, lap_scratch=lap_scratch,
@@ -267,17 +271,22 @@ class Solver:
         # advect/force/lap/SOR kernels have u_size=(0,0) and return immediately
         # (no-ops), so the per-step ping-pong just shuffles q⁰ and zero and ω
         # never evolves.
-        self._omega_static_uniforms(state)
+        self._omega_static_uniforms(state, domain)
         # Initialise q⁰ immediately.
-        self._omega_init(state)
+        self._omega_init(state, domain)
         return state
 
-    def _omega_static_uniforms(self, state: _OmegaState) -> None:
+    def _omega_static_uniforms(self, state: _OmegaState, domain: Domain) -> None:
         """Set size / f0 uniforms that never change after build."""
-        size = self.equirect.size
+        size = domain.size
         p = self.params
         for k in [state.k_init, *state.k_adv, state.k_force0, state.k_lap, state.k_force1]:
             _set(k, "u_size", size)
+        # Patch kernels also need u_rho_max (declared in common.glsl for DOMAIN != 0).
+        if domain.kind != DOMAIN_EQUIRECT:
+            for k in [state.k_init, *state.k_adv, state.k_force0, state.k_lap, state.k_force1,
+                      state.k_recover, state.k_sor_red, state.k_sor_black, state.k_feather]:
+                _set(k, "u_rho_max", RHO_MAX)
         for k in [state.k_init, state.k_force0, state.k_lap, state.k_force1]:
             _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
@@ -290,11 +299,11 @@ class Solver:
             _set(k, "u_sor_omega", p.solver.sor_omega)
         _set(state.k_feather, "u_size", size)
 
-    def _omega_init(self, state: _OmegaState) -> None:
+    def _omega_init(self, state: _OmegaState, domain: Domain) -> None:
         """Dispatch omega_init.comp to write q⁰ into state.cur."""
         ctx = self.gpu.ctx
         k = state.k_init
-        size = self.equirect.size
+        size = domain.size
         _set(k, "u_size", size)
         _set(k, "u_vortex_count", len(self.vortices.vortices))
         _set(k, "u_coriolis_f0", self.params.solver.coriolis_f0)
@@ -303,16 +312,16 @@ class Solver:
             _set(k, "u_profile_omega", 0)
         self._ssbo.bind_to_storage_buffer(2)
         state.cur.bind_to_image(0, read=False, write=True)
-        gx, gy = self.equirect.groups()
+        gx, gy = domain.groups()
         k.run(gx, gy, 1)
         ctx.memory_barrier()
 
-    def _omega_step(self, state: _OmegaState, turb_time: float = 0.0) -> None:
+    def _omega_step(self, state: _OmegaState, domain: Domain, turb_time: float = 0.0) -> None:
         """Evolve ω one step: MacCormack advection + forcing + hyperviscosity."""
         ctx = self.gpu.ctx
         p = self.params
-        gx, gy = self.equirect.groups()
-        vel_tex = self.equirect.vel_tex  # frozen kinematic velocity (P3a)
+        gx, gy = domain.groups()
+        vel_tex = domain.vel_tex  # frozen velocity from this step's _produce_psi
 
         # Bind SSBO for vortex contributions.
         self._ssbo.bind_to_storage_buffer(2)
@@ -647,23 +656,23 @@ class Solver:
         """Write dom.psi_tex for this step.
 
         KINEMATIC mode: analytic streamfunction rebuild via psi.comp (v1.5).
-        VORTICITY mode, equirect domain (P3b): advance ω one step, recover
+        VORTICITY mode (P6c): advance ω one step for ALL three domains, recover
           ω_rel = q−f, run the analytic psi into a temp buffer, warm-start
           from the previous solved ψ, run SOR Poisson iterations, feather-blend
-          with analytic ψ over 50–60°, and write result to dom.psi_tex.
-        Polar patch domains always use the kinematic analytic path.
+          with analytic ψ (equirect: poleward; patches: near apron), and write
+          result to dom.psi_tex.
         """
         ctx = self.gpu.ctx
 
         if (
             self.params.solver.type == SolverType.VORTICITY
-            and dom.kind == DOMAIN_EQUIRECT
-            and self._omega_state is not None
+            and self._omega_states is not None
+            and dom.kind in self._omega_states
         ):
-            state = self._omega_state
+            state = self._omega_states[dom.kind]
 
             # a. Advance absolute vorticity q one step.
-            self._omega_step(state, turb_time)
+            self._omega_step(state, dom, turb_time)
 
             # b. Recover ω_rel = q − f into state.omega_rel.
             kr = state.k_recover
@@ -755,7 +764,8 @@ class Solver:
                 "}\n"
             )
             self._k_psi_copy = ctx.compute_shader(src)
-            _set(self._k_psi_copy, "u_size", self.equirect.size)
+        # Set u_size to THIS domain's size (not equirect).
+        _set(self._k_psi_copy, "u_size", dom.size)
         dom.psi_tex.use(location=0)
         _set(self._k_psi_copy, "u_src", 0)
         state.psi_work.bind_to_image(0, read=False, write=True)
@@ -885,6 +895,8 @@ class Solver:
         for dom in self.domains:
             dom.release()
         self._ssbo.release()
-        if self._omega_state is not None:
-            self._omega_state.release()
+        if self._omega_states is not None:
+            for state in self._omega_states.values():
+                state.release()
+            self._omega_states = None
             self._omega_state = None

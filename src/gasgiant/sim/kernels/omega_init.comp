@@ -9,7 +9,7 @@
 //   f        = f0·sin(lat)   (Coriolis parameter)
 //
 // Sign convention: ω ≡ ζ = +∇²ψ,  q = ω + f.
-// DOMAIN == 0 ONLY — polar patches stay kinematic in P3a.
+// DOMAIN == 0 (equirect) and DOMAIN != 0 (polar patches).
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -50,11 +50,14 @@ void main() {
     // Coriolis: f = f0·sin(lat).
     float f = coriolis(ll.y, u_coriolis_f0);
 
-    // Phase-A polar confinement: the eddy (relative) vorticity is evolved only
-    // equatorward — poleward of ~55° the 1/cosφ jet-vorticity and the spherical
-    // Laplacian metric blow up (and the poles are kinematic in Phase A). Ramp
-    // the relative part to 0 over 50°→60° so q→f (smooth, bounded) at the caps.
-    float confine = 1.0 - smoothstep(radians(50.0), radians(60.0), abs(ll.y));
+    // Phase-B polar confinement: equirect evolves equatorward, patches evolve poleward.
+    // For equirect (DOMAIN==0): q active for |lat| < ~62°, ramps to 0 poleward.
+    // For patches (DOMAIN!=0): q active for |lat| > ~63° (near pole), ramps to 0 near apron.
+#if DOMAIN == 0
+    float confine = 1.0 - smoothstep(radians(60.0), radians(64.0), abs(ll.y));
+#else
+    float confine = smoothstep(radians(60.0), radians(67.0), abs(ll.y));
+#endif
 
     // Absolute vorticity q = (ω_jet + ω_vortex)·confine + f.
     float q = (omega_jet + omega_vort) * confine + f;
