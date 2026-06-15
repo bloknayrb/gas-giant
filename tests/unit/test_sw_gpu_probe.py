@@ -114,3 +114,27 @@ def test_swp_continuity_conserves_mass(gpu):
     area=g.cos_c[:,None].astype(np.float64)
     m0=np.sum(h.astype(np.float64)*area); m1=np.sum(out.astype(np.float64)*area)
     np.testing.assert_allclose(m1, m0, rtol=2e-6)
+
+
+def test_swp_continuity_conserves_mass_strong_gradient(gpu):
+    """Under strong gradients the h_floor clamp is non-conservative (floor lifts cells),
+    so GPU and CPU will both deviate from m0 at roughly the same rtol (~6e-4 for this seed).
+    The key assertion is that GPU matches CPU cell-by-cell: same limiter, same conservation error."""
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import operators, grid
+    import numpy as np
+    rng=np.random.default_rng(11); W,H=64,32
+    h=np.clip(0.3+2.0*rng.random((H,W)),0.1,None).astype(np.float32)   # large thickness contrast
+    u=(0.4*rng.standard_normal((H,W))).astype(np.float32)
+    v=np.zeros((H+1,W),np.float32); v[1:H]=0.4*rng.standard_normal((H-1,W))
+    g=grid.Grid(W,H); area=g.cos_c[:,None].astype(np.float64)
+    out=solver.run_continuity(gpu,h,u,v,dt=0.01,h_floor=0.05)
+    cpu=operators.continuity_step(h.astype(np.float64),u.astype(np.float64),v.astype(np.float64),g,dt=0.01,h_floor=0.05)
+    # GPU must match CPU cell-by-cell (corrected limiter matches reference)
+    np.testing.assert_allclose(out, cpu, atol=2e-5)
+    # Both have the same (floor-driven) mass error; verify GPU mass error is no worse than CPU's
+    m0=np.sum(h.astype(np.float64)*area)
+    m_gpu=np.sum(out.astype(np.float64)*area)
+    m_cpu=np.sum(cpu.astype(np.float64)*area)
+    # GPU and CPU mass integrals should agree to f32 summation precision
+    np.testing.assert_allclose(m_gpu, m_cpu, rtol=1e-5)

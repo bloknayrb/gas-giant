@@ -179,8 +179,17 @@ void main() {
     float Ax_w = Fx_high_w - Fx_low_w;
     float cap_w  = texelFetch(u_cap, ivec2(i_w, j), 0).r;
     float sx_w   = min(1.0, cap_w  / (abs(Ax_w) + 1.0e-30));
-    // Ax_lim at east face: Ax_e * min(sx[i], sx[i+1]) (CPU: roll(sx,-1) = east neighbour)
-    float sx_e   = min(1.0, cap_e  / (abs(Ax_e) + 1.0e-30));
+    // sx_e = min(1, cap[i+1] / |Ax[i+1]|) where Ax[i+1] is the anti-diffusive flux
+    // at the i+1->i+2 face (NOT the i->i+1 face). CPU: roll(sx,-1,axis=1)[i] = sx[i+1].
+    int i_ee = wrapX(i + 2, W);
+    float h_ie  = texelFetch(u_h, ivec2(i_e,  j), 0).r;
+    float h_iee = texelFetch(u_h, ivec2(i_ee, j), 0).r;
+    float u_ie  = texelFetch(u_u, ivec2(i_e,  j), 0).r;
+    float Fx_high_ip1 = 0.5 * (h_ie + h_iee) * u_ie;
+    float h_ip1_donor = (u_ie >= 0.0) ? h_ie : h_iee;
+    float Fx_low_ip1  = h_ip1_donor * u_ie;
+    float Ax_ip1 = Fx_high_ip1 - Fx_low_ip1;
+    float sx_e   = min(1.0, cap_e / (abs(Ax_ip1) + 1.0e-30));
     float Ax_lim_e = Ax_e * min(sx_c, sx_e);
     // Ax_lim at west face: Ax_w * min(sx[i-1], sx[i])
     float Ax_lim_w = Ax_w * min(sx_w, sx_c);
