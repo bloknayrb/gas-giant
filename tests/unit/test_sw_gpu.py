@@ -35,3 +35,22 @@ def test_ref_divergence_radius_scaling():
     g1 = ref.Grid(W, H, a=1.0); g2 = ref.Grid(W, H, a=2.0)
     d1 = ref.divergence_hu(h, u, v, g1); d2 = ref.divergence_hu(h, u, v, g2)
     np.testing.assert_allclose(d2, 0.5 * d1, rtol=1e-12)
+
+
+def test_ref_continuity_radius_scaling():
+    # Independent a-scaling for _apply_fluxes (continuity 1/(a cosφ) metric):
+    # the per-step thickness tendency (h_new - h) must scale by 1/a.
+    from gasgiant.sim import shallow_water_ref as ref
+    rng = np.random.default_rng(6); W, H = 64, 32
+    h = np.clip(1.0 + 0.1 * rng.standard_normal((H, W)), 0.2, None)
+    u = 0.03 * rng.standard_normal((H, W))
+    v = np.zeros((H + 1, W)); v[1:H] = 0.03 * rng.standard_normal((H - 1, W))
+    g1 = ref.Grid(W, H, a=1.0); g2 = ref.Grid(W, H, a=2.0)
+    # Use a dt small enough that the FCT floor never fires (so the metric, not the
+    # clamp, governs) — same sub-CFL regime as the conservation tests.
+    h1 = ref.continuity_step(h, u, v, g1, dt=0.005, h_floor=0.05)
+    h2 = ref.continuity_step(h, u, v, g2, dt=0.005, h_floor=0.05)
+    # tendency halves at a=2; compare where the a=1 tendency is non-trivial.
+    t1 = h1 - h; t2 = h2 - h
+    mask = np.abs(t1) > 1e-6
+    np.testing.assert_allclose(t2[mask], 0.5 * t1[mask], rtol=1e-9)
