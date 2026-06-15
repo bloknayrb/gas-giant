@@ -47,9 +47,8 @@ def run_per_field_tests() -> tuple[bool, str]:
 
     Returns (passed: bool, summary_line: str).
     """
-    test_path = str(
-        Path(__file__).resolve().parent.parent / "tests" / "unit" / "test_sw_gpu.py"
-    )
+    repo_root = Path(__file__).resolve().parent.parent
+    test_path = str(repo_root / "tests" / "unit" / "test_sw_gpu.py")
     result = subprocess.run(
         [
             sys.executable, "-m", "pytest",
@@ -59,6 +58,7 @@ def run_per_field_tests() -> tuple[bool, str]:
         ],
         capture_output=True,
         text=True,
+        cwd=str(repo_root),  # ensure repo-root conftest.py (gpu fixture) is discovered
     )
     # Count passed tests from pytest output (look for "X passed" summary).
     passed_count = 0
@@ -117,7 +117,9 @@ def run_williamson_balance(gpu: GpuContext) -> dict:
     energy_rtol = abs(e1 - e0) / abs(e0)
     pe_rtol     = abs(pe1 - pe0) / abs(pe0)
 
-    finite_ok = bool(np.all(np.isfinite(hg)))
+    finite_ok = bool(
+        np.all(np.isfinite(hg)) and np.all(np.isfinite(ug)) and np.all(np.isfinite(vg))
+    )
 
     return dict(
         finite_ok=finite_ok,
