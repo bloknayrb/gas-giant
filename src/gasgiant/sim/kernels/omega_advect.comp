@@ -1,0 +1,154 @@
+#version 430
+// omega_advect.comp — Semi-Lagrangian MacCormack advection of the absolute
+// vorticity field q, one of three passes selected by the PASS define:
+//   PASS 0 (forward):  dst = bilinear(src, backtrace(p, +dt))
+//   PASS 1 (backward): dst = bilinear(src, backtrace(p, −dt))
+//   PASS 2 (correct):  dst = fwd + 0.5*(cur − back), limited against 2×2
+//                      neighborhood of cur at the backtraced position.
+//
+// Scalar version of advect.comp: R32F in/out, single-channel q.
+// Velocity is sampled from dom.vel_tex (rg32f, bilinear) which in P3a is
+// still the kinematic analytic velocity — q is a "passenger" advected by it.
+//
+// Key differences from advect.comp:
+//  - R32F textures throughout (single-channel q, not rgba32f tracers).
+//  - No relaxation, no replenishment, no band stamps — forcing+hyperviscosity
+//    is handled by a separate omega_force.comp kernel after all three passes.
+//  - 2×2 scalar min/max clamp (essential: q is unbounded/sign-indefinite).
+//
+// DOMAIN == 0 (equirect) and DOMAIN != 0 (polar patches). wrapX / clampY
+// from common.glsl are already domain-branched; fetchQ is correct for both
+// domains once the DOMAIN define is passed at compile time.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+// Samplers — always bound even when unused (determinism guard).
+uniform sampler2D u_src;    // pass 0: q_cur; pass 1: q_fwd; pass 2: q_fwd
+uniform sampler2D u_cur;    // pass 2: q_cur
+uniform sampler2D u_back;   // pass 2: q_back
+uniform sampler2D u_vel;    // rg32f frozen velocity
+
+uniform ivec2 u_size;
+uniform float u_dt;
+
+// Output
+layout(r32f, binding = 0) writeonly uniform image2D out_omega;
+
+// ---- helpers ---------------------------------------------------------------
+
+float fetchQ(sampler2D tex, int x, int y) {
+    return texelFetch(tex, ivec2(wrapX(x, u_size.x), clampY(y, u_size.y)), 0).r;
+}
+
+// RK2 backtrace — equirect spherical metric or AE patch metric.
+vec2 backtrace(vec2 pixPos, float dt) {
+    vec2 size  = vec2(u_size);
+    vec2 uvSc  = 1.0 / size;
+
+#if DOMAIN == 0
+    vec2 ll = vec2(
+        (pixPos.x / size.x) * 2.0 * PI - PI,
+        0.5 * PI - (pixPos.y / size.y) * PI
+    );
+    vec2 vel  = texture(u_vel, pixPos * uvSc).rg;
+    float cosl = max(cos(ll.y), 0.017);
+
+    // RK2 midpoint.
+    vec2 mid = ll + vec2(-0.5 * dt * vel.x / cosl, -0.5 * dt * vel.y);
+    vec2 midPix = vec2(
+        (mid.x + PI) / (2.0 * PI) * size.x,
+        (0.5 * PI - mid.y) / PI * size.y
+    );
+    vec2 velMid   = texture(u_vel, midPix * uvSc).rg;
+    float coslMid = max(cos(mid.y), 0.017);
+
+    vec2 dest = ll + vec2(-dt * velMid.x / coslMid, -dt * velMid.y);
+    return vec2(
+        (dest.x + PI) / (2.0 * PI) * size.x,
+        (0.5 * PI - dest.y) / PI * size.y
+    );
+#else
+    // Patch space is Cartesian (in st radians) — no pole singularity.
+    vec2 st = patchStFromPix(pixPos, u_size);
+    vec2 vel = texture(u_vel, pixPos * uvSc).rg;
+    vec2 stMid = st - 0.5 * dt * patchVelocity(st, vel);
+    vec2 velMid = texture(u_vel, patchPixFromSt(stMid, u_size) * uvSc).rg;
+    vec2 stDest = st - dt * patchVelocity(stMid, velMid);
+    return patchPixFromSt(stDest, u_size);
+#endif
+}
+
+// Catmull-Rom weight vector for fractional offset t.
+vec4 crWeights(float t) {
+    float t2 = t * t;
+    float t3 = t2 * t;
+    return vec4(
+        -0.5 * t3 + t2 - 0.5 * t,
+         1.5 * t3 - 2.5 * t2 + 1.0,
+        -1.5 * t3 + 2.0 * t2 + 0.5 * t,
+         0.5 * t3 - 0.5 * t2
+    );
+}
+
+// Bicubic Catmull-Rom scalar sample (pixel-center convention).
+float sampleCR_s(sampler2D tex, vec2 pos) {
+    vec2 grid = pos - 0.5;
+    vec2 base = floor(grid);
+    vec2 f    = grid - base;
+    vec4 wx = crWeights(f.x);
+    vec4 wy = crWeights(f.y);
+    float acc = 0.0;
+    for (int j = 0; j < 4; ++j) {
+        float row = 0.0;
+        int y = int(base.y) + j - 1;
+        for (int i = 0; i < 4; ++i) {
+            row += wx[i] * fetchQ(tex, int(base.x) + i - 1, y);
+        }
+        acc += wy[j] * row;
+    }
+    return acc;
+}
+
+// 2×2 scalar min/max at a continuous position.
+void minMax2x2_s(sampler2D tex, vec2 pos, out float lo, out float hi) {
+    vec2 grid = pos - 0.5;
+    ivec2 base = ivec2(floor(grid));
+    lo =  1e30;
+    hi = -1e30;
+    for (int j = 0; j < 2; ++j)
+        for (int i = 0; i < 2; ++i) {
+            float s = fetchQ(tex, base.x + i, base.y + j);
+            lo = min(lo, s);
+            hi = max(hi, s);
+        }
+}
+
+// ---- main ------------------------------------------------------------------
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 pixPos  = vec2(px) + 0.5;
+    vec2 src_pos = backtrace(pixPos, u_dt);
+
+#if PASS == 2
+    float fwd  = texelFetch(u_src,  px, 0).r;
+    float cur  = texelFetch(u_cur,  px, 0).r;
+    float back = texelFetch(u_back, px, 0).r;
+
+    float result = fwd + 0.5 * (cur - back);
+
+    // Limit against the 2×2 neighborhood of q_cur at the backtraced position.
+    float lo, hi;
+    minMax2x2_s(u_cur, src_pos, lo, hi);
+    if (result < lo || result > hi) result = fwd;
+    result = clamp(result, lo, hi);
+
+    imageStore(out_omega, px, vec4(result, 0.0, 0.0, 0.0));
+#else
+    imageStore(out_omega, px, vec4(sampleCR_s(u_src, src_pos), 0.0, 0.0, 0.0));
+#endif
+}

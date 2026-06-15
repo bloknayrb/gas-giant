@@ -66,11 +66,13 @@ class Simulation:
 
         self.profile_dyn = self.gpu.lut_texture(self.profiles.dyn_lut())
         self.profile_stamp = self.gpu.lut_texture(self.profiles.stamp_lut())
+        self.profile_omega = self.gpu.lut_texture(self.profiles.omega_lut())
 
         self.solver = Solver(
             self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp,
             wave_lats=select_wave_latitudes(self.bands, self.profiles),
             events=EventSchedule.generate(p, self.bands),
+            profile_omega_tex=self.profile_omega,
         )
         self.solver.init_tracers()
         self._tracers_changed = True
@@ -81,6 +83,7 @@ class Simulation:
         self.solver.release()
         self.profile_dyn.release()
         self.profile_stamp.release()
+        self.profile_omega.release()
 
     @property
     def tracers(self):
@@ -102,6 +105,7 @@ class Simulation:
             self.lanes = select_lanes(new_params.seed, self.bands, new_params.bands.lane_density)
             self.profile_dyn.write(self.profiles.dyn_lut().astype(np.float32).tobytes())
             self.profile_stamp.write(self.profiles.stamp_lut().astype(np.float32).tobytes())
+            self.profile_omega.write(self.profiles.omega_lut().astype(np.float32).tobytes())
             self.solver.params = new_params
             self.solver.set_profiles(self.profiles)
             self.solver.apply_velocity_params()

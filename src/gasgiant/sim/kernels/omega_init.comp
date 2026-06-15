@@ -1,0 +1,66 @@
+#version 430
+// omega_init.comp — Initialise the absolute vorticity field q⁰ (equirect only).
+//
+// Writes the initial absolute vorticity:
+//   q = ω_jet + ω_vortex + f
+// where
+//   ω_jet    = analytic jet vorticity from profile_omega LUT
+//   ω_vortex = sum over all Gaussian vortices (vortex_omega.glsl)
+//   f        = f0·sin(lat)   (Coriolis parameter)
+//
+// Sign convention: ω ≡ ζ = +∇²ψ,  q = ω + f.
+// DOMAIN == 0 (equirect) and DOMAIN != 0 (polar patches).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+// Output: absolute vorticity q  (R32F)
+layout(r32f, binding = 0) writeonly uniform image2D out_omega;
+
+// Profile LUT: r channel = ω_jet (relative vorticity of jets), by latitude.
+uniform sampler2D u_profile_omega;
+
+uniform ivec2 u_size;
+uniform int   u_vortex_count;
+uniform float u_coriolis_f0;
+
+// SSBO for vortex data — declared BEFORE including vortex_omega.glsl which
+// references vortex_data[] and u_vortex_count as caller-declared symbols.
+layout(std430, binding = 2) readonly buffer Vortices {
+    vec4 vortex_data[];
+};
+
+// Include after the SSBO/uniform declarations they depend on.
+#include "vortex_omega.glsl"
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    vec2 ll = lonlatAt(px, u_size);
+    vec3 p  = spherePoint(ll);
+
+    // ω_jet from the profile LUT (R channel).
+    float omega_jet = texture(u_profile_omega, latProfileUV(ll.y)).r;
+
+    // ω_vortex: accumulated Gaussian vortex contributions.
+    float omega_vort = vortexOmegaAccum(p);
+
+    // Coriolis: f = f0·sin(lat).
+    float f = coriolis(ll.y, u_coriolis_f0);
+
+    // Phase-B polar confinement: equirect evolves equatorward, patches evolve poleward.
+    // For equirect (DOMAIN==0): q active for |lat| < ~62°, ramps to 0 poleward.
+    // For patches (DOMAIN!=0): q active for |lat| > ~63° (near pole), ramps to 0 near apron.
+#if DOMAIN == 0
+    float confine = 1.0 - smoothstep(radians(60.0), radians(64.0), abs(ll.y));
+#else
+    float confine = smoothstep(radians(60.0), radians(67.0), abs(ll.y));
+#endif
+
+    // Absolute vorticity q = (ω_jet + ω_vortex)·confine + f.
+    float q = (omega_jet + omega_vort) * confine + f;
+
+    imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
+}

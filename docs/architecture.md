@@ -77,7 +77,7 @@ derive the frozen velocity, then three MacCormack passes per domain:
   and anticyclones their bright tops. T2 is replenished with fresh evolving
   noise (≈ exponential-decay flow noise by construction).
 
-There is no feedback from tracers to velocity, so the solver is
+There is no feedback from tracers to velocity, so the kinematic solver is
 unconditionally stable: the only failure modes are visual (washout — guarded
 by a variance test over 300 steps) and they are tested.
 
@@ -89,6 +89,69 @@ defaults to unit 0 (= the forward tracers in pass 2), so every sampler must be
 explicitly bound even when its feature is guarded off — the belt-replenish
 block is `if (u_belt_replenish > 0.0)` but `u_profile_dyn` is bound
 unconditionally.
+
+### v1.6 vorticity-streamfunction solver (opt-in)
+
+`solver.type = vorticity` switches from the analytic kinematic ψ to a
+prognostic vorticity-streamfunction fluid on all three domains. The tracer
+advection pipeline (`advect.comp`) is unchanged; the new solver replaces how
+ψ and velocity are rebuilt each step.
+
+**Kinematic vs vorticity strategy.** The kinematic solver rebuilds ψ analytically
+from the jet profile + vortex registry every step — the flow never evolves, it is
+always the idealized prescribed field. The vorticity solver carries a live scalar
+field q (absolute vorticity) that is advected by the flow, nudged toward a target
+derived from the same jet profile and vortex registry, and then used to recover ψ
+by inverting the Poisson equation ∇²ψ = +ω. The jet shear folds q into filaments
+between nudge corrections, producing the belt morphology the kinematic path cannot.
+
+**Absolute vorticity formulation.** The prognostic variable is q = ω + f where
+ω = ζ is the relative vorticity (sign convention ζ = +∇²ψ, consistent with the
+existing ψ-velocity pairing) and f = f₀ · sin φ is the Coriolis term. Advecting q
+instead of ω conserves the planetary vorticity contribution automatically and
+sets the β/Rhines scale via `coriolis_f0`. After each MacCormack step the
+Coriolis term is recovered as q − f when computing ω\_rel for the Poisson solve.
+
+**Per-step vorticity pipeline (each domain independently):**
+1. Three MacCormack passes (`omega_advect.comp`) advect q — same RK2 backtrace,
+   Catmull-Rom interpolation, and 2×2 limiter as the tracer advect, but scalar R32F.
+2. Nudging sub-pass (`omega_force.comp` SUBPASS 0): q\_target = ω\_jet + ω\_vortex + f.
+   ω\_jet from a new `profile_omega` LUT (integrated from the jet-shear profile);
+   ω\_vortex = analytic Gaussian-Laplacian from vortex SSBO. Rate = 1/τ\_ω per step.
+   Also applies optional Rayleigh drag and a hard polar confinement gate to prevent
+   eddy growth in the exchange band where the domain is non-authoritative.
+3. Intermediate step: `omega_lap.comp` computes ∇²ω\_rel into a scratch texture.
+4. Hyperviscosity sub-pass (`omega_force.comp` SUBPASS 1): grid-normalized biharmonic
+   q += ν₄ · (−∇²(∇²ω\_rel)) · Δ⁴/64. Applies to ω\_rel only; Coriolis is excluded.
+5. Recover ω\_rel = q − f (`omega_recover.comp`).
+6. Red-black SOR Poisson solve (`poisson_sor.comp`): `poisson_iters` × (red + black)
+   checkerboard sweeps update ψ in place; SOR factor `sor_omega` ∈ (1, 2).
+7. Velocity derived from ψ by the unchanged `velocity.comp` (`−∂ψ/∂φ`, `(1/cosφ)∂ψ/∂λ`).
+
+**Naive vs AE-metric Laplacian.** The equirect Poisson uses the standard 5-point
+spherical-metric stencil (1/cos²φ longitude weights, tanφ split for the asymmetric
+latitude weights). The polar patches use a 9-point AE-metric stencil in (s, t) patch
+coordinates: coefficients c\_ss, c\_tt, c\_st (cross-derivative), and c\_g (radial)
+derived from the azimuthal-equidistant metric ρ/sin ρ. The stencil is regular at the
+pole (ρ → 0 is handled analytically via the limit); no coordinate singularity.
+
+**Per-domain ω states.** Each of the three domains (`_OmegaState` in `solver.py`)
+holds its own ping-pong R32F textures for q plus scratch textures for ∇²ω\_rel, ω\_rel,
+the kinematic warm-start ψ, and the SOR working ψ. The equirect and polar-patch ω
+states evolve independently per step; only the tracer exchange (and the shared jet/
+vortex nudge target) couples them.
+
+**Cross-domain ψ-coupling is unnecessary.** No boundary conditions are exchanged
+between the equirect ψ and the patch ψ at the exchange band. The shared nudge target
+(same `profile_omega` LUT and same vortex SSBO across all domains) plus the per-step
+tracer exchange produce a seam-free full-sphere output — an adversarial polar judge
+independently verified no visible discontinuity at the 64–67° band.
+
+**Testing note.** An early Phase-A test suite passed while the vorticity solver was
+effectively a no-op (uniforms not set). The gate was strengthened to require: (a)
+param-responsiveness (changing `coriolis_f0` measurably moves the ω field), (b)
+ω evolves over dev steps, (c) steady-state ω magnitude is bounded in the production
+regime. Recorded as a test-design lesson.
 
 ## Invalidation tiers
 

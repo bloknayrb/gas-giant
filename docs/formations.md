@@ -201,6 +201,42 @@ them away).
   solver is the v1.6 path. Raising sim resolution does NOT help (advection
   dissipation smooths matched-scale texture; verified 2048 vs 4096 = 0.9 %).
 
+*v1.6 vorticity-solver mechanism (opt-in, `jupiter_vorticity` preset):*
+The folded-filament morphology the kinematic solver could not achieve is produced
+by a real prognostic vorticity-streamfunction fluid: absolute vorticity q = ω + f
+is advected and nudged toward a jet+vortex target, then ψ is recovered by a
+red-black SOR Poisson solve each step. The jet shear folds the evolving ω field
+into closed filaments and eddy structures without any explicit noise injection.
+Blind 3-judge panel chose the vorticity output over the kinematic 3-0; orientation
+coherence metric: 0.384 (vs 0.14 kinematic, 0.62 reference).
+
+*v1.6 solver knobs (all RESTART tier, all `solver.*`):*
+- `type` — `kinematic` (default, v1.5 byte-identical) or `vorticity` (opt-in).
+- `coriolis_f0` — Coriolis magnitude f₀ in f = f₀ · sin φ; lower values produce
+  more barotropic instability and eddy-shedding (jupiter_vorticity = 3.0).
+- `vort_relax_tau` — nudge timescale in steps pulling ω toward the jet+vortex
+  target; longer = folds persist longer before relaxing back (preset = 600).
+- `vort_hypervisc` — scale-selective biharmonic hyperviscosity, grid-normalized
+  (preset = 0.6; higher removes grid-scale noise faster at the cost of smoothing
+  mid-scale structure).
+- `vort_inject` / `vort_inject_scale` — broadband eddy-vorticity injection.
+  **Finding (recorded):** injection was found NOT to drive folding; jet shear does.
+  Preset = 0 / 0.5.
+- `vort_drag` — linear Rayleigh drag on ω\_rel per step (large-scale energy sink);
+  preset = 0 (off).
+- `poisson_iters` — fixed SOR iterations per step (preset = 48).
+- `sor_omega` — SOR over-relaxation factor ∈ (1, 2) exclusive (preset = 1.7).
+
+**Recorded LIMITs (v1.6, do not gloss):**
+- Small stamped vortices (pearls, barges) are dissipated faster by the eddy
+  turbulence; the reference's dense string-of-pearls field does not appear —
+  eddy-richness and small-vortex persistence are opposed in this regime.
+- Eddy-shedding along shear lines is partial: eddies curl near the large ovals
+  but long laminar belt boundaries do not produce a continuous vortex train.
+- Bands/contrast at matched scale remain softer than the reference.
+- 16K export time ~81.6 s (vs ~36 s kinematic); the perf gate was lifted for
+  this preset. `jupiter_like` kinematic stays ~36 s.
+
 ### Fine filaments / scooter clouds
 Wispy streaks riding the jets, visible at high resolution.
 *Implementation:* T2 detail tracer (replenished each step ≈ an

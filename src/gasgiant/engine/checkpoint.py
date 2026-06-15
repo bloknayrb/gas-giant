@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from gasgiant.params.model import SolverType
 from gasgiant.params.presets import load_preset_doc, to_preset_doc
 from gasgiant.sim.vortices import Vortex
 
@@ -28,7 +29,11 @@ if TYPE_CHECKING:
 # 3 = v1.2: the vortex registry is serialized into the checkpoint (older
 # checkpoints carried no registry state and relied on drift-only replay,
 # which mis-restored outbreak-bearing or mid-edit runs).
-GENERATION_VERSION = 3
+# 4 = v1.6: vorticity-solver prognostic state (omega field + warm-start psi)
+# serialized for vorticity-mode round-trip (equirect only — P4 incomplete).
+# 5 = v1.6 Phase B P8a: all three domains' omega+psi state serialized so
+# polar-patch vorticity round-trips are byte-exact.
+GENERATION_VERSION = 5
 
 # Registry scalar fields serialized per vortex. float64: the "restored
 # registry is identical" guarantee is exact-round-trip, and pack_ssbo computes
@@ -54,6 +59,25 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
         for j, ob in enumerate(s.events.outbreaks):
             if ob.vortex is not None:
                 outbreak_links[j] = index_of.get(id(ob.vortex), -1)
+    # Vorticity mode: save the prognostic ω field (state.cur, the advected
+    # absolute-vorticity q), the warm-start ψ (dom.psi_tex, last solved+feathered),
+    # AND the frozen velocity texture (dom.vel_tex, written from psi each step)
+    # for ALL three domains.  vel_tex is needed because _omega_step reads it to
+    # advect q — without it the first step after restore would use a stale/zero
+    # velocity and diverge from the original even though ω and ψ are byte-exact.
+    # These keys are absent in kinematic checkpoints (absent-key-tolerant on load).
+    vort_extra: dict = {}
+    if sim.params.solver.type == SolverType.VORTICITY and s._omega_states is not None:
+        from gasgiant.sim.solver import DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH
+        vort_extra["omega_eq"] = sim.gpu.read_texture(s._omega_states[DOMAIN_EQUIRECT].cur)
+        vort_extra["psi_eq"]   = sim.gpu.read_texture(s.equirect.psi_tex)
+        vort_extra["vel_eq"]   = sim.gpu.read_texture(s.equirect.vel_tex)
+        vort_extra["omega_n"]  = sim.gpu.read_texture(s._omega_states[DOMAIN_NORTH].cur)
+        vort_extra["psi_n"]    = sim.gpu.read_texture(s.north.psi_tex)
+        vort_extra["vel_n"]    = sim.gpu.read_texture(s.north.vel_tex)
+        vort_extra["omega_s"]  = sim.gpu.read_texture(s._omega_states[DOMAIN_SOUTH].cur)
+        vort_extra["psi_s"]    = sim.gpu.read_texture(s.south.psi_tex)
+        vort_extra["vel_s"]    = sim.gpu.read_texture(s.south.vel_tex)
     np.savez_compressed(
         path,
         preset=json.dumps(to_preset_doc(sim.params)),
@@ -65,6 +89,7 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
         tracers_s=sim.gpu.read_texture(s.south.tracers.cur),
         outbreak_links=outbreak_links,
         **reg,
+        **vort_extra,
     )
 
 
@@ -111,5 +136,32 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
         for j, ob in enumerate(s.events.outbreaks):
             idx = int(links[j]) if j < len(links) else -1
             ob.vortex = s.vortices.vortices[idx] if 0 <= idx < n else None
+
+    # Vorticity mode: restore the prognostic ω field, warm-start ψ, AND frozen
+    # velocity for ALL three domains.  vel_tex must be restored because _omega_step
+    # uses dom.vel_tex to advect q on the very first step after resume — without it
+    # the restored run diverges immediately from the original.
+    # Keys are absent in kinematic checkpoints — tolerate.
+    if params.solver.type == SolverType.VORTICITY and s._omega_states is not None:
+        from gasgiant.sim.solver import DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH
+        _vort_pairs = [
+            (DOMAIN_EQUIRECT, s.equirect, "omega_eq", "psi_eq", "vel_eq"),
+            (DOMAIN_NORTH,    s.north,    "omega_n",  "psi_n",  "vel_n"),
+            (DOMAIN_SOUTH,    s.south,    "omega_s",  "psi_s",  "vel_s"),
+        ]
+        for kind, dom, omega_key, psi_key, vel_key in _vort_pairs:
+            if omega_key in data:
+                s._omega_states[kind].cur.write(
+                    np.ascontiguousarray(data[omega_key], dtype=np.float32).tobytes()
+                )
+            if psi_key in data:
+                dom.psi_tex.write(
+                    np.ascontiguousarray(data[psi_key], dtype=np.float32).tobytes()
+                )
+            if vel_key in data:
+                dom.vel_tex.write(
+                    np.ascontiguousarray(data[vel_key], dtype=np.float32).tobytes()
+                )
+
     sim._tracers_changed = True
     return sim

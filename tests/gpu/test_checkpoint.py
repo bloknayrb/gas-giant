@@ -154,3 +154,51 @@ def test_checkpoint_from_older_generation_is_refused(gpu, tmp_path):
     with pytest.raises(ValueError, match="generation_version"):
         load_checkpoint(path, gpu)
     assert GENERATION_VERSION >= 2
+
+
+def test_vorticity_checkpoint_round_trip(gpu, tmp_path):
+    """Vorticity mode: checkpoint must round-trip ω + warm-start ψ for ALL THREE
+    domains so that continuing from the restored sim is byte-identical to
+    continuing the original.  The advected absolute-vorticity field and the
+    warm-start ψ are PROGNOSTIC state — without them a resumed run diverges
+    immediately.  This test must PASS byte-exact (assert_array_equal, not allclose)."""
+    from gasgiant.params.model import SolverType
+    from gasgiant.sim.solver import DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH
+
+    p = PlanetParams(seed=77)
+    p.sim.resolution = 512
+    p.sim.dev_steps = 100
+    p.solver.type = SolverType.VORTICITY
+    sim = Simulation(p, gpu)
+    sim.solver.step(30)
+
+    path = tmp_path / "vort_state.npz"
+    save_checkpoint(sim, path)
+
+    restored = load_checkpoint(path, gpu)
+    assert restored.steps_done == 30
+
+    # Tracers must be byte-identical immediately after restore.
+    np.testing.assert_array_equal(
+        restored.tracers.read_current(), sim.tracers.read_current()
+    )
+
+    # ω field must be byte-identical for ALL three domains immediately after restore.
+    for kind in (DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH):
+        np.testing.assert_array_equal(
+            gpu.read_texture(restored.solver._omega_states[kind].cur),
+            gpu.read_texture(sim.solver._omega_states[kind].cur),
+        ), f"omega mismatch for domain {kind} immediately after restore"
+
+    # Continuing both sims another 10 steps must stay byte-identical:
+    # this proves the warm-start ψ and ω serialization are sufficient.
+    sim.solver.step(10)
+    restored.solver.step(10)
+    np.testing.assert_array_equal(
+        restored.tracers.read_current(), sim.tracers.read_current()
+    )
+    for kind in (DOMAIN_EQUIRECT, DOMAIN_NORTH, DOMAIN_SOUTH):
+        np.testing.assert_array_equal(
+            gpu.read_texture(restored.solver._omega_states[kind].cur),
+            gpu.read_texture(sim.solver._omega_states[kind].cur),
+        ), f"omega mismatch for domain {kind} after 10 more steps"

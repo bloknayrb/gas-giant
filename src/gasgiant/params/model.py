@@ -484,6 +484,49 @@ class DetailParams(_Params):
     )
 
 
+class SolverType(StrEnum):
+    KINEMATIC = "kinematic"   # v1.5 analytic-streamfunction (default)
+    VORTICITY = "vorticity"   # v1.6 prognostic vorticity-streamfunction (opt-in)
+
+
+class SolverParams(_Params):
+    type: SolverType = pfield(SolverType.KINEMATIC, tier=Tier.RESTART, ui="Solver",
+        description="Streamfunction solver: kinematic (analytic, v1.5) or "
+                    "vorticity (prognostic fluid, v1.6+)")
+    poisson_iters: int = pfield(48, tier=Tier.RESTART, lo=8, hi=512, ui="Solver",
+        description="Fixed red-black SOR iterations per step (vorticity mode)")
+    sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, ui="Solver",
+        description="SOR over-relaxation factor, must be in (1,2) exclusive "
+                    "(vorticity mode)")
+    vort_relax_tau: float = pfield(
+        120.0, tier=Tier.RESTART, lo=20.0, hi=2000.0, log=True, ui="Solver",
+        description="Vorticity nudging timescale toward jets+vortices (vorticity mode)")
+    vort_hypervisc: float = pfield(1.0, tier=Tier.RESTART, lo=0.0, hi=10.0, ui="Solver",
+        description="Scale-selective biharmonic hyperviscosity rate (vorticity mode)")
+    coriolis_f0: float = pfield(2.0, tier=Tier.RESTART, lo=0.0, hi=20.0, ui="Solver",
+        description="Planetary vorticity magnitude f0 in f=f0*sin(lat); "
+                    "sets the Rhines/band scale (vorticity mode)")
+    vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, ui="Solver",
+        description="Broadband eddy-vorticity injection amplitude per step; the "
+                    "jet shear folds it into filaments (the emergent-turbulence "
+                    "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
+    vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, ui="Solver",
+        description="Eddy-injection frequency as a multiple of bands.detail_freq "
+                    "(vorticity mode)")
+    vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, ui="Solver",
+        description="Linear (Rayleigh) drag fraction on relative vorticity per "
+                    "step; absorbs the 2D inverse-cascade energy that piles up at "
+                    "large scales (0 = off). Vorticity mode.")
+
+    @model_validator(mode="after")
+    def _validate_sor_omega(self) -> SolverParams:
+        if not (1.0 < self.sor_omega < 2.0):
+            raise ValueError(
+                f"sor_omega={self.sor_omega} must be strictly in (1.0, 2.0) exclusive"
+            )
+        return self
+
+
 class PoleStyle(StrEnum):
     CYCLONE_CLUSTER = "cyclone_cluster"  # Jupiter: central cyclone + polygon ring
     POLYGON_JET = "polygon_jet"          # Saturn: hexagonal (k-gonal) jet
@@ -683,6 +726,7 @@ class PlanetParams(_Params):
     seed: int = pfield(0, tier=Tier.RESTART, lo=0, hi=2**31 - 1, ui="Global")
     name: str = pfield("unnamed", tier=Tier.POST, ui="Global")
     sim: SimParams = Field(default_factory=SimParams)
+    solver: SolverParams = Field(default_factory=SolverParams)
     bands: BandsParams = Field(default_factory=BandsParams)
     jets: JetsParams = Field(default_factory=JetsParams)
     turbulence: TurbulenceParams = Field(default_factory=TurbulenceParams)

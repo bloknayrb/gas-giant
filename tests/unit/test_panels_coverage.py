@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from gasgiant.params.model import PlanetParams
+from gasgiant.params.model import PlanetParams, SolverParams
 
 panels = pytest.importorskip("gasgiant.app.panels")
 
@@ -39,3 +39,43 @@ def test_every_leaf_renders_a_widget():
         if panels.leaf_kind(path.rsplit(".", 1)[-1], info, value) is None
     ]
     assert not unrenderable, f"fields with no widget (disabled text): {unrenderable}"
+
+
+def test_solver_params_all_fields_classified():
+    """Every SolverParams field (the 5 new v1.6 knobs + type) must be
+    classified by the panel walker: type→enum, poisson_iters→int,
+    sor_omega/vort_hypervisc/coriolis_f0→float, vort_relax_tau→float(log).
+    This guards against a new field silently falling through to disabled text."""
+    sp = SolverParams()
+    doc = sp.model_dump()
+    unclassified = []
+    for name, info in SolverParams.model_fields.items():
+        kind = panels.leaf_kind(name, info, doc[name])
+        if kind is None:
+            unclassified.append(name)
+    assert not unclassified, (
+        f"SolverParams fields with no widget (would render as disabled text): {unclassified}"
+    )
+
+    # Also assert the specific widget kinds the plan specifies.
+    expected_kinds = {
+        "type": "enum",
+        "poisson_iters": "int",
+        "sor_omega": "float",
+        "vort_hypervisc": "float",
+        "coriolis_f0": "float",
+        "vort_relax_tau": "float",
+    }
+    for field, expected in expected_kinds.items():
+        info = SolverParams.model_fields[field]
+        got = panels.leaf_kind(field, info, doc[field])
+        assert got == expected, (
+            f"SolverParams.{field}: expected widget kind '{expected}', got '{got}'"
+        )
+
+    # vort_relax_tau must have log=True in its schema extra (log slider).
+    tau_info = SolverParams.model_fields["vort_relax_tau"]
+    extra = tau_info.json_schema_extra if isinstance(tau_info.json_schema_extra, dict) else {}
+    assert extra.get("log") is True, (
+        "vort_relax_tau must carry log=True in json_schema_extra for the log slider"
+    )
