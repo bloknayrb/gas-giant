@@ -904,8 +904,73 @@ class SwGpuSolver:
 
     # -- Step -----------------------------------------------------------------
 
+    def _step_semi_implicit(self) -> None:
+        """One M2 semi-implicit step on the GPU (mirrors ref.step_semi_implicit).
+
+        Predictor -> Picard loop (warm-started dh) over {helmholtz_rhs +
+        helmholtz_sor} -> velocity_backsub -> conservative continuity -> assemble
+        h_new = h + dh + (h_fct - h_linref), with a loud positivity guard.
+
+        Uses self.dt * self.dt_multiplier as the SI dt.  All field math runs on
+        the GPU kernels; the small per-step assembly (anomaly, max-floor) is a
+        numpy op on f32 readbacks (matching the CPU's f64->the same algebra; the
+        per-field tolerance test documents the f32 vs f64 gap).
+        """
+        gpu = self.gpu
+        W, H, a, gp, omega = self.W, self.H, self.a, self.gp, self.omega
+        theta = self.theta
+        dt = self.dt * self.dt_multiplier
+        h_floor = self.h_floor
+        if self.H_ref is None:
+            raise ValueError("_step_semi_implicit requires H_ref (semi_implicit=True)")
+        H_ref = np.asarray(self.H_ref, dtype=np.float32)
+
+        # Resident state.
+        h = self.gpu.read_texture(self._tex_h)[..., 0]
+        u = self.gpu.read_texture(self._tex_u)[..., 0]
+        v = self.gpu.read_texture(self._tex_v)[..., 0]
+
+        # 1. Predictor (no Coriolis).
+        u_star, v_star = run_si_predictor(gpu, h, u, v, a, gp, dt, theta)
+
+        # 3. Picard loop with deferred Coriolis; warm-start dh across iters.
+        dh = np.zeros((H, W), dtype=np.float32)
+        for _ in range(self.picard_iters):
+            rhs = run_helmholtz_rhs(gpu, h, u, v, u_star, v_star, dh,
+                                    H_ref, gp, omega, theta, dt, a)
+            dh = run_helmholtz_sor(gpu, rhs, H_ref, gp, theta, dt, a,
+                                   self.helmholtz_iters, self.sor_omega, dh0=dh)
+
+        # 4. Back-substitution: implicit pressure of full height h + dh.
+        h_impl = (h + dh).astype(np.float32)
+        u_new, v_new = run_velocity_backsub(gpu, u_star, v_star, h_impl,
+                                            gp, theta, dt, omega, a)
+
+        # 5. Final height: matched theta-centered increment + explicit anomaly.
+        h_fct = run_continuity_conservative(gpu, h, u_new, v_new, a, dt, h_floor)
+        from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+        g = ref.Grid(W, H, a)
+        h_linref = h - dt * ref.divergence_helmholtz(u_new, v_new, H_ref.astype(np.float64), g)
+        anomaly = h_fct - h_linref
+        h_raw = h + dh + anomaly
+        h_min = float(h_raw.min())
+        if h_min < h_floor - 1e-9:
+            raise ValueError(
+                f"_step_semi_implicit positivity violation: min(h)={h_min:.3e} < "
+                f"h_floor={h_floor:.3e}. The velocity field drove a floor cell "
+                f"below the floor (meridional Courant too large); the conservative "
+                f"limiter cannot keep mass closed here. Reduce dt or relax forcing."
+            )
+        h_new = np.maximum(h_raw, h_floor).astype(np.float32)
+
+        self._tex_h.write(h_new.tobytes())
+        self._tex_u.write(u_new.astype(np.float32).tobytes())
+        self._tex_v.write(v_new.astype(np.float32).tobytes())
+
     def step(self) -> None:
         """One full step in CPU-reference order (no CPU round-trip).
+
+        For the semi-implicit path, delegate to _step_semi_implicit.
 
         Sequence (mirrors ref.step / ref.momentum_step order):
           1. vorticity(old u, v) → ζ
@@ -916,6 +981,10 @@ class SwGpuSolver:
           6. continuity pass-B → h_new
           7. ping-pong: swap resident h/u/v ↔ h_new/u_new/v_new
         """
+        if self.semi_implicit:
+            self._step_semi_implicit()
+            return
+
         ctx = self.ctx
         W, H = self.W, self.H
         a = self.a
@@ -1011,6 +1080,305 @@ class SwGpuSolver:
         self._tex_h, self._tex_h_new = self._tex_h_new, self._tex_h
         self._tex_u, self._tex_u_new = self._tex_u_new, self._tex_u
         self._tex_v, self._tex_v_new = self._tex_v_new, self._tex_v
+
+
+def run_continuity_conservative(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    a: float,
+    dt: float,
+    h_floor: float,
+) -> np.ndarray:
+    """GPU conservative FCT continuity step; ports continuity_step_conservative().
+
+    Five passes (s_pos -> cap -> Fx/Fy_tot -> s_tot -> h_new).  Returns (H,W).
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+    H, W = h.shape
+    ctx = gpu.ctx
+    KN = "sw_continuity_conservative.comp"
+
+    tex_h = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_h.write(h.tobytes())
+    tex_u = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_u.write(u.tobytes())
+    tex_v = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_v.write(v.tobytes())
+
+    tex_s_pos = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_cap   = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_fx    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_fy    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_s_tot = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_hnew  = gpu.texture2d((W, H),     components=1, dtype="f4")
+
+    gx_c = (W + _GROUP - 1) // _GROUP
+    gy_c = (H + _GROUP - 1) // _GROUP
+    gy_v = (H + 1 + _GROUP - 1) // _GROUP
+
+    def _common(k):
+        _set(k, "u_size",    (W, H))
+        _set(k, "u_dt",      float(dt))
+        _set(k, "u_h_floor", float(h_floor))
+        _set(k, "u_a",       float(a))
+        tex_h.use(location=0); _set(k, "u_h", 0)
+        tex_u.use(location=1); _set(k, "u_u", 1)
+        tex_v.use(location=2); _set(k, "u_v", 2)
+
+    # PASS 0: s_pos
+    k0 = gpu.compute(_KERNELS, KN, defines={"PASS": "0"})
+    _common(k0)
+    tex_s_pos.bind_to_image(0, read=False, write=True)
+    k0.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    # PASS 1: cap
+    k1 = gpu.compute(_KERNELS, KN, defines={"PASS": "1"})
+    _common(k1)
+    tex_s_pos.use(location=3); _set(k1, "u_s_pos", 3)
+    tex_cap.bind_to_image(0, read=False, write=True)
+    k1.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    # PASS 2: Fx_tot, Fy_tot
+    k2 = gpu.compute(_KERNELS, KN, defines={"PASS": "2"})
+    _common(k2)
+    tex_s_pos.use(location=3); _set(k2, "u_s_pos", 3)
+    tex_cap.use(location=4);   _set(k2, "u_cap",   4)
+    tex_fx.bind_to_image(0, read=False, write=True)
+    tex_fy.bind_to_image(1, read=False, write=True)
+    k2.run(gx_c, gy_v, 1); ctx.memory_barrier()
+
+    # PASS 3: s_tot
+    k3 = gpu.compute(_KERNELS, KN, defines={"PASS": "3"})
+    _common(k3)
+    tex_fx.use(location=3); _set(k3, "u_fx_tot", 3)
+    tex_fy.use(location=4); _set(k3, "u_fy_tot", 4)
+    tex_s_tot.bind_to_image(0, read=False, write=True)
+    k3.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    # PASS 4: h_new
+    k4 = gpu.compute(_KERNELS, KN, defines={"PASS": "4"})
+    _common(k4)
+    tex_fx.use(location=3);    _set(k4, "u_fx_tot", 3)
+    tex_fy.use(location=4);    _set(k4, "u_fy_tot", 4)
+    tex_s_tot.use(location=5); _set(k4, "u_s_tot",  5)
+    tex_hnew.bind_to_image(0, read=False, write=True)
+    k4.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_hnew)[..., 0]
+    for tex in (tex_h, tex_u, tex_v, tex_s_pos, tex_cap,
+                tex_fx, tex_fy, tex_s_tot, tex_hnew):
+        tex.release()
+    return result
+
+
+def run_helmholtz_rhs(
+    gpu: "GpuContext",
+    h_n: np.ndarray,
+    u_n: np.ndarray,
+    v_n: np.ndarray,
+    u_star: np.ndarray,
+    v_star: np.ndarray,
+    dh_prev: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    omega: float,
+    theta: float,
+    dt: float,
+    a: float,
+) -> np.ndarray:
+    """GPU Helmholtz RHS assembly; ports helmholtz_rhs() exactly, shape (H, W)."""
+    h_n = np.asarray(h_n, dtype=np.float32)
+    u_n = np.asarray(u_n, dtype=np.float32)
+    v_n = np.asarray(v_n, dtype=np.float32)
+    u_star = np.asarray(u_star, dtype=np.float32)
+    v_star = np.asarray(v_star, dtype=np.float32)
+    dh_prev = np.asarray(dh_prev, dtype=np.float32)
+    H, W = h_n.shape
+    ctx = gpu.ctx
+
+    # grad(h_n), grad(dh_prev) on faces (gp=1 so run_grad returns the bare grad).
+    gxn, gyn = run_grad(gpu, h_n, gp=1.0, a=a)
+    gxd, gyd = run_grad(gpu, dh_prev, gp=1.0, a=a)
+
+    tex_us  = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_us.write(u_star.tobytes())
+    tex_vs  = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
+    tex_un  = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_un.write(u_n.tobytes())
+    tex_vn  = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vn.write(v_n.tobytes())
+    tex_gxn = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gxn.write(gxn.astype(np.float32).tobytes())
+    tex_gyn = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gyn.write(gyn.astype(np.float32).tobytes())
+    tex_gxd = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gxd.write(gxd.astype(np.float32).tobytes())
+    tex_gyd = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gyd.write(gyd.astype(np.float32).tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+    tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    k = gpu.compute(_KERNELS, "sw_helmholtz_rhs.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_a",     float(a))
+    _set(k, "u_dlam",  2.0 * math.pi / W)
+    _set(k, "u_dphi",  math.pi / H)
+    _set(k, "u_omega", float(omega))
+    _set(k, "u_dt",    float(dt))
+    _set(k, "u_gp",    float(gp))
+    _set(k, "u_theta", float(theta))
+    tex_href.use(location=0); _set(k, "u_Href", 0)
+    tex_us.use(location=1);   _set(k, "u_us",  1)
+    tex_vs.use(location=2);   _set(k, "u_vs",  2)
+    tex_un.use(location=3);   _set(k, "u_un",  3)
+    tex_vn.use(location=4);   _set(k, "u_vn",  4)
+    tex_gxn.use(location=5);  _set(k, "u_gxn", 5)
+    tex_gyn.use(location=6);  _set(k, "u_gyn", 6)
+    tex_gxd.use(location=7);  _set(k, "u_gxd", 7)
+    tex_gyd.use(location=8);  _set(k, "u_gyd", 8)
+    tex_out.bind_to_image(0, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_out)[..., 0]
+    for tex in (tex_us, tex_vs, tex_un, tex_vn, tex_gxn, tex_gyn,
+                tex_gxd, tex_gyd, tex_href, tex_out):
+        tex.release()
+    return result
+
+
+def run_velocity_backsub(
+    gpu: "GpuContext",
+    u_star: np.ndarray,
+    v_star: np.ndarray,
+    h_impl: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    omega: float,
+    a: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU velocity back-substitution; ports velocity_backsub() exactly.
+
+    Returns (u_new (H,W), v_new (H+1,W)).
+    """
+    u_star = np.asarray(u_star, dtype=np.float32)
+    v_star = np.asarray(v_star, dtype=np.float32)
+    h_impl = np.asarray(h_impl, dtype=np.float32)
+    H, W = h_impl.shape
+    ctx = gpu.ctx
+
+    gx, gy = run_grad(gpu, h_impl, gp=1.0, a=a)
+
+    tex_us = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_us.write(u_star.tobytes())
+    tex_vs = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
+    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gx.write(gx.astype(np.float32).tobytes())
+    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gy.write(gy.astype(np.float32).tobytes())
+    tex_u  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    k = gpu.compute(_KERNELS, "sw_velocity_backsub.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_omega", float(omega))
+    _set(k, "u_dt",    float(dt))
+    _set(k, "u_gp",    float(gp))
+    _set(k, "u_theta", float(theta))
+    tex_us.use(location=0); _set(k, "u_us", 0)
+    tex_vs.use(location=1); _set(k, "u_vs", 1)
+    tex_gx.use(location=2); _set(k, "u_gx", 2)
+    tex_gy.use(location=3); _set(k, "u_gy", 3)
+    tex_u.bind_to_image(0, read=False, write=True)
+    tex_v.bind_to_image(1, read=False, write=True)
+
+    gx_g = (W + _GROUP - 1) // _GROUP
+    gy_g = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx_g, gy_g, 1)
+    ctx.memory_barrier()
+
+    u_new = gpu.read_texture(tex_u)[..., 0]
+    v_new = gpu.read_texture(tex_v)[..., 0]
+    for tex in (tex_us, tex_vs, tex_gx, tex_gy, tex_u, tex_v):
+        tex.release()
+    return u_new, v_new
+
+
+def run_si_predictor(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    a: float,
+    gp: float,
+    dt: float,
+    theta: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU semi-implicit explicit predictor; returns (u_star, v_star).
+
+    Ports _semi_implicit_predictor() from shallow_water_ref.py exactly:
+    advection (relative-vorticity flux) + KE-gradient + (1-theta) explicit
+    pressure half -(1-theta)*dt*gp*grad(h^n).  NO Coriolis.
+
+    Orchestration:
+      1. zeta  = run_vorticity(u, v, a)                  — corners (H+1, W)
+      2. ke    = 0.5*(u^2 + v_c^2) at centres (CPU-free) via numpy on GPU read?
+         We build ke on CPU from the already-resident arrays (h,u,v are inputs).
+      3. (gxk, gyk) = run_grad(ke, gp=1, a)
+      4. (gxn, gyn) = run_grad(h,  gp=1, a)
+      5. sw_si_predictor.comp combiner.
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+    H, W = h.shape
+    ctx = gpu.ctx
+
+    zeta = run_vorticity(gpu, u, v, a)                # (H+1, W)
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])
+    ke = (0.5 * (u * u + v_c * v_c)).astype(np.float32)
+    gxk, gyk = run_grad(gpu, ke, gp=1.0, a=a)
+    gxn, gyn = run_grad(gpu, h,  gp=1.0, a=a)
+
+    tex_zeta = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gxk  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gyk  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gxn  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gyn  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_u    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_us   = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_vs   = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    tex_zeta.write(zeta.astype(np.float32).tobytes())
+    tex_gxk.write(gxk.astype(np.float32).tobytes())
+    tex_gyk.write(gyk.astype(np.float32).tobytes())
+    tex_gxn.write(gxn.astype(np.float32).tobytes())
+    tex_gyn.write(gyn.astype(np.float32).tobytes())
+    tex_u.write(u.tobytes())
+    tex_v.write(v.tobytes())
+
+    k = gpu.compute(_KERNELS, "sw_si_predictor.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_dt",    float(dt))
+    _set(k, "u_gp",    float(gp))
+    _set(k, "u_theta", float(theta))
+    tex_zeta.use(location=0); _set(k, "u_zeta", 0)
+    tex_gxk.use(location=1);  _set(k, "u_gxk",  1)
+    tex_gyk.use(location=2);  _set(k, "u_gyk",  2)
+    tex_gxn.use(location=3);  _set(k, "u_gxn",  3)
+    tex_gyn.use(location=4);  _set(k, "u_gyn",  4)
+    tex_u.use(location=5);    _set(k, "u_u",    5)
+    tex_v.use(location=6);    _set(k, "u_v",    6)
+    tex_us.bind_to_image(0, read=False, write=True)
+    tex_vs.bind_to_image(1, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    u_star = gpu.read_texture(tex_us)[..., 0]
+    v_star = gpu.read_texture(tex_vs)[..., 0]
+    for tex in (tex_zeta, tex_gxk, tex_gyk, tex_gxn, tex_gyn,
+                tex_u, tex_v, tex_us, tex_vs):
+        tex.release()
+    return u_star, v_star
 
 
 def run_momentum(

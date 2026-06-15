@@ -2,9 +2,10 @@
 
 Verifies that:
 1. Adding the semi_implicit flag (defaulted False) does NOT perturb the explicit path.
-2. Constructing with semi_implicit=True leaves explicit field textures and step()
-   output byte-identical to semi_implicit=False (the SI kernels are not wired yet;
-   step() must be the same explicit step regardless).
+2. Constructing with semi_implicit=True leaves the INITIAL field textures
+   byte-identical to semi_implicit=False, while step() now follows the wired SI
+   path (M2-T7b): a distinct integrator whose output diverges from the explicit
+   path but stays finite and bounded.
 3. H_ref has shape (H,) when semi_implicit=True, and is None (absent from state)
    when semi_implicit=False (default).
 """
@@ -59,9 +60,10 @@ def test_explicit_path_byte_identical(gpu):
 # ---------------------------------------------------------------------------
 
 def test_si_construction_isolated(gpu):
-    """Constructing with semi_implicit=True must not alter the explicit field
-    textures or step() output relative to semi_implicit=False (the SI path is
-    not wired yet — step() is still the explicit step in both cases).
+    """Constructing with semi_implicit=True leaves the INITIAL field textures and
+    the H_ref/state gates intact, while step() now follows the wired SI path
+    (M2-T7b).  The SI step is a DIFFERENT integrator, so after stepping its output
+    diverges from the explicit path — but stays finite and physically bounded.
     Also asserts H_ref shape and that it is None on the explicit solver.
     """
     from gasgiant.sim import sw_gpu
@@ -69,7 +71,7 @@ def test_si_construction_isolated(gpu):
     # Build explicit-only solver.
     sg_exp = sw_gpu.SwGpuSolver.from_williamson2(gpu, **_IC, semi_implicit=False)
 
-    # Build SI-flagged solver with non-default SI params (all inert for now).
+    # Build SI-flagged solver with non-default SI params (now wired by T7b).
     sg_si = sw_gpu.SwGpuSolver.from_williamson2(
         gpu, **_IC,
         semi_implicit=True,
@@ -80,14 +82,14 @@ def test_si_construction_isolated(gpu):
         dt_multiplier=2.0,
     )
 
-    # --- initial fields must be byte-identical ---
+    # --- initial fields must be byte-identical (construction does not perturb IC) ---
     h_exp0, u_exp0, v_exp0 = sg_exp.download_state()
     h_si0,  u_si0,  v_si0  = sg_si.download_state()
     assert np.array_equal(h_exp0, h_si0),  "h initial state differs when semi_implicit=True"
     assert np.array_equal(u_exp0, u_si0),  "u initial state differs when semi_implicit=True"
     assert np.array_equal(v_exp0, v_si0),  "v initial state differs when semi_implicit=True"
 
-    # --- advance both solvers and compare ---
+    # --- advance both solvers; SI path is wired now, so it diverges but stays sane ---
     for _ in range(_N_STEPS):
         sg_exp.step()
         sg_si.step()
@@ -95,9 +97,14 @@ def test_si_construction_isolated(gpu):
     h_exp, u_exp, v_exp = sg_exp.download_state()
     h_si,  u_si,  v_si  = sg_si.download_state()
 
-    assert np.array_equal(h_exp, h_si), "h differs after steps when semi_implicit=True"
-    assert np.array_equal(u_exp, u_si), "u differs after steps when semi_implicit=True"
-    assert np.array_equal(v_exp, v_si), "v differs after steps when semi_implicit=True"
+    # SI path is a distinct integrator: it must NOT be byte-identical to explicit.
+    assert not np.array_equal(h_si, h_exp), (
+        "SI path produced byte-identical h to explicit — SI step() not wired?"
+    )
+    # ...but it must remain finite and physically bounded (no blow-up).
+    for f in (h_si, u_si, v_si):
+        assert np.all(np.isfinite(f)), "SI path produced non-finite fields"
+    assert np.all(h_si >= sg_si.h_floor - 1e-6), "SI path violated the height floor"
 
     # --- H_ref shape gate ---
     assert sg_si.H_ref is not None, "H_ref should be set when semi_implicit=True"

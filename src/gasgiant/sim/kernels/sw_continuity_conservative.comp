@@ -1,0 +1,189 @@
+#version 430
+// sw_continuity_conservative.comp — M2 conservative FCT continuity step.
+//
+// Ports continuity_step_conservative() from shallow_water_ref.py EXACTLY.
+// Compiled FIVE times via defines={"PASS": "0".."4"}; the driver dispatches them
+// in order with a memory_barrier between each.
+//
+//   PASS 0: s_pos  = _positive_lowflux_scales(Fx_low, Fy_low)          (W,H)
+//   PASS 1: cap    = max(h_low - h_floor,0)*cos_c/dt, h_low from Fx/Fy_low_pos (W,H)
+//   PASS 2: Fx_tot (W,H) east-face + Fy_tot (W,H+1) v-face  (Zalesak-limited)
+//   PASS 3: s_tot  = _positive_lowflux_scales(Fx_tot, Fy_tot)          (W,H)
+//   PASS 4: h_new  = _apply_fluxes(h, Fx_tot*s_tot, Fy_tot*s_tot)      (W,H)
+//
+// PASS is injected by gpu.compute(defines=...).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform ivec2 u_size;     // (W,H)
+uniform float u_dt;
+uniform float u_h_floor;
+uniform float u_a;
+
+uniform sampler2D u_h;    // (W,H)
+uniform sampler2D u_u;    // (W,H)
+uniform sampler2D u_v;    // (W,H+1)
+
+#include "sw_cont_cons.glsl"
+
+#if PASS == 0
+layout(r32f, binding = 0) writeonly uniform image2D out_s_pos;   // (W,H)
+#elif PASS == 1
+uniform sampler2D u_s_pos;
+layout(r32f, binding = 0) writeonly uniform image2D out_cap;     // (W,H)
+#elif PASS == 2
+uniform sampler2D u_s_pos;
+uniform sampler2D u_cap;
+layout(r32f, binding = 0) writeonly uniform image2D out_fx_tot;  // (W,H)
+layout(r32f, binding = 1) writeonly uniform image2D out_fy_tot;  // (W,H+1)
+#elif PASS == 3
+uniform sampler2D u_fx_tot;  // (W,H)
+uniform sampler2D u_fy_tot;  // (W,H+1)
+layout(r32f, binding = 0) writeonly uniform image2D out_s_tot;   // (W,H)
+#else // PASS == 4
+uniform sampler2D u_fx_tot;  // (W,H)
+uniform sampler2D u_fy_tot;  // (W,H+1)
+uniform sampler2D u_s_tot;   // (W,H)
+layout(r32f, binding = 0) writeonly uniform image2D out_h_new;   // (W,H)
+#endif
+
+float DLAM(int W) { return 2.0 * PI / float(W); }
+float DPHI(int H) { return PI / float(H); }
+
+// _apply_fluxes for cell (i,j): h - dt*(dFx+dFy)/(a cos_c),
+// dFx = (Fx_e - Fx_w)/dlam, dFy = (Fy_c_n - Fy_c_s)/dphi.
+float apply_one(float h_c, float Fx_e, float Fx_w, float Fy_n, float Fy_s,
+                int j, int W, int H) {
+    float dFx = (Fx_e - Fx_w) / DLAM(W);
+    float Fy_c_n = Fy_n * cosVface(j,     H);
+    float Fy_c_s = Fy_s * cosVface(j + 1, H);
+    float dFy = (Fy_c_n - Fy_c_s) / DPHI(H);
+    return h_c - u_dt * (dFx + dFy) / (u_a * cosCenter(j, H));
+}
+
+#if PASS >= 1 && PASS <= 2
+// donor-scaled low-order east-face flux of cell i (uses s_pos of donor cell).
+float fx_low_pos_e(int i, int j, int W) {
+    float fxe = fx_low_e(i, j, W);
+    float s = (fxe >= 0.0) ? texelFetch(u_s_pos, ivec2(wrapX(i, W), j), 0).r
+                           : texelFetch(u_s_pos, ivec2(wrapX(i + 1, W), j), 0).r;
+    return fxe * s;
+}
+// donor-scaled low-order v-face flux of row k (uses s_pos of donor cell).
+float fy_low_pos_k(int i, int k, int W, int H) {
+    if (k <= 0 || k >= H) return 0.0;
+    float fyk = fy_low_k(i, k, W, H);
+    float s = (fyk >= 0.0) ? texelFetch(u_s_pos, ivec2(wrapX(i, W), k - 1), 0).r
+                           : texelFetch(u_s_pos, ivec2(wrapX(i, W), k),     0).r;
+    return fyk * s;
+}
+#endif
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x, H = u_size.y;
+    int i = px.x, j = px.y;
+
+#if PASS == 0
+    if (i >= W || j >= H) return;
+    imageStore(out_s_pos, px, vec4(s_cell_low(i, j, W, H), 0.0, 0.0, 0.0));
+
+#elif PASS == 1
+    if (i >= W || j >= H) return;
+    float h_c = cc_h(i, j, W);
+    float Fx_e = fx_low_pos_e(i,     j, W);
+    float Fx_w = fx_low_pos_e(i - 1, j, W);
+    float Fy_n = fy_low_pos_k(i, j,     W, H);
+    float Fy_s = fy_low_pos_k(i, j + 1, W, H);
+    float h_low = apply_one(h_c, Fx_e, Fx_w, Fy_n, Fy_s, j, W, H);
+    float cap = max(h_low - u_h_floor, 0.0) * cosCenter(j, H) / u_dt;
+    imageStore(out_cap, px, vec4(cap, 0.0, 0.0, 0.0));
+
+#elif PASS == 2
+    // Dispatch covers (W,H+1): write Fx_tot for j<H, Fy_tot for all v-rows.
+    if (i >= W || j > H) return;
+
+    // --- Fx_tot east face of cell (i,j), j<H ---
+    if (j < H) {
+        float Fx_lp_e = fx_low_pos_e(i, j, W);
+        float Ax_e = fx_high_e(i, j, W) - Fx_lp_e;
+        float cap_c = texelFetch(u_cap, ivec2(i, j), 0).r;
+        float sx_c = min(1.0, cap_c / (abs(Ax_e) + 1e-30));
+        // sx at i+1 (the i+1->i+2 face), CPU roll(sx,-1)[i] = sx[i+1].
+        int ie = wrapX(i + 1, W);
+        float Fx_lp_ie = fx_low_pos_e(ie, j, W);
+        float Ax_ie = fx_high_e(ie, j, W) - Fx_lp_ie;
+        float cap_ie = texelFetch(u_cap, ivec2(ie, j), 0).r;
+        float sx_e = min(1.0, cap_ie / (abs(Ax_ie) + 1e-30));
+        float Ax_lim_e = Ax_e * min(sx_c, sx_e);
+        imageStore(out_fx_tot, ivec2(i, j), vec4(Fx_lp_e + Ax_lim_e, 0.0, 0.0, 0.0));
+    }
+
+    // --- Fy_tot v-face row j ---
+    if (j == 0 || j == H) {
+        imageStore(out_fy_tot, ivec2(i, j), vec4(0.0, 0.0, 0.0, 0.0));
+    } else {
+        float Fy_lp_k = fy_low_pos_k(i, j, W, H);
+        float Ay_k = fy_high_k(i, j, W, H) - Fy_lp_k;
+        float cap_n = texelFetch(u_cap, ivec2(i, j - 1), 0).r;  // cap[j-1]
+        float cap_s = texelFetch(u_cap, ivec2(i, j),     0).r;  // cap[j]
+        float cap_v = min(cap_n, cap_s);
+        float sy_k = min(1.0, cap_v / (abs(Ay_k) + 1e-30));
+        float Ay_lim_k = Ay_k * sy_k;
+        imageStore(out_fy_tot, ivec2(i, j), vec4(Fy_lp_k + Ay_lim_k, 0.0, 0.0, 0.0));
+    }
+
+#elif PASS == 3
+    if (i >= W || j >= H) return;
+    // s_cell from _positive_lowflux_scales(Fx_tot, Fy_tot).
+    float pref = u_dt / (u_a * cosCenter(j, H));
+    float avail = max(cc_h(i, j, W) - u_h_floor, 0.0);
+    float fxe = texelFetch(u_fx_tot, ivec2(wrapX(i,     W), j), 0).r;
+    float fxw = texelFetch(u_fx_tot, ivec2(wrapX(i - 1, W), j), 0).r;
+    float out_xe = max(fxe, 0.0) / DLAM(W);
+    float out_xw = max(-fxw, 0.0) / DLAM(W);
+    float fyn = texelFetch(u_fy_tot, ivec2(i, j),     0).r;
+    float fys = texelFetch(u_fy_tot, ivec2(i, j + 1), 0).r;
+    float fyn_c = fyn * cosVface(j,     H);
+    float fys_c = fys * cosVface(j + 1, H);
+    float out_yn = max(fyn_c, 0.0) / DPHI(H);
+    float out_ys = max(-fys_c, 0.0) / DPHI(H);
+    float out_total = pref * (out_xe + out_xw + out_yn + out_ys);
+    float s = min(1.0, avail / (out_total + 1e-30));
+    imageStore(out_s_tot, px, vec4(s, 0.0, 0.0, 0.0));
+
+#else // PASS == 4
+    if (i >= W || j >= H) return;
+    // Final apply: Fx_tot*s_tot (donor), Fy_tot*s_tot (donor).
+    float h_c = cc_h(i, j, W);
+    int iw = wrapX(i - 1, W), ie = wrapX(i + 1, W);
+    float fxe = texelFetch(u_fx_tot, ivec2(i,  j), 0).r;
+    float fxw = texelFetch(u_fx_tot, ivec2(iw, j), 0).r;
+    // donor scale: east face of i -> s_tot[i] if fxe>=0 else s_tot[i+1].
+    float sxe = (fxe >= 0.0) ? texelFetch(u_s_tot, ivec2(i,  j), 0).r
+                             : texelFetch(u_s_tot, ivec2(ie, j), 0).r;
+    // west face of i = east face of i-1 -> s_tot[i-1] if fxw>=0 else s_tot[i].
+    float sxw = (fxw >= 0.0) ? texelFetch(u_s_tot, ivec2(iw, j), 0).r
+                             : texelFetch(u_s_tot, ivec2(i,  j), 0).r;
+    float Fx_e = fxe * sxe;
+    float Fx_w = fxw * sxw;
+
+    float fyn = texelFetch(u_fy_tot, ivec2(i, j),     0).r;
+    float fys = texelFetch(u_fy_tot, ivec2(i, j + 1), 0).r;
+    // v-face row k donor: s_tot[k-1] if fy>=0 else s_tot[k].
+    float syn, sys;
+    if (j <= 0)            syn = 1.0;
+    else                   syn = (fyn >= 0.0) ? texelFetch(u_s_tot, ivec2(i, j - 1), 0).r
+                                              : texelFetch(u_s_tot, ivec2(i, j),     0).r;
+    if (j + 1 >= H)        sys = 1.0;
+    else                   sys = (fys >= 0.0) ? texelFetch(u_s_tot, ivec2(i, j),     0).r
+                                              : texelFetch(u_s_tot, ivec2(i, j + 1), 0).r;
+    float Fy_n = fyn * syn;
+    float Fy_s = fys * sys;
+
+    float h_new = apply_one(h_c, Fx_e, Fx_w, Fy_n, Fy_s, j, W, H);
+    imageStore(out_h_new, px, vec4(h_new, 0.0, 0.0, 0.0));
+#endif
+}
