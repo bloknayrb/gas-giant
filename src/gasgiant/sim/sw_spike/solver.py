@@ -39,12 +39,11 @@ def _layer_momentum(h, u, v, M, f0, g, dt):
     B = M + ke
     gx, gy = ops.grad_faces(B, g)                 # face gradients of Bernoulli
     f_uf = _f_uface(g, f0)
-    f_vf = _f_vface(g, f0)
-    q_uf = zeta_uf + f_uf
+    q_uf = zeta_uf
     v_at_uf = center_to_uface(v_c)                # v interpolated to u-face
     u_star = u + dt * (q_uf * v_at_uf - gx)       # explicit advect+pressure (zonal)
     zeta_vf = 0.5 * (zeta + np.roll(zeta, 1, axis=1))  # corner->v-face (avg in lon)
-    q_vf = zeta_vf + f_vf
+    q_vf = zeta_vf
     u_c = 0.5 * (u + np.roll(u, 1, axis=1))       # u at centers
     u_at_vf = center_to_vface(u_c)
     v_star = v.copy()
