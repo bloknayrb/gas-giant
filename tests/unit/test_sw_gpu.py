@@ -98,3 +98,36 @@ def test_ref_continuity_radius_scaling():
     t1 = h1 - h; t2 = h2 - h
     mask = np.abs(t1) > 1e-6
     np.testing.assert_allclose(t2[mask], 0.5 * t1[mask], rtol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Task 4: GPU divergence tests
+# ---------------------------------------------------------------------------
+
+def _div_inputs(W, H, seed):
+    rng = np.random.default_rng(seed)
+    h = (1.0 + 0.2 * rng.standard_normal((H, W))).astype(np.float32)
+    u = (0.1 * rng.standard_normal((H, W))).astype(np.float32)
+    v = np.zeros((H + 1, W), np.float32); v[1:H] = 0.1 * rng.standard_normal((H - 1, W))
+    return h, u, v
+
+
+def test_gpu_divergence_matches_ref(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    for W, H in [(64, 32), (96, 48)]:   # incl. NON-power-of-2 W (wrapX bug surfaces here)
+        h, u, v = _div_inputs(W, H, 1)
+        g = ref.Grid(W, H, a=1.0)
+        cpu = ref.divergence_hu(h.astype(np.float64), u.astype(np.float64), v.astype(np.float64), g)
+        got = sw_gpu.run_divergence(gpu, h, u, v, a=1.0)
+        cos_c = g.cos_c[:, None]
+        # PRE-division: compare cos_c*div (removes f32 polar 1/cos amplification).
+        np.testing.assert_allclose(cos_c * got, cos_c * cpu, atol=2e-5)
+
+
+def test_gpu_divergence_radius_scaling(gpu):
+    # INDEPENDENT a-scaling: GPU div at a=2 == a=1 output * 1/2 (single 1/a factor).
+    from gasgiant.sim import sw_gpu
+    h, u, v = _div_inputs(64, 32, 7)
+    d1 = sw_gpu.run_divergence(gpu, h, u, v, a=1.0)
+    d2 = sw_gpu.run_divergence(gpu, h, u, v, a=2.0)
+    np.testing.assert_allclose(d2, 0.5 * d1, rtol=1e-5)
