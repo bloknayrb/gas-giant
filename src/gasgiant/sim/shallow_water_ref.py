@@ -227,6 +227,130 @@ def continuity_step(h, u, v, g, dt, h_floor):
 
 
 # ---------------------------------------------------------------------------
+# M2 semi-implicit: adjoint Helmholtz operator pair
+# ---------------------------------------------------------------------------
+
+def divergence_helmholtz(
+    Fx: np.ndarray,
+    Fy: np.ndarray,
+    H_ref_lat: np.ndarray,
+    g: Grid,
+) -> np.ndarray:
+    """Negative adjoint of grad_faces under cos-weighted inner products.
+
+    Computes the flux-form, cos-weighted divergence
+
+        D[j,i] = [ d(H_x * Fx)/dlam + d(H_y * Fy * cosφ)/dphi ] / (a cosφ_c)
+
+    where H_x = H_ref_lat[:, None] (center values broadcast to u-faces) and
+    H_y[k] = 0.5*(H_ref_lat[k-1] + H_ref_lat[k]) (meridional average broadcast
+    to v-faces; pole rows k=0 and k=H are zeroed because cos_v=0 there).
+
+    Adjoint identity (with H_ref_lat ≡ 1):
+        <grad_faces(h), (Fx, Fy)>_faces = -<h, divergence_helmholtz(Fx, Fy, 1, g)>_centers
+
+    where:
+        <p, q>_centers  = Σ p*q*cos_c[:,None]
+        <(ax,ay),(bx,by)>_faces = Σ ax*bx*cos_c[:,None] + Σ ay*by*cos_v[:,None]
+
+    The derivation is summation-by-parts: shift the λ index on the zonal term
+    (periodic) and the φ index on the meridional term to move finite differences
+    from M onto (Fx, Fy).  The result is this exact formula; the common factor
+    a² dlam dphi cancels and is omitted consistently from both sides.
+
+    Parameters
+    ----------
+    Fx : ndarray, shape (H, W)
+        Flux at u-faces (east faces).
+    Fy : ndarray, shape (H+1, W)
+        Flux at v-faces (meridional faces).  Pole rows (0, H) should be zero;
+        cos_v=0 there forces their contribution to vanish regardless.
+    H_ref_lat : ndarray, shape (H,)
+        Reference layer thickness profile (latitude-only).  Applied SYMMETRICALLY:
+        same weighting on the GRAD side and the DIV side so the composed operator
+        L = -div(H_ref * grad) is self-adjoint.
+    g : Grid
+
+    Returns
+    -------
+    ndarray, shape (H, W) — divergence at cell centers.
+    """
+    H, W = g.H, g.W
+
+    # --- Apply H_ref symmetrically to face fluxes ---
+    # u-faces: use center value at each latitude row.
+    Hx = H_ref_lat[:, None]          # (H, 1), broadcast to (H, W)
+    Fx_w = Hx * Fx                   # weighted zonal flux, (H, W)
+
+    # v-faces: meridional average of adjacent centers.
+    # H_y[k] = 0.5*(H_ref_lat[k-1] + H_ref_lat[k]) for k=1..H-1; poles = 0.
+    H_ref_v = np.zeros(H + 1)
+    H_ref_v[1:H] = 0.5 * (H_ref_lat[0:H - 1] + H_ref_lat[1:H])
+    Fy_w = H_ref_v[:, None] * Fy     # weighted meridional flux, (H+1, W)
+
+    # --- Zonal divergence term: (Fx_w[j,i] - Fx_w[j,i-1]) / (a dlam) ---
+    # This is -d/dlam applied to Fx_w (roll by +1 brings i-1 into position i).
+    dFx = (Fx_w - np.roll(Fx_w, 1, axis=1)) / (g.a * g.dlam)    # (H, W)
+
+    # --- Meridional divergence term ---
+    # The adjoint derivation (summation-by-parts on the φ index) gives:
+    #   adjoint contribution: Σ_j h[j] * (Fy_cos[j+1] - Fy_cos[j]) / (a dphi)
+    # where Fy_cos[k] = Fy[k] * cos_v[k].
+    # Since divergence_helmholtz is the NEGATIVE adjoint we subtract this term.
+    # The outer metric 1/cos_c converts from the centre inner product to a raw sum.
+    Fy_cos = Fy_w * g.cos_v[:, None]       # (H+1, W): cosφ_v weighted flux
+    # (Fy_cos[j+1] - Fy_cos[j]) is the adjoint meridional contribution per cell j
+    dFy = (Fy_cos[1:H + 1] - Fy_cos[0:H]) / (g.a * g.dphi)      # (H, W)
+
+    # Return the NEGATIVE adjoint of grad_faces:
+    #   divergence_helmholtz = (dFx - dFy) / cos_c
+    # Proof: <grad h, U>_faces
+    #   zonal: Σ h[j,i] * (Ux[j,i-1]-Ux[j,i])/(a dlam)        = -<h, dFx/cos_c>_c
+    #   merid: Σ h[j,i] * (Uy_cos[j+1]-Uy_cos[j])/(a dphi)    = -<h, (-dFy/cos_c)>_c
+    # So <grad h, U>_faces = -<h, (dFx-dFy)/cos_c>_c = -<h, div_H>_c  ✓
+    return (dFx - dFy) / g.cos_c[:, None]
+
+
+def helmholtz_apply(
+    dh: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+) -> np.ndarray:
+    """Apply the semi-implicit Helmholtz operator to a height perturbation.
+
+        L(dh) = dh - (theta * dt)^2 * gp * divergence_helmholtz(*grad_faces(dh), H_ref_lat, g)
+
+    This operator arises from the θ-implicit wave equation.  It is self-adjoint
+    and positive definite (for H_ref_lat > 0, gp > 0) because the inner operator
+    is -div(H_ref * grad), which is SPD on the C-grid.
+
+    Parameters
+    ----------
+    dh : ndarray, shape (H, W)
+        Height perturbation to apply the operator to.
+    H_ref_lat : ndarray, shape (H,)
+        Reference layer thickness profile, latitude-only.
+    gp : float
+        Reduced gravity g'.
+    theta : float
+        Implicitness parameter (0=explicit, 1=fully implicit).
+    dt : float
+        Time step.
+    g : Grid
+
+    Returns
+    -------
+    ndarray, shape (H, W)
+    """
+    alpha = (theta * dt) ** 2 * gp
+    gx, gy = grad_faces(dh, g)
+    return dh - alpha * divergence_helmholtz(gx, gy, H_ref_lat, g)
+
+
+# ---------------------------------------------------------------------------
 # Single-layer Montgomery potential and pressure gradient
 # ---------------------------------------------------------------------------
 
