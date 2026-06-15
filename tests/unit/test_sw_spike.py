@@ -59,3 +59,33 @@ def test_divergence_has_no_checkerboard_null_mode():
     div = operators.divergence_hu(h, u, v, g)
     # On a C-grid the checkerboard produces real flux divergence (non-null).
     assert np.max(np.abs(div)) > 1e-4
+
+
+def test_montgomery_two_layer_coupling():
+    from gasgiant.sim.sw_spike import operators
+    h1 = np.full((4, 4), 2.0)
+    h2 = np.full((4, 4), 3.0)
+    gp = (1.0, 0.05)  # (g'_1 external, g'_2 baroclinic)
+    M1, M2 = operators.montgomery_2layer(h1, h2, gp)
+    # M1 = g'_1 (h1+h2); M2 = g'_1 (h1+h2) + g'_2 h2
+    np.testing.assert_allclose(M1, 1.0 * 5.0)
+    np.testing.assert_allclose(M2, 1.0 * 5.0 + 0.05 * 3.0)
+
+
+def test_pressure_gradient_constant_field_is_zero():
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=32, H=16)
+    M = np.full((16, 32), 7.3)
+    gx, gy = operators.grad_faces(M, g)
+    assert np.max(np.abs(gx)) < 1e-12
+    assert np.max(np.abs(gy)) < 1e-12
+
+
+def test_pressure_gradient_sees_checkerboard():
+    # Centered-collocated grad would return ~0 here; the C-grid face grad must not.
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=32, H=16)
+    jj, ii = np.indices((16, 32))
+    M = ((ii + jj) % 2).astype(float)
+    gx, gy = operators.grad_faces(M, g)
+    assert np.max(np.abs(gx)) > 1e-3   # face differences are large for a 2dx mode

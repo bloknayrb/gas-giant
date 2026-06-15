@@ -34,3 +34,26 @@ def divergence_hu(h: np.ndarray, u: np.ndarray, v: np.ndarray, g: Grid) -> np.nd
 
     inv_metric = 1.0 / g.cos_c[:, None]  # (H, 1)
     return inv_metric * (dFx + dFy)
+
+
+def montgomery_2layer(h1: np.ndarray, h2: np.ndarray, gp: tuple[float, float]):
+    """Reduced-gravity Montgomery potentials for the 2-layer stack (spec §2.2)."""
+    g1, g2 = gp
+    eta1 = h1 + h2          # height of top of layer 1
+    M1 = g1 * eta1
+    M2 = g1 * eta1 + g2 * h2
+    return M1, M2
+
+
+def grad_faces(M: np.ndarray, g: Grid):
+    """∇M evaluated on faces (single difference, no 2dx null space).
+
+    Returns (gx at u-faces (H,W), gy at v-faces (H+1,W)).
+    """
+    H, W = M.shape
+    # Zonal gradient at east face i = (M[i+1] - M[i]) / (a cosφ dλ).
+    gx = (np.roll(M, -1, axis=1) - M) / (g.cos_c[:, None] * g.dlam)
+    # Meridional gradient at v-face j = (M[north row j-1] - M[south row j]) / (a dφ).
+    gy = np.zeros((H + 1, W))
+    gy[1:H] = (M[0:H - 1] - M[1:H]) / g.dphi
+    return gx, gy
