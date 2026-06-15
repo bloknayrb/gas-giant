@@ -17,6 +17,12 @@ float cosVface(int row, int H) {
 }
 
 // Periodic wrap in X (longitude).
+// NOTE: The two-step ((x%w)+w)%w form is avoided because some drivers treat
+// % as unsigned for signed int arguments on non-power-of-2 w, producing wrong
+// results (e.g. wrapX(-1,96)→63 instead of 95).  Branch-based form is safe on
+// all conformant implementations and the branch is trivially branch-predicted.
 int wrapX(int x, int w) {
-    return ((x % w) + w) % w;
+    if (x < 0)  return x + w;
+    if (x >= w) return x - w;
+    return x;
 }

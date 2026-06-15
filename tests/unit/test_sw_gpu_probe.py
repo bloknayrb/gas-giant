@@ -158,6 +158,22 @@ def test_swp_forcing_matches_ref(gpu):
     np.testing.assert_allclose(out["v2"][1:H], st.v2[1:H], atol=2e-5)
 
 
+def test_swp_step_matches_ref_n_steps(gpu):
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init, solver as cpu
+    import numpy as np
+    W, H = 96, 48
+    st_cpu = init.emergent_init(W=W, H=H, f0=4.0, gp=(1.0, 0.05), n_bands=10, band_contrast=0.4)
+    # Build the GPU solver from the SAME initial state (copy CPU init fields + params + dt)
+    sg = gsolver.SwpSolver.from_cpu_state(gpu, st_cpu)
+    for _ in range(30):
+        st_cpu = cpu.step(st_cpu, dt=st_cpu.dt)
+        sg.step()
+    h1g = sg.download("h1")
+    assert np.all(np.isfinite(h1g))
+    assert np.max(np.abs(h1g - st_cpu.h1)) < 5e-4   # f32 GPU vs f64 CPU drift over 30 steps
+
+
 def test_swp_continuity_conserves_mass_strong_gradient(gpu):
     """Under strong gradients the h_floor clamp is non-conservative (floor lifts cells),
     so GPU and CPU will both deviate from m0 at roughly the same rtol (~6e-4 for this seed).

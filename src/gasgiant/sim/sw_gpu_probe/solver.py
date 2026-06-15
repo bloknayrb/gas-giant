@@ -576,6 +576,404 @@ def run_forcing(
     return result
 
 
+class SwpSolver:
+    """Resident-texture 2-layer shallow-water solver for GPU spin-up (~32k steps).
+
+    All fields stay on the GPU as R32F textures; ``step()`` dispatches the
+    pre-compiled kernels in CPU-reference order with ping-pong scratch textures
+    and ``ctx.memory_barrier()`` between dependent dispatches.  No CPU round-trip
+    occurs during ``step()``.
+
+    Usage::
+
+        sg = SwpSolver.from_cpu_state(gpu, st_cpu)
+        for _ in range(N):
+            sg.step()
+        h1 = sg.download("h1")
+    """
+
+    def __init__(
+        self,
+        gpu: "GpuContext",
+        W: int,
+        H: int,
+        f0: float,
+        gp: tuple[float, float],
+        dt: float,
+        h_floor: float,
+        tau_rad: float,
+        tau_drag: float,
+        nu4: float,
+    ) -> None:
+        import moderngl  # noqa: PLC0415
+
+        self.gpu = gpu
+        self.ctx = gpu.ctx
+        self.W = W
+        self.H = H
+        self.f0 = float(f0)
+        self.g1 = float(gp[0])
+        self.g2 = float(gp[1])
+        self.dt = float(dt)
+        self.h_floor = float(h_floor)
+        self.tau_rad = float(tau_rad)
+        self.tau_drag = float(tau_drag)
+        self.nu4 = float(nu4)
+
+        # Dispatch group counts.
+        gx_c  = (W + _GROUP - 1) // _GROUP
+        gy_c  = (H + _GROUP - 1) // _GROUP
+        gy_v  = (H + 1 + _GROUP - 1) // _GROUP
+        self._gx_c = gx_c
+        self._gy_c = gy_c
+        self._gy_v = gy_v
+
+        # ── Compile all kernels ONCE ──────────────────────────────────────────
+        self._k_mont   = gpu.compute(_KERNELS, "swp_grad_montgomery.comp")
+        self._k_vort   = gpu.compute(_KERNELS, "swp_vorticity.comp")
+        self._k_mom    = gpu.compute(_KERNELS, "swp_momentum.comp")
+        self._k_cont_a = gpu.compute(_KERNELS, "swp_continuity.comp", defines={"PASS": "0"})
+        self._k_cont_b = gpu.compute(_KERNELS, "swp_continuity.comp", defines={"PASS": "1"})
+        self._k_force0 = gpu.compute(_KERNELS, "swp_forcing.comp", defines={"PASS0": "1"})
+        self._k_force1 = gpu.compute(_KERNELS, "swp_forcing.comp", defines={})
+
+        # ── Resident field textures ───────────────────────────────────────────
+        def _cc(name):
+            return gpu.texture2d((W, H), components=1, dtype="f4")
+
+        def _vf(name):
+            return gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+        self._tex: dict[str, "moderngl.Texture"] = {
+            "h1":    _cc("h1"),   "u1":    _cc("u1"),   "v1":    _vf("v1"),
+            "h2":    _cc("h2"),   "u2":    _cc("u2"),   "v2":    _vf("v2"),
+            "h_eq1": _cc("h_eq1"), "h_eq2": _cc("h_eq2"),
+        }
+
+        # ── Scratch / ping-pong textures ──────────────────────────────────────
+        # Montgomery potentials.
+        self._tex_M1  = _cc("M1")
+        self._tex_M2  = _cc("M2")
+        # Montgomery gradient outputs (only M1,M2 values are used; gx/gy discarded).
+        self._tex_gx1 = _cc("gx1");  self._tex_gx2 = _cc("gx2")
+        self._tex_gy1 = _vf("gy1");  self._tex_gy2 = _vf("gy2")
+
+        # Vorticity scratch (v-face sized, one per layer).
+        self._tex_zeta1 = _vf("zeta1")
+        self._tex_zeta2 = _vf("zeta2")
+
+        # New u,v outputs from momentum.
+        self._tex_u1n = _cc("u1n");  self._tex_v1n = _vf("v1n")
+        self._tex_u2n = _cc("u2n");  self._tex_v2n = _vf("v2n")
+
+        # New h outputs from continuity (pass A/B scratch per layer).
+        self._tex_h1_low = _cc("h1_low");  self._tex_h1_cap = _cc("h1_cap")
+        self._tex_h2_low = _cc("h2_low");  self._tex_h2_cap = _cc("h2_cap")
+        self._tex_h1n    = _cc("h1n")
+        self._tex_h2n    = _cc("h2n")
+
+        # Forcing scratch (pass 0 → pass 1).
+        self._tex_sc_h1  = _cc("sc_h1");   self._tex_sc_h2  = _cc("sc_h2")
+        self._tex_sc_u1  = _cc("sc_u1");   self._tex_sc_u2  = _cc("sc_u2")
+        self._tex_sc_v1  = _vf("sc_v1");   self._tex_sc_v2  = _vf("sc_v2")
+        # Forcing final outputs — written then swapped into resident textures.
+        self._tex_fh1    = _cc("fh1");     self._tex_fh2    = _cc("fh2")
+        self._tex_fu1    = _cc("fu1");     self._tex_fu2    = _cc("fu2")
+        self._tex_fv1    = _vf("fv1");     self._tex_fv2    = _vf("fv2")
+
+    # ── Public constructors / I/O ─────────────────────────────────────────────
+
+    @classmethod
+    def from_cpu_state(cls, gpu: "GpuContext", st) -> "SwpSolver":
+        """Build a SwpSolver from a CPU ``SwState``, copying all fields to GPU."""
+        sg = cls(
+            gpu=gpu,
+            W=st.g.W,
+            H=st.g.H,
+            f0=st.f0,
+            gp=st.gp,
+            dt=st.dt,
+            h_floor=st.h_floor,
+            tau_rad=st.tau_rad,
+            tau_drag=st.tau_drag,
+            nu4=st.nu4,
+        )
+        sg.upload("h1", st.h1)
+        sg.upload("u1", st.u1)
+        sg.upload("v1", st.v1)
+        sg.upload("h2", st.h2)
+        sg.upload("u2", st.u2)
+        sg.upload("v2", st.v2)
+        sg.upload("h_eq1", st.h_eq1)
+        sg.upload("h_eq2", st.h_eq2)
+        return sg
+
+    def upload(self, name: str, arr: np.ndarray) -> None:
+        self._tex[name].write(arr.astype(np.float32).tobytes())
+
+    def download(self, name: str) -> np.ndarray:
+        return self.gpu.read_texture(self._tex[name])[..., 0]
+
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _swap(self, name: str, tmp: "moderngl.Texture") -> None:
+        """Swap a resident texture with a scratch texture (ping-pong)."""
+        self._tex[name], tmp_ref = tmp, self._tex[name]
+        # Put the old resident back in tmp so caller can reuse it next step.
+        # We achieve this by returning the old value — but since Python is
+        # reference-based we just mutate self._tex; caller holds the *old*
+        # reference in tmp_ref.  We need to write the result back to ensure
+        # the caller's local var also points to the correct object.
+        # Actually: just reassign self._tex[name] to the scratch and keep the
+        # old texture for reuse next time as the new scratch slot.
+        # The two-line swap above already does this; this comment is clarifying.
+        # self._tex[name] now points to the *new* data texture; tmp still
+        # points to the *old* resident which we can overwrite next step.
+        # (Python swap via temp works on dict values too.)
+        pass  # intentional no-op; the two-liner above is the swap.
+
+    # ── step() ───────────────────────────────────────────────────────────────
+
+    def step(self) -> None:
+        """One full step in CPU-reference order (no CPU round-trip).
+
+        Order:
+          1. Compute M1, M2 from OLD h1, h2.
+          2. Momentum layer-1: OLD h1,u1,v1 + M1 → NEW u1,v1.
+          3. Momentum layer-2: OLD h2,u2,v2 + M2 → NEW u2,v2.
+          4. Continuity layer-1: OLD h1 + NEW u1,v1 → NEW h1.
+          5. Continuity layer-2: OLD h2 + NEW u2,v2 → NEW h2.
+          6. Ping-pong: swap resident textures with the new fields.
+          7. Forcing (in-place on resident textures with ping-pong scratch).
+        """
+        ctx   = self.ctx
+        W, H  = self.W, self.H
+        dt    = self.dt
+        f0    = self.f0
+        g1, g2 = self.g1, self.g2
+
+        gx_c, gy_c, gy_v = self._gx_c, self._gy_c, self._gy_v
+
+        # Shortcuts to resident textures.
+        t = self._tex
+
+        # ── 1. Montgomery potentials from OLD h ───────────────────────────────
+        k = self._k_mont
+        _set(k, "u_size", (W, H))
+        _set(k, "u_g1", g1)
+        _set(k, "u_g2", g2)
+
+        t["h1"].use(location=0); _set(k, "u_h1", 0)
+        t["h2"].use(location=1); _set(k, "u_h2", 1)
+
+        self._tex_M1.bind_to_image(0,  read=False, write=True)
+        self._tex_M2.bind_to_image(1,  read=False, write=True)
+        self._tex_gx1.bind_to_image(2, read=False, write=True)
+        self._tex_gx2.bind_to_image(3, read=False, write=True)
+        self._tex_gy1.bind_to_image(4, read=False, write=True)
+        self._tex_gy2.bind_to_image(5, read=False, write=True)
+
+        k.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # ── 2. Momentum layer-1 (vorticity pass then momentum pass) ──────────
+        self._run_momentum_layer(
+            k_vort=self._k_vort, k_mom=self._k_mom,
+            tex_u_in=t["u1"], tex_v_in=t["v1"], tex_M=self._tex_M1,
+            tex_zeta=self._tex_zeta1,
+            tex_u_out=self._tex_u1n, tex_v_out=self._tex_v1n,
+            f0=f0, dt=dt, W=W, H=H,
+        )
+
+        # ── 3. Momentum layer-2 ────────────────────────────────────────────────
+        self._run_momentum_layer(
+            k_vort=self._k_vort, k_mom=self._k_mom,
+            tex_u_in=t["u2"], tex_v_in=t["v2"], tex_M=self._tex_M2,
+            tex_zeta=self._tex_zeta2,
+            tex_u_out=self._tex_u2n, tex_v_out=self._tex_v2n,
+            f0=f0, dt=dt, W=W, H=H,
+        )
+
+        # ── 4. Continuity layer-1 (OLD h1, NEW u1n, v1n) ─────────────────────
+        self._run_continuity_layer(
+            tex_h=t["h1"], tex_u=self._tex_u1n, tex_v=self._tex_v1n,
+            tex_h_low=self._tex_h1_low, tex_cap=self._tex_h1_cap,
+            tex_h_new=self._tex_h1n,
+            dt=dt, W=W, H=H,
+        )
+
+        # ── 5. Continuity layer-2 (OLD h2, NEW u2n, v2n) ─────────────────────
+        self._run_continuity_layer(
+            tex_h=t["h2"], tex_u=self._tex_u2n, tex_v=self._tex_v2n,
+            tex_h_low=self._tex_h2_low, tex_cap=self._tex_h2_cap,
+            tex_h_new=self._tex_h2n,
+            dt=dt, W=W, H=H,
+        )
+
+        # ── 6. Ping-pong: swap resident ↔ new ────────────────────────────────
+        # After swap, self._tex["h1"] points to tex_h1n data, and self._tex_h1n
+        # points to the old h1 texture (reusable scratch next step).
+        t["h1"], self._tex_h1n = self._tex_h1n, t["h1"]
+        t["h2"], self._tex_h2n = self._tex_h2n, t["h2"]
+        t["u1"], self._tex_u1n = self._tex_u1n, t["u1"]
+        t["v1"], self._tex_v1n = self._tex_v1n, t["v1"]
+        t["u2"], self._tex_u2n = self._tex_u2n, t["u2"]
+        t["v2"], self._tex_v2n = self._tex_v2n, t["v2"]
+
+        # ── 7. Forcing (two-pass, in-place on new resident textures) ──────────
+        self._run_forcing()
+
+    def _run_momentum_layer(
+        self, *, k_vort, k_mom,
+        tex_u_in, tex_v_in, tex_M,
+        tex_zeta, tex_u_out, tex_v_out,
+        f0, dt, W, H,
+    ) -> None:
+        ctx = self.ctx
+        gx_c, gy_v = self._gx_c, self._gy_v
+
+        # Vorticity pass.
+        _set(k_vort, "u_size", (W, H))
+        tex_u_in.use(location=0); _set(k_vort, "u_u", 0)
+        tex_v_in.use(location=1); _set(k_vort, "u_v", 1)
+        tex_zeta.bind_to_image(0, read=False, write=True)
+        k_vort.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # Momentum pass.
+        _set(k_mom, "u_size", (W, H))
+        _set(k_mom, "u_f0",   f0)
+        _set(k_mom, "u_dt",   dt)
+        tex_zeta.use(location=0);  _set(k_mom, "u_zeta", 0)
+        tex_u_in.use(location=1);  _set(k_mom, "u_u",    1)
+        tex_v_in.use(location=2);  _set(k_mom, "u_v",    2)
+        tex_M.use(location=3);     _set(k_mom, "u_M",    3)
+        tex_u_out.bind_to_image(0, read=False, write=True)
+        tex_v_out.bind_to_image(1, read=False, write=True)
+        k_mom.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+    def _run_continuity_layer(
+        self, *, tex_h, tex_u, tex_v,
+        tex_h_low, tex_cap, tex_h_new,
+        dt, W, H,
+    ) -> None:
+        ctx = self.ctx
+        gx_c, gy_c = self._gx_c, self._gy_c
+        h_floor = self.h_floor
+        k_a, k_b = self._k_cont_a, self._k_cont_b
+
+        # Pass A.
+        _set(k_a, "u_size",    (W, H))
+        _set(k_a, "u_dt",      dt)
+        _set(k_a, "u_h_floor", h_floor)
+        tex_h.use(location=0); _set(k_a, "u_h", 0)
+        tex_u.use(location=1); _set(k_a, "u_u", 1)
+        tex_v.use(location=2); _set(k_a, "u_v", 2)
+        tex_h_low.bind_to_image(0, read=False, write=True)
+        tex_cap.bind_to_image(1,   read=False, write=True)
+        k_a.run(gx_c, gy_c, 1)
+        ctx.memory_barrier()
+
+        # Pass B.
+        _set(k_b, "u_size",    (W, H))
+        _set(k_b, "u_dt",      dt)
+        _set(k_b, "u_h_floor", h_floor)
+        tex_h.use(location=0);     _set(k_b, "u_h",     0)
+        tex_u.use(location=1);     _set(k_b, "u_u",     1)
+        tex_v.use(location=2);     _set(k_b, "u_v",     2)
+        tex_h_low.use(location=3); _set(k_b, "u_h_low", 3)
+        tex_cap.use(location=4);   _set(k_b, "u_cap",   4)
+        tex_h_new.bind_to_image(0, read=False, write=True)
+        k_b.run(gx_c, gy_c, 1)
+        ctx.memory_barrier()
+
+    def _run_forcing(self) -> None:
+        """Two-pass forcing on resident textures.  Swaps resident ↔ final outputs."""
+        ctx  = self.ctx
+        W, H = self.W, self.H
+        gx_c, gy_v = self._gx_c, self._gy_v
+        t = self._tex
+
+        tau_rad  = self.tau_rad
+        tau_drag = self.tau_drag
+        nu4      = self.nu4
+        h_floor  = self.h_floor
+
+        def _uniforms(k):
+            _set(k, "u_size",     (W, H))
+            _set(k, "u_tau_rad",  tau_rad)
+            _set(k, "u_tau_drag", tau_drag)
+            _set(k, "u_nu4",      nu4)
+            _set(k, "u_h_floor",  h_floor)
+
+        # Pass 0.
+        k0 = self._k_force0
+        _uniforms(k0)
+        t["h1"].use(location=0);    _set(k0, "u_h1",    0)
+        t["h2"].use(location=1);    _set(k0, "u_h2",    1)
+        t["u1"].use(location=2);    _set(k0, "u_u1",    2)
+        t["u2"].use(location=3);    _set(k0, "u_u2",    3)
+        t["v1"].use(location=4);    _set(k0, "u_v1",    4)
+        t["v2"].use(location=5);    _set(k0, "u_v2",    5)
+        t["h_eq1"].use(location=6); _set(k0, "u_h_eq1", 6)
+        t["h_eq2"].use(location=7); _set(k0, "u_h_eq2", 7)
+
+        self._tex_sc_h1.bind_to_image(0, read=False, write=True)
+        self._tex_sc_h2.bind_to_image(1, read=False, write=True)
+        self._tex_sc_u1.bind_to_image(2, read=False, write=True)
+        self._tex_sc_u2.bind_to_image(3, read=False, write=True)
+        self._tex_sc_v1.bind_to_image(4, read=False, write=True)
+        self._tex_sc_v2.bind_to_image(5, read=False, write=True)
+
+        k0.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # Pass 1.
+        k1 = self._k_force1
+        _uniforms(k1)
+        t["h_eq1"].use(location=6); _set(k1, "u_h_eq1", 6)
+        t["h_eq2"].use(location=7); _set(k1, "u_h_eq2", 7)
+        self._tex_sc_h1.use(location=8);  _set(k1, "u_s_h1", 8)
+        self._tex_sc_h2.use(location=9);  _set(k1, "u_s_h2", 9)
+        self._tex_sc_u1.use(location=10); _set(k1, "u_s_u1", 10)
+        self._tex_sc_u2.use(location=11); _set(k1, "u_s_u2", 11)
+        self._tex_sc_v1.use(location=12); _set(k1, "u_s_v1", 12)
+        self._tex_sc_v2.use(location=13); _set(k1, "u_s_v2", 13)
+
+        self._tex_fh1.bind_to_image(0, read=False, write=True)
+        self._tex_fh2.bind_to_image(1, read=False, write=True)
+        self._tex_fu1.bind_to_image(2, read=False, write=True)
+        self._tex_fu2.bind_to_image(3, read=False, write=True)
+        self._tex_fv1.bind_to_image(4, read=False, write=True)
+        self._tex_fv2.bind_to_image(5, read=False, write=True)
+
+        k1.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # Ping-pong: swap resident ↔ final forcing outputs.
+        t["h1"], self._tex_fh1 = self._tex_fh1, t["h1"]
+        t["h2"], self._tex_fh2 = self._tex_fh2, t["h2"]
+        t["u1"], self._tex_fu1 = self._tex_fu1, t["u1"]
+        t["u2"], self._tex_fu2 = self._tex_fu2, t["u2"]
+        t["v1"], self._tex_fv1 = self._tex_fv1, t["v1"]
+        t["v2"], self._tex_fv2 = self._tex_fv2, t["v2"]
+
+    # ── Diagnostic helpers ────────────────────────────────────────────────────
+
+    def relative_vorticity_top(self) -> np.ndarray:
+        """Relative vorticity ζ of the top layer at corners (H+1, W)."""
+        u1 = self.download("u1")
+        v1 = self.download("v1")
+        return run_vorticity(self.gpu, u1, v1)
+
+    def eddy_vorticity_std(self) -> float:
+        """Std of eddy (non-zonal) top-layer vorticity; matches cpu.eddy_vorticity_std."""
+        zeta = self.relative_vorticity_top()  # (H+1, W)
+        eddy = zeta - zeta.mean(axis=1, keepdims=True)
+        return float(np.std(eddy))
+
+
 def run_vorticity(
     gpu: "GpuContext",
     u: np.ndarray,
