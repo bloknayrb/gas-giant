@@ -214,3 +214,61 @@ class MapDeriver:
         gy = (size[1] + _GROUP - 1) // _GROUP
         prog.run(gx, gy, 1)
         self.gpu.ctx.memory_barrier()
+
+    def derive_from_tracer(
+        self,
+        rgba: "np.ndarray",
+        res: int,
+        appearance: AppearanceParams,
+        seed: int = 0,
+    ) -> "np.ndarray":
+        """Render an (H, W, 4) float32 equirect RGBA tracer ndarray through the
+        existing derive.comp shader and return an (res//2, res, 3) float32 RGB.
+
+        Uploads the tracer ndarray to a temporary moderngl texture, creates 1x1
+        dummy polar-patch textures (the SW spike is equirect-only; the shader
+        blends them in, but with blend_band == (pi/2, pi/2) the polar weight is
+        zero everywhere except the very poles, which we accept), and re-uses all
+        existing derive() code paths.  Caller owns the GPU context.
+        """
+        from gasgiant.sim.solver import BLEND_BAND, RHO_MAX
+
+        h_src, w_src = rgba.shape[:2]
+        # Upload equirect tracer.
+        tracer_tex = self.gpu.texture2d(
+            (w_src, h_src), 4, "f4",
+            data=np.ascontiguousarray(rgba, dtype=np.float32),
+            linear=True,
+        )
+        # 1x1 dummy polar patches (zeros — no polar contribution).
+        dummy = np.zeros((1, 1, 4), dtype=np.float32)
+        patch_n = self.gpu.texture2d((1, 1), 4, "f4", data=dummy, linear=True)
+        patch_s = self.gpu.texture2d((1, 1), 4, "f4", data=dummy, linear=True)
+
+        color_tex = self.gpu.texture2d((res, res // 2), 4, "f4")
+        height_tex = self.gpu.texture2d((res, res // 2), 1, "f4")
+
+        # Ensure palettes are loaded for this appearance.
+        self.update_palettes(appearance)
+
+        try:
+            self.derive(
+                tracer_tex,
+                patch_n,
+                patch_s,
+                RHO_MAX,
+                BLEND_BAND,
+                color_tex,
+                height_tex,
+                appearance,
+                seed=seed,
+            )
+            rgb = self.gpu.read_texture(color_tex)[..., :3]
+        finally:
+            tracer_tex.release()
+            patch_n.release()
+            patch_s.release()
+            color_tex.release()
+            height_tex.release()
+
+        return rgb
