@@ -238,6 +238,102 @@ def run_grad_montgomery(
     return result
 
 
+def run_continuity(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    dt: float,
+    h_floor: float,
+) -> np.ndarray:
+    """GPU FCT two-pass mass-conserving continuity step.
+
+    Ports continuity_step() from sw_spike/operators.py.
+
+    Parameters
+    ----------
+    gpu     : GpuContext
+    h       : (H, W) float32 — cell-centred layer depth
+    u       : (H, W) float32 — zonal velocity at cell centres (east face)
+    v       : (H+1, W) float32 — meridional velocity at v-faces
+    dt      : float — timestep
+    h_floor : float — positivity floor
+
+    Returns
+    -------
+    (H, W) float32 — updated layer depth h_new.
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+
+    H, W = h.shape
+    ctx = gpu.ctx
+
+    # Input textures
+    tex_h = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_u = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    tex_h.write(h.tobytes())
+    tex_u.write(u.tobytes())
+    tex_v.write(v.tobytes())
+
+    # Scratch textures (pass A outputs, pass B inputs)
+    tex_h_low = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_cap   = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    # Output texture
+    tex_h_new = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    # Compile both kernel variants
+    k_a = gpu.compute(_KERNELS, "swp_continuity.comp", defines={"PASS": "0"})
+    k_b = gpu.compute(_KERNELS, "swp_continuity.comp", defines={"PASS": "1"})
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+
+    # ---------- Pass A ----------
+    _set(k_a, "u_size",    (W, H))
+    _set(k_a, "u_dt",      float(dt))
+    _set(k_a, "u_h_floor", float(h_floor))
+
+    tex_h.use(location=0); _set(k_a, "u_h", 0)
+    tex_u.use(location=1); _set(k_a, "u_u", 1)
+    tex_v.use(location=2); _set(k_a, "u_v", 2)
+
+    tex_h_low.bind_to_image(0, read=False, write=True)
+    tex_cap.bind_to_image(1,   read=False, write=True)
+
+    k_a.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # ---------- Pass B ----------
+    _set(k_b, "u_size",    (W, H))
+    _set(k_b, "u_dt",      float(dt))
+    _set(k_b, "u_h_floor", float(h_floor))
+
+    tex_h.use(location=0);     _set(k_b, "u_h",     0)
+    tex_u.use(location=1);     _set(k_b, "u_u",     1)
+    tex_v.use(location=2);     _set(k_b, "u_v",     2)
+    tex_h_low.use(location=3); _set(k_b, "u_h_low", 3)
+    tex_cap.use(location=4);   _set(k_b, "u_cap",   4)
+
+    tex_h_new.bind_to_image(0, read=False, write=True)
+
+    k_b.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # Download result
+    result = gpu.read_texture(tex_h_new)[..., 0]
+
+    # Release temporaries
+    for tex in (tex_h, tex_u, tex_v, tex_h_low, tex_cap, tex_h_new):
+        tex.release()
+
+    return result
+
+
 def run_vorticity(
     gpu: "GpuContext",
     u: np.ndarray,

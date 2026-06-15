@@ -85,3 +85,32 @@ def test_swp_vorticity_rigid_rotation(gpu):
     zg = solver.run_vorticity(gpu, u.astype(np.float32), v)
     analytic = 2 * U * np.sin(g.phi_v)[:, None] * np.ones((1, W))
     np.testing.assert_allclose(zg[2:63], analytic[2:63], atol=2e-2)  # interior corners
+
+
+def test_swp_continuity_matches_ref(gpu):
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import operators, grid
+    import numpy as np
+    rng=np.random.default_rng(2); W,H=64,32
+    h=np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
+    u=(0.05*rng.standard_normal((H,W))).astype(np.float32)
+    v=np.zeros((H+1,W),np.float32); v[1:H]=0.05*rng.standard_normal((H-1,W))
+    g=grid.Grid(W,H)
+    cpu=operators.continuity_step(h.astype(np.float64),u.astype(np.float64),v.astype(np.float64),g,dt=0.02,h_floor=0.05)
+    gpu_out=solver.run_continuity(gpu,h,u,v,dt=0.02,h_floor=0.05)
+    np.testing.assert_allclose(gpu_out, cpu, atol=2e-5)
+
+
+def test_swp_continuity_conserves_mass(gpu):
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid
+    import numpy as np
+    rng=np.random.default_rng(3); W,H=64,32
+    h=np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
+    u=(0.03*rng.standard_normal((H,W))).astype(np.float32); v=np.zeros((H+1,W),np.float32)
+    g=grid.Grid(W,H)
+    out=solver.run_continuity(gpu,h,u,v,dt=0.01,h_floor=0.05)
+    # cast to f64 BEFORE the cos-area sum (measure physical conservation, not f32 summation order)
+    area=g.cos_c[:,None].astype(np.float64)
+    m0=np.sum(h.astype(np.float64)*area); m1=np.sum(out.astype(np.float64)*area)
+    np.testing.assert_allclose(m1, m0, rtol=2e-6)
