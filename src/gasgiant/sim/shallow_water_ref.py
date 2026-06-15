@@ -448,6 +448,154 @@ def helmholtz_apply(
 
 
 # ---------------------------------------------------------------------------
+# M2-T3: Helmholtz RHS assembly and Picard contraction certificate
+# ---------------------------------------------------------------------------
+
+def helmholtz_rhs(
+    h_star_expl: np.ndarray,
+    u_star: np.ndarray,
+    v_star: np.ndarray,
+    dh_prev: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    omega: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+) -> np.ndarray:
+    """Assemble the RHS of the semi-implicit Helmholtz linear system.
+
+    Returns the RHS vector b such that the Picard iteration solves:
+        L_sym(dh) = b    (L_sym = helmholtz_apply)
+
+    The three terms are:
+
+    1. h_star_expl  — the explicit predictor height (the forcing).
+
+    2. -theta*dt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
+       where (u_cs, v_cs) = coriolis_sandwich(u_star, v_star, omega, g, dt).
+       This is the height tendency due to the reference-layer divergence of the
+       Coriolis-rotated predictor velocities.
+
+    3. +(theta*dt)**2 * gp * divergence_helmholtz(du_cor, dv_cor, H_ref_lat, g)
+       where (u_pg, v_pg) = (theta*dt*gp) * grad_faces(dh_prev)  (pressure-gradient
+       response to the previous increment), and
+       (u_rot, v_rot) = coriolis_sandwich(u_pg, v_pg, omega, g, dt),
+       and (du_cor, dv_cor) = (u_rot - u_pg, v_rot - v_pg).
+       This is the DEFERRED Coriolis correction: only the (Coriolis - I) part of
+       the implicit pressure-gradient response, lagged at dh_prev.  The identity
+       part (I) is already on the LHS in L_sym and must NOT appear here.
+
+    Zero-velocity invariant: with u_star=0, v_star=0, dh_prev=0 every correction
+    term vanishes and helmholtz_rhs returns h_star_expl exactly.
+    Proof: coriolis_sandwich(0,0)=(0,0) → term 2 = 0.
+           grad_faces(0)=(0,0) → u_pg=v_pg=0 → coriolis_sandwich(0,0)=(0,0)
+           → du_cor=dv_cor=0 → term 3 = 0.
+
+    NOTE: T4 (test_w2_geostrophic_stationary, test_backsub_continuity_consistency,
+    test_semi_implicit_reduces_to_m1_at_small_dt) is the end-to-end arbiter.
+    The split between the deferred Coriolis term and L_sym may be refined in T4
+    without violating the invariants tested here.
+
+    Parameters
+    ----------
+    h_star_expl : ndarray, shape (H, W)
+        Explicit predictor height (h^n minus the (1-theta) explicit gravity-wave
+        and FCT transport halves).
+    u_star : ndarray, shape (H, W)
+        Provisional zonal velocity after the explicit advection step.
+    v_star : ndarray, shape (H+1, W)
+        Provisional meridional velocity after the explicit advection step.
+    dh_prev : ndarray, shape (H, W)
+        Height increment from the previous Picard iteration (dh^(m)).
+    H_ref_lat : ndarray, shape (H,)
+        Reference layer thickness profile (latitude-only).
+    gp : float
+        Reduced gravity g'.
+    omega : float
+        Planetary rotation rate Omega (rad/s).
+    theta : float
+        Off-centering parameter (0=explicit, 1=fully implicit; 0.5 is standard).
+    dt : float
+        Time step.
+    g : Grid
+
+    Returns
+    -------
+    ndarray, shape (H, W)
+    """
+    tdt = theta * dt
+
+    # --- Term 2: height tendency from Coriolis-rotated predictor velocities ---
+    u_cs, v_cs = coriolis_sandwich(u_star, v_star, omega, g, dt)
+    term2 = -tdt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
+
+    # --- Term 3: deferred Coriolis correction (only (Coriolis - I) part) ---
+    # Implicit pressure-gradient velocity increment (face values).
+    gx_prev, gy_prev = grad_faces(dh_prev, g)
+    u_pg = tdt * gp * gx_prev          # (H, W)  u-faces
+    v_pg = tdt * gp * gy_prev          # (H+1,W) v-faces
+
+    # Coriolis rotation of the pressure-gradient increment.
+    u_rot, v_rot = coriolis_sandwich(u_pg, v_pg, omega, g, dt)
+
+    # Only the (Coriolis - I) part: subtract the identity contribution.
+    du_cor = u_rot - u_pg              # (H, W)
+    dv_cor = v_rot - v_pg              # (H+1,W)
+
+    term3 = tdt * divergence_helmholtz(du_cor, dv_cor, H_ref_lat, g)
+
+    return h_star_expl + term2 + term3
+
+
+def picard_contraction_factor(
+    omega: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+) -> float:
+    """Picard contraction factor for the deferred-Coriolis iteration.
+
+    The Picard iteration for the semi-implicit Helmholtz system contracts
+    because the deferred Coriolis term is a bounded perturbation.  The
+    contraction factor is bounded by the Cayley off-diagonal magnitude:
+
+        rho = 2*alpha / (1 + alpha**2)
+
+    evaluated at the worst-case (largest |f|) latitude, where:
+
+        alpha = 0.5 * |f|_max * dt
+        |f|_max = 2 * omega * max(|sin(phi_c)|)
+
+    This is the Cayley rotation off-diagonal entry: the (Coriolis - I)
+    operator has operator norm <= rho (the averaging sandwich has norm <= 1,
+    so the Cayley off-diagonal is the binding bound).
+
+    For rho < 1 the iteration is a contraction; for rho < 0.5 it converges
+    rapidly.  A pre-run check in T4 rejects configs with rho too close to 1.
+
+    Parameters
+    ----------
+    omega : float
+        Planetary rotation rate Omega (rad/s).
+    theta : float
+        Off-centering parameter (unused in the bound, included for API
+        consistency with the T4 caller which may extend the formula).
+    dt : float
+        Time step.
+    g : Grid
+
+    Returns
+    -------
+    float
+        Contraction factor rho in [0, 1).
+    """
+    f_max = 2.0 * omega * float(np.max(np.abs(np.sin(g.phi_c))))
+    alpha = 0.5 * f_max * dt
+    return 2.0 * alpha / (1.0 + alpha ** 2)
+
+
+# ---------------------------------------------------------------------------
 # Single-layer Montgomery potential and pressure gradient
 # ---------------------------------------------------------------------------
 

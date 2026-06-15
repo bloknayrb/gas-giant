@@ -19,6 +19,8 @@ from gasgiant.sim.shallow_water_ref import (
     divergence_helmholtz,
     grad_faces,
     helmholtz_apply,
+    helmholtz_rhs,
+    picard_contraction_factor,
     velocity_backsub,
 )
 
@@ -222,4 +224,110 @@ def test_velocity_backsub_nonzero_dh() -> None:
 
     assert not np.array_equal(u_back, u_sand), (
         "velocity_backsub with dh!=0 unexpectedly equals coriolis_sandwich (u)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# M2-T3: helmholtz_rhs and picard_contraction_factor
+# ---------------------------------------------------------------------------
+
+def test_rhs_zero_velocity() -> None:
+    """helmholtz_rhs with u_star=0, v_star=0, dh_prev=0 returns h_star_expl exactly.
+
+    The zero-velocity invariant: every correction term vanishes because
+    coriolis_sandwich(0,0)=(0,0) and grad_faces(0)=(0,0).
+    """
+    rng = np.random.default_rng(314)
+    W, H = 16, 8
+    g = _make_grid(W=W, H=H, a=1.0)
+
+    h_star_expl = rng.standard_normal((H, W))
+    u_star = np.zeros((H, W))
+    v_star = np.zeros((H + 1, W))
+    dh_prev = np.zeros((H, W))
+
+    H_ref_lat = 1.0 + 0.3 * np.cos(g.phi_c)   # positive, latitude-varying
+    gp = 9.8
+    omega = 7.292e-5
+    theta = 0.5
+    dt = 300.0
+
+    result = helmholtz_rhs(h_star_expl, u_star, v_star, dh_prev,
+                           H_ref_lat, gp, omega, theta, dt, g)
+
+    assert np.array_equal(result, h_star_expl), (
+        "helmholtz_rhs with zero velocities/dh_prev must equal h_star_expl exactly.\n"
+        f"Max abs diff: {np.max(np.abs(result - h_star_expl)):.3e}"
+    )
+
+
+def test_picard_rho_below_half() -> None:
+    """picard_contraction_factor returns rho = 2*alpha/(1+alpha^2) for the worst latitude.
+
+    - Benign config (small omega*dt): rho < 0.5.
+    - Stiff config (omega=1.0, dt=2.0, alpha~1): rho >= 0.5.
+    - Returned value matches closed-form for both configs.
+    """
+    W, H = 16, 8
+
+    # --- Benign: small alpha ---
+    g_benign = _make_grid(W=W, H=H, a=1.0)
+    omega_b = 7.292e-5
+    dt_b = 300.0
+    rho_b = picard_contraction_factor(omega_b, theta=0.5, dt=dt_b, g=g_benign)
+
+    # Verify closed form
+    f_max_b = 2.0 * omega_b * np.max(np.abs(np.sin(g_benign.phi_c)))
+    alpha_b = 0.5 * f_max_b * dt_b
+    expected_b = 2.0 * alpha_b / (1.0 + alpha_b ** 2)
+    np.testing.assert_allclose(rho_b, expected_b, rtol=1e-12,
+                                err_msg="picard_contraction_factor benign: formula mismatch")
+    assert rho_b < 0.5, (
+        f"Benign config should have rho < 0.5, got {rho_b:.6f}"
+    )
+
+    # --- Stiff: large alpha ---
+    g_stiff = _make_grid(W=W, H=H, a=1.0)
+    omega_s = 1.0
+    dt_s = 2.0
+    rho_s = picard_contraction_factor(omega_s, theta=0.5, dt=dt_s, g=g_stiff)
+
+    f_max_s = 2.0 * omega_s * np.max(np.abs(np.sin(g_stiff.phi_c)))
+    alpha_s = 0.5 * f_max_s * dt_s
+    expected_s = 2.0 * alpha_s / (1.0 + alpha_s ** 2)
+    np.testing.assert_allclose(rho_s, expected_s, rtol=1e-12,
+                                err_msg="picard_contraction_factor stiff: formula mismatch")
+    assert rho_s >= 0.5, (
+        f"Stiff config (omega={omega_s}, dt={dt_s}, alpha={alpha_s:.3f}) should have "
+        f"rho >= 0.5, got {rho_s:.6f}"
+    )
+
+
+def test_picard_factor_matches_formula() -> None:
+    """Independent recompute of rho from alpha at the worst-case latitude.
+
+    Uses a planetary-scale grid and verifies the binding latitude is
+    the one closest to the pole (largest |sin phi|).
+    """
+    W, H = 32, 16
+    g = _make_grid(W=W, H=H, a=6.4e6)
+    omega = 7.292e-5
+    theta = 0.6
+    dt = 600.0
+
+    rho = picard_contraction_factor(omega, theta, dt, g)
+
+    # Independent formula
+    sin_phi_max = np.max(np.abs(np.sin(g.phi_c)))
+    f_max = 2.0 * omega * sin_phi_max
+    alpha = 0.5 * f_max * dt
+    expected = 2.0 * alpha / (1.0 + alpha ** 2)
+
+    np.testing.assert_allclose(
+        rho, expected,
+        rtol=1e-13, atol=1e-15,
+        err_msg=(
+            f"picard_contraction_factor mismatch: got {rho:.15g}, "
+            f"expected {expected:.15g} (alpha={alpha:.6f})"
+        ),
     )
