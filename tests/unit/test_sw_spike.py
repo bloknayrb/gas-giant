@@ -199,3 +199,28 @@ def test_h_eq_has_band_structure():
     assert heq.shape == (64,)
     d = np.diff(np.sign(np.diff(heq)))
     assert np.count_nonzero(d) >= 6
+
+
+def test_relaxation_pulls_h_toward_h_eq():
+    from gasgiant.sim.sw_spike import init, solver
+    st = init.emergent_init(W=64, H=32, f0=4.0, gp=(1.0, 0.05),
+                            n_bands=8, band_contrast=0.4)
+    st.h1 = st.h1 + 1.0
+    before = np.mean(np.abs(st.h1 - st.h_eq1))
+    for _ in range(50):
+        st = solver.step(st, dt=st.dt)
+    after = np.mean(np.abs(st.h1 - st.h_eq1))
+    assert after < before
+
+
+def test_drag_reduces_bottom_layer_energy_without_forcing():
+    from gasgiant.sim.sw_spike import init, solver
+    st = init.emergent_init(W=64, H=32, f0=4.0, gp=(1.0, 0.05),
+                            n_bands=8, band_contrast=0.4)
+    st.tau_rad = 0.0
+    st.u2 = st.u2 + 0.2
+    e0 = float(np.sum(st.u2 ** 2))
+    for _ in range(50):
+        st = solver.step(st, dt=st.dt)
+    e1 = float(np.sum(st.u2 ** 2))
+    assert e1 < e0

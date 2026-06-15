@@ -55,6 +55,56 @@ def _layer_momentum(h, u, v, M, f0, g, dt):
     return u_new, v_new
 
 
+def _biharmonic(field: np.ndarray) -> np.ndarray:
+    """Grid-normalized ∇⁴ proxy: iterated 5-point Laplacian on the lon-lat grid."""
+    def lap(a):
+        return (np.roll(a, 1, 1) + np.roll(a, -1, 1)
+                + np.roll(a, 1, 0) + np.roll(a, -1, 0) - 4 * a)
+    return lap(lap(field))
+
+
+def _smoothstep(x: np.ndarray) -> np.ndarray:
+    x = np.clip(x, 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def _polar_sponge(phi: np.ndarray, lat0=np.radians(65.0), lat1=np.radians(85.0)) -> np.ndarray:
+    """Ramp 0->1 poleward of lat0; used to relax velocity->0 and h->h_eq near poles."""
+    return _smoothstep((np.abs(phi) - lat0) / (lat1 - lat0))
+
+
+def _apply_forcing(st: "SwState") -> None:
+    """All forcing is STEP-based (tau in steps), dt-independent — the explicit
+    gravity-wave dt is tiny so time-based timescales would be infeasible."""
+    g = st.g
+    # Thermal (mass) relaxation toward h_eq (per-step fraction 1/tau_rad).
+    if st.tau_rad > 0.0 and st.h_eq1 is not None:
+        st.h1 = st.h1 + (st.h_eq1 - st.h1) / st.tau_rad
+        st.h2 = st.h2 + (st.h_eq2 - st.h2) / st.tau_rad
+    # Rayleigh bottom drag on the lower layer (per-step).
+    if st.tau_drag > 0.0:
+        st.u2 = st.u2 * (1.0 - 1.0 / st.tau_drag)
+        st.v2 = st.v2 * (1.0 - 1.0 / st.tau_drag)
+    # Grid-normalized biharmonic hyperviscosity on velocity (v1.6 lesson: /64).
+    if st.nu4 > 0.0:
+        st.u1 = st.u1 - (st.nu4 / 64.0) * _biharmonic(st.u1)
+        st.u2 = st.u2 - (st.nu4 / 64.0) * _biharmonic(st.u2)
+    # Polar sponge: tame the lon-lat polar CFL/metric blowup (no AE patches in M0).
+    sc = _polar_sponge(g.phi_c)[:, None]    # (H,1) at centers
+    sv = _polar_sponge(g.phi_v)[:, None]    # (H+1,1) at v-faces
+    rate = 0.5
+    st.u1 = st.u1 * (1.0 - rate * sc)
+    st.u2 = st.u2 * (1.0 - rate * sc)
+    st.v1 = st.v1 * (1.0 - rate * sv)
+    st.v2 = st.v2 * (1.0 - rate * sv)
+    if st.h_eq1 is not None:
+        st.h1 = st.h1 + rate * sc * (st.h_eq1 - st.h1)
+        st.h2 = st.h2 + rate * sc * (st.h_eq2 - st.h2)
+    # Positivity floor.
+    st.h1 = np.maximum(st.h1, st.h_floor)
+    st.h2 = np.maximum(st.h2, st.h_floor)
+
+
 def step(st: SwState, dt: float) -> SwState:
     g = st.g
     M1, M2 = ops.montgomery_2layer(st.h1, st.h2, st.gp)
@@ -64,6 +114,7 @@ def step(st: SwState, dt: float) -> SwState:
     h2 = ops.continuity_step(st.h2, u2, v2, g, dt, st.h_floor)
     st.h1, st.u1, st.v1 = h1, u1, v1
     st.h2, st.u2, st.v2 = h2, u2, v2
+    _apply_forcing(st)
     return st
 
 
