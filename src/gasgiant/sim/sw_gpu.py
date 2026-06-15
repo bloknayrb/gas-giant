@@ -516,6 +516,9 @@ class SwGpuSolver:
         sg._tex_h.write(st.h.astype(np.float32).tobytes())
         sg._tex_u.write(st.u.astype(np.float32).tobytes())
         sg._tex_v.write(st.v.astype(np.float32).tobytes())
+        # Store initial velocity fields for velocity_l2_drift().
+        sg.u_init = st.u.astype(np.float32).copy()
+        sg.v_init = st.v.astype(np.float32).copy()
         return sg
 
     # -- Public I/O -----------------------------------------------------------
@@ -537,8 +540,16 @@ class SwGpuSolver:
         return float(np.sum(h * g.cos_c[:, None]) * self.a * self.a * g.dlam * g.dphi)
 
     def velocity_l2_drift(self) -> float:
-        """Placeholder — Tasks 11-13 populate u_init/v_init; return NaN for now."""
-        return float("nan")
+        """RMS drift from initial velocity: sqrt(mean((u-u_init)²) + mean((v-v_init)²)).
+
+        Mirrors shallow_water_ref.velocity_l2_drift(): u and v live on different
+        staggered grids (H,W) and (H+1,W), averaged separately and combined.
+        Requires u_init/v_init to have been set by from_williamson2().
+        """
+        _, u, v = self.download_state()
+        du = u - self.u_init
+        dv = v - self.v_init
+        return float(np.sqrt(np.mean(du * du) + np.mean(dv * dv)))
 
     # -- Step -----------------------------------------------------------------
 

@@ -269,3 +269,20 @@ def test_gpu_matches_ref_n_steps(gpu):
     assert np.max(np.abs(hg - st.h)) < 5e-4     # f32 GPU vs f64 CPU drift over 50 steps
     assert np.max(np.abs(ug - st.u)) < 5e-4
     assert np.max(np.abs(vg[1:H] - st.v[1:H])) < 5e-4
+
+
+# ---------------------------------------------------------------------------
+# Task 11: Williamson-2 GPU balance + l2 gate (80 steps)
+# ---------------------------------------------------------------------------
+
+def test_gpu_williamson2_balanced(gpu):
+    from gasgiant.sim import sw_gpu
+    import numpy as np
+    sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    m0 = sg.total_mass()
+    for _ in range(80):
+        sg.step()
+    hg, ug, vg = sg.download_state()
+    assert np.all(np.isfinite(hg))
+    assert sg.velocity_l2_drift() < 2e-2          # steady state stays balanced
+    np.testing.assert_allclose(sg.total_mass(), m0, rtol=1e-5)   # mass drift (R32F)
