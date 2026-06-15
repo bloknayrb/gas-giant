@@ -3,6 +3,14 @@ import pytest
 from gasgiant.sim import shallow_water_ref as ref
 
 
+def test_sw_gpu_state_roundtrip(gpu):
+    from gasgiant.sim import sw_gpu
+    h = np.random.default_rng(0).random((32, 64)).astype(np.float32)
+    st = sw_gpu.SwGpuState.create(gpu, W=64, H=32, a=1.0, gp=1.0, omega=2.0)
+    st.upload_h(h)
+    np.testing.assert_allclose(st.download_h(), h, atol=0)  # exact f4 round-trip
+
+
 def test_ref_williamson2_stays_balanced():
     from gasgiant.sim import shallow_water_ref as ref
     st = ref.williamson2_state(W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
