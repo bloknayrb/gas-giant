@@ -118,6 +118,10 @@ def step(st: SwState, dt: float) -> SwState:
     return st
 
 
+def relative_vorticity_top(st: SwState) -> np.ndarray:
+    return ops.vorticity(st.u1, st.v1, st.g)
+
+
 def kinetic_energy(st: SwState) -> float:
     area = st.g.cos_c[:, None]
     vc1 = 0.5 * (st.v1[0:st.g.H] + st.v1[1:st.g.H + 1])

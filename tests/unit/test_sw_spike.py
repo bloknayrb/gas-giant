@@ -224,3 +224,15 @@ def test_drag_reduces_bottom_layer_energy_without_forcing():
         st = solver.step(st, dt=st.dt)
     e1 = float(np.sum(st.u2 ** 2))
     assert e1 < e0
+
+
+def test_spinup_runs_stable_and_develops_eddies():
+    from gasgiant.sim.sw_spike import init, solver
+    st = init.emergent_init(W=96, H=48, f0=4.0, gp=(1.0, 0.05),
+                            n_bands=10, band_contrast=0.4)
+    z0 = np.std(solver.relative_vorticity_top(st))
+    for _ in range(300):
+        st = solver.step(st, dt=st.dt)
+    assert np.all(np.isfinite(st.h1))                 # no NaN over 300 steps
+    z1 = np.std(solver.relative_vorticity_top(st))
+    assert z1 > z0                                     # eddies (vorticity) grew
