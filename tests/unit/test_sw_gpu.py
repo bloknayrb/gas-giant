@@ -159,3 +159,32 @@ def test_gpu_grad_radius_scaling(gpu):
     gx2, gy2 = sw_gpu.run_grad(gpu, h, gp=1.0, a=2.0)
     np.testing.assert_allclose(gx2, 0.5 * gx1, rtol=1e-5)
     np.testing.assert_allclose(gy2[1:H], 0.5 * gy1[1:H], rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: GPU vorticity tests
+# ---------------------------------------------------------------------------
+
+def test_gpu_vorticity_matches_ref(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    for W, H in [(64, 32), (96, 48)]:
+        rng = np.random.default_rng(7)
+        u = (0.2 * rng.standard_normal((H, W))).astype(np.float32)
+        v = np.zeros((H+1, W), np.float32); v[1:H] = 0.2 * rng.standard_normal((H-1, W))
+        g = ref.Grid(W, H, a=1.0)
+        zc = ref.vorticity(u.astype(np.float64), v.astype(np.float64), g)
+        zg = sw_gpu.run_vorticity(gpu, u, v, a=1.0)
+        cos_v = g.cos_v[:, None]
+        np.testing.assert_allclose(cos_v * zg, cos_v * zc, atol=2e-5)  # pre-division (zeta ~ 1/cos_v)
+
+def test_gpu_vorticity_rigid_rotation_a2(gpu):
+    # u=U cosφ -> zeta = 2U sinφ / a ; at a=2 the analytic is halved.
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    W, H = 128, 64; U = 0.5; g = ref.Grid(W, H, a=2.0)
+    u = (U * g.cos_c)[:, None] * np.ones((1, W), np.float32)
+    v = np.zeros((H+1, W), np.float32)
+    zg = sw_gpu.run_vorticity(gpu, u.astype(np.float32), v, a=2.0)
+    analytic = (2*U*np.sin(g.phi_v)/2.0)[:, None] * np.ones((1, W))  # /a, a=2
+    np.testing.assert_allclose(zg[2:63], analytic[2:63], atol=2e-2)

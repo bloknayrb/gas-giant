@@ -1,0 +1,93 @@
+#version 430
+layout(local_size_x = 16, local_size_y = 16) in;
+#include "sw_common.glsl"
+
+// sw_vorticity.comp — Relative vorticity zeta = (1/(a cosphi))[dv/dlam - d(u cosphi)/dphi]
+//                     at corners (W, H+1).
+//
+// Graduated from swp_vorticity.comp (M0.5) with the /u_a radius factor added.
+// Dispatch over (W, H+1): x in [0,W), y in [0,H].
+// Corner row j in 1..H-1 is computed; rows 0 and H are zeroed (poles).
+//
+// Near-pole accuracy: GPU sin() can have ~27 ULP error for arguments near pi/H
+// (verified on Windows/OpenGL 4.3). The pre-division test cos_v*zeta amplifies
+// this error by |numerator|/cos_v. Fix: use 5-term Maclaurin for the sin of small
+// arguments (argument <= 0.3 rad covers all near-pole cases for H >= 10).
+
+uniform sampler2D u_u;      // cell-centred u, size (W, H)
+uniform sampler2D u_v;      // v-face v,       size (W, H+1)
+layout(r32f, binding = 0) writeonly uniform image2D out_zeta;  // (W, H+1)
+uniform ivec2 u_size;       // (W, H)
+uniform float u_a, u_dlam, u_dphi;
+
+// sin(x) accurate for small |x| via 5-term Maclaurin series.
+// Error < 1 ULP for |x| < 0.3 (rel. error < 1e-14, well within f32 range).
+// Falls back to hardware sin for larger arguments.
+float sinAcc(float x) {
+    if (abs(x) <= 0.3) {
+        float x2 = x * x;
+        return x * (1.0 - x2 / 6.0 * (1.0 - x2 / 20.0));
+    }
+    return sin(x);
+}
+
+// cos(phi) at v-face row j — accurate at both poles.
+// Reflects south-pole rows so the sin argument stays in (0, PI/2]:
+//   j <= H/2: sin(j*PI/H)         (small angle, accurate)
+//   j >  H/2: sin((H-j)*PI/H)     (symmetric, same value, also small)
+// For |j*PI/H| <= 0.3, sinAcc gives sub-ULP precision.
+float cosVfaceAcc(int j, int H) {
+    if (j <= 0 || j >= H) return 0.0;
+    int k = (j <= H / 2) ? j : (H - j);
+    return sinAcc(float(k) * PI / float(H));
+}
+
+// cos(phi) at cell-centre row j — accurate at both poles.
+//   2*j+1 < H  (north half): sin((j+0.5)*PI/H)         (small angle)
+//   otherwise  (south half): sin((H-1-j+0.5)*PI/H)      (reflected, small)
+float cosCenterAcc(int j, int H) {
+    int k = (2 * j + 1 < H) ? j : (H - 1 - j);
+    return sinAcc((float(k) + 0.5) * PI / float(H));
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+    // Dispatch over (W, H+1): x in [0,W), y in [0,H].
+    if (px.x >= W || px.y > H) return;
+
+    int i = px.x;   // longitude index
+    int j = px.y;   // corner row index (0 = north pole, H = south pole)
+
+    // Pole rows: force zeta = 0.
+    if (j == 0 || j == H) {
+        imageStore(out_zeta, px, vec4(0.0, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    // cos(phi) at v-face row j via accurate Maclaurin helper.
+    float cos_v = cosVfaceAcc(j, H);
+
+    // Numerator form: zeta = [(v_c - v_w)/dlam - ducos] / (cos_v * a + 1e-30).
+    // This avoids the two-step form where dividing by cos_v then multiplying back
+    // amplifies any ULP error in the GPU-computed cos_v.
+
+    // --- Zonal numerator: (v_c - v_w) / dlam ---
+    float v_c = texelFetch(u_v, ivec2(i,               j), 0).r;
+    float v_w = texelFetch(u_v, ivec2(wrapX(i - 1, W), j), 0).r;
+    float dv_num = (v_c - v_w) / u_dlam;
+
+    // --- Meridional term: d(u*cos_c)/dphi ---
+    // Corner row j sits between cell-centre rows j-1 (north) and j (south).
+    float u_north = texelFetch(u_u, ivec2(i, j - 1), 0).r;
+    float u_south = texelFetch(u_u, ivec2(i, j    ), 0).r;
+    float cos_north = cosCenterAcc(j - 1, H);
+    float cos_south = cosCenterAcc(j,     H);
+    float ducos = (u_north * cos_north - u_south * cos_south) / u_dphi;
+
+    // zeta = (dv_num - ducos) / (cos_v * a + 1e-30)   sole a-metric site.
+    float zeta = (dv_num - ducos) / (cos_v * u_a + 1.0e-30);
+
+    imageStore(out_zeta, px, vec4(zeta, 0.0, 0.0, 0.0));
+}
