@@ -16,6 +16,7 @@ a-scaling tests are the only way to catch a missing `a`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 
@@ -236,3 +237,212 @@ def pressure_grad(h: np.ndarray, gp: float, g: Grid):
     Returns (gx, gy) = grad_faces(M, g).
     """
     return grad_faces(gp * h, g)
+
+
+# ---------------------------------------------------------------------------
+# SwRefState dataclass for single-layer Williamson-2 integration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SwRefState:
+    """Single-layer shallow-water state for CPU reference integration.
+
+    Fields
+    ------
+    g      : Grid (W, H, a)
+    gp     : reduced gravity g' (float)
+    h      : layer thickness at centers (H, W)
+    u      : zonal velocity at u-faces (H, W)
+    v      : meridional velocity at v-faces (H+1, W)
+    dt     : time step (set by CFL at construction)
+    omega  : planetary rotation rate (½ f / sinφ)
+    u_init : copy of initial u for drift diagnostics
+    v_init : copy of initial v for drift diagnostics
+    h_floor: positivity floor for h (default 0.05)
+    """
+    g: Grid
+    gp: float
+    h: np.ndarray
+    u: np.ndarray
+    v: np.ndarray
+    dt: float
+    omega: float
+    u_init: np.ndarray
+    v_init: np.ndarray
+    h_floor: float = 0.05
+
+
+# ---------------------------------------------------------------------------
+# Williamson test 2 analytic initial condition
+# ---------------------------------------------------------------------------
+
+def williamson2_state(
+    W: int, H: int, a: float,
+    omega: float, u0: float, gp: float, h0: float,
+    h_floor: float = 0.05,
+) -> SwRefState:
+    """Steady geostrophic solid-body flow (Williamson test 2).
+
+    u = u0 · cosφ  (zonal, uniform in λ)
+    v = 0
+    h = h0 − (a·Ω·u0 + u0²/2) · sin²φ / g'
+
+    This is an exact steady solution → dt chosen by polar CFL.
+    """
+    g = Grid(W, H, a)
+
+    cos_c = g.cos_c[:, None] * np.ones((1, W))    # (H, W)
+    sin_c = np.sin(g.phi_c)[:, None] * np.ones((1, W))  # (H, W)
+
+    # Zonal velocity at u-faces (H, W): u = u0 cosφ, uniform in λ.
+    u = u0 * cos_c
+
+    # Meridional velocity at v-faces (H+1, W): zero.
+    v = np.zeros((H + 1, W))
+
+    # Analytic height at cell centers (H, W).
+    h = h0 - (a * omega * u0 + 0.5 * u0 * u0) * sin_c * sin_c / gp
+    h = np.maximum(h, h_floor)
+
+    # CFL dt: gravity wave speed, minimum grid spacing (polar CFL governs).
+    c_gw = np.sqrt(gp * h.max())
+    cos_min = np.maximum(g.cos_c.min(), 1e-6)   # avoid division by zero at poles
+    dx_min = min(cos_min * a * g.dlam, a * g.dphi)
+    dt = 0.3 * dx_min / c_gw
+
+    return SwRefState(
+        g=g, gp=gp, h=h.copy(), u=u.copy(), v=v.copy(),
+        dt=dt, omega=omega,
+        u_init=u.copy(), v_init=v.copy(),
+        h_floor=h_floor,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Single-layer momentum step (vector-invariant, relative vorticity flux only)
+# ---------------------------------------------------------------------------
+
+def momentum_step(
+    h: np.ndarray, u: np.ndarray, v: np.ndarray,
+    gp: float, omega: float, g: Grid, dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Vector-invariant momentum update for a single layer.
+
+    Advection+pressure are explicit; Coriolis is implicit (trapezoidal).
+    Only relative vorticity ζ enters the flux cross term; the full
+    Coriolis f = 2Ω sinφ is applied separately via coriolis_trapezoidal.
+
+    Matches sw_spike/solver.py::_layer_momentum with `a`-aware operators.
+    """
+    H, W = h.shape
+
+    # Relative vorticity at corners (H+1, W).
+    zeta = vorticity(u, v, g)
+
+    # Interpolate ζ to u-faces and v-faces.
+    zeta_uf = corner_to_uface(zeta)                                      # (H, W)
+    zeta_vf = 0.5 * (zeta + np.roll(zeta, 1, axis=1))                   # (H+1, W) corner→v-face
+
+    # v at cell centers, then interpolated to u-faces.
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])                                   # (H, W)
+    v_at_uf = center_to_uface(v_c)                                       # (H, W)
+
+    # u at cell centers, then interpolated to v-faces.
+    u_c = 0.5 * (u + np.roll(u, 1, axis=1))                              # (H, W) centers
+    u_at_vf = center_to_vface(u_c)                                       # (H+1, W)
+
+    # Bernoulli potential B = g'h + ½(u² + v_c²) at centers.
+    ke = 0.5 * (u * u + v_c * v_c)
+    B = gp * h + ke
+    gx, gy = grad_faces(B, g)                                             # face gradients
+
+    # Explicit step: advection by relative vorticity + pressure gradient.
+    u_star = u + dt * (zeta_uf * v_at_uf - gx)
+    v_star = v.copy()
+    v_star[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gy[1:H])
+
+    # Coriolis f at u-faces (H, W): f = 2Ω sinφ_c (same as sw_spike _f_uface).
+    f_uf = 2.0 * omega * np.sin(g.phi_c)[:, None] * np.ones((1, W))    # (H, W)
+
+    # Trapezoidal Coriolis rotation on (u_star, v_star collapsed to centers).
+    v_star_c = 0.5 * (v_star[0:H] + v_star[1:H + 1])                   # (H, W)
+    u_new, v_c_new = coriolis_trapezoidal(u_star, v_star_c, f_uf, dt)
+
+    # Scatter v_c_new back to v-faces: interior faces = avg of adjacent center rows.
+    v_new = np.zeros_like(v)
+    v_new[1:H] = 0.5 * (v_c_new[0:H - 1] + v_c_new[1:H])
+
+    return u_new, v_new
+
+
+# ---------------------------------------------------------------------------
+# Top-level step function
+# ---------------------------------------------------------------------------
+
+def step(st: SwRefState) -> SwRefState:
+    """Advance the state by one time step.
+
+    Order: momentum from (h_old, u_old, v_old), then continuity from
+    (h_old, u_new, v_new).  Matches sw_spike/solver.step.
+    """
+    u_new, v_new = momentum_step(st.h, st.u, st.v, st.gp, st.omega, st.g, st.dt)
+    h_new = continuity_step(st.h, u_new, v_new, st.g, st.dt, st.h_floor)
+    return SwRefState(
+        g=st.g, gp=st.gp,
+        h=h_new, u=u_new, v=v_new,
+        dt=st.dt, omega=st.omega,
+        u_init=st.u_init, v_init=st.v_init,
+        h_floor=st.h_floor,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+def total_mass(st: SwRefState) -> float:
+    """Global mass integral: Σ h · cosφ · a² dλ dφ."""
+    g = st.g
+    return float(np.sum(st.h * g.cos_c[:, None]) * g.a * g.a * g.dlam * g.dphi)
+
+
+def total_energy(st: SwRefState) -> float:
+    """Global total energy: Σ [½h(u² + v_c²) + ½g'h²] cosφ · a² dλ dφ."""
+    g = st.g
+    H = g.H
+    v_c = 0.5 * (st.v[0:H] + st.v[1:H + 1])
+    ke = 0.5 * st.h * (st.u * st.u + v_c * v_c)
+    pe = 0.5 * st.gp * st.h * st.h
+    return float(np.sum((ke + pe) * g.cos_c[:, None]) * g.a * g.a * g.dlam * g.dphi)
+
+
+def velocity_l2_drift(st: SwRefState) -> float:
+    """RMS drift from initial velocity: sqrt(mean_u((u-u0)²) + mean_v((v-v0)²)).
+
+    u and v live on different staggered grids (H,W) and (H+1,W), so each is
+    averaged separately and the combined RMS is returned.
+    """
+    du = st.u - st.u_init
+    dv = st.v - st.v_init
+    return float(np.sqrt(np.mean(du * du) + np.mean(dv * dv)))
+
+
+def total_potential_enstrophy(st: SwRefState) -> float:
+    """Global potential enstrophy diagnostic: Σ ½(ζ+f)²/h_corner · cosφ_corner · a² dλ dφ.
+
+    h_corner is averaged from adjacent cells; floored to avoid division by zero.
+    """
+    g = st.g
+    H, W = g.H, g.W
+    zeta = vorticity(st.u, st.v, g)           # (H+1, W)
+    f_v = 2.0 * st.omega * np.sin(g.phi_v)[:, None] * np.ones((1, W))  # (H+1, W)
+    abs_vort = zeta + f_v
+
+    # h at corners: average of four adjacent cells (clipped to interior).
+    h_corner = np.full((H + 1, W), st.h_floor)
+    h_corner[1:H] = 0.5 * (st.h[0:H - 1] + st.h[1:H])  # meridional avg (simplified)
+    h_corner = np.maximum(h_corner, st.h_floor)
+
+    cos_v = g.cos_v[:, None] * np.ones((1, W))
+    ens = 0.5 * abs_vort * abs_vort / h_corner * cos_v
+    return float(np.sum(ens) * g.a * g.a * g.dlam * g.dphi)

@@ -3,6 +3,42 @@ import pytest
 from gasgiant.sim import shallow_water_ref as ref
 
 
+def test_ref_williamson2_stays_balanced():
+    from gasgiant.sim import shallow_water_ref as ref
+    st = ref.williamson2_state(W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    m0 = ref.total_mass(st); e0 = ref.total_energy(st)
+    for _ in range(80):
+        st = ref.step(st)
+    assert np.all(np.isfinite(st.h))
+    assert ref.velocity_l2_drift(st) < 1e-2
+    np.testing.assert_allclose(ref.total_mass(st), m0, rtol=1e-11)
+
+
+def test_ref_williamson2_balanced_at_a2():
+    # VM3 integrated a!=1: a missing `a` in continuity or the mass area-weight is
+    # invisible at a=1.0 but breaks balance/conservation at a=2.0.
+    from gasgiant.sim import shallow_water_ref as ref
+    st = ref.williamson2_state(W=128, H=64, a=2.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    m0 = ref.total_mass(st)
+    for _ in range(80):
+        st = ref.step(st)
+    assert np.all(np.isfinite(st.h))
+    assert ref.velocity_l2_drift(st) < 1e-2
+    np.testing.assert_allclose(ref.total_mass(st), m0, rtol=1e-11)
+
+
+def test_ref_total_mass_radius_scaling():
+    # a^2 area weight: total_mass at a=2 is 4x a=1 for the same h field.
+    from gasgiant.sim import shallow_water_ref as ref
+    st1 = ref.williamson2_state(W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    st2 = ref.williamson2_state(W=64, H=32, a=2.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    # same h0/profile shape; compare mass of the SAME h on both grids:
+    import numpy as np
+    st2b = ref.williamson2_state(W=64, H=32, a=2.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    st2b.h = st1.h.copy()
+    np.testing.assert_allclose(ref.total_mass(st2b), 4.0 * ref.total_mass(st1), rtol=1e-12)
+
+
 def test_ref_divergence_solid_body_zero():
     g = ref.Grid(W=64, H=32, a=1.0)
     h = np.ones((32, 64)); u = np.full((32, 64), 0.3); v = np.zeros((33, 64))
