@@ -44,7 +44,7 @@ def emergent_init(W, H, f0, gp, n_bands, band_contrast, h_mean=5.0) -> SwState:
                  h1=np.maximum(h1, 0.1), u1=u1, v1=np.zeros((H + 1, W)),
                  h2=np.maximum(h2, 0.1), u2=np.zeros((H, W)), v2=np.zeros((H + 1, W)),
                  dt=dt,
-                 tau_rad=300.0, tau_drag=1000.0, nu4=0.2,
+                 tau_rad=300.0, tau_drag=1000.0, nu4=0.08,
                  h_eq1=np.repeat(heq1[:, None], W, axis=1),
                  h_eq2=np.repeat(heq2[:, None], W, axis=1))
     return st

@@ -122,6 +122,14 @@ def relative_vorticity_top(st: SwState) -> np.ndarray:
     return ops.vorticity(st.u1, st.v1, st.g)
 
 
+def eddy_vorticity_std(st: SwState) -> float:
+    """Std of the NON-ZONAL (eddy) top-layer vorticity — the emergent-eddy signal,
+    independent of the zonal-jet vorticity (which masks eddies in the total)."""
+    zeta = ops.vorticity(st.u1, st.v1, st.g)      # (H+1, W)
+    eddy = zeta - zeta.mean(axis=1, keepdims=True)  # subtract zonal mean
+    return float(np.std(eddy))
+
+
 def kinetic_energy(st: SwState) -> float:
     area = st.g.cos_c[:, None]
     vc1 = 0.5 * (st.v1[0:st.g.H] + st.v1[1:st.g.H + 1])

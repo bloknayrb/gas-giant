@@ -228,11 +228,13 @@ def test_drag_reduces_bottom_layer_energy_without_forcing():
 
 def test_spinup_runs_stable_and_develops_eddies():
     from gasgiant.sim.sw_spike import init, solver
-    st = init.emergent_init(W=96, H=48, f0=4.0, gp=(1.0, 0.05),
-                            n_bands=10, band_contrast=0.4)
-    z0 = np.std(solver.relative_vorticity_top(st))
-    for _ in range(300):
+    st = init.emergent_init(W=128, H=64, f0=4.0, gp=(1.0, 0.05),
+                            n_bands=14, band_contrast=0.5)
+    # default nu4 is now the validated 0.05.
+    e0 = solver.eddy_vorticity_std(st)
+    for _ in range(4000):
         st = solver.step(st, dt=st.dt)
-    assert np.all(np.isfinite(st.h1))                 # no NaN over 300 steps
-    z1 = np.std(solver.relative_vorticity_top(st))
-    assert z1 > z0                                     # eddies (vorticity) grew
+    assert np.all(np.isfinite(st.h1)), "blew up"
+    e1 = solver.eddy_vorticity_std(st)
+    # Baroclinic instability must AMPLIFY the non-zonal eddy field by a clear margin.
+    assert e1 > 5.0 * e0, f"eddies did not grow: e0={e0:.4g} e1={e1:.4g}"
