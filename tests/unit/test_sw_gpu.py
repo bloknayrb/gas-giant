@@ -311,3 +311,35 @@ def test_gpu_mass_closed_energy_bounded(gpu):
     assert e_drift < 1e-3, f"energy drift {e_drift:.2e} too large — possible asymmetric-flux/Bernoulli bug"
     # ENSTROPHY: diagnostic, finite/bounded (no hard closure gate).
     assert np.isfinite(sg.total_potential_enstrophy())
+
+
+# ---------------------------------------------------------------------------
+# Task 13: GPU determinism + hash gate (byte-identical + evolved)
+# ---------------------------------------------------------------------------
+
+def test_gpu_deterministic(gpu):
+    from gasgiant.sim import sw_gpu
+    import numpy as np, hashlib
+    def run():
+        sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+        for _ in range(50):
+            sg.step()
+        return sg.download_state()
+    h0, u0, v0 = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0).download_state()
+    a_state = run(); b_state = run()
+    # byte-identical between the two runs (GPU-vs-GPU, not a precision bound)
+    for fa, fb in zip(a_state, b_state):
+        assert np.array_equal(fa, fb), "GPU run not deterministic"
+    # SHA1 of concatenated f4 bytes matches
+    def sha(state):
+        m = hashlib.sha1()
+        for f in state: m.update(np.ascontiguousarray(f, dtype=np.float32).tobytes())
+        return m.hexdigest()
+    assert sha(a_state) == sha(b_state)
+    # field EVOLVED (no-op trap guard): Williamson-2 is a steady-state balanced flow
+    # so h stays byte-identical in f32; u and v accumulate numerical drift — check those.
+    # If BOTH are unchanged the solver is a no-op (the v1.6 trap).
+    h_final, u_final, v_final = a_state
+    h_init, u_init_arr, v_init_arr = h0, u0, v0
+    evolved = (not np.array_equal(u_final, u_init_arr)) or (not np.array_equal(v_final, v_init_arr))
+    assert evolved, "field did not evolve (u and v unchanged after 50 steps) — possible no-op"
