@@ -297,6 +297,12 @@ def test_picard_rho_below_half() -> None:
     expected_s = 2.0 * alpha_s / (1.0 + alpha_s ** 2)
     np.testing.assert_allclose(rho_s, expected_s, rtol=1e-12,
                                 err_msg="picard_contraction_factor stiff: formula mismatch")
+    # Anchor the parametric intent: rho = 2a/(1+a^2) >= 0.5 iff alpha >= tan(pi/12) ≈ 0.268.
+    # Asserting the threshold here keeps the stiff case from silently going vacuous if
+    # someone later lowers omega_s/dt_s below the rho>=0.5 boundary.
+    assert alpha_s >= 0.268, (
+        f"Stiff config must have alpha >= 0.268 to guarantee rho >= 0.5, got alpha={alpha_s:.3f}"
+    )
     assert rho_s >= 0.5, (
         f"Stiff config (omega={omega_s}, dt={dt_s}, alpha={alpha_s:.3f}) should have "
         f"rho >= 0.5, got {rho_s:.6f}"
