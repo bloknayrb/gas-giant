@@ -425,6 +425,7 @@ def run_forcing(
     v2: np.ndarray,
     params: dict,
     f0: float = 0.0,
+    forcing_dt_scale: float = 1.0,
 ) -> dict[str, np.ndarray]:
     """GPU forcing pass: relaxation → drag → hypervisc → polar sponge → floor.
 
@@ -432,12 +433,15 @@ def run_forcing(
 
     Parameters
     ----------
-    gpu    : GpuContext
-    fields : dict with keys h1, h2, u1, u2, h_eq1, h_eq2 — (H, W) float32
-    v1     : (H+1, W) float32 — layer-1 meridional velocity
-    v2     : (H+1, W) float32 — layer-2 meridional velocity
-    params : dict with keys tau_rad, tau_drag, nu4, h_floor (all float)
-    f0     : unused (kept for API symmetry with run_momentum)
+    gpu              : GpuContext
+    fields           : dict with keys h1, h2, u1, u2, h_eq1, h_eq2 — (H, W) float32
+    v1               : (H+1, W) float32 — layer-1 meridional velocity
+    v2               : (H+1, W) float32 — layer-2 meridional velocity
+    params           : dict with keys tau_rad, tau_drag, nu4, h_floor (all float)
+    f0               : unused (kept for API symmetry with run_momentum)
+    forcing_dt_scale : dt / dt_ref.  1.0 = original step-based behaviour (default).
+                       Scales relaxation, drag, and sponge fractions so the physical
+                       timescale is preserved across resolutions.
 
     Returns
     -------
@@ -459,6 +463,7 @@ def run_forcing(
     tau_drag = float(params.get("tau_drag", 0.0))
     nu4      = float(params.get("nu4",      0.0))
     h_floor  = float(params.get("h_floor",  0.05))
+    dt_scale = float(forcing_dt_scale)
 
     # ── allocate input textures ────────────────────────────────────────────
     tex_h1    = gpu.texture2d((W, H),     components=1, dtype="f4")
@@ -505,6 +510,7 @@ def run_forcing(
         _set(k, "u_tau_drag", tau_drag)
         _set(k, "u_nu4",      nu4)
         _set(k, "u_h_floor",  h_floor)
+        _set(k, "u_dt_scale", dt_scale)
 
     def _bind_input_samplers(k):
         tex_h1.use(location=0);   _set(k, "u_h1",    0)
@@ -604,6 +610,7 @@ class SwpSolver:
         tau_rad: float,
         tau_drag: float,
         nu4: float,
+        forcing_dt_scale: float = 1.0,
     ) -> None:
         import moderngl  # noqa: PLC0415
 
@@ -619,6 +626,7 @@ class SwpSolver:
         self.tau_rad = float(tau_rad)
         self.tau_drag = float(tau_drag)
         self.nu4 = float(nu4)
+        self.forcing_dt_scale = float(forcing_dt_scale)
 
         # Dispatch group counts.
         gx_c  = (W + _GROUP - 1) // _GROUP
@@ -684,8 +692,17 @@ class SwpSolver:
     # ── Public constructors / I/O ─────────────────────────────────────────────
 
     @classmethod
-    def from_cpu_state(cls, gpu: "GpuContext", st) -> "SwpSolver":
-        """Build a SwpSolver from a CPU ``SwState``, copying all fields to GPU."""
+    def from_cpu_state(cls, gpu: "GpuContext", st, forcing_dt_scale: float = 1.0) -> "SwpSolver":
+        """Build a SwpSolver from a CPU ``SwState``, copying all fields to GPU.
+
+        Parameters
+        ----------
+        gpu              : GpuContext
+        st               : CPU SwState (sw_spike.solver.SwState)
+        forcing_dt_scale : dt / dt_ref.  1.0 = original step-based behaviour.
+                           Pass dt/dt_ref to keep the physical forcing timescale
+                           fixed at resolutions where dt < dt_ref.
+        """
         sg = cls(
             gpu=gpu,
             W=st.g.W,
@@ -697,6 +714,7 @@ class SwpSolver:
             tau_rad=st.tau_rad,
             tau_drag=st.tau_drag,
             nu4=st.nu4,
+            forcing_dt_scale=forcing_dt_scale,
         )
         sg.upload("h1", st.h1)
         sg.upload("u1", st.u1)
@@ -899,6 +917,7 @@ class SwpSolver:
         tau_drag = self.tau_drag
         nu4      = self.nu4
         h_floor  = self.h_floor
+        dt_scale = self.forcing_dt_scale
 
         def _uniforms(k):
             _set(k, "u_size",     (W, H))
@@ -906,6 +925,7 @@ class SwpSolver:
             _set(k, "u_tau_drag", tau_drag)
             _set(k, "u_nu4",      nu4)
             _set(k, "u_h_floor",  h_floor)
+            _set(k, "u_dt_scale", dt_scale)
 
         # Pass 0.
         k0 = self._k_force0

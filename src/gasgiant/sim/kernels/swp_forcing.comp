@@ -38,6 +38,10 @@ uniform float  u_tau_rad;    // relaxation timescale (steps); 0 = disabled
 uniform float  u_tau_drag;   // drag timescale (steps); 0 = disabled
 uniform float  u_nu4;        // hyperviscosity coefficient; 0 = disabled
 uniform float  u_h_floor;    // positivity floor
+// Physical-time forcing rescale: dt/dt_ref.  1.0 = original step-based behaviour.
+// Multiplied into per-step fractions so the physical relaxation/drag rate is
+// preserved at any resolution (at dt=dt_ref it reduces to the original M0 forcing).
+uniform float  u_dt_scale;   // dt / dt_ref; default 1.0
 
 // PASS 0 inputs (cell-centred fields H,W; v-face H+1,W)
 uniform sampler2D u_h1;      // (W, H)
@@ -91,9 +95,12 @@ float polar_sponge_vface(int row, int H) {
     return sponge_smooth((abs(phi) - LAT0) / (LAT1 - LAT0));
 }
 
-// Biharmonic wrap: replicate np.roll axis=0 (meridional wrap, row -1 -> H-1, row H -> 0)
+// Biharmonic wrap: replicate np.roll axis=0 (meridional wrap, row -1 -> H-1, row H -> 0).
+// Use branch form to avoid GLSL modulo sign issues on non-power-of-2 H.
 int wrapY(int y, int H) {
-    return ((y % H) + H) % H;
+    if (y < 0)  return y + H;
+    if (y >= H) return y - H;
+    return y;
 }
 
 float fetchCenterField(sampler2D tex, int i, int j, int W, int H) {
@@ -142,9 +149,9 @@ void main() {
         float v1_val = texelFetch(u_v1, px, 0).r;
         float v2_val = texelFetch(u_v2, px, 0).r;
 
-        // Drag on v2 (j==0 and j==H are pole faces, v=0; drag * 0 = 0)
+        // Drag on v2 (j==0 and j==H are pole faces, v=0; drag * 0 = 0; scaled by dt/dt_ref)
         if (u_tau_drag > 0.0) {
-            v2_val = v2_val * (1.0 - 1.0 / u_tau_drag);
+            v2_val = v2_val * (1.0 - u_dt_scale / u_tau_drag);
         }
 
         imageStore(out_v1, px, vec4(v1_val, 0.0, 0.0, 0.0));
@@ -160,15 +167,15 @@ void main() {
         float heq1    = texelFetch(u_h_eq1, px, 0).r;
         float heq2    = texelFetch(u_h_eq2, px, 0).r;
 
-        // Step 1: relaxation
+        // Step 1: relaxation (scaled by dt/dt_ref for physical-time invariance)
         if (u_tau_rad > 0.0) {
-            h1_val = h1_val + (heq1 - h1_val) / u_tau_rad;
-            h2_val = h2_val + (heq2 - h2_val) / u_tau_rad;
+            h1_val = h1_val + (heq1 - h1_val) * (u_dt_scale / u_tau_rad);
+            h2_val = h2_val + (heq2 - h2_val) * (u_dt_scale / u_tau_rad);
         }
 
-        // Step 2: drag on u2 (u1 is NOT dragged)
+        // Step 2: drag on u2 (u1 is NOT dragged; scaled by dt/dt_ref)
         if (u_tau_drag > 0.0) {
-            u2_val = u2_val * (1.0 - 1.0 / u_tau_drag);
+            u2_val = u2_val * (1.0 - u_dt_scale / u_tau_drag);
         }
 
         imageStore(out_h1, px, vec4(h1_val, 0.0, 0.0, 0.0));
@@ -187,9 +194,9 @@ void main() {
         float v1_val = texelFetch(u_s_v1, px, 0).r;
         float v2_val = texelFetch(u_s_v2, px, 0).r;
 
-        // Step 4: polar sponge on v1, v2
+        // Step 4: polar sponge on v1, v2 (rate scaled by dt/dt_ref for physical-time invariance)
         float sv   = polar_sponge_vface(j, H);
-        float rate = 0.5;
+        float rate = 0.5 * u_dt_scale;
         v1_val = v1_val * (1.0 - rate * sv);
         v2_val = v2_val * (1.0 - rate * sv);
 
@@ -214,9 +221,9 @@ void main() {
             u2_val = u2_val - (u_nu4 / 64.0) * bh_u2;
         }
 
-        // Step 4: polar sponge on u1, u2, h1, h2
+        // Step 4: polar sponge on u1, u2, h1, h2 (rate scaled by dt/dt_ref)
         float sc   = polar_sponge_center(j, H);
-        float rate = 0.5;
+        float rate = 0.5 * u_dt_scale;
         u1_val = u1_val * (1.0 - rate * sc);
         u2_val = u2_val * (1.0 - rate * sc);
         h1_val = h1_val + rate * sc * (heq1 - h1_val);

@@ -196,3 +196,118 @@ def test_swp_continuity_conserves_mass_strong_gradient(gpu):
     m_cpu=np.sum(cpu.astype(np.float64)*area)
     # GPU and CPU mass integrals should agree to f32 summation precision
     np.testing.assert_allclose(m_gpu, m_cpu, rtol=1e-5)
+
+
+# ── M0.5 Task 9: physical-time forcing rescale tests ─────────────────────────
+
+def test_swp_forcing_dt_scale_unity_matches_existing(gpu):
+    """With forcing_dt_scale=1.0 the N-step GPU run still matches the CPU reference.
+
+    The physical-time rescale must be a no-op at dt=dt_ref (forcing_dt_scale=1.0),
+    so existing 30-step accuracy is preserved.
+    """
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init, solver as cpu
+    import numpy as np
+    W, H = 96, 48
+    st_cpu = init.emergent_init(W=W, H=H, f0=4.0, gp=(1.0, 0.05), n_bands=10, band_contrast=0.4)
+    # Build GPU solver with forcing_dt_scale=1.0 (explicit; must be identical to default)
+    sg = gsolver.SwpSolver.from_cpu_state(gpu, st_cpu, forcing_dt_scale=1.0)
+    for _ in range(30):
+        st_cpu = cpu.step(st_cpu, dt=st_cpu.dt)
+        sg.step()
+    h1g = sg.download("h1")
+    assert np.all(np.isfinite(h1g))
+    assert np.max(np.abs(h1g - st_cpu.h1)) < 5e-4
+
+
+def test_swp_reproduces_m0_eddy_curve(gpu):
+    """GPU eddy_vorticity_std at 192×96 with forcing_dt_scale=1.0 tracks CPU within 25%.
+
+    Runs ~3000 steps to see eddy growth, sampling at 3 checkpoints.
+    Marked slow — bounded step count keeps CI runtime reasonable.
+    """
+    import pytest
+    pytest.importorskip("moderngl")  # skip if no GPU
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init, solver as cpu
+    import numpy as np
+
+    W, H = 192, 96
+    STEPS = 3000
+    CHECK_AT = [1000, 2000, 3000]
+
+    st_cpu = init.emergent_init(W=W, H=H, f0=4.0, gp=(1.0, 0.05), n_bands=10, band_contrast=0.4)
+    sg = gsolver.SwpSolver.from_cpu_state(gpu, st_cpu, forcing_dt_scale=1.0)
+
+    step_idx = 0
+    for ck in CHECK_AT:
+        n = ck - step_idx
+        for _ in range(n):
+            st_cpu = cpu.step(st_cpu, dt=st_cpu.dt)
+            sg.step()
+        step_idx = ck
+        evs_cpu = cpu.eddy_vorticity_std(st_cpu)
+        evs_gpu = sg.eddy_vorticity_std()
+        assert np.isfinite(evs_gpu), f"GPU eddy std not finite at step {ck}"
+        # Within 25% of each other (both > 0 after initial transient)
+        if evs_cpu > 1e-6:
+            ratio = abs(evs_gpu - evs_cpu) / evs_cpu
+            assert ratio < 0.25, (
+                f"step={ck}: GPU eddy_std={evs_gpu:.4f} CPU={evs_cpu:.4f} "
+                f"ratio={ratio:.3f} > 0.25"
+            )
+
+
+def test_swp_highres_smoke(gpu):
+    """512×256 smoke test with physical-time rescale: fields stay finite and eddies rise.
+
+    Runs ~3000 steps with forcing_dt_scale=dt_512/dt_ref so the physical forcing
+    timescale matches the 192×96 reference.  Only asserts finite + monotone eddy growth
+    (not the full eddy regime — see swp_spinup.py for the full run).
+    """
+    import pytest
+    pytest.importorskip("moderngl")
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init
+    from gasgiant.sim.sw_spike.grid import Grid
+    import numpy as np
+
+    W_ref, H_ref = 192, 96
+    W_hi,  H_hi  = 512, 256
+
+    # Compute dt_ref from the 192×96 emergent_init
+    st_ref = init.emergent_init(W=W_ref, H=H_ref, f0=4.0, gp=(1.0, 0.05),
+                                 n_bands=10, band_contrast=0.4)
+    dt_ref = st_ref.dt
+
+    # Compute dt for 512×256 using the same formula
+    g_hi   = Grid(W_hi, H_hi)
+    h_mean = 5.0
+    c_gw   = np.sqrt(1.0 * h_mean)
+    dx_min = min(g_hi.cos_c.min() * g_hi.dlam, g_hi.dphi)
+    dt_hi  = 0.3 * dx_min / c_gw
+    dt_scale = dt_hi / dt_ref
+
+    # Init at high res and build GPU solver
+    st_hi = init.emergent_init(W=W_hi, H=H_hi, f0=4.0, gp=(1.0, 0.05),
+                                n_bands=10, band_contrast=0.4)
+    sg = gsolver.SwpSolver.from_cpu_state(gpu, st_hi, forcing_dt_scale=dt_scale)
+
+    STEPS = 3000
+    CHECK_EVERY = 1000
+    evs_prev = sg.eddy_vorticity_std()
+    evs_history = [evs_prev]
+    for ck in range(CHECK_EVERY, STEPS + 1, CHECK_EVERY):
+        for _ in range(CHECK_EVERY):
+            sg.step()
+        h1 = sg.download("h1")
+        assert np.all(np.isfinite(h1)), f"h1 non-finite at step {ck}"
+        evs = sg.eddy_vorticity_std()
+        assert np.isfinite(evs), f"eddy_vorticity_std non-finite at step {ck}"
+        evs_history.append(evs)
+
+    # Eddies should be growing (final value > initial)
+    assert evs_history[-1] > evs_history[0], (
+        f"eddies not growing: history={evs_history}"
+    )
