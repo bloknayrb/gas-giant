@@ -1,9 +1,11 @@
-"""Unit tests for M2-T1 adjoint Helmholtz operator pair.
+"""Unit tests for M2-T1 adjoint Helmholtz operator pair and M2-T2 Coriolis sandwich.
 
 Tests:
 - test_helmholtz_adjoint: exact discrete adjoint identity <grad h, U>_faces == -<h, div(U,g)>_centers
   for both a=1.0 and a=6.4e6, to rtol/atol 1e-12.
 - test_helmholtz_conserves: mass conservation of (L - I), SPD sanity, symmetry of helmholtz_apply.
+- test_coriolis_sandwich_matches_momentum: byte-identical to momentum_step's inline Coriolis sequence.
+- test_velocity_backsub_zero_dh: with dh=0, backsub equals coriolis_sandwich.
 """
 from __future__ import annotations
 
@@ -12,9 +14,12 @@ import pytest
 
 from gasgiant.sim.shallow_water_ref import (
     Grid,
+    coriolis_trapezoidal,
+    coriolis_sandwich,
     divergence_helmholtz,
     grad_faces,
     helmholtz_apply,
+    velocity_backsub,
 )
 
 
@@ -129,3 +134,72 @@ def test_helmholtz_conserves() -> None:
     # --- 3. SPD: <x, Lx> > 0 ---
     xLx = _inner_centers(x, Lx, g)
     assert xLx > 0.0, f"helmholtz_apply is not positive definite: <x,Lx>={xLx}"
+
+
+# ---------------------------------------------------------------------------
+# M2-T2: coriolis_sandwich and velocity_backsub
+# ---------------------------------------------------------------------------
+
+def test_coriolis_sandwich_matches_momentum() -> None:
+    """coriolis_sandwich is byte-identical to the Coriolis sandwich in momentum_step.
+
+    Replicates momentum_step's exact inline Coriolis sequence and asserts
+    np.array_equal (not just allclose) against coriolis_sandwich output.
+    """
+    rng = np.random.default_rng(1234)
+    W, H = 16, 8
+    g = _make_grid(W=W, H=H, a=6.4e6)
+    omega = 7.292e-5
+    dt = 300.0
+
+    u_star = rng.standard_normal((H, W))
+    v_star = rng.standard_normal((H + 1, W))
+    # Zero pole rows as momentum_step produces (v_star[0] and v_star[H] are
+    # never updated by the explicit step — they stay zero from v.copy()).
+    v_star[0] = 0.0
+    v_star[H] = 0.0
+
+    # --- Reference: replicate momentum_step's inline Coriolis sandwich ---
+    f_uf = 2.0 * omega * np.sin(g.phi_c)[:, None] * np.ones((1, W))    # (H, W)
+    v_star_c = 0.5 * (v_star[0:H] + v_star[1:H + 1])                   # (H, W)
+    u_ref, v_c_ref = coriolis_trapezoidal(u_star, v_star_c, f_uf, dt)
+    v_ref = np.zeros_like(v_star)
+    v_ref[1:H] = 0.5 * (v_c_ref[0:H - 1] + v_c_ref[1:H])
+
+    # --- Function under test ---
+    u_got, v_got = coriolis_sandwich(u_star, v_star, omega, g, dt)
+
+    assert np.array_equal(u_got, u_ref), (
+        "coriolis_sandwich u output differs byte-for-byte from momentum_step inline sequence"
+    )
+    assert np.array_equal(v_got, v_ref), (
+        "coriolis_sandwich v output differs byte-for-byte from momentum_step inline sequence"
+    )
+
+
+def test_velocity_backsub_zero_dh() -> None:
+    """velocity_backsub with dh=0 equals coriolis_sandwich (no pressure correction)."""
+    rng = np.random.default_rng(5678)
+    W, H = 16, 8
+    g = _make_grid(W=W, H=H, a=6.4e6)
+    omega = 7.292e-5
+    dt = 300.0
+    gp = 9.8
+    theta = 0.5
+
+    u_star = rng.standard_normal((H, W))
+    v_star = rng.standard_normal((H + 1, W))
+    v_star[0] = 0.0
+    v_star[H] = 0.0
+
+    dh = np.zeros((H, W))
+
+    u_back, v_back = velocity_backsub(u_star, v_star, dh, gp, theta, dt, omega, g)
+    u_sand, v_sand = coriolis_sandwich(u_star, v_star, omega, g, dt)
+
+    assert np.array_equal(u_back, u_sand), (
+        "velocity_backsub with dh=0 differs from coriolis_sandwich in u"
+    )
+    assert np.array_equal(v_back, v_sand), (
+        "velocity_backsub with dh=0 differs from coriolis_sandwich in v"
+    )

@@ -170,6 +170,98 @@ def coriolis_trapezoidal(u: np.ndarray, v: np.ndarray, f: np.ndarray, dt: float)
     return u_new, v_new
 
 
+def coriolis_sandwich(
+    u: np.ndarray,
+    v: np.ndarray,
+    omega: float,
+    g: Grid,
+    dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Coriolis sandwich: collapse v to centers, rotate, scatter back to v-faces.
+
+    Reproduces the exact sequence in momentum_step: forward interpolation
+    (S_fwd), trapezoidal rotation, and backward scatter (S_back).
+
+    Parameters
+    ----------
+    u : ndarray, shape (H, W)
+        Zonal velocity on u-faces.
+    v : ndarray, shape (H+1, W)
+        Meridional velocity on v-faces.  Pole rows (0 and H) must be zero.
+    omega : float
+        Planetary rotation rate Ω (rad/s).
+    g : Grid
+    dt : float
+        Time step.
+
+    Returns
+    -------
+    u_new : ndarray, shape (H, W)
+    v_new : ndarray, shape (H+1, W)
+        Pole rows remain zero.
+    """
+    H, W = u.shape
+
+    # Coriolis parameter at u-faces / cell-center latitude (H, W).
+    f_uf = 2.0 * omega * np.sin(g.phi_c)[:, None] * np.ones((1, W))
+
+    # S_fwd: collapse v from v-faces to cell centers.
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])                   # (H, W)
+
+    # Trapezoidal rotation on the center-collocated pair.
+    u_new, v_c_new = coriolis_trapezoidal(u, v_c, f_uf, dt)
+
+    # S_back: scatter v back to v-faces; pole rows stay zero.
+    v_new = np.zeros_like(v)
+    v_new[1:H] = 0.5 * (v_c_new[0:H - 1] + v_c_new[1:H])
+
+    return u_new, v_new
+
+
+def velocity_backsub(
+    u_star: np.ndarray,
+    v_star: np.ndarray,
+    dh: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    omega: float,
+    g: Grid,
+) -> tuple[np.ndarray, np.ndarray]:
+    """M2 semi-implicit back-substitution: subtract pressure gradient, then rotate.
+
+    Computes the implicit pressure-gradient correction and applies the Coriolis
+    sandwich.  When dh is zero the output equals coriolis_sandwich exactly.
+
+    Parameters
+    ----------
+    u_star : ndarray, shape (H, W)
+        Provisional zonal velocity after the explicit step.
+    v_star : ndarray, shape (H+1, W)
+        Provisional meridional velocity after the explicit step.
+    dh : ndarray, shape (H, W)
+        Height perturbation from the semi-implicit solver.
+    gp : float
+        Reduced gravity g'.
+    theta : float
+        Implicitness parameter (0=explicit, 1=fully implicit).
+    dt : float
+        Time step.
+    omega : float
+        Planetary rotation rate Ω (rad/s).
+    g : Grid
+
+    Returns
+    -------
+    u_new : ndarray, shape (H, W)
+    v_new : ndarray, shape (H+1, W)
+    """
+    gx, gy = grad_faces(dh, g)                            # (H,W), (H+1,W)
+    u_corr = u_star - theta * dt * gp * gx
+    v_corr = v_star - theta * dt * gp * gy
+    return coriolis_sandwich(u_corr, v_corr, omega, g, dt)
+
+
 def _mass_fluxes(h, u, v, g):
     """Low-order (donor-cell / upwind) and high-order (centered) mass fluxes."""
     H, W = h.shape
