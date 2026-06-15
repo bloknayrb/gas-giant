@@ -115,3 +115,14 @@ def test_vorticity_of_rigid_rotation_constant_sign():
     analytic = 2 * U * np.sin(g.phi_v)[:, None] * np.ones((1, 128))
     inner = slice(2, 63)
     np.testing.assert_allclose(zeta[inner], analytic[inner], atol=2e-2)
+
+
+def test_trapezoidal_coriolis_conserves_speed():
+    # Pure inertial rotation: |(u,v)| must be preserved by the implicit rotation.
+    from gasgiant.sim.sw_spike import operators
+    u = np.array([[1.0]]); v = np.array([[0.0]])
+    f = np.array([[0.7]]); dt = 0.3
+    for _ in range(200):
+        u, v = operators.coriolis_trapezoidal(u, v, f, dt)
+    speed = np.hypot(u, v)
+    np.testing.assert_allclose(speed, 1.0, atol=1e-10)

@@ -77,3 +77,16 @@ def vorticity(u: np.ndarray, v: np.ndarray, g: Grid) -> np.ndarray:
 def corner_to_uface(zc: np.ndarray) -> np.ndarray:
     """Average corner field (H+1,W) to u-faces (H,W): mean of the 2 corners in φ."""
     return 0.5 * (zc[0:-1] + zc[1:])
+
+
+def coriolis_trapezoidal(u: np.ndarray, v: np.ndarray, f: np.ndarray, dt: float):
+    """Energy-neutral (norm-preserving) implicit Coriolis: trapezoidal rotation.
+
+    Solves (u^{n+1}-u^n)/dt = f v*, (v^{n+1}-v^n)/dt = -f u*, with * = ½(n+n+1).
+    Closed form is the Cayley rotation by angle θ=f dt.
+    """
+    a = 0.5 * f * dt
+    denom = 1.0 + a * a
+    u_new = ((1.0 - a * a) * u + 2.0 * a * v) / denom
+    v_new = ((1.0 - a * a) * v - 2.0 * a * u) / denom
+    return u_new, v_new
