@@ -415,6 +415,174 @@ def run_grad(
     return result_gx, result_gy
 
 
+def _upload_href(gpu: "GpuContext", H_ref_lat: np.ndarray, H: int):
+    """Upload H_ref_lat (H,) as a (1,H) R32F texture sampled by row index.
+
+    Cast to float32 before upload: reference_depth returns float64.
+    """
+    href = np.asarray(H_ref_lat, dtype=np.float32).reshape(H)
+    if href.shape != (H,):
+        raise ValueError(f"H_ref_lat must be shape ({H},), got {href.shape}")
+    tex = gpu.texture2d((1, H), components=1, dtype="f4")
+    tex.write(href.tobytes())
+    return tex
+
+
+def run_helmholtz_apply(
+    gpu: "GpuContext",
+    dh: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    a: float,
+) -> np.ndarray:
+    """GPU L_sym(dh) = dh - (theta*dt)^2*gp * div_H(grad(dh)), shape (H, W).
+
+    Ports helmholtz_apply() from shallow_water_ref.py exactly (radius `a`).
+    """
+    dh = np.asarray(dh, dtype=np.float32)
+    H, W = dh.shape
+    ctx = gpu.ctx
+    alpha = (theta * dt) ** 2 * gp
+
+    tex_dh   = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_dh.write(dh.tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+
+    k = gpu.compute(_KERNELS, "sw_helmholtz_apply.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_alpha", float(alpha))
+    _set(k, "u_a",     float(a))
+    _set(k, "u_dlam",  2.0 * math.pi / W)
+    _set(k, "u_dphi",  math.pi / H)
+    tex_dh.use(location=0);   _set(k, "u_dh",   0)
+    tex_href.use(location=1); _set(k, "u_Href", 1)
+    tex_out.bind_to_image(0, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_out)[..., 0]
+    for tex in (tex_dh, tex_out, tex_href):
+        tex.release()
+    return result
+
+
+def run_helmholtz_residual(
+    gpu: "GpuContext",
+    dh: np.ndarray,
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    a: float,
+) -> np.ndarray:
+    """GPU Helmholtz residual L_sym(dh) - rhs, shape (H, W)."""
+    dh = np.asarray(dh, dtype=np.float32)
+    rhs = np.asarray(rhs, dtype=np.float32)
+    H, W = dh.shape
+    ctx = gpu.ctx
+    alpha = (theta * dt) ** 2 * gp
+
+    tex_dh   = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_rhs  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_dh.write(dh.tobytes())
+    tex_rhs.write(rhs.tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+
+    k = gpu.compute(_KERNELS, "sw_helmholtz_residual.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_alpha", float(alpha))
+    _set(k, "u_a",     float(a))
+    _set(k, "u_dlam",  2.0 * math.pi / W)
+    _set(k, "u_dphi",  math.pi / H)
+    tex_dh.use(location=0);   _set(k, "u_dh",   0)
+    tex_href.use(location=1); _set(k, "u_Href", 1)
+    tex_rhs.use(location=2);  _set(k, "u_rhs",  2)
+    tex_out.bind_to_image(0, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_out)[..., 0]
+    for tex in (tex_dh, tex_rhs, tex_out, tex_href):
+        tex.release()
+    return result
+
+
+def run_helmholtz_sor(
+    gpu: "GpuContext",
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    a: float,
+    n_iters: int,
+    sor_omega: float,
+    dh0: np.ndarray | None = None,
+) -> np.ndarray:
+    """GPU fixed-count red/black SOR for L_sym dh = rhs, shape (H, W).
+
+    Ports helmholtz_sor() from shallow_water_ref.py: exactly n_iters sweeps,
+    each a red sweep (memory_barrier) then a black sweep (memory_barrier) with
+    the analytic diagonal D.  Starts from zeros unless dh0 is supplied.
+    The red and black kernels write IN PLACE into the same dh texture (each
+    color reads only the other color + itself, so the update is race-free).
+    """
+    rhs = np.asarray(rhs, dtype=np.float32)
+    H, W = rhs.shape
+    ctx = gpu.ctx
+    alpha = (theta * dt) ** 2 * gp
+
+    dh_init = (np.zeros((H, W), dtype=np.float32)
+               if dh0 is None else np.asarray(dh0, dtype=np.float32))
+
+    tex_dh   = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_rhs  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_dh.write(dh_init.tobytes())
+    tex_rhs.write(rhs.tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+
+    k_red   = gpu.compute(_KERNELS, "sw_helmholtz_sor.comp", defines={"COLOR": "0"})
+    k_black = gpu.compute(_KERNELS, "sw_helmholtz_sor.comp", defines={"COLOR": "1"})
+
+    dlam, dphi = 2.0 * math.pi / W, math.pi / H
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+
+    def _bind(k):
+        _set(k, "u_size",      (W, H))
+        _set(k, "u_alpha",     float(alpha))
+        _set(k, "u_a",         float(a))
+        _set(k, "u_dlam",      dlam)
+        _set(k, "u_dphi",      dphi)
+        _set(k, "u_sor_omega", float(sor_omega))
+        tex_dh.use(location=0);   _set(k, "u_dh",   0)
+        tex_href.use(location=1); _set(k, "u_Href", 1)
+        tex_rhs.use(location=2);  _set(k, "u_rhs",  2)
+        tex_dh.bind_to_image(0, read=True, write=True)
+
+    for _ in range(int(n_iters)):
+        for k in (k_red, k_black):
+            _bind(k)
+            k.run(gx, gy, 1)
+            ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_dh)[..., 0]
+    for tex in (tex_dh, tex_rhs, tex_href):
+        tex.release()
+    return result
+
+
 class SwGpuSolver:
     """Resident-texture single-layer shallow-water solver (M1).
 
