@@ -351,7 +351,6 @@ def test_gpu_deterministic(gpu):
 
 def test_gpu_checkpoint_roundtrip(gpu, tmp_path):
     from gasgiant.sim import sw_gpu
-    import numpy as np
 
     # Build solver A with the same Williamson-2 constants used by other tests.
     solver = sw_gpu.SwGpuSolver.from_williamson2(

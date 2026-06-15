@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -607,7 +608,7 @@ class SwGpuSolver:
 
     # -- Checkpoint I/O -------------------------------------------------------
 
-    def save_checkpoint(self, path) -> None:
+    def save_checkpoint(self, path: str | os.PathLike) -> None:
         """Save solver state to a .npz file.
 
         Stores all scalar parameters and the current h, u, v field arrays
@@ -636,7 +637,7 @@ class SwGpuSolver:
         )
 
     @classmethod
-    def load_checkpoint(cls, gpu: "GpuContext", path) -> "SwGpuSolver":
+    def load_checkpoint(cls, gpu: "GpuContext", path: str | os.PathLike) -> "SwGpuSolver":
         """Reconstruct a :class:`SwGpuSolver` from a checkpoint written by
         :meth:`save_checkpoint`.
 
@@ -656,26 +657,37 @@ class SwGpuSolver:
         ValueError
             If the checkpoint version is not 1.
         """
-        data = np.load(path)
-        version = int(data["version"])
-        if version != 1:
-            raise ValueError(f"Unsupported checkpoint version {version!r}; expected 1")
+        # Context manager guarantees the .npz zip handle is released before the
+        # caller (e.g. pytest tmp_path) tries to clean up — matters on Windows,
+        # where a lingering handle blocks file removal (WinError 32).
+        with np.load(path) as data:
+            version = int(data["version"])
+            if version != 1:
+                raise ValueError(f"Unsupported checkpoint version {version!r}; expected 1")
+            W = int(data["W"])
+            H = int(data["H"])
+            a = float(data["a"])
+            gp = float(data["gp"])
+            omega = float(data["omega"])
+            dt = float(data["dt"])
+            h_floor = float(data["h_floor"])
+            # .astype returns fresh arrays that outlive the closed zip handle.
+            h = data["h"].astype(np.float32)
+            u = data["u"].astype(np.float32)
+            v = data["v"].astype(np.float32)
 
         sg = cls(
             gpu=gpu,
-            W=int(data["W"]),
-            H=int(data["H"]),
-            a=float(data["a"]),
-            gp=float(data["gp"]),
-            omega=float(data["omega"]),
-            dt=float(data["dt"]),
-            h_floor=float(data["h_floor"]),
+            W=W,
+            H=H,
+            a=a,
+            gp=gp,
+            omega=omega,
+            dt=dt,
+            h_floor=h_floor,
         )
 
         # Upload saved fields to GPU textures (bit-exact float32).
-        h = data["h"].astype(np.float32)
-        u = data["u"].astype(np.float32)
-        v = data["v"].astype(np.float32)
         sg._tex_h.write(h.tobytes())
         sg._tex_u.write(u.tobytes())
         sg._tex_v.write(v.tobytes())
