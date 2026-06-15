@@ -237,15 +237,22 @@ def test_continuity_conservative_exact_even_when_positivity_fails() -> None:
     h[1, :] = h_floor * 1.02            # near-floor interior row
     u = 0.3 * rng.standard_normal((g.H, g.W))
     v = np.zeros((g.H + 1, g.W))
-    v[1, :] = +4.0                      # strong divergent meridional flow at the
-    v[2, :] = -4.0                      # floor row (drained through both faces)
+    # DIVERGENT meridional flow draining the near-floor row 1 through BOTH faces
+    # (row 1 is the non-donor side at each), so the donor-cell limiter cannot
+    # keep it >= floor — the documented out-of-regime case.
+    v[1, :] = -4.0                      # north face of row 1: drains row 1 northward
+    v[2, :] = +4.0                      # south face of row 1: drains row 1 southward
     dt = 0.5
 
     m0 = float(np.sum(h * g.cos_c[:, None]) * g.a * g.a * g.dlam * g.dphi)
     h_new = continuity_step_conservative(h, u, v, g, dt, h_floor)
     m1 = float(np.sum(h_new * g.cos_c[:, None]) * g.a * g.a * g.dlam * g.dphi)
 
-    # Exact conservation regardless of whether positivity held.
+    # Mass is conserved EXACTLY (flux-form telescoping) under strong divergent
+    # drain at a near-floor cell — whether or not the donor-cell limiter manages
+    # to keep this particular config >= floor. Exact conservation is the property
+    # step_semi_implicit's loud positivity guard relies on (it can reject a
+    # sub-floor result knowing mass was never silently injected).
     assert abs(m1 - m0) <= 1e-12 * abs(m0), (
         f"continuity_step_conservative leaked mass under stress: "
         f"rel drift {(m1 - m0) / m0:.3e}"

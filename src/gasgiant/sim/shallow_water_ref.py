@@ -368,13 +368,17 @@ def continuity_step_conservative(h, u, v, g, dt, h_floor):
     """
     Fx_low, Fx_high, Fy_low, Fy_high = _mass_fluxes(h, u, v, g)
     # 1. Make the low-order donor pass positivity-preserving via outflux limiting.
+    #    Fx_low_pos / Fy_low_pos are the positivity-limited low-order fluxes; they
+    #    define the monotone base h_low.  The anti-diffusive correction below is
+    #    relative to THIS limited base (high - limited_low), which is consistent
+    #    with the base h_low is built from.
     sx_pos, sy_pos = _positive_lowflux_scales(h, Fx_low, Fy_low, g, dt, h_floor)
-    Fx_low = Fx_low * sx_pos
-    Fy_low = Fy_low * sy_pos
-    h_low = _apply_fluxes(h, Fx_low, Fy_low, g, dt)                 # now >= h_floor
+    Fx_low_pos = Fx_low * sx_pos
+    Fy_low_pos = Fy_low * sy_pos
+    h_low = _apply_fluxes(h, Fx_low_pos, Fy_low_pos, g, dt)         # now >= h_floor
     # 2. Zalesak anti-diffusive correction toward the high-order (centered) flux.
-    Ax = Fx_high - Fx_low
-    Ay = Fy_high - Fy_low
+    Ax = Fx_high - Fx_low_pos
+    Ay = Fy_high - Fy_low_pos
     cap = np.maximum(h_low - h_floor, 0.0) * g.cos_c[:, None] / dt
     sx = np.minimum(1.0, cap / (np.abs(Ax) + 1e-30))
     Ax_lim = Ax * np.minimum(sx, np.roll(sx, -1, axis=1))
@@ -389,8 +393,8 @@ def continuity_step_conservative(h, u, v, g, dt, h_floor):
     #    drained through faces where it is the non-donor side (divergent meridional
     #    velocity, Courant >~ 1) can still dip below the floor — the caller guards
     #    that loudly rather than clamping (which would inject mass).
-    Fx_tot = Fx_low + Ax_lim
-    Fy_tot = Fy_low + Ay_lim
+    Fx_tot = Fx_low_pos + Ax_lim
+    Fy_tot = Fy_low_pos + Ay_lim
     gx, gy = _positive_lowflux_scales(h, Fx_tot, Fy_tot, g, dt, h_floor)
     return _apply_fluxes(h, Fx_tot * gx, Fy_tot * gy, g, dt)
 
@@ -1209,6 +1213,8 @@ def step_semi_implicit(
     # the floor.  If that happens, np.maximum below would SILENTLY inject mass
     # (defeating M2-T5).  Reject loudly instead — same hard-reject philosophy as the
     # Picard contraction certificate: the dt/flow exceeds the positivity regime.
+    # 1e-9 slack absorbs f64 round-off in the flux-form sums (h is O(1-10),
+    # round-off O(1e-15)); anything beyond it is a real positivity violation.
     h_min = float(h_raw.min())
     if h_min < st.h_floor - 1e-9:
         raise ValueError(
