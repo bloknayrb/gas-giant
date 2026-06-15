@@ -233,3 +233,20 @@ def test_gpu_continuity_conserves_mass(gpu):
     area=g.cos_c[:,None].astype(np.float64)
     m0=np.sum(h.astype(np.float64)*area); m1=np.sum(got.astype(np.float64)*area)
     np.testing.assert_allclose(m1,m0,rtol=2e-6)
+
+
+# ---------------------------------------------------------------------------
+# Task 9: SwGpuSolver.step (resident-texture full step)
+# ---------------------------------------------------------------------------
+
+def test_gpu_step_matches_ref_one_step(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    for a in [1.0, 2.0]:
+        st = ref.williamson2_state(W=128, H=64, a=a, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+        sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=a, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+        st = ref.step(st); sg.step()
+        hg, ug, vg = sg.download_state()
+        np.testing.assert_allclose(hg, st.h, atol=2e-5)
+        np.testing.assert_allclose(ug, st.u, atol=2e-5)
+        np.testing.assert_allclose(vg[1:64], st.v[1:64], atol=2e-5)

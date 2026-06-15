@@ -414,6 +414,243 @@ def run_grad(
     return result_gx, result_gy
 
 
+class SwGpuSolver:
+    """Resident-texture single-layer shallow-water solver (M1).
+
+    All fields stay on the GPU as R32F textures; ``step()`` dispatches
+    pre-compiled kernels in CPU-reference order with ping-pong scratch textures
+    and ``ctx.memory_barrier()`` between dependent dispatches.  No CPU round-trip
+    occurs during ``step()``.
+
+    Usage::
+
+        sg = SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, ...)
+        sg.step()
+        h, u, v = sg.download_state()
+    """
+
+    def __init__(
+        self,
+        gpu: "GpuContext",
+        W: int,
+        H: int,
+        a: float,
+        gp: float,
+        omega: float,
+        dt: float,
+        h_floor: float = 0.05,
+    ) -> None:
+        self.gpu = gpu
+        self.ctx = gpu.ctx
+        self.W = W
+        self.H = H
+        self.a = float(a)
+        self.gp = float(gp)
+        self.omega = float(omega)
+        self.dt = float(dt)
+        self.h_floor = float(h_floor)
+
+        # Dispatch group counts.
+        self._gx_c = (W + _GROUP - 1) // _GROUP
+        self._gy_c = (H + _GROUP - 1) // _GROUP
+        self._gy_v = (H + 1 + _GROUP - 1) // _GROUP
+
+        # Grid spacing.
+        self._dlam = 2.0 * math.pi / W
+        self._dphi = math.pi / H
+
+        # -- Compile all kernels ONCE ----------------------------------------
+        self._k_vort   = gpu.compute(_KERNELS, "sw_vorticity.comp")
+        self._k_bern   = gpu.compute(_KERNELS, "sw_bernoulli.comp")
+        self._k_grad   = gpu.compute(_KERNELS, "sw_grad.comp")
+        self._k_mom    = gpu.compute(_KERNELS, "sw_momentum.comp")
+        self._k_cont_a = gpu.compute(_KERNELS, "sw_continuity.comp", defines={"PASS": "0"})
+        self._k_cont_b = gpu.compute(_KERNELS, "sw_continuity.comp", defines={"PASS": "1"})
+
+        # -- Resident field textures ------------------------------------------
+        self._tex_h = gpu.texture2d((W, H),     components=1, dtype="f4")
+        self._tex_u = gpu.texture2d((W, H),     components=1, dtype="f4")
+        self._tex_v = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+        # -- Scratch textures (pre-allocated, reused every step) --------------
+        # Vorticity (H+1, W).
+        self._tex_zeta  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+        # Bernoulli (H, W).
+        self._tex_B     = gpu.texture2d((W, H),     components=1, dtype="f4")
+        # Bernoulli gradient.
+        self._tex_gx    = gpu.texture2d((W, H),     components=1, dtype="f4")
+        self._tex_gy    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+        # New u, v from momentum.
+        self._tex_u_new = gpu.texture2d((W, H),     components=1, dtype="f4")
+        self._tex_v_new = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+        # New h from continuity (pass A/B scratch).
+        self._tex_h_low = gpu.texture2d((W, H),     components=1, dtype="f4")
+        self._tex_cap   = gpu.texture2d((W, H),     components=1, dtype="f4")
+        self._tex_h_new = gpu.texture2d((W, H),     components=1, dtype="f4")
+
+    # -- Public constructors --------------------------------------------------
+
+    @classmethod
+    def from_williamson2(
+        cls,
+        gpu: "GpuContext",
+        W: int,
+        H: int,
+        a: float,
+        omega: float,
+        u0: float,
+        gp: float,
+        h0: float,
+        h_floor: float = 0.05,
+    ) -> "SwGpuSolver":
+        """Build a SwGpuSolver from the analytic Williamson-2 initial condition.
+
+        Produces the same initial h, u, v and dt as
+        ``ref.williamson2_state(W, H, a, omega, u0, gp, h0)``.
+        """
+        from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+        st = ref.williamson2_state(W=W, H=H, a=a, omega=omega, u0=u0, gp=gp,
+                                   h0=h0, h_floor=h_floor)
+        sg = cls(gpu=gpu, W=W, H=H, a=a, gp=gp, omega=omega,
+                 dt=st.dt, h_floor=h_floor)
+        sg._tex_h.write(st.h.astype(np.float32).tobytes())
+        sg._tex_u.write(st.u.astype(np.float32).tobytes())
+        sg._tex_v.write(st.v.astype(np.float32).tobytes())
+        return sg
+
+    # -- Public I/O -----------------------------------------------------------
+
+    def download_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return (h, u, v) as numpy arrays: (H,W), (H,W), (H+1,W)."""
+        h = self.gpu.read_texture(self._tex_h)[..., 0]
+        u = self.gpu.read_texture(self._tex_u)[..., 0]
+        v = self.gpu.read_texture(self._tex_v)[..., 0]
+        return h, u, v
+
+    # -- Diagnostic helpers ---------------------------------------------------
+
+    def total_mass(self) -> float:
+        """Global mass integral: Σ h · cosφ · a² dλ dφ."""
+        from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+        h, _, _ = self.download_state()
+        g = ref.Grid(self.W, self.H, self.a)
+        return float(np.sum(h * g.cos_c[:, None]) * self.a * self.a * g.dlam * g.dphi)
+
+    def velocity_l2_drift(self) -> float:
+        """Placeholder — Tasks 11-13 populate u_init/v_init; return NaN for now."""
+        return float("nan")
+
+    # -- Step -----------------------------------------------------------------
+
+    def step(self) -> None:
+        """One full step in CPU-reference order (no CPU round-trip).
+
+        Sequence (mirrors ref.step / ref.momentum_step order):
+          1. vorticity(old u, v) → ζ
+          2. bernoulli(old h, u, v) → B
+          3. grad(B, gp=1.0) → gx, gy
+          4. momentum-assembly(ζ, gx, gy, old u, v) → u_new, v_new
+          5. continuity pass-A (old h, u_new, v_new) → h_low, cap
+          6. continuity pass-B → h_new
+          7. ping-pong: swap resident h/u/v ↔ h_new/u_new/v_new
+        """
+        ctx = self.ctx
+        W, H = self.W, self.H
+        a = self.a
+        gp = self.gp
+        omega = self.omega
+        dt = self.dt
+        h_floor = self.h_floor
+        dlam = self._dlam
+        dphi = self._dphi
+        gx_c, gy_c, gy_v = self._gx_c, self._gy_c, self._gy_v
+
+        # --- 1. Vorticity (old u, v) → ζ at corners (H+1, W) ---------------
+        k = self._k_vort
+        _set(k, "u_size", (W, H))
+        _set(k, "u_a",    a)
+        _set(k, "u_dlam", dlam)
+        _set(k, "u_dphi", dphi)
+        self._tex_u.use(location=0); _set(k, "u_u", 0)
+        self._tex_v.use(location=1); _set(k, "u_v", 1)
+        self._tex_zeta.bind_to_image(0, read=False, write=True)
+        k.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # --- 2. Bernoulli potential (old h, u, v) → B at centres (H, W) ----
+        k = self._k_bern
+        _set(k, "u_size", (W, H))
+        _set(k, "u_gp",   gp)
+        self._tex_h.use(location=0); _set(k, "u_h", 0)
+        self._tex_u.use(location=1); _set(k, "u_u", 1)
+        self._tex_v.use(location=2); _set(k, "u_v", 2)
+        self._tex_B.bind_to_image(0, read=False, write=True)
+        k.run(gx_c, gy_c, 1)
+        ctx.memory_barrier()
+
+        # --- 3. grad(B, gp=1.0, a) → gx, gy (face gradients of B) ----------
+        k = self._k_grad
+        _set(k, "u_size", (W, H))
+        _set(k, "u_a",    a)
+        _set(k, "u_dlam", dlam)
+        _set(k, "u_dphi", dphi)
+        _set(k, "u_gp",   1.0)   # B already contains gp*h + ke; scale by 1
+        self._tex_B.use(location=0); _set(k, "u_h", 0)
+        self._tex_gx.bind_to_image(0, read=False, write=True)
+        self._tex_gy.bind_to_image(1, read=False, write=True)
+        k.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # --- 4. Momentum assembly → u_new, v_new ----------------------------
+        k = self._k_mom
+        _set(k, "u_size",  (W, H))
+        _set(k, "u_omega", omega)
+        _set(k, "u_dt",    dt)
+        self._tex_zeta.use(location=0); _set(k, "u_zeta", 0)
+        self._tex_gx.use(location=1);   _set(k, "u_gx",   1)
+        self._tex_gy.use(location=2);   _set(k, "u_gy",   2)
+        self._tex_u.use(location=3);    _set(k, "u_u",    3)
+        self._tex_v.use(location=4);    _set(k, "u_v",    4)
+        self._tex_u_new.bind_to_image(0, read=False, write=True)
+        self._tex_v_new.bind_to_image(1, read=False, write=True)
+        k.run(gx_c, gy_v, 1)
+        ctx.memory_barrier()
+
+        # --- 5. Continuity pass A (old h, new u/v) → h_low, cap ------------
+        k = self._k_cont_a
+        _set(k, "u_size",    (W, H))
+        _set(k, "u_dt",      dt)
+        _set(k, "u_h_floor", h_floor)
+        _set(k, "u_a",       a)
+        self._tex_h.use(location=0);     _set(k, "u_h", 0)
+        self._tex_u_new.use(location=1); _set(k, "u_u", 1)
+        self._tex_v_new.use(location=2); _set(k, "u_v", 2)
+        self._tex_h_low.bind_to_image(0, read=False, write=True)
+        self._tex_cap.bind_to_image(1,   read=False, write=True)
+        k.run(gx_c, gy_c, 1)
+        ctx.memory_barrier()
+
+        # --- 6. Continuity pass B → h_new ------------------------------------
+        k = self._k_cont_b
+        _set(k, "u_size",    (W, H))
+        _set(k, "u_dt",      dt)
+        _set(k, "u_h_floor", h_floor)
+        _set(k, "u_a",       a)
+        self._tex_h.use(location=0);     _set(k, "u_h",     0)
+        self._tex_u_new.use(location=1); _set(k, "u_u",     1)
+        self._tex_v_new.use(location=2); _set(k, "u_v",     2)
+        self._tex_h_low.use(location=3); _set(k, "u_h_low", 3)
+        self._tex_cap.use(location=4);   _set(k, "u_cap",   4)
+        self._tex_h_new.bind_to_image(0, read=False, write=True)
+        k.run(gx_c, gy_c, 1)
+        ctx.memory_barrier()
+
+        # --- 7. Ping-pong: swap resident ↔ new ------------------------------
+        self._tex_h, self._tex_h_new = self._tex_h_new, self._tex_h
+        self._tex_u, self._tex_u_new = self._tex_u_new, self._tex_u
+        self._tex_v, self._tex_v_new = self._tex_v_new, self._tex_v
+
+
 def run_momentum(
     gpu: "GpuContext",
     h: np.ndarray,
