@@ -551,6 +551,60 @@ class SwGpuSolver:
         dv = v - self.v_init
         return float(np.sqrt(np.mean(du * du) + np.mean(dv * dv)))
 
+    def total_energy(self) -> float:
+        """Global total energy: Σ [½h(u² + v_c²) + ½g'h²] cosφ · a² dλ dφ.
+
+        Mirrors shallow_water_ref.total_energy() with f64 reduction of f32 readback.
+        v_c is the cell-centred meridional velocity averaged from the two bounding v-faces.
+
+        NOTE: This is mass-CLOSED + energy-MONITORED (bounded drift gate).
+        True §6 budget closure (forcing == dissipation) is an M3 gate; M1 has no forcing.
+        The only energy sink here is the FCT floor + numerical truncation.
+        """
+        from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+        h, u, v = self.download_state()
+        # Promote to f64 for accurate global reduction.
+        h = h.astype(np.float64)
+        u = u.astype(np.float64)
+        v = v.astype(np.float64)
+        H = self.H
+        v_c = 0.5 * (v[0:H] + v[1:H + 1])          # cell-centred v, shape (H, W)
+        ke = 0.5 * h * (u * u + v_c * v_c)
+        pe = 0.5 * self.gp * h * h
+        g = ref.Grid(self.W, H, self.a)
+        return float(np.sum((ke + pe) * g.cos_c[:, None]) * self.a * self.a * g.dlam * g.dphi)
+
+    def total_potential_enstrophy(self) -> float:
+        """Global potential enstrophy diagnostic: Σ ½(ζ+f)²/h_corner · cosφ_corner · a² dλ dφ.
+
+        Diagnostic only — no hard closure gate in M1 (no forcing/drag).
+        h_corner is averaged from adjacent cells and floored to avoid division by zero.
+        Mirrors shallow_water_ref.total_potential_enstrophy() with f64 reduction.
+        """
+        from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+        h, u, v = self.download_state()
+        h = h.astype(np.float64)
+        u = u.astype(np.float64)
+        v = v.astype(np.float64)
+        H, W = self.H, self.W
+        g = ref.Grid(W, H, self.a)
+
+        # Relative vorticity at corners (H+1, W) via CPU reference (f64 inputs).
+        zeta = ref.vorticity(u, v, g)
+
+        # Planetary vorticity at v-faces/corners.
+        f_v = 2.0 * self.omega * np.sin(g.phi_v)[:, None] * np.ones((1, W))
+        abs_vort = zeta + f_v
+
+        # h at corners: meridional average of adjacent cells (pole rows floored).
+        h_corner = np.full((H + 1, W), self.h_floor)
+        h_corner[1:H] = 0.5 * (h[0:H - 1] + h[1:H])
+        h_corner = np.maximum(h_corner, self.h_floor)
+
+        cos_v = g.cos_v[:, None] * np.ones((1, W))
+        ens = 0.5 * abs_vort * abs_vort / h_corner * cos_v
+        return float(np.sum(ens) * self.a * self.a * g.dlam * g.dphi)
+
     # -- Step -----------------------------------------------------------------
 
     def step(self) -> None:

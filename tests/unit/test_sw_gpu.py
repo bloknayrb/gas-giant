@@ -286,3 +286,28 @@ def test_gpu_williamson2_balanced(gpu):
     assert np.all(np.isfinite(hg))
     assert sg.velocity_l2_drift() < 2e-2          # steady state stays balanced
     np.testing.assert_allclose(sg.total_mass(), m0, rtol=1e-5)   # mass drift (R32F)
+
+
+# ---------------------------------------------------------------------------
+# Task 12: mass-closed + energy/enstrophy drift-monitored gate (M1)
+# ---------------------------------------------------------------------------
+
+def test_gpu_mass_closed_energy_bounded(gpu):
+    from gasgiant.sim import sw_gpu
+    import numpy as np
+    sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    m0 = sg.total_mass(); e0 = sg.total_energy()
+    energies = [e0]
+    for _ in range(80):
+        sg.step(); energies.append(sg.total_energy())
+    hg, _, _ = sg.download_state()
+    assert np.all(np.isfinite(hg))
+    # MASS: CLOSED to machine precision (R32F, f64 reduction).
+    np.testing.assert_allclose(sg.total_mass(), m0, rtol=1e-5)
+    # ENERGY: MONITORED — bounded drift, NOT closure. Near-steady Williamson-2 with
+    # no forcing: the only sink is the FCT floor, so |drift| must be tiny (<1e-3,
+    # far tighter than the loose 1% the rev-3 review warned hides bugs; measured ~5e-8).
+    e_drift = abs(energies[-1] - e0) / abs(e0)
+    assert e_drift < 1e-3, f"energy drift {e_drift:.2e} too large — possible asymmetric-flux/Bernoulli bug"
+    # ENSTROPHY: diagnostic, finite/bounded (no hard closure gate).
+    assert np.isfinite(sg.total_potential_enstrophy())
