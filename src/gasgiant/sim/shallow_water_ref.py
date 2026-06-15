@@ -347,13 +347,21 @@ def _positive_lowflux_scales(h, Fx_low, Fy_low, g, dt, h_floor):
 
 
 def continuity_step_conservative(h, u, v, g, dt, h_floor):
-    """Mass-conserving, positivity-preserving FCT (no non-conservative clamp).
+    """Mass-conserving FCT with donor-cell positivity limiting (EXACTLY conservative).
 
     Identical Zalesak anti-diffusive limiting to continuity_step, but the
-    LOW-ORDER base is first made positivity-preserving by outflux limiting
-    (_positive_lowflux_scales) so the np.maximum(., h_floor) floor clamps become
-    exact no-ops.  Result: mass is conserved to round-off even when the velocity
-    field would otherwise drive near-floor cells below the floor (the M2-T5 case).
+    LOW-ORDER base is first made positivity-preserving by per-face outflux limiting
+    (_positive_lowflux_scales).  Mass is conserved to round-off UNCONDITIONALLY
+    (every scaled face flux is shared identically by its two adjacent cells, so the
+    flux-form divergence telescopes exactly).
+
+    Positivity is preserved only in the DONOR-CELL sub-CFL regime: the limiter
+    scales each face by its upwind cell's available mass, so a cell drained through
+    a face for which it is NOT the donor (e.g. a near-floor cell straddled by a
+    divergent meridional velocity at Courant >~ 1) can still dip below h_floor.
+    The caller (step_semi_implicit) guards this with a loud positivity check rather
+    than a silent floor clamp, so an out-of-regime config fails instead of leaking
+    mass.  Within M2's validated regime the result is >= h_floor and no clamp fires.
 
     Used by step_semi_implicit.  continuity_step (the M1 path) is left BYTE-FOR-
     BYTE unchanged for GPU parity.
@@ -373,12 +381,14 @@ def continuity_step_conservative(h, u, v, g, dt, h_floor):
     cap_v = np.zeros((g.H + 1, g.W)); cap_v[1:g.H] = np.minimum(cap[0:g.H - 1], cap[1:g.H])
     sy = np.minimum(1.0, cap_v / (np.abs(Ay) + 1e-30))
     Ay_lim = Ay * sy
-    # 3. Final positivity guard on the COMBINED flux.  The split Zalesak caps in
-    #    (2) limit the zonal and meridional anti-diffusive fluxes independently;
-    #    a cell drained simultaneously through both can still dip below the floor.
-    #    Re-apply the conservative outflux limiter to the total flux so the result
-    #    is >= h_floor by construction (flux form -> still exactly mass-conserving,
-    #    no np.maximum clamp needed).
+    # 3. Final donor-cell outflux limiting on the COMBINED flux.  The split Zalesak
+    #    caps in (2) limit the zonal and meridional anti-diffusive fluxes
+    #    independently; re-applying the conservative limiter to the total flux pulls
+    #    most near-floor cells back to >= h_floor while staying EXACTLY mass-
+    #    conserving (flux form).  It is NOT a full positivity guarantee: a floor cell
+    #    drained through faces where it is the non-donor side (divergent meridional
+    #    velocity, Courant >~ 1) can still dip below the floor — the caller guards
+    #    that loudly rather than clamping (which would inject mass).
     Fx_tot = Fx_low + Ax_lim
     Fy_tot = Fy_low + Ay_lim
     gx, gy = _positive_lowflux_scales(h, Fx_tot, Fy_tot, g, dt, h_floor)
@@ -1192,7 +1202,22 @@ def step_semi_implicit(
     h_fct = continuity_step_conservative(h, u_new, v_new, g, dt, st.h_floor)
     h_linref = h - dt * divergence_helmholtz(u_new, v_new, H_ref_lat, g)
     anomaly = h_fct - h_linref
-    h_new = np.maximum(h + dh + anomaly, st.h_floor)
+    h_raw = h + dh + anomaly
+    # Positivity guard: continuity_step_conservative keeps h_fct >= h_floor only
+    # in the donor-cell sub-CFL regime; a floor cell drained through BOTH faces by
+    # a divergent meridional velocity (meridional Courant >~ 1) can still dip below
+    # the floor.  If that happens, np.maximum below would SILENTLY inject mass
+    # (defeating M2-T5).  Reject loudly instead — same hard-reject philosophy as the
+    # Picard contraction certificate: the dt/flow exceeds the positivity regime.
+    h_min = float(h_raw.min())
+    if h_min < st.h_floor - 1e-9:
+        raise ValueError(
+            f"step_semi_implicit positivity violation: min(h)={h_min:.3e} < "
+            f"h_floor={st.h_floor:.3e}. The velocity field drove a floor cell "
+            f"below the floor (meridional Courant too large); the conservative "
+            f"limiter cannot keep mass closed here. Reduce dt or relax forcing."
+        )
+    h_new = np.maximum(h_raw, st.h_floor)
 
     return SwRefState(
         g=g, gp=gp,

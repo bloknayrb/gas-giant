@@ -29,6 +29,7 @@ import pytest
 from gasgiant.sim.shallow_water_ref import (
     Grid,
     SwRefState,
+    continuity_step_conservative,
     divergence_helmholtz,
     reference_depth,
     step_semi_implicit,
@@ -214,3 +215,38 @@ def test_no_new_negative_h() -> None:
     )
     # Informational: record the run minimum (used in commit report).
     # min_h_over_run >= h_floor by the assertion above.
+
+
+def test_continuity_conservative_exact_even_when_positivity_fails() -> None:
+    """continuity_step_conservative is EXACTLY mass-conserving (flux-form) even in
+    the out-of-regime case where its donor-cell positivity limiting cannot keep a
+    floor cell non-negative.
+
+    A floor cell straddled by a divergent meridional velocity (drained through
+    both faces, donor of neither) can dip below the floor — but mass MUST stay
+    closed to round-off, which is what step_semi_implicit's loud positivity guard
+    relies on (it rejects the sub-floor case rather than clamping, so a leak can
+    never be silent). This locks in the exact-conservation property under stress.
+    """
+    g = Grid(W=4, H=3, a=1.0)
+    h_floor = 0.05
+    rng = np.random.default_rng(7)
+    # A near-floor middle band with strong, sign-varying meridional velocity to
+    # create divergence at floor cells; plus some zonal flow.
+    h = np.full((g.H, g.W), 1.0)
+    h[1, :] = h_floor * 1.02            # near-floor interior row
+    u = 0.3 * rng.standard_normal((g.H, g.W))
+    v = np.zeros((g.H + 1, g.W))
+    v[1, :] = +4.0                      # strong divergent meridional flow at the
+    v[2, :] = -4.0                      # floor row (drained through both faces)
+    dt = 0.5
+
+    m0 = float(np.sum(h * g.cos_c[:, None]) * g.a * g.a * g.dlam * g.dphi)
+    h_new = continuity_step_conservative(h, u, v, g, dt, h_floor)
+    m1 = float(np.sum(h_new * g.cos_c[:, None]) * g.a * g.a * g.dlam * g.dphi)
+
+    # Exact conservation regardless of whether positivity held.
+    assert abs(m1 - m0) <= 1e-12 * abs(m0), (
+        f"continuity_step_conservative leaked mass under stress: "
+        f"rel drift {(m1 - m0) / m0:.3e}"
+    )
