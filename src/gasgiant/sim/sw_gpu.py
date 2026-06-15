@@ -242,6 +242,107 @@ def run_vorticity(
     return result
 
 
+def run_continuity(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    a: float,
+    dt: float,
+    h_floor: float,
+) -> np.ndarray:
+    """GPU FCT two-pass continuity step; returns updated h, shape (H, W).
+
+    Ports continuity_step() from shallow_water_ref.py exactly, with radius `a`
+    in the flux-divergence denominator (1/(a cosφ)).
+
+    Parameters
+    ----------
+    gpu     : GpuContext
+    h       : (H, W) float32 — cell-centred layer depth
+    u       : (H, W) float32 — zonal velocity at cell centres
+    v       : (H+1, W) float32 — meridional velocity at v-faces
+    a       : float — planetary radius
+    dt      : float — time step
+    h_floor : float — positivity floor
+
+    Returns
+    -------
+    (H, W) float32 — updated h.
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+
+    H, W = h.shape
+    ctx = gpu.ctx
+
+    # Allocate input textures.
+    tex_h = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_u = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    # Scratch textures for pass 0 outputs.
+    tex_h_low = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_cap   = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    # Output texture.
+    tex_h_new = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    # Upload inputs.
+    tex_h.write(h.tobytes())
+    tex_u.write(u.tobytes())
+    tex_v.write(v.tobytes())
+
+    # -- Pass 0: compute h_low and cap ------------------------------------
+    k0 = gpu.compute(_KERNELS, "sw_continuity.comp", defines={"PASS": "0"})
+
+    _set(k0, "u_size",    (W, H))
+    _set(k0, "u_dt",      float(dt))
+    _set(k0, "u_h_floor", float(h_floor))
+    _set(k0, "u_a",       float(a))
+
+    tex_h.use(location=0); _set(k0, "u_h", 0)
+    tex_u.use(location=1); _set(k0, "u_u", 1)
+    tex_v.use(location=2); _set(k0, "u_v", 2)
+
+    tex_h_low.bind_to_image(0, read=False, write=True)
+    tex_cap.bind_to_image(1,   read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k0.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # -- Pass 1: FCT-limited fluxes -> h_new -----------------------------
+    k1 = gpu.compute(_KERNELS, "sw_continuity.comp", defines={"PASS": "1"})
+
+    _set(k1, "u_size",    (W, H))
+    _set(k1, "u_dt",      float(dt))
+    _set(k1, "u_h_floor", float(h_floor))
+    _set(k1, "u_a",       float(a))
+
+    tex_h.use(location=0);     _set(k1, "u_h",     0)
+    tex_u.use(location=1);     _set(k1, "u_u",     1)
+    tex_v.use(location=2);     _set(k1, "u_v",     2)
+    tex_h_low.use(location=3); _set(k1, "u_h_low", 3)
+    tex_cap.use(location=4);   _set(k1, "u_cap",   4)
+
+    tex_h_new.bind_to_image(0, read=False, write=True)
+
+    k1.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # Download result.
+    result = gpu.read_texture(tex_h_new)[..., 0]
+
+    # Release temporaries.
+    for tex in (tex_h, tex_u, tex_v, tex_h_low, tex_cap, tex_h_new):
+        tex.release()
+
+    return result
+
+
 def run_grad(
     gpu: "GpuContext",
     h: np.ndarray,

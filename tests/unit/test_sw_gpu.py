@@ -188,3 +188,33 @@ def test_gpu_vorticity_rigid_rotation_a2(gpu):
     zg = sw_gpu.run_vorticity(gpu, u.astype(np.float32), v, a=2.0)
     analytic = (2*U*np.sin(g.phi_v)/2.0)[:, None] * np.ones((1, W))  # /a, a=2
     np.testing.assert_allclose(zg[2:63], analytic[2:63], atol=2e-2)
+
+
+# ---------------------------------------------------------------------------
+# Task 7: GPU continuity tests
+# ---------------------------------------------------------------------------
+
+def test_gpu_continuity_matches_ref(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    for W, H, a in [(64, 32, 1.0), (96, 48, 1.0), (64, 32, 2.0)]:
+        rng = np.random.default_rng(2)
+        h = np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
+        u = (0.05*rng.standard_normal((H,W))).astype(np.float32)
+        v = np.zeros((H+1,W),np.float32); v[1:H]=0.05*rng.standard_normal((H-1,W))
+        g = ref.Grid(W,H,a=a)
+        cpu = ref.continuity_step(h.astype(np.float64),u.astype(np.float64),v.astype(np.float64),g,dt=0.02,h_floor=0.05)
+        got = sw_gpu.run_continuity(gpu,h,u,v,a=a,dt=0.02,h_floor=0.05)
+        np.testing.assert_allclose(got,cpu,atol=2e-5)
+
+def test_gpu_continuity_conserves_mass(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    rng=np.random.default_rng(3); W,H=64,32
+    h=np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
+    u=(0.03*rng.standard_normal((H,W))).astype(np.float32); v=np.zeros((H+1,W),np.float32)
+    g=ref.Grid(W,H,a=1.0)
+    got=sw_gpu.run_continuity(gpu,h,u,v,a=1.0,dt=0.01,h_floor=0.05)
+    area=g.cos_c[:,None].astype(np.float64)
+    m0=np.sum(h.astype(np.float64)*area); m1=np.sum(got.astype(np.float64)*area)
+    np.testing.assert_allclose(m1,m0,rtol=2e-6)
