@@ -226,6 +226,19 @@ def test_drag_reduces_bottom_layer_energy_without_forcing():
     assert e1 < e0
 
 
+def test_encode_tracer_channels_in_range():
+    from gasgiant.sim.sw_spike import init, solver, encode
+    st = init.emergent_init(W=64, H=32, f0=4.0, gp=(1.0, 0.05),
+                            n_bands=8, band_contrast=0.4)
+    for _ in range(20):
+        st = solver.step(st, dt=st.dt)
+    rgba = encode.to_tracer(st)
+    assert rgba.shape == (32, 64, 4)
+    assert rgba.dtype == np.float32
+    assert np.all(np.isfinite(rgba))
+    assert rgba.min() >= 0.0 and rgba.max() <= 1.0
+
+
 def test_spinup_runs_stable_and_develops_eddies():
     from gasgiant.sim.sw_spike import init, solver
     st = init.emergent_init(W=128, H=64, f0=4.0, gp=(1.0, 0.05),
