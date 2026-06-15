@@ -1,7 +1,27 @@
 # M0.5 Verdict — GPU 2-Layer Shallow-Water Kill-Gate
 
-**Status: PENDING BLIND PANEL**  
+**Status: ✅ GO — build M1.** Blind panel decided by the user 2026-06-15.
 Harness run: 2026-06-15. Branch: `v2-shallow-water`.
+
+## VERDICT (user blind panel, 2026-06-15)
+
+The user judged the UNLABELED blind image and picked the **bottom** crop as more
+Jupiter-like in belt/eddy structure. Blind key: **bottom = SW GPU 2-layer; top =
+v1.6 morphology-only.** So in a fair (morphology-only, matched-palette) blind
+comparison, with the eddy regime reached (evs 1.2038 ≥ 1.0) and the crop box
+slightly biased toward v1.6, the user preferred the emergent shallow-water render.
+Per the falsifiability rule this is a clean **WIN → GO**.
+
+**The resolution hypothesis is CONFIRMED.** M0's apparent loss was the double
+confound the M1/M0.5 reviews exposed: (1) coarse 192×96 CPU resolution, and (2)
+the unfair detail-synthesis pipeline asymmetry (v1.6 got filaments+warp, SW got
+none). Remove both and the SW dynamics produce more convincing belt/eddy structure
+than v1.6's painted/nudged solver. **Proceed to M1** (the clean single-layer
+Williamson-validated GPU rebuild) → M2 (semi-implicit) → M3 (2-layer baroclinic,
+the next real render gate). Honest caveats: both renders were morphology-only
+(no detail polish); the SW eddy train is regular/Rossby-wave-like rather than
+fully turbulent-folded; coher (necessary-not-sufficient) also favored SW
+(0.397 vs 0.289).
 
 ---
 
