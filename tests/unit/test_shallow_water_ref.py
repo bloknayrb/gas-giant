@@ -470,6 +470,12 @@ def test_backsub_continuity_consistency() -> None:
     test reconstructs dh and anomaly the same way step_semi_implicit does and
     confirms h_new - h reproduces them — i.e. the back-substituted velocity and
     the continuity transport are consistent with the solved increment.
+
+    NOTE (M2-T5): the FCT used in the anomaly is now continuity_step_conservative
+    (the mass-conserving, positivity-preserving variant) instead of the M1
+    continuity_step, so the anomaly is mass-neutral even at the floor.  This IC
+    is well above the floor, so the two FCT variants agree here; the test is
+    reconstructed against the variant the step actually uses.
     """
     st = williamson2_state(W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
     g, gp, omega, dt, theta = st.g, st.gp, st.omega, st.dt, 0.5
@@ -485,7 +491,7 @@ def test_backsub_continuity_consistency() -> None:
                            _POISSON_ITERS, _SOR_OMEGA, dh0=dh)
 
     u_new, v_new = velocity_backsub(u_star, v_star, st.h + dh, gp, theta, dt, omega, g)
-    h_fct = ref.continuity_step(st.h, u_new, v_new, g, dt, st.h_floor)
+    h_fct = ref.continuity_step_conservative(st.h, u_new, v_new, g, dt, st.h_floor)
     h_linref = st.h - dt * divergence_helmholtz(u_new, v_new, H_ref_lat, g)
     expected = dh + (h_fct - h_linref)
 

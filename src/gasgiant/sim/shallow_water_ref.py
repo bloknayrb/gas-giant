@@ -298,6 +298,93 @@ def _apply_fluxes(h, Fx, Fy, g, dt):
     return h - dt * (dFx + dFy) / (g.a * g.cos_c[:, None])  # (a) 1/(a cosφ)
 
 
+def _positive_lowflux_scales(h, Fx_low, Fy_low, g, dt, h_floor):
+    """Per-cell outflux scale factors making the donor-cell pass positivity-preserving.
+
+    The donor-cell (upwind) low-order pass is monotone for pure advection at
+    Courant < 1, but it is NOT positivity-preserving under a DIVERGENT velocity:
+    where div(u) > 0 it drains a cell, and a near-floor cell can be driven below
+    h_floor.  The M1 continuity_step then clamps such cells UP to the floor with
+    np.maximum, which INJECTS mass (non-conservative — this is the M2-T5 leak).
+
+    The conservative cure is to make the low-order base itself positive by
+    limiting each cell's total OUTFLUX to the mass it has above the floor, then
+    applying the SAME scaled face flux to both adjacent cells (flux form ->
+    exact conservation).  Each face has a single upwind donor, so scaling a face
+    by its donor cell's factor s in [0,1] removes only outgoing mass.
+
+    Returns (sx, sy): face-flux multipliers for Fx_low (H,W) and Fy_low (H+1,W).
+    """
+    H, W = h.shape
+    pref = dt / (g.a * g.cos_c[:, None])          # _apply_fluxes outer factor
+
+    # Per-cell available mass above the floor, in the same units the flux
+    # divergence consumes it: dh_avail such that pref*(out_div) <= h - h_floor.
+    avail = np.maximum(h - h_floor, 0.0)
+
+    # Outgoing flux-divergence contribution of each cell (positive part only).
+    # Zonal: east face Fx[i] leaves cell i if >0; west face Fx[i-1] leaves cell i
+    #        if <0 (i.e. -Fx[i-1] when Fx[i-1] < 0).
+    out_xe = np.maximum(Fx_low, 0.0) / g.dlam                       # leaves via east face
+    out_xw = np.maximum(-np.roll(Fx_low, 1, axis=1), 0.0) / g.dlam  # leaves via west face
+    # Meridional: Fy_c[j] (north face of cell j) leaves if >0; Fy_c[j+1] (south
+    # face) leaves if <0.  Fy_c = Fy * cos_v.
+    Fy_c = Fy_low * g.cos_v[:, None]
+    out_yn = np.maximum(Fy_c[0:H], 0.0) / g.dphi                    # north face (row j)
+    out_ys = np.maximum(-Fy_c[1:H + 1], 0.0) / g.dphi              # south face (row j)
+
+    out_total = pref * (out_xe + out_xw + out_yn + out_ys)          # mass leaving cell
+    # Scale so cell never loses more than its above-floor mass.
+    s_cell = np.minimum(1.0, avail / (out_total + 1e-300))          # (H, W) in [0,1]
+
+    # Map cell scales onto faces by the donor (upwind) cell.
+    # Zonal east face i: donor is cell i if Fx>=0 else cell i+1.
+    sx = np.where(Fx_low >= 0, s_cell, np.roll(s_cell, -1, axis=1))
+    # Meridional v-face j (1..H-1): donor is north cell j-1 if Fy>=0 else south cell j.
+    sy = np.ones((H + 1, W))
+    sy[1:H] = np.where(Fy_low[1:H] >= 0, s_cell[0:H - 1], s_cell[1:H])
+    return sx, sy
+
+
+def continuity_step_conservative(h, u, v, g, dt, h_floor):
+    """Mass-conserving, positivity-preserving FCT (no non-conservative clamp).
+
+    Identical Zalesak anti-diffusive limiting to continuity_step, but the
+    LOW-ORDER base is first made positivity-preserving by outflux limiting
+    (_positive_lowflux_scales) so the np.maximum(., h_floor) floor clamps become
+    exact no-ops.  Result: mass is conserved to round-off even when the velocity
+    field would otherwise drive near-floor cells below the floor (the M2-T5 case).
+
+    Used by step_semi_implicit.  continuity_step (the M1 path) is left BYTE-FOR-
+    BYTE unchanged for GPU parity.
+    """
+    Fx_low, Fx_high, Fy_low, Fy_high = _mass_fluxes(h, u, v, g)
+    # 1. Make the low-order donor pass positivity-preserving via outflux limiting.
+    sx_pos, sy_pos = _positive_lowflux_scales(h, Fx_low, Fy_low, g, dt, h_floor)
+    Fx_low = Fx_low * sx_pos
+    Fy_low = Fy_low * sy_pos
+    h_low = _apply_fluxes(h, Fx_low, Fy_low, g, dt)                 # now >= h_floor
+    # 2. Zalesak anti-diffusive correction toward the high-order (centered) flux.
+    Ax = Fx_high - Fx_low
+    Ay = Fy_high - Fy_low
+    cap = np.maximum(h_low - h_floor, 0.0) * g.cos_c[:, None] / dt
+    sx = np.minimum(1.0, cap / (np.abs(Ax) + 1e-30))
+    Ax_lim = Ax * np.minimum(sx, np.roll(sx, -1, axis=1))
+    cap_v = np.zeros((g.H + 1, g.W)); cap_v[1:g.H] = np.minimum(cap[0:g.H - 1], cap[1:g.H])
+    sy = np.minimum(1.0, cap_v / (np.abs(Ay) + 1e-30))
+    Ay_lim = Ay * sy
+    # 3. Final positivity guard on the COMBINED flux.  The split Zalesak caps in
+    #    (2) limit the zonal and meridional anti-diffusive fluxes independently;
+    #    a cell drained simultaneously through both can still dip below the floor.
+    #    Re-apply the conservative outflux limiter to the total flux so the result
+    #    is >= h_floor by construction (flux form -> still exactly mass-conserving,
+    #    no np.maximum clamp needed).
+    Fx_tot = Fx_low + Ax_lim
+    Fy_tot = Fy_low + Ay_lim
+    gx, gy = _positive_lowflux_scales(h, Fx_tot, Fy_tot, g, dt, h_floor)
+    return _apply_fluxes(h, Fx_tot * gx, Fy_tot * gy, g, dt)
+
+
 def continuity_step(h, u, v, g, dt, h_floor):
     """Flux-corrected transport: mass-conserving AND positivity-preserving.
 
@@ -1037,7 +1124,9 @@ def step_semi_implicit(
          explicit nonlinear/anomaly transport (FCT on the total h minus its linear
          reference-divergence part).  The theta-centered reference divergence is
          implicit (in dh) and supplies the unconditional stability; only the slow
-         nonlinear anomaly transport is explicit.
+         nonlinear anomaly transport is explicit.  The FCT is the CONSERVATIVE
+         variant (continuity_step_conservative) so the anomaly is mass-neutral
+         even when the velocity drives a near-floor cell to the floor (M2-T5).
 
     NOTE (W2 height drift): the matched theta-scheme has an intrinsic O((theta*dt)^2)
     steady-state height imbalance from the implicit pressure/Coriolis coupling on
@@ -1081,11 +1170,26 @@ def step_semi_implicit(
     u_new, v_new = velocity_backsub(u_star, v_star, h + dh, gp, theta, dt, omega, g)
 
     # 5. Final height: matched theta-centered increment + explicit nonlinear anomaly.
-    #    anomaly = FCT(total h, u_new) - explicit linear reference divergence(u_new).
-    #    At a balanced/linear state the anomaly is negligible; it carries the slow
-    #    (CFL-safe) nonlinear and positivity-limited transport beyond the linear
-    #    reference-divergence already represented implicitly in dh.
-    h_fct = continuity_step(h, u_new, v_new, g, dt, st.h_floor)
+    #    h_new = h + dh + anomaly, anomaly = FCT(total h, u_new) - linear ref-div(u_new).
+    #    The theta-centered reference divergence is IMPLICIT (in dh) and supplies
+    #    the unconditional gravity-wave stability; only the slow nonlinear anomaly
+    #    transport is explicit.  This composition is what removes the gravity-wave
+    #    CFL — replacing it with pure explicit FCT reinstates the CFL (the FCT
+    #    transport is explicit and blows up at large dt).
+    #
+    #    CONSERVATION (M2-T5): this sum is exactly mass-conserving iff each piece
+    #    integrates conservatively.  div(dh)-free?  Yes: the SOR Helmholtz operator
+    #    is flux-form so Σ dh·cosφ = Σ rhs-mass = 0 to round-off.  The anomaly:
+    #    Σ h_linref·cosφ = Σ h·cosφ (divergence is flux-form, sums to zero), so
+    #    Σ anomaly·cosφ = Σ h_fct·cosφ - Σ h·cosφ.  This is zero ONLY if h_fct
+    #    conserves mass.  The M1 continuity_step does NOT when the velocity drives a
+    #    near-floor cell below h_floor: its np.maximum floor clamp INJECTS mass
+    #    (~5e-7/step once min(h) touches the floor — the original T5 leak).  We use
+    #    continuity_step_conservative instead, which makes the floor clamp a no-op
+    #    via conservative outflux limiting, so Σ h_fct·cosφ = Σ h·cosφ exactly and
+    #    the anomaly is mass-neutral.  (M1 continuity_step is left byte-identical
+    #    for GPU parity.)
+    h_fct = continuity_step_conservative(h, u_new, v_new, g, dt, st.h_floor)
     h_linref = h - dt * divergence_helmholtz(u_new, v_new, H_ref_lat, g)
     anomaly = h_fct - h_linref
     h_new = np.maximum(h + dh + anomaly, st.h_floor)
