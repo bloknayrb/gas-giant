@@ -1,0 +1,98 @@
+#version 430
+// swp_divergence.comp — Flux-form mass divergence ∇·(h u) at cell centres.
+//
+// Ports divergence_hu() from sw_spike/operators.py exactly:
+//   div[j,i] = (1/cos_c) * (dFx/dlam + dFy/dphi)
+// where:
+//   Fx[j,i] = h[j,i] * u[j,i]   (same-index zonal flux, east face)
+//   Fy[j,row] = h_vf[row,i] * v[row,i] * cosVface(row)
+//   h_vf[row,i] = 0.5*(h[row-1,i] + h[row,i])   (center_to_vface)
+//   wrapX used for west-neighbour zonal differencing.
+//
+// Output: the divided divergence div (H,W) — same contract as the CPU fn.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "swp_common.glsl"
+
+uniform ivec2 u_size;        // (W, H)
+
+uniform sampler2D u_h;       // cell-centred h,  size (W, H)
+uniform sampler2D u_u;       // cell-centred u,  size (W, H)
+uniform sampler2D u_v;       // v-face v,        size (W, H+1)
+
+layout(r32f, binding = 0) writeonly uniform image2D out_div;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+    if (px.x >= W || px.y >= H) return;
+
+    int i = px.x;   // longitude index
+    int j = px.y;   // latitude row  (0 = north)
+
+    float dlam = 2.0 * PI / float(W);
+    float dphi = PI / float(H);
+
+    // --- Zonal flux term ---
+    // Fx[j,i] = h[j,i] * u[j,i]  (east face of cell i)
+    // West-face of cell i is Fx[j, i-1] = h[j,i-1] * u[j,i-1]
+    float h_c  = texelFetch(u_h, px, 0).r;
+    float u_c  = texelFetch(u_u, px, 0).r;
+    float Fx_e = h_c * u_c;
+
+    int i_w = wrapX(i - 1, W);
+    float h_w = texelFetch(u_h, ivec2(i_w, j), 0).r;
+    float u_w = texelFetch(u_u, ivec2(i_w, j), 0).r;
+    float Fx_w = h_w * u_w;
+
+    float dFx = (Fx_e - Fx_w) / dlam;
+
+    // --- Meridional flux term ---
+    // North face of row j is v-face index j   (phi_v[j])
+    // South face of row j is v-face index j+1 (phi_v[j+1])
+    //
+    // h at north v-face (row j): average of center rows j-1 and j.
+    // center_to_vface zeros the pole faces (j==0 and j==H).
+    // cosVface already returns 0.0 for those pole rows.
+
+    float cos_north = cosVface(j,     H);
+    float cos_south = cosVface(j + 1, H);
+
+    // h_vf at north face (v-face row j): 0.5*(h[j-1] + h[j])
+    // (same as center_to_vface; pole face stays 0 via cosVface==0)
+    float h_vf_north;
+    if (j <= 0) {
+        h_vf_north = 0.0;
+    } else {
+        float h_north_n = texelFetch(u_h, ivec2(i, j - 1), 0).r;
+        h_vf_north = 0.5 * (h_north_n + h_c);
+    }
+
+    float h_vf_south;
+    if (j + 1 >= H) {
+        h_vf_south = 0.0;
+    } else {
+        float h_south_n = texelFetch(u_h, ivec2(i, j + 1), 0).r;
+        h_vf_south = 0.5 * (h_c + h_south_n);
+    }
+
+    // v at north face (v-face row j) and south face (v-face row j+1)
+    float v_north = texelFetch(u_v, ivec2(i, j),     0).r;
+    float v_south = texelFetch(u_v, ivec2(i, j + 1), 0).r;
+
+    // Fy_c[j]   = h_vf_north * v_north * cos_north
+    // Fy_c[j+1] = h_vf_south * v_south * cos_south
+    float Fy_north = h_vf_north * v_north * cos_north;
+    float Fy_south = h_vf_south * v_south * cos_south;
+
+    // dFy = (Fy_c[north] - Fy_c[south]) / dphi
+    float dFy = (Fy_north - Fy_south) / dphi;
+
+    // Apply metric: div = (1/cos_c) * (dFx + dFy)
+    float cos_c = cosCenter(j, H);
+    float div = (dFx + dFy) / cos_c;
+
+    imageStore(out_div, px, vec4(div, 0.0, 0.0, 0.0));
+}
