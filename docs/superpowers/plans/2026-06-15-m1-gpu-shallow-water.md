@@ -2,9 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Revision note (rev 2).** The rev-1 adversarial review found a FATAL sequencing
+> issue (F1): M1 produced no go/no-go evidence. **That is now RESOLVED** — the
+> M0.5 GPU 2-layer render probe was exactly the cheap hypothesis test F1 demanded,
+> and the user's blind panel chose the SW render over v1.6 (`m0p5-verdict.md`:
+> GO). So the resolution hypothesis is confirmed and M1 is correctly sequenced:
+> its job is the **rigorous production foundation** (Williamson-validated, radius
+> `a`, conservation budget, determinism, checkpoint) that M2/M3 build on — NOT a
+> go/no-go (the next render gate is M3, the 2-layer baroclinic solver, per spec).
+> Rev 2 also folds the 3 surviving majors (radius `a` tested at a≠1; explicit
+> branch-form wrap; reuse the existing `gpu` fixture) and the M0.5 build lessons.
+
 **Goal:** A single-layer, equirect-only, GPU **Arakawa C-grid** reduced-gravity shallow-water solver, validated per-field against a NumPy CPU reference and against the Williamson et al. (1992) test 2, with the split solution-accuracy + self-budget-closure gate, determinism, and byte-exact checkpoint.
 
-**Architecture:** The validated M0 CPU operators (`src/gasgiant/sim/sw_spike/operators.py`) graduate into a clean single-layer **`shallow_water_ref.py`** (adds planetary radius `a`, drops the 2nd layer, adds the Williamson-2 analytic state). Each C-grid operator is then ported to a moderngl compute kernel and **diffed per-field against the reference** (the v1.6 GPU-vs-CPU-ground-truth discipline). A Python `SwGpuSolver` wires the kernels into the explicit step. Validation: per-field diffs → 1-step → N-step GPU≈CPU → Williamson-2 balance + l2 → conservation budget closure → determinism/hash → checkpoint.
+**Architecture (rev 2 — graduate, don't rewrite).** M0.5 already produced WORKING, per-field-validated GPU kernels in `src/gasgiant/sim/sw_gpu_probe/` (2-layer). M1 **graduates the single-layer subset of those kernels** into production `src/gasgiant/sim/kernels/sw_*.comp` — they already carry the hard-won fixes (branch-form `wrapX`, the FCT east-face limiter fix, the C-grid metric, the Coriolis structure). The validated M0 CPU operators (`sw_spike/operators.py`) graduate into a clean single-layer **`shallow_water_ref.py`** (adds planetary radius `a`, drops layer 2, adds the Williamson-2 analytic state) — the authoritative ground truth. M1's NEW work over M0.5 is: thread radius `a` through every metric site (incl. continuity + the conserved integrals), the Williamson-2 analytic validation, the split solution-accuracy + self-budget-closure conservation gate, GPU determinism/hash, and byte-exact checkpoint. Validation flow: per-field diffs (incl. a≠1) → 1-step → N-step GPU≈CPU → Williamson-2 balance + l2 → conservation budget closure → determinism/hash → checkpoint.
 
 **Tech Stack:** Python 3.13, NumPy (CPU reference + tests), moderngl GPU compute (R32F textures, `gpu.compute`/`bind_to_image`/`run`/`memory_barrier`/`read_texture`), pytest. Existing GPU API in `src/gasgiant/gl/context.py`.
 
@@ -14,8 +25,10 @@
 - Arakawa C-grid on a lon-lat sphere, **planetary radius `a` now explicit** (M0 was a=1; M1 adds it to the metric — carried M0 caveat #1). Nondimensional default `a=1.0` keeps tests comparable; the metric divides by `a`.
 - Rows descending (row 0 = north). `h` at centers `(H,W)`; `u` at east faces `(H,W)`; `v` at meridional faces `(H+1,W)`, pole faces 0; `ζ` at corners `(H+1,W)`.
 - Single-layer reduced gravity: pressure term `−g'∇h` (Montgomery collapses to `M = g'·h`).
-- GPU: each staggered field is its own R32F texture sized `(W, H)` or `(W, H+1)` (moderngl `texture2d` takes `(width, height)`). `repeat_x=True` (periodic lon), `repeat_y=False`. Read via `texelFetch`; write via `imageStore`. v-face/corner textures have height `H+1`.
-- **Per-field diff tolerance:** GPU vs CPU reference `atol=2e-5` (R32F single precision; the v1.6 cross-validation convention). Never loosen without reporting.
+- GPU: each staggered field is its own R32F texture sized `(W, H)` or `(W, H+1)` (moderngl `texture2d` takes `(width, height)`). `repeat_x=True` (periodic lon), `repeat_y=False`. v-face/corner textures have height `H+1`.
+- **Wrapping (M0.5 lesson, major):** `texelFetch` does NOT honor `repeat_x` — every zonal neighbor uses an explicit `wrapX`. And `wrapX` MUST be the branch form `int wrapX(int x,int w){ if(x<0)return x+w; if(x>=w)return x-w; return x; }` — the modulo form `((x%w)+w)%w` computes WRONG on GPU for non-power-of-2 dims (driver treats `%` as unsigned; power-of-2 sizes accidentally pass, masking it). Same for any meridional `wrapY`. The M0.5 `swp_common.glsl` already has the correct form — graduate it.
+- **Per-field diff tolerance (M0.5 lesson, was a rev-1 fatal):** a FLAT `atol=2e-5` is unachievable for any op with a `1/cosφ` or `1/(cosφ·dlam)` division — f32 ULPs amplified by `1/cosφ` near the poles exceed it on every row at ≥512². **Diff the PRE-division quantity** at `atol=2e-5` (the raw flux/difference before the metric divide; equivalently compare `cosφ·gx`). Flat `atol=2e-5` only for ops WITHOUT polar metric division. GPU-vs-CPU is a single-precision DIFF bound; GPU-vs-GPU is byte-identical (determinism). Never loosen.
+- **Tests reuse the existing session-scoped `gpu` fixture** in `tests/conftest.py` (do NOT create a new one — a 2nd GL context corrupts readbacks; the autouse `_gpu_context_current` handles `make_current()`). One context per process.
 
 ---
 
@@ -34,6 +47,8 @@
 
 Kernels are pure (one responsibility each), mirroring the CPU reference function-for-function so per-field diffing is exact.
 
+**Rev-2 build note — graduate the M0.5 kernels.** For each GPU kernel task below, do NOT write GLSL from scratch: START from the corresponding validated `src/gasgiant/sim/sw_gpu_probe/kernels/swp_*.comp` kernel (which already passed per-field diffs and carries the branch-`wrapX`, FCT-east-face, and Coriolis fixes), then (a) strip 2-layer → single layer (Montgomery → `M=g'·h`), (b) thread radius `a` through the metric, (c) keep the pre-division diff discipline. This makes each kernel task a small graduate-and-add-`a` step rather than a fresh port — the M0.5 kernels are the de-risked starting point and `shallow_water_ref.py` (Task 1) is the gold-standard checker. Run every per-field diff at BOTH `a=1.0` and `a=2.0` (VM3).
+
 ---
 
 ## Task 1: CPU reference — single-layer C-grid operators (graduate M0 + radius a)
@@ -42,7 +57,13 @@ Kernels are pure (one responsibility each), mirroring the CPU reference function
 - Create: `src/gasgiant/sim/shallow_water_ref.py`
 - Test: `tests/unit/test_sw_gpu.py`
 
-**Context:** Port the validated M0 operators from `src/gasgiant/sim/sw_spike/{grid,operators}.py` into a single-layer reference. Single layer ⇒ Montgomery is just `M = g'·h`, so the pressure gradient is `grad_faces(g'·h)`. Add planetary radius `a` to every metric: zonal grad denominator becomes `a·cosφ·dλ`, meridional `a·dφ`, divergence prefactor `1/(a·cosφ)`, vorticity `1/(a·cosφ)`. Keep the M0 sign conventions (validated) verbatim; just thread `a` through.
+**Context:** Port the validated M0 operators from `src/gasgiant/sim/sw_spike/{grid,operators}.py` into a single-layer reference. Single layer ⇒ Montgomery is just `M = g'·h`, so the pressure gradient is `grad_faces(g'·h)`. **Thread planetary radius `a` through EVERY metric site (rev-2 major VM3 — the rev-1 plan listed only 3 of them, leaving a silent-wrong-physics path into M3):**
+- `grad_faces`: zonal denominator `a·cosφ·dλ`, meridional `a·dφ`.
+- `divergence_hu`: prefactor `1/(a·cosφ)`.
+- `vorticity`: prefactor `1/(a·cosφ)`.
+- **`_apply_fluxes` (continuity): the SAME `1/(a·cosφ)` prefactor and `a·dλ`/`a·dφ` in the flux divergence — it has the identical metric structure to `divergence_hu` and was the omitted site.**
+- **`total_mass`: area weight `a²·cosφ·dλ·dφ`. `total_energy`: same `a²` area weight.**
+Keep the M0 sign conventions (validated) verbatim; just thread `a` through. A wrong/absent `a` is invisible at the default `a=1.0` (1/1==1), so it MUST be exercised at a≠1 (Task 1 grad test + Task 2 integrated Williamson + Task 4/7 per-field diffs all run an a=2.0 case).
 
 - [ ] **Step 1: Write the failing tests** (these are the M0 analytic checks, re-asserted with `a`)
 
@@ -80,7 +101,7 @@ def test_ref_grad_radius_scaling():
 Run: `uv run pytest tests/unit/test_sw_gpu.py -k "ref_" -v`  Expected: FAIL (module missing).
 
 - [ ] **Step 3: Implement `shallow_water_ref.py`**
-Port `Grid` (add `a: float = 1.0` field; multiply metric denominators by `a` in `grad_faces`, `divergence_hu`, `vorticity`), `center_to_uface`, `center_to_vface`, `divergence_hu`, `grad_faces`, `vorticity`, `corner_to_uface`, `coriolis_trapezoidal`, `_mass_fluxes`, `_apply_fluxes`, `continuity_step` from M0 `sw_spike/operators.py` and `grid.py` — VERBATIM except threading `a` through the three metric operators. Single layer: add `def pressure_grad(h, gp, g): return grad_faces(gp * h, g)` where `gp` is the scalar `g'`. Each function keeps its M0 signature so GPU kernels diff against it 1:1.
+Port `Grid` (add `a: float = 1.0` field), `center_to_uface`, `center_to_vface`, `divergence_hu`, `grad_faces`, `vorticity`, `corner_to_uface`, `coriolis_trapezoidal`, `_mass_fluxes`, `_apply_fluxes`, `continuity_step` from M0 `sw_spike/operators.py` and `grid.py` — VERBATIM except threading `a` through ALL metric sites per the VM3 list above (`grad_faces`, `divergence_hu`, `vorticity`, AND `_apply_fluxes`, AND the `total_mass`/`total_energy` area weights in Task 2). Single layer: add `def pressure_grad(h, gp, g): return grad_faces(gp * h, g)` where `gp` is the scalar `g'`. Each function keeps its M0 signature so GPU kernels diff against it 1:1.
 
 (The exact M0 bodies are in `src/gasgiant/sim/sw_spike/operators.py` and `grid.py` — read them and port; do not re-derive. The only edits are `a` in the metric.)
 
@@ -113,6 +134,19 @@ def test_ref_williamson2_stays_balanced():
         st = ref.step(st)
     assert np.all(np.isfinite(st.h))
     # Steady solution: l2 velocity drift small; mass exactly conserved.
+    assert ref.velocity_l2_drift(st) < 1e-2
+    np.testing.assert_allclose(ref.total_mass(st), m0, rtol=1e-11)
+
+
+def test_ref_williamson2_balanced_at_a2():
+    # VM3: integrated a!=1 test — a missing/wrong `a` in continuity or the mass
+    # area-weight is invisible at a=1.0 but breaks balance/conservation at a=2.0.
+    from gasgiant.sim import shallow_water_ref as ref
+    st = ref.williamson2_state(W=128, H=64, a=2.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    m0 = ref.total_mass(st)
+    for _ in range(80):
+        st = ref.step(st)
+    assert np.all(np.isfinite(st.h))
     assert ref.velocity_l2_drift(st) < 1e-2
     np.testing.assert_allclose(ref.total_mass(st), m0, rtol=1e-11)
 ```
@@ -152,7 +186,7 @@ def test_sw_gpu_state_roundtrip(gpu):  # gpu fixture = shared headless GpuContex
     np.testing.assert_allclose(st.download_h(), h, atol=0)  # exact f4 round-trip
 ```
 
-Add a `gpu` pytest fixture (session-scoped) creating ONE `GpuContext.headless()` + `make_current()` (the v1.6 one-context-per-process rule), in `tests/unit/test_sw_gpu.py` or a local conftest.
+**REUSE the existing session-scoped `gpu` fixture in `tests/conftest.py`** (rev-2 major F2) — just add `gpu` as a test parameter. Do NOT define a new `gpu` fixture or call `make_current()`; the autouse `_gpu_context_current` fixture handles it. Creating a 2nd `GpuContext.headless()` reintroduces the v1.6 multi-context readback-corruption bug.
 
 - [ ] **Step 2: Run, verify FAIL.**
 
