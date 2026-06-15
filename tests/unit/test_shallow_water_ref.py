@@ -203,3 +203,23 @@ def test_velocity_backsub_zero_dh() -> None:
     assert np.array_equal(v_back, v_sand), (
         "velocity_backsub with dh=0 differs from coriolis_sandwich in v"
     )
+
+
+def test_velocity_backsub_nonzero_dh() -> None:
+    """A non-zero dh must change the back-substituted velocity (catches a
+    dropped/sign-flipped pressure-gradient correction)."""
+    rng = np.random.default_rng(9999)
+    W, H = 16, 8
+    g = _make_grid(W=W, H=H, a=6.4e6)
+    omega, dt, gp, theta = 7.292e-5, 300.0, 9.8, 0.5
+
+    u_star = rng.standard_normal((H, W))
+    v_star = np.zeros((H + 1, W))          # isolate the dh effect
+    dh = rng.standard_normal((H, W))
+
+    u_back, v_back = velocity_backsub(u_star, v_star, dh, gp, theta, dt, omega, g)
+    u_sand, v_sand = coriolis_sandwich(u_star, v_star, omega, g, dt)
+
+    assert not np.array_equal(u_back, u_sand), (
+        "velocity_backsub with dh!=0 unexpectedly equals coriolis_sandwich (u)"
+    )

@@ -582,7 +582,11 @@ def momentum_step(
     v_star = v.copy()
     v_star[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gy[1:H])
 
-    # Coriolis f at u-faces (H, W): f = 2Ω sinφ_c (same as sw_spike _f_uface).
+    # Coriolis sandwich (f only; ζ already applied above).
+    # NOTE: this block is byte-identical to coriolis_sandwich(). It is kept
+    # inline (not a call) to guarantee the explicit path's byte-identity. If you
+    # change the Coriolis sequence, update coriolis_sandwich AND this copy
+    # together, then re-run test_coriolis_sandwich_matches_momentum.
     f_uf = 2.0 * omega * np.sin(g.phi_c)[:, None] * np.ones((1, W))    # (H, W)
 
     # Trapezoidal Coriolis rotation on (u_star, v_star collapsed to centers).
