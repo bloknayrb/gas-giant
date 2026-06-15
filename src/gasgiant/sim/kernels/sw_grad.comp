@@ -1,0 +1,62 @@
+#version 430
+// sw_grad.comp — Single-layer face pressure gradient for the M1 shallow-water solver.
+//
+// Computes M = u_gp * h, then evaluates grad_faces(M):
+//
+//   gx[j,i] = (M[j,i+1] - M[j,i]) / (a * cos_c[j] * dlam)   — east face (W,H)
+//   gy[j]   = (M[j-1,i] - M[j,i]) / (a * dphi)               — interior v-face (W,H+1)
+//   gy[0]   = gy[H] = 0                                        — pole rows
+//
+// Dispatch over (W, H+1) to cover all v-face rows.
+// Guards:
+//   gx (zonal): store only for row < H
+//   gy (meridional): store for all rows 0..H (pole rows store 0)
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform sampler2D u_h;     // cell-centred h, size (W, H)
+uniform ivec2 u_size;      // (W, H)
+uniform float u_a;         // planetary radius
+uniform float u_dlam;      // 2*PI/W (zonal grid spacing)
+uniform float u_dphi;      // PI/H   (meridional grid spacing)
+uniform float u_gp;        // reduced gravity g'
+
+// Output images
+layout(r32f, binding = 0) writeonly uniform image2D out_gx;  // east-face gradient (W, H)
+layout(r32f, binding = 1) writeonly uniform image2D out_gy;  // v-face gradient    (W, H+1)
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+
+    // Dispatch covers (W, H+1); discard out-of-bounds threads.
+    if (px.x >= W || px.y > H) return;
+
+    int i = px.x;
+    int j = px.y;   // 0..H inclusive (v-face row space)
+
+    // --- Zonal gradient gx: store only for cell rows (j < H) ---
+    if (j < H) {
+        float M_c = u_gp * texelFetch(u_h, ivec2(i, j), 0).r;
+        int i_e = wrapX(i + 1, W);   // branch-form wrapX — NEVER ((x%w)+w)%w
+        float M_e = u_gp * texelFetch(u_h, ivec2(i_e, j), 0).r;
+        float cos_c = cosCenter(j, H);
+        float gx_val = (M_e - M_c) / (u_a * cos_c * u_dlam);
+        imageStore(out_gx, ivec2(i, j), vec4(gx_val, 0.0, 0.0, 0.0));
+    }
+
+    // --- Meridional gradient gy: all rows 0..H ---
+    if (j == 0 || j == H) {
+        // Pole rows: zero by convention.
+        imageStore(out_gy, ivec2(i, j), vec4(0.0, 0.0, 0.0, 0.0));
+    } else {
+        // Interior v-face between north center row j-1 and south center row j.
+        float M_n = u_gp * texelFetch(u_h, ivec2(i, j - 1), 0).r;
+        float M_s = u_gp * texelFetch(u_h, ivec2(i, j),     0).r;
+        float gy_val = (M_n - M_s) / (u_a * u_dphi);
+        imageStore(out_gy, ivec2(i, j), vec4(gy_val, 0.0, 0.0, 0.0));
+    }
+}

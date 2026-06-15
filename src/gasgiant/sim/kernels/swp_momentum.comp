@@ -1,0 +1,462 @@
+#version 430
+// swp_momentum.comp — Vector-invariant momentum update for one layer.
+//
+// Ports _layer_momentum() from sw_spike/solver.py (single layer).
+//
+// Inputs:
+//   u_zeta : (W, H+1) — relative vorticity at corners (pre-computed)
+//   u_u    : (W, H)   — zonal velocity at u-faces (east face of cell)
+//   u_v    : (W, H+1) — meridional velocity at v-faces
+//   u_M    : (W, H)   — Montgomery potential at cell centres (this layer)
+//
+// Outputs:
+//   out_u_new : (W, H)   — updated zonal velocity
+//   out_v_new : (W, H+1) — updated meridional velocity (poles forced to 0)
+//
+// Physics (vector-invariant form):
+//   v_c      = 0.5*(v[j] + v[j+1])                      — v at centers (H,W)
+//   ke       = 0.5*(u*u + v_c*v_c)                       — kinetic energy at centers
+//   B        = M + ke                                     — Bernoulli potential
+//   gx       = (B[j,i+1]-B[j,i]) / (cos_c*dlam)         — zonal grad at u-face
+//   gy[j]    = (B[j-1,i]-B[j,i]) / dphi  for 1<=j<=H-1  — merid grad at v-face
+//   q_uf     = 0.5*(zeta[j]+zeta[j+1])                   — corner->u-face (zeta)
+//   v_at_uf  = 0.5*(v_c[j,i]+v_c[j,i+1])  (east avg)    — v at u-face
+//   u_star   = u + dt*(q_uf*v_at_uf - gx)                — explicit zonal
+//   q_vf     = 0.5*(zeta[j,i]+zeta[j,i-1])               — corner->v-face (zeta, west avg)
+//   u_c      = 0.5*(u[j,i]+u[j,i-1])      (west avg)     — u at centers
+//   u_at_vf  = 0.5*(u_c[j-1]+u_c[j])      (meridional)   — u at v-face
+//   v_star[j]= v[j] + dt*(-q_vf[j]*u_at_vf[j] - gy[j]) for 1<=j<=H-1
+//   v_c_star = 0.5*(v_star[j]+v_star[j+1])               — v_star at centers
+//   f        = f0*sin(phi_c[j])                           — Coriolis at centers
+//   a = 0.5*f*dt; d = 1+a*a
+//   u_new    = ((1-a*a)*u_star + 2*a*v_c_star) / d
+//   v_c_new  = ((1-a*a)*v_c_star - 2*a*u_star) / d
+//   v_new[j] = 0.5*(v_c_new[j-1]+v_c_new[j]) for 1<=j<=H-1; poles=0
+//
+// Dispatch over (W, H+1) to cover both cell-centred and v-face rows.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "swp_common.glsl"
+
+uniform ivec2 u_size;   // (W, H)
+uniform float u_f0;     // planetary vorticity scale factor
+uniform float u_dt;     // timestep
+
+uniform sampler2D u_zeta; // corners (W, H+1)
+uniform sampler2D u_u;    // cell-centred u (W, H)
+uniform sampler2D u_v;    // v-face v (W, H+1)
+uniform sampler2D u_M;    // Montgomery potential at centres (W, H)
+
+layout(r32f, binding = 0) writeonly uniform image2D out_u_new; // (W, H)
+layout(r32f, binding = 1) writeonly uniform image2D out_v_new; // (W, H+1)
+
+// Fetch helpers (return 0 for out-of-range rows)
+float fetchU(int i, int row, int W, int H) {
+    if (row < 0 || row >= H) return 0.0;
+    return texelFetch(u_u, ivec2(wrapX(i, W), row), 0).r;
+}
+float fetchV(int i, int row, int W, int H) {
+    if (row < 0 || row > H) return 0.0;
+    return texelFetch(u_v, ivec2(wrapX(i, W), row), 0).r;
+}
+float fetchM(int i, int row, int W, int H) {
+    if (row < 0 || row >= H) return 0.0;
+    return texelFetch(u_M, ivec2(wrapX(i, W), row), 0).r;
+}
+float fetchZeta(int i, int row, int W, int H) {
+    if (row < 0 || row > H) return 0.0;
+    return texelFetch(u_zeta, ivec2(wrapX(i, W), row), 0).r;
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+
+    // Dispatch covers (W, H+1) for v-face outputs; cell outputs guarded by j < H.
+    if (px.x >= W || px.y > H) return;
+
+    int i = px.x;
+    int j = px.y;  // row index: 0..H-1 for centres; 0..H for v-faces
+
+    float dlam = 2.0 * PI / float(W);
+    float dphi = PI / float(H);
+
+    // -----------------------------------------------------------------------
+    // Step 1: compute intermediate fields at row j (as centre row)
+    // We need: u_star[j,i], v_c_star[j,i] for the Coriolis step.
+    // These are only meaningful for j in [0, H-1].
+    //
+    // We also need v_c_new[j-1] and v_c_new[j] to scatter back to v_new[j].
+    // So we compute u_star and v_c_star for BOTH row j and row j-1 (the north
+    // centre row), then do Coriolis on each, and average for out_v_new.
+    // -----------------------------------------------------------------------
+
+    // Helper: compute u_star and v_c_star at a given centre row `row`.
+    // Returns them via out-parameter idiom (GLSL doesn't have tuples).
+    // We inline two calls below.
+
+    // --- Compute for centre row j (used for out_u_new[j]) ---
+    float u_star_j  = 0.0;
+    float vc_star_j = 0.0;
+
+    if (j < H) {
+        // v at centres: v_c[j] = 0.5*(v[j] + v[j+1])
+        float vj0 = fetchV(i, j,   W, H);
+        float vj1 = fetchV(i, j+1, W, H);
+        float v_c_j = 0.5 * (vj0 + vj1);
+
+        // u at this centre row
+        float u_j = fetchU(i, j, W, H);
+
+        // kinetic energy at centre j
+        float ke_j = 0.5 * (u_j * u_j + v_c_j * v_c_j);
+
+        // Bernoulli at centre j
+        float M_j = fetchM(i, j, W, H);
+        float B_j = M_j + ke_j;
+
+        // v_c at east neighbor (i+1) for v_at_uface
+        int i_e = wrapX(i + 1, W);
+        float vj0_e = fetchV(i_e, j,   W, H);
+        float vj1_e = fetchV(i_e, j+1, W, H);
+        float v_c_je = 0.5 * (vj0_e + vj1_e);
+
+        // gx = (B[j,i+1] - B[j,i]) / (cos_c*dlam)
+        float u_je = fetchU(i_e, j, W, H);
+        float ke_je = 0.5 * (u_je * u_je + v_c_je * v_c_je);
+        float M_je = fetchM(i_e, j, W, H);
+        float B_je = M_je + ke_je;
+        float cos_c_j = cosCenter(j, H);
+        float gx_j = (B_je - B_j) / (cos_c_j * dlam);
+
+        // zeta at u-face: q_uf = 0.5*(zeta[j,i] + zeta[j+1,i])
+        float zeta_j0 = fetchZeta(i, j,   W, H);
+        float zeta_j1 = fetchZeta(i, j+1, W, H);
+        float q_uf_j = 0.5 * (zeta_j0 + zeta_j1);
+
+        // v at u-face: center_to_uface(v_c) = 0.5*(v_c[j,i] + v_c[j,i+1])
+        float v_at_uf_j = 0.5 * (v_c_j + v_c_je);
+
+        // u_star
+        u_star_j = u_j + u_dt * (q_uf_j * v_at_uf_j - gx_j);
+
+        // v_star at v-faces (for collapse to centres):
+        // v_star[j]   = v[j]   (pole or trivial)
+        // v_star[j+1] = v[j+1] + dt*(-q_vf[j+1]*u_at_vf[j+1] - gy[j+1])
+        //
+        // We need v_c_star[j] = 0.5*(v_star[j] + v_star[j+1]).
+        // v_star[j] (the north v-face of centre row j) = v[j] if j==0
+        //   or v[j] + dt*(...) for interior j.
+        // v_star[j+1] (south v-face) similarly.
+
+        // Compute v_star at the north v-face of this centre row (v-face row = j):
+        float v_star_north;
+        if (j == 0) {
+            // pole: v[0] stays 0
+            v_star_north = fetchV(i, 0, W, H);
+        } else {
+            // interior v-face j: q_vf[j] = 0.5*(zeta[j,i]+zeta[j,i-1])
+            int i_w = wrapX(i - 1, W);
+            float z_c  = fetchZeta(i,   j, W, H);
+            float z_w  = fetchZeta(i_w, j, W, H);
+            float q_vf_north = 0.5 * (z_c + z_w);
+
+            // gy[j] = (B[j-1,i] - B[j,i]) / dphi
+            // B[j-1,i] uses centre row j-1
+            float vj0_n = fetchV(i, j-1, W, H);
+            float vj1_n = fetchV(i, j,   W, H);
+            float v_c_jn = 0.5 * (vj0_n + vj1_n);
+            float u_jn  = fetchU(i, j-1, W, H);
+            float ke_jn = 0.5 * (u_jn * u_jn + v_c_jn * v_c_jn);
+            float M_jn  = fetchM(i, j-1, W, H);
+            float B_jn  = M_jn + ke_jn;
+            float gy_j  = (B_jn - B_j) / dphi;
+
+            // u_c[j] = 0.5*(u[j,i]+u[j,i-1])  (west average)
+            float u_jw = fetchU(i_w, j, W, H);
+            float u_c_j = 0.5 * (u_j + u_jw);
+
+            // u_at_vf[j] = center_to_vface(u_c)[j] = 0.5*(u_c[j-1]+u_c[j])
+            float u_jn_w = fetchU(i_w, j-1, W, H);
+            float u_c_jn = 0.5 * (fetchU(i, j-1, W, H) + u_jn_w);
+            float u_at_vf_north = 0.5 * (u_c_jn + u_c_j);
+
+            v_star_north = fetchV(i, j, W, H) + u_dt * (-q_vf_north * u_at_vf_north - gy_j);
+        }
+
+        // Compute v_star at the south v-face (v-face row = j+1):
+        float v_star_south;
+        if (j + 1 >= H) {
+            // south pole: v[H] stays 0
+            v_star_south = fetchV(i, j+1, W, H);
+        } else {
+            // interior v-face j+1
+            // B[j,i] already computed; B[j+1,i] needed for gy[j+1]
+            int jj = j + 1;  // v-face index
+            int i_w = wrapX(i - 1, W);
+            float z_c  = fetchZeta(i,   jj, W, H);
+            float z_w  = fetchZeta(i_w, jj, W, H);
+            float q_vf_south = 0.5 * (z_c + z_w);
+
+            // B[jj,i] for gy = (B[j,i] - B[jj,i]) / dphi
+            float vj0_s  = fetchV(i, jj,   W, H);
+            float vj1_s  = fetchV(i, jj+1, W, H);
+            float v_c_js = 0.5 * (vj0_s + vj1_s);
+            float u_js   = fetchU(i, jj, W, H);
+            float ke_js  = 0.5 * (u_js * u_js + v_c_js * v_c_js);
+            float M_js   = fetchM(i, jj, W, H);
+            float B_js   = M_js + ke_js;
+            float gy_jj  = (B_j - B_js) / dphi;
+
+            // u_c[j] = 0.5*(u[j,i]+u[j,i-1])
+            float u_jw   = fetchU(i_w, j, W, H);
+            float u_c_j2 = 0.5 * (u_j + u_jw);
+
+            // u_c[jj] = 0.5*(u[jj,i]+u[jj,i-1])
+            float u_jj_w = fetchU(i_w, jj, W, H);
+            float u_c_jj = 0.5 * (u_js + u_jj_w);
+
+            // u_at_vf[jj] = 0.5*(u_c[j]+u_c[jj])
+            float u_at_vf_south = 0.5 * (u_c_j2 + u_c_jj);
+
+            v_star_south = fetchV(i, jj, W, H) + u_dt * (-q_vf_south * u_at_vf_south - gy_jj);
+        }
+
+        // v_c_star[j] = 0.5*(v_star_north + v_star_south)
+        vc_star_j = 0.5 * (v_star_north + v_star_south);
+
+        // --- Trapezoidal Coriolis at centre row j ---
+        // f = f0 * sin(phi_c[j]);  phi_c[j] = 0.5*PI - (j+0.5)*PI/H
+        float phi_c_j = 0.5 * PI - (float(j) + 0.5) * PI / float(H);
+        float f_j = u_f0 * sin(phi_c_j);
+        float a_j = 0.5 * f_j * u_dt;
+        float d_j = 1.0 + a_j * a_j;
+        float u_new_j = ((1.0 - a_j * a_j) * u_star_j + 2.0 * a_j * vc_star_j) / d_j;
+
+        imageStore(out_u_new, ivec2(i, j), vec4(u_new_j, 0.0, 0.0, 0.0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 2: compute out_v_new at v-face row j.
+    // v_new[0] = 0, v_new[H] = 0.
+    // v_new[j] = 0.5*(v_c_new[j-1] + v_c_new[j])  for 1<=j<=H-1.
+    // v_c_new[r] = ((1-a²)*v_c_star[r] - 2*a*u_star[r]) / d[r]
+    // We need v_c_new from centre rows j-1 (north) and j (south of v-face j).
+    // -----------------------------------------------------------------------
+    if (j == 0 || j == H) {
+        imageStore(out_v_new, ivec2(i, j), vec4(0.0, 0.0, 0.0, 0.0));
+    } else {
+        // Centre row north of v-face j: row = j-1
+        // Centre row south of v-face j: row = j
+
+        // --- Compute u_star, vc_star for north centre row (j-1) ---
+        int jn = j - 1;
+        float u_star_n;
+        float vc_star_n;
+        {
+            float vn0 = fetchV(i, jn,   W, H);
+            float vn1 = fetchV(i, jn+1, W, H);
+            float v_c_n = 0.5 * (vn0 + vn1);
+
+            float u_n = fetchU(i, jn, W, H);
+            float ke_n = 0.5 * (u_n * u_n + v_c_n * v_c_n);
+            float M_n = fetchM(i, jn, W, H);
+            float B_n = M_n + ke_n;
+
+            int i_e = wrapX(i + 1, W);
+            float vn0_e = fetchV(i_e, jn,   W, H);
+            float vn1_e = fetchV(i_e, jn+1, W, H);
+            float v_c_ne = 0.5 * (vn0_e + vn1_e);
+
+            float u_ne = fetchU(i_e, jn, W, H);
+            float ke_ne = 0.5 * (u_ne * u_ne + v_c_ne * v_c_ne);
+            float M_ne = fetchM(i_e, jn, W, H);
+            float B_ne = M_ne + ke_ne;
+
+            float cos_c_n = cosCenter(jn, H);
+            float gx_n = (B_ne - B_n) / (cos_c_n * dlam);
+
+            float zn0 = fetchZeta(i, jn,   W, H);
+            float zn1 = fetchZeta(i, jn+1, W, H);
+            float q_uf_n = 0.5 * (zn0 + zn1);
+
+            float v_at_uf_n = 0.5 * (v_c_n + v_c_ne);
+
+            u_star_n = u_n + u_dt * (q_uf_n * v_at_uf_n - gx_n);
+
+            // v_star at north vface of jn (= vface jn) and south vface (= vface jn+1 = j)
+            float vs_n_north;
+            if (jn == 0) {
+                vs_n_north = fetchV(i, 0, W, H);
+            } else {
+                int i_w = wrapX(i - 1, W);
+                float z_c  = fetchZeta(i,   jn, W, H);
+                float z_w  = fetchZeta(i_w, jn, W, H);
+                float q_vf = 0.5 * (z_c + z_w);
+
+                float vnn0 = fetchV(i, jn-1, W, H);
+                float vnn1 = fetchV(i, jn,   W, H);
+                float v_c_nn = 0.5 * (vnn0 + vnn1);
+                float u_nn   = fetchU(i, jn-1, W, H);
+                float ke_nn  = 0.5 * (u_nn*u_nn + v_c_nn*v_c_nn);
+                float M_nn   = fetchM(i, jn-1, W, H);
+                float B_nn   = M_nn + ke_nn;
+                float gy_jn  = (B_nn - B_n) / dphi;
+
+                float u_n_w  = fetchU(i_w, jn, W, H);
+                float u_c_n2 = 0.5 * (u_n + u_n_w);
+                float u_nn_w = fetchU(i_w, jn-1, W, H);
+                float u_c_nn = 0.5 * (u_nn + u_nn_w);
+                float u_at_vf = 0.5 * (u_c_nn + u_c_n2);
+
+                vs_n_north = fetchV(i, jn, W, H) + u_dt * (-q_vf * u_at_vf - gy_jn);
+            }
+
+            // south vface of jn = vface j (this is an interior vface since j in 1..H-1, jn=j-1 >= 0)
+            float vs_n_south;
+            {
+                // v-face row j, centre south row = j (which is south of vface j)
+                int i_w = wrapX(i - 1, W);
+                float z_c  = fetchZeta(i,   j, W, H);
+                float z_w  = fetchZeta(i_w, j, W, H);
+                float q_vf = 0.5 * (z_c + z_w);
+
+                // gy[j] = (B[jn,i] - B[j,i]) / dphi  (north centre = jn = j-1, south = j)
+                float vj0_s = fetchV(i, j,   W, H);
+                float vj1_s = fetchV(i, j+1, W, H);
+                float v_c_js = 0.5 * (vj0_s + vj1_s);
+                float u_js   = fetchU(i, j, W, H);
+                float ke_js  = 0.5 * (u_js*u_js + v_c_js*v_c_js);
+                float M_js   = fetchM(i, j, W, H);
+                float B_js   = M_js + ke_js;
+                float gy_j   = (B_n - B_js) / dphi;
+
+                float u_n_w  = fetchU(i_w, jn, W, H);
+                float u_c_n2 = 0.5 * (u_n + u_n_w);
+                float u_js_w = fetchU(i_w, j, W, H);
+                float u_c_js = 0.5 * (u_js + u_js_w);
+                float u_at_vf = 0.5 * (u_c_n2 + u_c_js);
+
+                vs_n_south = fetchV(i, j, W, H) + u_dt * (-q_vf * u_at_vf - gy_j);
+            }
+
+            vc_star_n = 0.5 * (vs_n_north + vs_n_south);
+        }
+
+        // Coriolis for north centre row jn
+        float phi_c_n = 0.5 * PI - (float(jn) + 0.5) * PI / float(H);
+        float f_n = u_f0 * sin(phi_c_n);
+        float a_n = 0.5 * f_n * u_dt;
+        float d_n = 1.0 + a_n * a_n;
+        float vc_new_n = ((1.0 - a_n * a_n) * vc_star_n - 2.0 * a_n * u_star_n) / d_n;
+
+        // --- Compute u_star, vc_star for south centre row j ---
+        float u_star_s;
+        float vc_star_s;
+        {
+            float vs0 = fetchV(i, j,   W, H);
+            float vs1 = fetchV(i, j+1, W, H);
+            float v_c_s = 0.5 * (vs0 + vs1);
+
+            float u_s = fetchU(i, j, W, H);
+            float ke_s = 0.5 * (u_s * u_s + v_c_s * v_c_s);
+            float M_s = fetchM(i, j, W, H);
+            float B_s = M_s + ke_s;
+
+            int i_e = wrapX(i + 1, W);
+            float vs0_e = fetchV(i_e, j,   W, H);
+            float vs1_e = fetchV(i_e, j+1, W, H);
+            float v_c_se = 0.5 * (vs0_e + vs1_e);
+
+            float u_se = fetchU(i_e, j, W, H);
+            float ke_se = 0.5 * (u_se * u_se + v_c_se * v_c_se);
+            float M_se = fetchM(i_e, j, W, H);
+            float B_se = M_se + ke_se;
+
+            float cos_c_s = cosCenter(j, H);
+            float gx_s = (B_se - B_s) / (cos_c_s * dlam);
+
+            float zs0 = fetchZeta(i, j,   W, H);
+            float zs1 = fetchZeta(i, j+1, W, H);
+            float q_uf_s = 0.5 * (zs0 + zs1);
+
+            float v_at_uf_s = 0.5 * (v_c_s + v_c_se);
+
+            u_star_s = u_s + u_dt * (q_uf_s * v_at_uf_s - gx_s);
+
+            // v_star for south centre row j:
+            // north vface = j (same as above — recompute)
+            float vs_s_north;
+            {
+                // interior vface j: jn = j-1 is north centre
+                int i_w = wrapX(i - 1, W);
+                float z_c  = fetchZeta(i,   j, W, H);
+                float z_w  = fetchZeta(i_w, j, W, H);
+                float q_vf = 0.5 * (z_c + z_w);
+
+                // B[jn,i] = B_n (already computed above... but we're in a different scope)
+                // Recompute B_n:
+                float vnn0 = fetchV(i, jn,   W, H);
+                float vnn1 = fetchV(i, jn+1, W, H);
+                float v_c_nn = 0.5 * (vnn0 + vnn1);
+                float u_nn   = fetchU(i, jn, W, H);
+                float ke_nn  = 0.5 * (u_nn*u_nn + v_c_nn*v_c_nn);
+                float M_nn   = fetchM(i, jn, W, H);
+                float B_nn   = M_nn + ke_nn;
+                float gy_j   = (B_nn - B_s) / dphi;
+
+                float u_s_w  = fetchU(i_w, j, W, H);
+                float u_c_s2 = 0.5 * (u_s + u_s_w);
+                float u_nn_w = fetchU(i_w, jn, W, H);
+                float u_c_nn = 0.5 * (u_nn + u_nn_w);
+                float u_at_vf = 0.5 * (u_c_nn + u_c_s2);
+
+                vs_s_north = fetchV(i, j, W, H) + u_dt * (-q_vf * u_at_vf - gy_j);
+            }
+
+            float vs_s_south;
+            if (j + 1 >= H) {
+                vs_s_south = fetchV(i, j+1, W, H);
+            } else {
+                int jj = j + 1;
+                int i_w = wrapX(i - 1, W);
+                float z_c  = fetchZeta(i,   jj, W, H);
+                float z_w  = fetchZeta(i_w, jj, W, H);
+                float q_vf = 0.5 * (z_c + z_w);
+
+                float vjj0 = fetchV(i, jj,   W, H);
+                float vjj1 = fetchV(i, jj+1, W, H);
+                float v_c_jj = 0.5 * (vjj0 + vjj1);
+                float u_jj   = fetchU(i, jj, W, H);
+                float ke_jj  = 0.5 * (u_jj*u_jj + v_c_jj*v_c_jj);
+                float M_jj   = fetchM(i, jj, W, H);
+                float B_jj   = M_jj + ke_jj;
+                float gy_jj_v = (B_s - B_jj) / dphi;
+
+                float u_s_w  = fetchU(i_w, j, W, H);
+                float u_c_s2 = 0.5 * (u_s + u_s_w);
+                float u_jj_w = fetchU(i_w, jj, W, H);
+                float u_c_jj = 0.5 * (u_jj + u_jj_w);
+                float u_at_vf = 0.5 * (u_c_s2 + u_c_jj);
+
+                vs_s_south = fetchV(i, jj, W, H) + u_dt * (-q_vf * u_at_vf - gy_jj_v);
+            }
+
+            vc_star_s = 0.5 * (vs_s_north + vs_s_south);
+        }
+
+        // Coriolis for south centre row j
+        float phi_c_s = 0.5 * PI - (float(j) + 0.5) * PI / float(H);
+        float f_s = u_f0 * sin(phi_c_s);
+        float a_s = 0.5 * f_s * u_dt;
+        float d_s = 1.0 + a_s * a_s;
+        float vc_new_s = ((1.0 - a_s * a_s) * vc_star_s - 2.0 * a_s * u_star_s) / d_s;
+
+        // v_new[j] = 0.5*(v_c_new[jn] + v_c_new[j])
+        float v_new_j = 0.5 * (vc_new_n + vc_new_s);
+
+        imageStore(out_v_new, ivec2(i, j), vec4(v_new_j, 0.0, 0.0, 0.0));
+    }
+}

@@ -1,0 +1,28 @@
+#version 430
+layout(local_size_x = 16, local_size_y = 16) in;
+#include "sw_common.glsl"
+uniform sampler2D u_h;      // center (W,H)
+uniform sampler2D u_u;      // east face (W,H)
+uniform sampler2D u_v;      // vface (W,H+1)
+layout(r32f, binding = 0) uniform image2D out_div;   // center (W,H)
+uniform ivec2 u_size;       // (W,H)
+uniform float u_a, u_dlam, u_dphi;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x, H = u_size.y;
+    if (px.x >= W || px.y >= H) return;
+    float cphi = cosCenter(px.y, H);
+    float FxE = texelFetch(u_h, px, 0).r * texelFetch(u_u, px, 0).r;
+    ivec2 pw = ivec2(wrapX(px.x - 1, W), px.y);   // branch-form wrapX -- NEVER ((x%w)+w)%w
+    float FxW = texelFetch(u_h, pw, 0).r * texelFetch(u_u, pw, 0).r;
+    float dFx = (FxE - FxW) / u_dlam;
+    float cN = cosVface(px.y, H), cS = cosVface(px.y + 1, H);
+    float hN = 0.5 * (texelFetch(u_h, ivec2(px.x, max(px.y-1,0)), 0).r + texelFetch(u_h, px, 0).r);
+    float hS = 0.5 * (texelFetch(u_h, px, 0).r + texelFetch(u_h, ivec2(px.x, min(px.y+1,H-1)), 0).r);
+    float FyN = (px.y == 0)   ? 0.0 : hN * texelFetch(u_v, ivec2(px.x, px.y),   0).r * cN;
+    float FyS = (px.y == H-1) ? 0.0 : hS * texelFetch(u_v, ivec2(px.x, px.y+1), 0).r * cS;
+    float dFy = (FyN - FyS) / u_dphi;
+    float div = (dFx + dFy) / (u_a * cphi);
+    imageStore(out_div, px, vec4(div, 0, 0, 0));
+}

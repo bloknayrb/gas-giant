@@ -1,0 +1,111 @@
+#version 430
+// swp_grad_montgomery.comp — Montgomery potentials + face gradients for the 2-layer SWP.
+//
+// Ports montgomery_2layer() and grad_faces() from sw_spike/operators.py:
+//
+//   eta1 = h1 + h2
+//   M1   = g1 * eta1
+//   M2   = g1 * eta1 + g2 * h2
+//
+//   gx[j,i] = (M[j,i+1] - M[j,i]) / (cos_c[j] * dlam)   — east face, periodic
+//   gy[1:H] = (M[j-1,i] - M[j,i]) / dphi                 — interior v-faces (north row - south row)
+//   gy[0] = gy[H] = 0                                     — pole rows
+//
+// Dispatch over (W, H+1) so row index reaches H (the south pole v-face).
+// Guards:
+//   center/u-face stores: row < H only
+//   v-face (gy) stores: all rows 0..H (pole rows store 0)
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "swp_common.glsl"
+
+uniform ivec2 u_size;   // (W, H)
+uniform float u_g1;     // reduced gravity 1
+uniform float u_g2;     // reduced gravity 2
+
+uniform sampler2D u_h1; // cell-centred h1, size (W, H)
+uniform sampler2D u_h2; // cell-centred h2, size (W, H)
+
+// Output images — cell-centred (W, H)
+layout(r32f, binding = 0) writeonly uniform image2D out_M1;
+layout(r32f, binding = 1) writeonly uniform image2D out_M2;
+layout(r32f, binding = 2) writeonly uniform image2D out_gx1;
+layout(r32f, binding = 3) writeonly uniform image2D out_gx2;
+
+// Output images — v-face (W, H+1)
+layout(r32f, binding = 4) writeonly uniform image2D out_gy1;
+layout(r32f, binding = 5) writeonly uniform image2D out_gy2;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+
+    // We dispatch over (W, H+1) to cover all v-face rows.
+    if (px.x >= W || px.y > H) return;
+
+    int i = px.x;
+    int j = px.y;   // 0..H inclusive (v-face row space)
+
+    float dlam = 2.0 * PI / float(W);
+    float dphi = PI / float(H);
+
+    // --- Cell-centred stores (only for rows 0..H-1) ---
+    if (j < H) {
+        float h1_c = texelFetch(u_h1, ivec2(i, j), 0).r;
+        float h2_c = texelFetch(u_h2, ivec2(i, j), 0).r;
+
+        float eta1 = h1_c + h2_c;
+        float M1_c = u_g1 * eta1;
+        float M2_c = u_g1 * eta1 + u_g2 * h2_c;
+
+        imageStore(out_M1, ivec2(i, j), vec4(M1_c, 0.0, 0.0, 0.0));
+        imageStore(out_M2, ivec2(i, j), vec4(M2_c, 0.0, 0.0, 0.0));
+
+        // gx at east face of cell (i,j): (M[j,i+1] - M[j,i]) / (cos_c[j]*dlam)
+        int i_e = wrapX(i + 1, W);
+        float h1_e = texelFetch(u_h1, ivec2(i_e, j), 0).r;
+        float h2_e = texelFetch(u_h2, ivec2(i_e, j), 0).r;
+
+        float eta1_e = h1_e + h2_e;
+        float M1_e   = u_g1 * eta1_e;
+        float M2_e   = u_g1 * eta1_e + u_g2 * h2_e;
+
+        float cos_c = cosCenter(j, H);
+        float gx1_c = (M1_e - M1_c) / (cos_c * dlam);
+        float gx2_c = (M2_e - M2_c) / (cos_c * dlam);
+
+        imageStore(out_gx1, ivec2(i, j), vec4(gx1_c, 0.0, 0.0, 0.0));
+        imageStore(out_gx2, ivec2(i, j), vec4(gx2_c, 0.0, 0.0, 0.0));
+    }
+
+    // --- v-face stores (rows 0..H) ---
+    // gy[0] = 0 (north pole), gy[H] = 0 (south pole)
+    // gy[1:H] = (M[j-1,i] - M[j,i]) / dphi  (north center row minus south center row)
+    if (j == 0 || j == H) {
+        imageStore(out_gy1, ivec2(i, j), vec4(0.0, 0.0, 0.0, 0.0));
+        imageStore(out_gy2, ivec2(i, j), vec4(0.0, 0.0, 0.0, 0.0));
+    } else {
+        // j is in 1..H-1 — interior v-face between center rows j-1 (north) and j (south)
+        float h1_n = texelFetch(u_h1, ivec2(i, j - 1), 0).r;
+        float h2_n = texelFetch(u_h2, ivec2(i, j - 1), 0).r;
+        float h1_s = texelFetch(u_h1, ivec2(i, j),     0).r;
+        float h2_s = texelFetch(u_h2, ivec2(i, j),     0).r;
+
+        float eta1_n = h1_n + h2_n;
+        float M1_n   = u_g1 * eta1_n;
+        float M2_n   = u_g1 * eta1_n + u_g2 * h2_n;
+
+        float eta1_s = h1_s + h2_s;
+        float M1_s   = u_g1 * eta1_s;
+        float M2_s   = u_g1 * eta1_s + u_g2 * h2_s;
+
+        // north row minus south row, divided by dphi
+        float gy1_v = (M1_n - M1_s) / dphi;
+        float gy2_v = (M2_n - M2_s) / dphi;
+
+        imageStore(out_gy1, ivec2(i, j), vec4(gy1_v, 0.0, 0.0, 0.0));
+        imageStore(out_gy2, ivec2(i, j), vec4(gy2_v, 0.0, 0.0, 0.0));
+    }
+}
