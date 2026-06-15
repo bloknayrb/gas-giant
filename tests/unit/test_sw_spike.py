@@ -155,3 +155,30 @@ def test_continuity_preserves_positivity_under_strong_gradient():
     h2 = operators.continuity_step(h, u, v, g, dt=0.5, h_floor=0.05)
     assert np.min(h2) >= 0.05 - 1e-9     # FCT keeps h >= floor, no negatives
     assert np.all(np.isfinite(h2))
+
+
+def test_balanced_zonal_state_stays_balanced():
+    # Mini Williamson-2: a geostrophically balanced zonal jet must not accelerate.
+    from gasgiant.sim.sw_spike import solver
+    st = solver.balanced_test_state(W=128, H=64, f0=4.0, gp=(1.0, 0.05))
+    ke0 = solver.kinetic_energy(st)
+    for _ in range(50):
+        st = solver.step(st, dt=st.dt)
+    ke1 = solver.kinetic_energy(st)
+    # Balance preserved to scheme order: KE drifts < 1% over 50 steps.
+    assert abs(ke1 - ke0) / ke0 < 0.01
+
+
+def test_checkerboard_pressure_perturbation_does_not_grow():
+    # R1 gate: seed a 2dx checkerboard in h, confirm it does NOT amplify.
+    from gasgiant.sim.sw_spike import solver
+    import numpy as np
+    st = solver.balanced_test_state(W=128, H=64, f0=4.0, gp=(1.0, 0.05))
+    jj, ii = np.indices(st.h1.shape)
+    cb = 0.001 * ((ii + jj) % 2)
+    st.h1 = st.h1 + cb
+    amp0 = solver.checkerboard_amplitude(st.h1)
+    for _ in range(100):
+        st = solver.step(st, dt=st.dt)
+    amp1 = solver.checkerboard_amplitude(st.h1)
+    assert amp1 <= amp0 * 1.5    # bounded, not exponentially growing
