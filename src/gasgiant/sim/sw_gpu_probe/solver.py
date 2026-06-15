@@ -418,6 +418,164 @@ def run_momentum(
     return u_new, v_new
 
 
+def run_forcing(
+    gpu: "GpuContext",
+    fields: dict[str, np.ndarray],
+    v1: np.ndarray,
+    v2: np.ndarray,
+    params: dict,
+    f0: float = 0.0,
+) -> dict[str, np.ndarray]:
+    """GPU forcing pass: relaxation → drag → hypervisc → polar sponge → floor.
+
+    Ports _apply_forcing() from sw_spike/solver.py for a 2-layer shallow-water state.
+
+    Parameters
+    ----------
+    gpu    : GpuContext
+    fields : dict with keys h1, h2, u1, u2, h_eq1, h_eq2 — (H, W) float32
+    v1     : (H+1, W) float32 — layer-1 meridional velocity
+    v2     : (H+1, W) float32 — layer-2 meridional velocity
+    params : dict with keys tau_rad, tau_drag, nu4, h_floor (all float)
+    f0     : unused (kept for API symmetry with run_momentum)
+
+    Returns
+    -------
+    dict with keys h1, h2, u1, u2, v1, v2 — post-forcing fields.
+    """
+    h1    = np.asarray(fields["h1"],    dtype=np.float32)
+    h2    = np.asarray(fields["h2"],    dtype=np.float32)
+    u1    = np.asarray(fields["u1"],    dtype=np.float32)
+    u2    = np.asarray(fields["u2"],    dtype=np.float32)
+    h_eq1 = np.asarray(fields["h_eq1"], dtype=np.float32)
+    h_eq2 = np.asarray(fields["h_eq2"], dtype=np.float32)
+    v1    = np.asarray(v1, dtype=np.float32)
+    v2    = np.asarray(v2, dtype=np.float32)
+
+    H, W = h1.shape
+    ctx = gpu.ctx
+
+    tau_rad  = float(params.get("tau_rad",  0.0))
+    tau_drag = float(params.get("tau_drag", 0.0))
+    nu4      = float(params.get("nu4",      0.0))
+    h_floor  = float(params.get("h_floor",  0.05))
+
+    # ── allocate input textures ────────────────────────────────────────────
+    tex_h1    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_h2    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_u1    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_u2    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v1    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_v2    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_heq1  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_heq2  = gpu.texture2d((W, H),     components=1, dtype="f4")
+
+    tex_h1.write(h1.tobytes())
+    tex_h2.write(h2.tobytes())
+    tex_u1.write(u1.tobytes())
+    tex_u2.write(u2.tobytes())
+    tex_v1.write(v1.tobytes())
+    tex_v2.write(v2.tobytes())
+    tex_heq1.write(h_eq1.tobytes())
+    tex_heq2.write(h_eq2.tobytes())
+
+    # ── scratch textures (output of pass 0, input to pass 1) ──────────────
+    sc_h1 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    sc_h2 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    sc_u1 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    sc_u2 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    sc_v1 = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    sc_v2 = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    # ── final output textures ──────────────────────────────────────────────
+    out_h1 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    out_h2 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    out_u1 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    out_u2 = gpu.texture2d((W, H),     components=1, dtype="f4")
+    out_v1 = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    out_v2 = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    # Dispatch size: (W, H+1) to cover both cell-centre (j<H) and v-face (j=H) rows
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+
+    def _set_common_uniforms(k):
+        _set(k, "u_size",     (W, H))
+        _set(k, "u_tau_rad",  tau_rad)
+        _set(k, "u_tau_drag", tau_drag)
+        _set(k, "u_nu4",      nu4)
+        _set(k, "u_h_floor",  h_floor)
+
+    def _bind_input_samplers(k):
+        tex_h1.use(location=0);   _set(k, "u_h1",    0)
+        tex_h2.use(location=1);   _set(k, "u_h2",    1)
+        tex_u1.use(location=2);   _set(k, "u_u1",    2)
+        tex_u2.use(location=3);   _set(k, "u_u2",    3)
+        tex_v1.use(location=4);   _set(k, "u_v1",    4)
+        tex_v2.use(location=5);   _set(k, "u_v2",    5)
+        tex_heq1.use(location=6); _set(k, "u_h_eq1", 6)
+        tex_heq2.use(location=7); _set(k, "u_h_eq2", 7)
+
+    # ── Pass 0: relax h + drag u2/v2 ──────────────────────────────────────
+    k0 = gpu.compute(_KERNELS, "swp_forcing.comp", defines={"PASS0": "1"})
+    _set_common_uniforms(k0)
+    _bind_input_samplers(k0)
+
+    sc_h1.bind_to_image(0, read=False, write=True)
+    sc_h2.bind_to_image(1, read=False, write=True)
+    sc_u1.bind_to_image(2, read=False, write=True)
+    sc_u2.bind_to_image(3, read=False, write=True)
+    sc_v1.bind_to_image(4, read=False, write=True)
+    sc_v2.bind_to_image(5, read=False, write=True)
+
+    k0.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # ── Pass 1: hypervisc + sponge + floor ────────────────────────────────
+    k1 = gpu.compute(_KERNELS, "swp_forcing.comp", defines={})
+    _set_common_uniforms(k1)
+    # Pass 1 needs h_eq for sponge h relaxation
+    tex_heq1.use(location=6); _set(k1, "u_h_eq1", 6)
+    tex_heq2.use(location=7); _set(k1, "u_h_eq2", 7)
+    # Scratch fields (post relax+drag) as samplers for pass 1
+    sc_h1.use(location=8);  _set(k1, "u_s_h1", 8)
+    sc_h2.use(location=9);  _set(k1, "u_s_h2", 9)
+    sc_u1.use(location=10); _set(k1, "u_s_u1", 10)
+    sc_u2.use(location=11); _set(k1, "u_s_u2", 11)
+    sc_v1.use(location=12); _set(k1, "u_s_v1", 12)
+    sc_v2.use(location=13); _set(k1, "u_s_v2", 13)
+
+    out_h1.bind_to_image(0, read=False, write=True)
+    out_h2.bind_to_image(1, read=False, write=True)
+    out_u1.bind_to_image(2, read=False, write=True)
+    out_u2.bind_to_image(3, read=False, write=True)
+    out_v1.bind_to_image(4, read=False, write=True)
+    out_v2.bind_to_image(5, read=False, write=True)
+
+    k1.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # ── download results ───────────────────────────────────────────────────
+    result = {
+        "h1": gpu.read_texture(out_h1)[..., 0],
+        "h2": gpu.read_texture(out_h2)[..., 0],
+        "u1": gpu.read_texture(out_u1)[..., 0],
+        "u2": gpu.read_texture(out_u2)[..., 0],
+        "v1": gpu.read_texture(out_v1)[..., 0],
+        "v2": gpu.read_texture(out_v2)[..., 0],
+    }
+
+    # ── release temporaries ───────────────────────────────────────────────
+    for tex in (
+        tex_h1, tex_h2, tex_u1, tex_u2, tex_v1, tex_v2, tex_heq1, tex_heq2,
+        sc_h1, sc_h2, sc_u1, sc_u2, sc_v1, sc_v2,
+        out_h1, out_h2, out_u1, out_u2, out_v1, out_v2,
+    ):
+        tex.release()
+
+    return result
+
+
 def run_vorticity(
     gpu: "GpuContext",
     u: np.ndarray,

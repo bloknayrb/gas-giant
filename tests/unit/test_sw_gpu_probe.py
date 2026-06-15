@@ -134,6 +134,30 @@ def test_swp_momentum_matches_ref(gpu):
     np.testing.assert_allclose(vn_g[1:H], vn_c[1:H], atol=2e-5)
 
 
+def test_swp_forcing_matches_ref(gpu):
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import solver as cpu, grid
+    import numpy as np
+    rng=np.random.default_rng(13); W,H=64,32; g=grid.Grid(W,H)
+    fields={k:(0.5*rng.standard_normal((H,W))).astype(np.float32) for k in ["u1","u2","h1","h2","h_eq1","h_eq2"]}
+    v1=np.zeros((H+1,W),np.float32); v1[1:H]=0.3*rng.standard_normal((H-1,W))
+    v2=np.zeros((H+1,W),np.float32); v2[1:H]=0.3*rng.standard_normal((H-1,W))
+    fields["h1"]+=5; fields["h2"]+=3
+    params=dict(tau_rad=300.0, tau_drag=1000.0, nu4=0.05, h_floor=0.05)
+    # Build a CPU SwState replica and call _apply_forcing on f64 copies
+    st=cpu.SwState(g=g, f0=4.0, gp=(1.0,0.05),
+        h1=fields["h1"].astype(np.float64).copy(), u1=fields["u1"].astype(np.float64).copy(), v1=v1.astype(np.float64).copy(),
+        h2=fields["h2"].astype(np.float64).copy(), u2=fields["u2"].astype(np.float64).copy(), v2=v2.astype(np.float64).copy(),
+        dt=0.001, h_floor=params["h_floor"], nu4=params["nu4"], tau_rad=params["tau_rad"], tau_drag=params["tau_drag"],
+        h_eq1=fields["h_eq1"].astype(np.float64).copy(), h_eq2=fields["h_eq2"].astype(np.float64).copy())
+    cpu._apply_forcing(st)
+    out=solver.run_forcing(gpu, fields, v1, v2, params, f0=4.0)  # returns dict of post-forcing fields
+    for k,exp in [("h1",st.h1),("h2",st.h2),("u1",st.u1),("u2",st.u2)]:
+        np.testing.assert_allclose(out[k], exp, atol=2e-5)
+    np.testing.assert_allclose(out["v1"][1:H], st.v1[1:H], atol=2e-5)
+    np.testing.assert_allclose(out["v2"][1:H], st.v2[1:H], atol=2e-5)
+
+
 def test_swp_continuity_conserves_mass_strong_gradient(gpu):
     """Under strong gradients the h_floor clamp is non-conservative (floor lifts cells),
     so GPU and CPU will both deviate from m0 at roughly the same rtol (~6e-4 for this seed).
