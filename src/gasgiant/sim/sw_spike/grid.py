@@ -41,3 +41,16 @@ class Grid:
     def f_c(self) -> np.ndarray:
         # placeholder f0=1; callers scale. Kept as sin(lat) shape.
         return np.sin(self.phi_c)
+
+
+def center_to_uface(a: np.ndarray) -> np.ndarray:
+    """East-face value = average of cell i and i+1 (periodic in lon)."""
+    return 0.5 * (a + np.roll(a, -1, axis=1))
+
+
+def center_to_vface(a: np.ndarray) -> np.ndarray:
+    """Meridional face value; shape (H+1, W). Pole faces forced to 0."""
+    H, W = a.shape
+    vf = np.zeros((H + 1, W), dtype=a.dtype)
+    vf[1:H] = 0.5 * (a[0:H - 1] + a[1:H])  # north row (j-1) and south row (j)
+    return vf
