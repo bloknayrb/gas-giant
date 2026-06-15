@@ -17,7 +17,7 @@
 - GPU: each staggered field per layer is its own R32F texture. `texture2d((W,H),1,"f4")`, `repeat_x=True`.
 - **`texelFetch` does NOT honor `repeat_x`** (M1-review F1): every zonal neighbor uses explicit `wrapX(i±1, W)`. Add `wrapX` to `sw_common.glsl`.
 - **Reuse the existing session-scoped `gpu` fixture** in `tests/conftest.py` (M1-review F2) — do NOT create a new one; the autouse `_gpu_context_current` handles `make_current()`. One context per process.
-- **Per-field GPU-vs-CPU diff `atol=2e-5`** (R32F). The CPU op in `sw_spike/operators.py` is ground truth. Never loosen.
+- **Per-field GPU-vs-CPU diff tolerance (review-corrected).** A *flat* `atol=2e-5` is unachievable for any op containing a `1/cosφ` or `1/(cosφ·dlam)` division: f32 ULPs amplified by `1/cosφ` (~5e4 near the poles) exceed it on every row at ≥512². So: **diff the PRE-division quantity** at `atol=2e-5` — i.e. compare the raw flux/difference before the metric divide (`dFx+dFy` before `/cosφ`, `M[i+1]−M[i]` before `/(cosφ·dlam)`), or equivalently `cosφ·gx`. This is precision-floor-clean at all resolutions (verified max 1.5e-6) and still validates indexing/sign/metric logic — which is what the gate exists to catch. Keep flat `atol=2e-5` only for ops WITHOUT polar metric division (vorticity numerator terms, raw fluxes). The CPU op in `sw_spike/operators.py` is ground truth. Do not loosen the pre-division tolerance.
 
 ---
 
@@ -58,7 +58,7 @@ def test_swp_state_roundtrip(gpu):
 
 **Context:** Port `sw_spike/operators.divergence_hu` (same-index zonal flux, `1/cosφ` metric, north-minus-south). Used by continuity but also a standalone diffable op. Single-field (per layer).
 
-- [ ] **Step 1: Failing test** `test_swp_divergence_matches_ref`: random `h,u,v`; compare `solver.run_divergence(gpu,h,u,v)` to `sw_spike.operators.divergence_hu(h,u,v, sw_spike.grid.Grid(W,H))` at `atol=2e-5`.
+- [ ] **Step 1: Failing test** `test_swp_divergence_matches_ref`: random `h,u,v`; compare the **pre-division** flux sum (`dFx+dFy` before the `/cosφ` divide — have `run_divergence` optionally return the pre-division field, or diff `cosφ·div`) to the CPU equivalent at `atol=2e-5` (per Conventions — the divided field would fail at the poles in f32).
 - [ ] **Step 2: FAIL.**
 - [ ] **Step 3:** Port the M1 plan's `sw_divergence.comp` GLSL (Task 4 there) but with `a` removed (a=1) and `wrapX` for the west neighbor. Mirror M0 `divergence_hu` exactly (read it).
 - [ ] **Step 4: PASS.** - [ ] **Step 5: Commit** `git commit -m "M0.5: swp_divergence.comp"`
@@ -69,7 +69,7 @@ def test_swp_state_roundtrip(gpu):
 
 **Context:** 2-layer: compute Montgomery `M1=g1·(h1+h2)`, `M2=g1·(h1+h2)+g2·h2` (port `montgomery_2layer`), then face gradients of each (port `grad_faces`). One dispatch can output `gx1,gy1,gx2,gy2`, or two dispatches (one per layer's M). Keep `wrapX`.
 
-- [ ] **Step 1: Failing test** `test_swp_grad_montgomery_matches_ref`: random `h1,h2`, `gp=(1.0,0.05)`; compute `M1,M2` via `montgomery_2layer`, then `grad_faces(M1)`, `grad_faces(M2)`; compare GPU `run_grad_montgomery(gpu,h1,h2,gp)` → `(gx1,gy1,gx2,gy2)` at `atol=2e-5`.
+- [ ] **Step 1: Failing test** `test_swp_grad_montgomery_matches_ref`: random `h1,h2`, `gp=(1.0,0.05)`; compute `M1,M2` via `montgomery_2layer`, then the **pre-division** face differences (`M[i+1]−M[i]`, north−south) — diff those at `atol=2e-5` (per Conventions); equivalently compare `cosφ·gx`. The Montgomery values `M1,M2` themselves diff at flat `atol=2e-5` (no division).
 - [ ] **Step 2-4:** Implement (face-difference, `1/(cosφ·dlam)` zonal with `wrapX`, north-minus-south meridional, poles 0). - [ ] **Step 5: Commit** `git commit -m "M0.5: swp_grad_montgomery.comp"`
 
 ---
@@ -85,10 +85,10 @@ def test_swp_state_roundtrip(gpu):
 
 ## Task 5: swp_continuity.comp (FCT two-pass) + diff — HIGHEST RISK
 
-**Context:** Port `continuity_step` (FCT). Two passes to avoid the limiter read-write race (M1 plan Task 7 design): pass A → `h_low` + `cap`; pass B → limited anti-diffusive flux. Per-face symmetric limiter so mass conserves. **M1-review caveat:** the per-face limiter factor must be applied symmetrically on both sides of each face (zonal: `min(cap_here, cap_east)`; meridional: `min(cap_north, cap_south)`).
+**Context:** Port `continuity_step` (FCT). Two passes (A: `h_low`+`cap`; B: limited anti-diffusive flux), separated by `ctx.memory_barrier()` (repo convention, e.g. `omega_force.comp` SUBPASS 0/1). `cap` is a pass-A output TEXTURE (not thread-local). **The zonal and meridional limiters are NOT the same rule — port `operators.py` VERBATIM and separately** (review F3): zonal `Ax_lim = Ax·min(sx[i], sx[i+1])` where `sx=min(1, cap/|Ax|)` per face (operators.py:136-137); meridional `cap_v = min(cap_north, cap_south)` THEN a single `sy = min(1, cap_v/|Ay|)`, `Ay_lim = Ay·sy` (operators.py:139-141). Per-face conservation is exact because `_apply_fluxes` differences one flux array (each face added to one cell, subtracted from its neighbor from the same value).
 
-- [ ] **Step 1: Failing tests** `test_swp_continuity_matches_ref` (atol 2e-5 vs `continuity_step`) + `test_swp_continuity_conserves_mass` (sub-CFL, rtol 2e-6 with cos-area weighting).
-- [ ] **Step 2-4:** Implement two-pass GLSL mirroring M0 `_mass_fluxes`/`_apply_fluxes`/`continuity_step`. If the diff fails, replicate pass A in Python and diff intermediates first. Do NOT loosen atol.
+- [ ] **Step 1: Failing tests** `test_swp_continuity_matches_ref` (atol 2e-5 vs `continuity_step`) + `test_swp_continuity_conserves_mass` (sub-CFL). **The mass test must cast the downloaded f32 `h` to float64 BEFORE the cos-area-weighted sum** (review F4) — measure physical conservation, not f32 summation order — then assert `rtol=2e-6`.
+- [ ] **Step 2-4:** Implement two-pass GLSL mirroring M0 `_mass_fluxes`/`_apply_fluxes`/`continuity_step` exactly (zonal/meridional limiters separate). If the diff fails, replicate pass A in Python and diff the intermediates `cap, sx, cap_v, sy, Ax_lim, Ay_lim` individually at `atol=2e-5` to localize. Do NOT loosen atol.
 - [ ] **Step 5: Commit** `git commit -m "M0.5: swp_continuity.comp FCT (two-pass)"`
 
 ---
@@ -120,12 +120,16 @@ def test_swp_state_roundtrip(gpu):
 
 ---
 
-## Task 9: High-res GPU spin-up develops eddies
+## Task 9: High-res GPU spin-up develops eddies (with the physical-time fix)
 
-**Context:** The payoff: run the emergent config at HIGH resolution (start 512×256; push to 1024×512 if stable+fast) for enough steps that eddies develop richly — the thing the CPU spike could not do. Use the M0-validated config (f0=4, gp=(1.0,0.05), n_bands=14, band_contrast=0.5, nu4 retuned for the higher res — start 0.05, raise if it blows up, per the M0 nu4 stability finding).
+**Context:** The payoff: run the emergent config at HIGH resolution where the CPU spike could not. **Primary resolution is 512×256** (the minimal viable test per the feasibility review); 1024×512 is a stretch goal. Use the M0 config (f0=4, gp=(1.0,0.05), n_bands=14, band_contrast=0.5).
 
-- [ ] **Step 1: Failing/passing test** `test_swp_highres_develops_eddies` (mark slow): 512×256, run until `eddy_vorticity_std > 0.5` or a step cap; assert finite + eddies grew. Keep the test bounded (~2000 steps) so CI is feasible; the FULL spin-up is in the killgate script.
-- [ ] **Step 2-4:** Implement; tune nu4 for stability at 512×256 (record the value). - [ ] **Step 5: Commit** `git commit -m "M0.5: high-res GPU spin-up develops eddies"`
+**Two corrections from the feasibility review, both mandatory:**
+1. **Step budget is large and must be sized up front.** `dt ∝ 1/(W·H)` (the binding constraint is the polar zonal spacing `cosφ_min·dlam`), so reaching M0's eddy regime (~12000 steps at 192×96) needs **~32k steps at 512×256** and **~64k at 1024×512** — NOT a ~2000-step cap. On GPU these are cheap (ms/step), but they MUST be the run size.
+2. **M0's forcing is STEP-based (tau in steps), so eddies grow on a step clock, not a physical clock.** At a smaller dt the per-step relaxation/drag/sponge over-damp the (now longer) integration. **Fix:** rescale the forcing per-step fractions by `dt_old/dt_new` (where `dt_old` is the M0 192×96 dt) so the *physical* regime is reproduced — i.e. multiply `1/tau_rad`, `1/tau_drag`, sponge `rate`, and confirm `nu4/64`. **Validate** by first reproducing M0's `eddy_vorticity_std(t)` growth CURVE at 192×96 on the GPU (vs the CPU reference), THEN confirming 512×256 follows the same physical-time curve with the rescaled constants. The M0 team already hit this exact wall at 256×128 (`sw_spike_killgate.py:45-47`) — do not repeat it.
+
+- [ ] **Step 1: Test** `test_swp_forcing_physical_time_rescale`: assert the rescaled-forcing GPU run at 192×96 reproduces the CPU `eddy_vorticity_std` at a matched physical time within ~20% (proves forcing fidelity). Plus a bounded `test_swp_highres_smoke` (512×256, ~2000 steps, mark slow): assert finite + eddy_vort_std rising (NOT the full regime — that's the killgate).
+- [ ] **Step 2-4:** Implement the forcing rescale + spin-up. **nu4:** start 0.05; run a short (~1-2k step) stability probe at the FINAL resolution and bisect to a stable-and-rich value (record it); note `_biharmonic` ignores the cosφ metric but the polar sponge (>65°) masks the polar over-damping. - [ ] **Step 5: Commit** `git commit -m "M0.5: high-res GPU spin-up + physical-time forcing rescale"`
 
 ---
 
@@ -133,18 +137,28 @@ def test_swp_state_roundtrip(gpu):
 
 **Files:** Create `scripts/swp_killgate.py`, `docs/superpowers/specs/m0p5-verdict.md`.
 
-**Context:** The binding test. Spin up the GPU 2-layer solver at the highest stable/feasible resolution (target 1024×512), encode the top layer (`sw_spike/encode.to_tracer`), render at 4096 via `maps.derive_from_tracer`, and produce the blind-panel comparison strip vs v1.6 `jupiter_vorticity` (reuse the M0 `sw_spike_killgate.py` structure + `measure_morphology`). R1/R3 gates as before. coher noted (more reliable now that the sim is finer, but still treat the visual panel as binding).
+**Context:** The binding test — redesigned for the two fairness fatals.
 
-- [ ] **Step 1:** Implement `scripts/swp_killgate.py`: GPU spin-up (1024×512, enough steps for filamentary eddies — print eddy_vort_std progression + assert >0.5 before rendering), encode, 4096 render, v1.6 4096 render, matched belt crops, `out/audit/m0p5/swp_vs_v16.png` + `sw_render_full.png` + `report.txt` (coher both, R1/R3, eddy std, ms/step, total wall time).
-- [ ] **Step 2:** Run `uv run python scripts/swp_killgate.py` (minutes). Inspect the output images.
-- [ ] **Step 3 (human gate):** Show `swp_vs_v16.png` to the user for the **blind forced-choice panel**. Per the gate: proceed to M1 only if the high-res GPU SW render WINS or ties strongly; if it still loses, the resolution hypothesis is refuted → stop.
-- [ ] **Step 4:** Write `docs/superpowers/specs/m0p5-verdict.md`: resolution reached, eddy_vort_std, coher, R1/R3, the blind-panel outcome, and the GO (build M1) / NO-GO (refute hypothesis, keep v1.6) decision. Commit.
+**FAIRNESS (review F1/F4): the comparison MUST be apples-to-apples.** v1.6's `jupiter_vorticity` renders WITH a detail-synthesis filament pass + warp + lanes (`detail.intensity=0.95`, `warp_amount=0.04`); `derive_from_tracer` renders the SW field WITHOUT any of them. Judging those against each other scores the appearance pipeline, not the sim morphology — and this same confound affected the M0 result. **Primary mode = MORPHOLOGY-ONLY:** render v1.6 with `detail.intensity=0`, `warp_amount=0`, `lanes=None`, and the SAME jupiter-like palette as SW, so the panel judges raw band+vorticity STRUCTURE only — the actual hypothesis. (Optional follow-up: give SW the detail pass by synthesizing a detail_tex from its own `u1/v1` velocity, for a "both with filaments" test.) Render both at the highest stable resolution (512×256 primary; 1024×512 stretch), encode top layer (`sw_spike/encode.to_tracer`), 4096 render, matched belt crops.
+
+**FALSIFIABILITY GUARD (review F4/F5): a LOSE does not always refute.** The decision rule:
+- **WIN** (SW preferred / indistinguishable on structure) → **proceed to M1**, even under asymmetric pipelines (SW won despite the handicap).
+- **LOSE** → refutes the resolution hypothesis **ONLY IF** (a) the pipelines were MATCHED (morphology-only), AND (b) the forcing was physical-time-rescaled (Task 9), AND (c) the SW eddy field reached the M0-equivalent filamentary regime (`eddy_vorticity_std ≥ ~1.0`, M0 reached 1.09 — NOT the old 0.5). Otherwise the result is **INCONCLUSIVE**, not a NO-GO.
+
+**BLIND PROTOCOL (review F5):** the comparison image MUST strip all text labels and the coher number; randomize which crop is top/bottom; render both through the same palette; instruct the judge to score filament-folding / belt STRUCTURE only, not color.
+
+- [ ] **Step 1:** Implement `scripts/swp_killgate.py`: GPU spin-up at the sized step budget (Task 9; print `eddy_vort_std` progression; **assert ≥1.0 before rendering** — else emit INCONCLUSIVE, do not refute), encode, 4096 render of SW AND of v1.6 with detail/warp/lanes DISABLED + matched palette, R1/R3 gates, write `out/audit/m0p5/swp_vs_v16_blind.png` (UNLABELED, randomized order) + `sw_render_full.png` + `report.txt` (coher both, R1/R3, eddy std, the regime/match flags for the falsifiability guard, ms/step, wall time, and which crop is which — for AFTER the judgment).
+- [ ] **Step 2:** Run `uv run python scripts/swp_killgate.py` (minutes). Inspect.
+- [ ] **Step 3 (human gate):** Show the UNLABELED `swp_vs_v16_blind.png` to the user with the structure-only instruction. Apply the falsifiability-guarded rule above.
+- [ ] **Step 4:** Write `docs/superpowers/specs/m0p5-verdict.md`: resolution, eddy_vort_std (regime reached?), pipeline-match mode, coher, R1/R3, blind-panel outcome, and GO (build M1) / NO-GO (refute, keep v1.6) / INCONCLUSIVE (re-run matched/longer) decision. Commit.
 
 ---
 
 ## Self-review notes (for the implementer)
 
-- **The M0 CPU operators are the spec.** Every GPU kernel is judged by `atol=2e-5` per-field diff against `src/gasgiant/sim/sw_spike/operators.py` / `solver.py`. If a diff fails, the GLSL port has an indexing/sign/metric bug — localize against the CPU field; NEVER loosen atol.
+> **Rev 2 (adversarial-review fold-in):** 2 fatal + 4 major findings folded in. (1) Tolerance: diff PRE-division quantities, not the metric-divided field (f32 polar amplification). (2) Fairness: the kill-gate renders v1.6 morphology-only (detail/warp/lanes OFF, matched palette) — the M0 result was confounded by this same asymmetry. (3) Step budget ~32k @512² / ~64k @1024² (dt∝1/(W·H)), not ~2k. (4) Forcing rescaled to physical time (the M0 256×128 wall). (5) Falsifiability guard: a LOSE refutes only under matched pipeline + physical-time forcing + eddy regime ≥1.0. (6) Blind protocol: unlabeled, randomized, structure-only.
+
+- **The M0 CPU operators are the spec.** Every GPU kernel is judged by per-field diff against `src/gasgiant/sim/sw_spike/operators.py` / `solver.py` (PRE-division at `atol=2e-5` for metric-divided ops; flat `atol=2e-5` otherwise). If a diff fails, the GLSL port has an indexing/sign/metric bug — localize against the CPU field; NEVER loosen.
 - **`texelFetch` does not wrap** — use `wrapX(i±1,W)` for EVERY zonal neighbor (M1-review F1).
 - **Reuse the existing `gpu` conftest fixture** — do not spawn a second GL context (M1-review F2 / v1.6 multi-context bug).
 - **Coriolis: relative vorticity only in the flux**; `f` via trapezoidal on the center-collapsed pair (M0 bug-fix + M1-review GLSL-1).
