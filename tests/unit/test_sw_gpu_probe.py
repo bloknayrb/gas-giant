@@ -116,6 +116,24 @@ def test_swp_continuity_conserves_mass(gpu):
     np.testing.assert_allclose(m1, m0, rtol=2e-6)
 
 
+def test_swp_momentum_matches_ref(gpu):
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import operators, solver as cpu, grid
+    import numpy as np
+    rng=np.random.default_rng(9); W,H=64,32
+    h1=(5.0+0.3*rng.standard_normal((H,W))).astype(np.float32)
+    h2=(3.0+0.3*rng.standard_normal((H,W))).astype(np.float32)
+    u=(0.1*rng.standard_normal((H,W))).astype(np.float32)
+    v=np.zeros((H+1,W),np.float32); v[1:H]=0.1*rng.standard_normal((H-1,W))
+    gp=(1.0,0.05); f0=4.0; dt=0.01; g=grid.Grid(W,H)
+    M1,_=operators.montgomery_2layer(h1.astype(np.float64),h2.astype(np.float64),gp)
+    un_c,vn_c = cpu._layer_momentum(h1.astype(np.float64),u.astype(np.float64),v.astype(np.float64),M1,f0,g,dt)
+    M1_f=(gp[0]*(h1+h2)).astype(np.float32)
+    un_g,vn_g = solver.run_momentum(gpu, M1_f, u, v, f0=f0, dt=dt)
+    np.testing.assert_allclose(un_g, un_c, atol=2e-5)
+    np.testing.assert_allclose(vn_g[1:H], vn_c[1:H], atol=2e-5)
+
+
 def test_swp_continuity_conserves_mass_strong_gradient(gpu):
     """Under strong gradients the h_floor clamp is non-conservative (floor lifts cells),
     so GPU and CPU will both deviate from m0 at roughly the same rtol (~6e-4 for this seed).

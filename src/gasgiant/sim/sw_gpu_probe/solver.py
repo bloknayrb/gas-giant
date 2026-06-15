@@ -334,6 +334,90 @@ def run_continuity(
     return result
 
 
+def run_momentum(
+    gpu: "GpuContext",
+    M: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    f0: float,
+    dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU vector-invariant momentum update for one layer.
+
+    Ports _layer_momentum() from sw_spike/solver.py (single layer).
+
+    Parameters
+    ----------
+    gpu : GpuContext
+    M   : (H, W) float32 — Montgomery potential for this layer
+    u   : (H, W) float32 — zonal velocity at u-faces
+    v   : (H+1, W) float32 — meridional velocity at v-faces
+    f0  : float — Coriolis scale factor (f = f0*sin(phi))
+    dt  : float — timestep
+
+    Returns
+    -------
+    u_new : (H, W) float32
+    v_new : (H+1, W) float32
+    """
+    M = np.asarray(M, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+
+    H, W = u.shape
+    ctx = gpu.ctx
+
+    # Step 1: compute vorticity into a scratch texture using the existing kernel.
+    tex_u_in  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v_in  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_M_in  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_zeta  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_u_out = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v_out = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    tex_u_in.write(u.tobytes())
+    tex_v_in.write(v.tobytes())
+    tex_M_in.write(M.tobytes())
+
+    # --- Vorticity pass ---
+    k_vort = gpu.compute(_KERNELS, "swp_vorticity.comp")
+    _set(k_vort, "u_size", (W, H))
+    tex_u_in.use(location=0); _set(k_vort, "u_u", 0)
+    tex_v_in.use(location=1); _set(k_vort, "u_v", 1)
+    tex_zeta.bind_to_image(0, read=False, write=True)
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k_vort.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # --- Momentum pass ---
+    k_mom = gpu.compute(_KERNELS, "swp_momentum.comp")
+    _set(k_mom, "u_size", (W, H))
+    _set(k_mom, "u_f0",   float(f0))
+    _set(k_mom, "u_dt",   float(dt))
+
+    tex_zeta.use(location=0);  _set(k_mom, "u_zeta", 0)
+    tex_u_in.use(location=1);  _set(k_mom, "u_u",    1)
+    tex_v_in.use(location=2);  _set(k_mom, "u_v",    2)
+    tex_M_in.use(location=3);  _set(k_mom, "u_M",    3)
+
+    tex_u_out.bind_to_image(0, read=False, write=True)
+    tex_v_out.bind_to_image(1, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k_mom.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    u_new = gpu.read_texture(tex_u_out)[..., 0]
+    v_new = gpu.read_texture(tex_v_out)[..., 0]
+
+    for tex in (tex_u_in, tex_v_in, tex_M_in, tex_zeta, tex_u_out, tex_v_out):
+        tex.release()
+
+    return u_new, v_new
+
+
 def run_vorticity(
     gpu: "GpuContext",
     u: np.ndarray,
