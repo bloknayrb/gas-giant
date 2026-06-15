@@ -172,3 +172,74 @@ def run_divergence(
         tex.release()
 
     return result
+
+
+def run_grad(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    gp: float,
+    a: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU face pressure gradient ∇(g'·h) on C-grid faces.
+
+    Computes M = gp·h internally, then evaluates grad_faces(M):
+      gx[j,i] = (M[j,i+1] − M[j,i]) / (a·cosφ_c·dλ)  at east faces (H, W)
+      gy[j]   = (M[j-1,i] − M[j,i]) / (a·dφ)          at v-faces (H+1, W)
+    Pole rows of gy are zeroed.
+
+    Parameters
+    ----------
+    gpu : GpuContext
+    h   : (H, W) float32 — cell-centred layer depth
+    gp  : float — reduced gravity g'
+    a   : float — planetary radius
+
+    Returns
+    -------
+    (gx, gy) — (H, W) and (H+1, W) float32 arrays.
+    """
+    h = np.asarray(h, dtype=np.float32)
+
+    H, W = h.shape
+    ctx = gpu.ctx
+
+    # Allocate input and output textures.
+    tex_h  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    # Upload input.
+    tex_h.write(h.tobytes())
+
+    # Compile (or reuse) the gradient kernel.
+    k = gpu.compute(_KERNELS, "sw_grad.comp")
+
+    # Set uniforms.
+    _set(k, "u_size", (W, H))
+    _set(k, "u_a",    float(a))
+    _set(k, "u_dlam", 2.0 * math.pi / W)
+    _set(k, "u_dphi", math.pi / H)
+    _set(k, "u_gp",   float(gp))
+
+    # Bind sampler.
+    tex_h.use(location=0); _set(k, "u_h", 0)
+
+    # Bind output images.
+    tex_gx.bind_to_image(0, read=False, write=True)
+    tex_gy.bind_to_image(1, read=False, write=True)
+
+    # Dispatch over (W, H+1) to cover all v-face rows.
+    gx_groups = (W + _GROUP - 1) // _GROUP
+    gy_groups = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx_groups, gy_groups, 1)
+    ctx.memory_barrier()
+
+    # Download results.
+    result_gx = gpu.read_texture(tex_gx)[..., 0]
+    result_gy = gpu.read_texture(tex_gy)[..., 0]
+
+    # Release temporaries.
+    for tex in (tex_h, tex_gx, tex_gy):
+        tex.release()
+
+    return result_gx, result_gy

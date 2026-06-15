@@ -131,3 +131,31 @@ def test_gpu_divergence_radius_scaling(gpu):
     d1 = sw_gpu.run_divergence(gpu, h, u, v, a=1.0)
     d2 = sw_gpu.run_divergence(gpu, h, u, v, a=2.0)
     np.testing.assert_allclose(d2, 0.5 * d1, rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: GPU grad tests
+# ---------------------------------------------------------------------------
+
+def test_gpu_grad_matches_ref(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    for W, H in [(64, 32), (96, 48)]:
+        rng = np.random.default_rng(5)
+        h = (5.0 + 0.3 * rng.standard_normal((H, W))).astype(np.float32)
+        gp = 1.0; g = ref.Grid(W, H, a=1.0)
+        gxc, gyc = ref.grad_faces((gp * h).astype(np.float64), g)
+        gxg, gyg = sw_gpu.run_grad(gpu, h, gp=gp, a=1.0)
+        cos_c = g.cos_c[:, None]
+        # gx has 1/cos amplification -> pre-division compare; gy has only /dphi (O(1)) -> flat
+        np.testing.assert_allclose((cos_c * g.dlam) * gxg, (cos_c * g.dlam) * gxc, atol=2e-5)
+        np.testing.assert_allclose(gyg[1:H], gyc[1:H], atol=2e-5)
+
+
+def test_gpu_grad_radius_scaling(gpu):
+    from gasgiant.sim import sw_gpu
+    rng = np.random.default_rng(8); W, H = 64, 32
+    h = (5.0 + 0.3 * rng.standard_normal((H, W))).astype(np.float32)
+    gx1, gy1 = sw_gpu.run_grad(gpu, h, gp=1.0, a=1.0)
+    gx2, gy2 = sw_gpu.run_grad(gpu, h, gp=1.0, a=2.0)
+    np.testing.assert_allclose(gx2, 0.5 * gx1, rtol=1e-5)
+    np.testing.assert_allclose(gy2[1:H], 0.5 * gy1[1:H], rtol=1e-5)
