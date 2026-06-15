@@ -207,6 +207,21 @@ def test_gpu_continuity_matches_ref(gpu):
         got = sw_gpu.run_continuity(gpu,h,u,v,a=a,dt=0.02,h_floor=0.05)
         np.testing.assert_allclose(got,cpu,atol=2e-5)
 
+def test_gpu_momentum_matches_ref(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    for W, H, a in [(64, 32, 1.0), (96, 48, 1.0), (64, 32, 2.0)]:
+        rng = np.random.default_rng(9)
+        h = (5.0 + 0.3*rng.standard_normal((H,W))).astype(np.float32)
+        u = (0.1*rng.standard_normal((H,W))).astype(np.float32)
+        v = np.zeros((H+1,W),np.float32); v[1:H]=0.1*rng.standard_normal((H-1,W))
+        gp, omega, dt = 1.0, 2.0, 0.01; g = ref.Grid(W,H,a=a)
+        un_c, vn_c = ref.momentum_step(h.astype(np.float64),u.astype(np.float64),v.astype(np.float64),gp,omega,g,dt)
+        un_g, vn_g = sw_gpu.run_momentum(gpu,h,u,v,a=a,gp=gp,omega=omega,dt=dt)
+        np.testing.assert_allclose(un_g, un_c, atol=2e-5)
+        np.testing.assert_allclose(vn_g[1:H], vn_c[1:H], atol=2e-5)
+
+
 def test_gpu_continuity_conserves_mass(gpu):
     from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np

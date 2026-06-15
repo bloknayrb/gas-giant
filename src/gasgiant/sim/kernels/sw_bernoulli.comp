@@ -1,0 +1,50 @@
+#version 430
+// sw_bernoulli.comp — Bernoulli potential B = gp*h + 0.5*(u^2 + v_c^2) at cell centres.
+//
+// v_c[j,i] = 0.5*(v[j,i] + v[j+1,i])  — v collapsed to centres
+// B[j,i]   = u_gp * h[j,i] + 0.5*(u[j,i]^2 + v_c[j,i]^2)
+//
+// Inputs:
+//   u_h  : (W, H)   — layer thickness h at centres
+//   u_u  : (W, H)   — zonal velocity u at centres (east face)
+//   u_v  : (W, H+1) — meridional velocity v at v-faces
+//   u_gp : float    — reduced gravity g'
+//
+// Output:
+//   out_B : (W, H)  — Bernoulli potential at centres
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform sampler2D u_h;    // (W, H)
+uniform sampler2D u_u;    // (W, H)
+uniform sampler2D u_v;    // (W, H+1)
+uniform ivec2 u_size;     // (W, H)
+uniform float u_gp;       // reduced gravity
+
+layout(r32f, binding = 0) writeonly uniform image2D out_B;  // (W, H)
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+
+    if (px.x >= W || px.y >= H) return;
+
+    int i = px.x;
+    int j = px.y;
+
+    float h_val = texelFetch(u_h, ivec2(i, j), 0).r;
+    float u_val = texelFetch(u_u, ivec2(i, j), 0).r;
+
+    // v_c = 0.5*(v[j] + v[j+1])
+    float v0 = texelFetch(u_v, ivec2(i, j),     0).r;
+    float v1 = texelFetch(u_v, ivec2(i, j + 1), 0).r;
+    float v_c = 0.5 * (v0 + v1);
+
+    float ke = 0.5 * (u_val * u_val + v_c * v_c);
+    float B  = u_gp * h_val + ke;
+
+    imageStore(out_B, ivec2(i, j), vec4(B, 0.0, 0.0, 0.0));
+}

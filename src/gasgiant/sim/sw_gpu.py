@@ -412,3 +412,121 @@ def run_grad(
         tex.release()
 
     return result_gx, result_gy
+
+
+def run_momentum(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    a: float,
+    gp: float,
+    omega: float,
+    dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU vector-invariant momentum step; returns (u_new, v_new).
+
+    Orchestration:
+      1. ζ = run_vorticity(gpu, u, v, a)               — corners (H+1, W)
+      2. B = sw_bernoulli.comp(h, u, v, gp)             — centres (H, W)
+      3. (gx, gy) = run_grad(gpu, B, gp=1.0, a)         — Bernoulli gradient (1 a-site)
+      4. sw_momentum.comp(ζ, gx, gy, u, v, omega, dt)   — assembly (no metric here)
+
+    Parameters
+    ----------
+    gpu   : GpuContext
+    h     : (H, W) float32 — layer thickness
+    u     : (H, W) float32 — zonal velocity at u-faces
+    v     : (H+1, W) float32 — meridional velocity at v-faces
+    a     : float — planetary radius
+    gp    : float — reduced gravity g'
+    omega : float — planetary rotation rate Ω (f = 2Ω sinφ)
+    dt    : float — timestep
+
+    Returns
+    -------
+    (u_new, v_new) — (H, W) and (H+1, W) float32 arrays.
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+
+    H, W = h.shape
+    ctx = gpu.ctx
+
+    # --- Step 1: relative vorticity at corners (H+1, W) ---
+    zeta = run_vorticity(gpu, u, v, a)  # numpy (H+1, W)
+
+    # --- Step 2: Bernoulli potential B at centres (H, W) via GPU kernel ---
+    tex_h_b = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_u_b = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v_b = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_B   = gpu.texture2d((W, H),     components=1, dtype="f4")
+
+    tex_h_b.write(h.tobytes())
+    tex_u_b.write(u.tobytes())
+    tex_v_b.write(v.tobytes())
+
+    kb = gpu.compute(_KERNELS, "sw_bernoulli.comp")
+    _set(kb, "u_size", (W, H))
+    _set(kb, "u_gp",   float(gp))
+    tex_h_b.use(location=0); _set(kb, "u_h", 0)
+    tex_u_b.use(location=1); _set(kb, "u_u", 1)
+    tex_v_b.use(location=2); _set(kb, "u_v", 2)
+    tex_B.bind_to_image(0, read=False, write=True)
+
+    gx_grp = (W + _GROUP - 1) // _GROUP
+    gy_grp = (H + _GROUP - 1) // _GROUP
+    kb.run(gx_grp, gy_grp, 1)
+    ctx.memory_barrier()
+
+    B_arr = gpu.read_texture(tex_B)[..., 0]  # (H, W) float32
+
+    for tex in (tex_h_b, tex_u_b, tex_v_b, tex_B):
+        tex.release()
+
+    # --- Step 3: Bernoulli gradient (gx, gy) via run_grad with gp=1.0 ---
+    # B already contains gp*h + ke; pass gp=1.0 so run_grad computes grad(1.0*B)=grad(B).
+    B_gx, B_gy = run_grad(gpu, B_arr, gp=1.0, a=a)  # (H,W) and (H+1,W)
+
+    # --- Step 4: assembly kernel ---
+    tex_zeta  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gx    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gy    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_u_m   = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v_m   = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_u_new = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v_new = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    tex_zeta.write(zeta.astype(np.float32).tobytes())
+    tex_gx.write(B_gx.astype(np.float32).tobytes())
+    tex_gy.write(B_gy.astype(np.float32).tobytes())
+    tex_u_m.write(u.tobytes())
+    tex_v_m.write(v.tobytes())
+
+    km = gpu.compute(_KERNELS, "sw_momentum.comp")
+    _set(km, "u_size",  (W, H))
+    _set(km, "u_omega", float(omega))
+    _set(km, "u_dt",    float(dt))
+
+    tex_zeta.use(location=0); _set(km, "u_zeta", 0)
+    tex_gx.use(location=1);   _set(km, "u_gx",   1)
+    tex_gy.use(location=2);   _set(km, "u_gy",   2)
+    tex_u_m.use(location=3);  _set(km, "u_u",    3)
+    tex_v_m.use(location=4);  _set(km, "u_v",    4)
+
+    tex_u_new.bind_to_image(0, read=False, write=True)
+    tex_v_new.bind_to_image(1, read=False, write=True)
+
+    gx_grp = (W + _GROUP - 1) // _GROUP
+    gy_grp = (H + 1 + _GROUP - 1) // _GROUP
+    km.run(gx_grp, gy_grp, 1)
+    ctx.memory_barrier()
+
+    result_u = gpu.read_texture(tex_u_new)[..., 0]  # (H, W)
+    result_v = gpu.read_texture(tex_v_new)[..., 0]  # (H+1, W)
+
+    for tex in (tex_zeta, tex_gx, tex_gy, tex_u_m, tex_v_m, tex_u_new, tex_v_new):
+        tex.release()
+
+    return result_u, result_v
