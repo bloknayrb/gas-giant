@@ -122,7 +122,7 @@ def test_helmholtz_conserves() -> None:
     yx = _inner_centers(y, Lx, g)
     np.testing.assert_allclose(
         xy, yx,
-        rtol=1e-10, atol=1e-10,
+        rtol=1e-12, atol=1e-12,
         err_msg=f"helmholtz_apply not symmetric: <x,Ly>={xy:.15g}, <y,Lx>={yx:.15g}",
     )
 

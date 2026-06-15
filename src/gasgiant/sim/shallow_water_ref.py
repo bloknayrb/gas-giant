@@ -277,6 +277,11 @@ def divergence_helmholtz(
     """
     H, W = g.H, g.W
 
+    if H_ref_lat.shape != (H,):
+        raise ValueError(
+            f"H_ref_lat must be shape ({H},) (latitude-only), got {H_ref_lat.shape}"
+        )
+
     # --- Apply H_ref symmetrically to face fluxes ---
     # u-faces: use center value at each latitude row.
     Hx = H_ref_lat[:, None]          # (H, 1), broadcast to (H, W)
@@ -289,7 +294,7 @@ def divergence_helmholtz(
     Fy_w = H_ref_v[:, None] * Fy     # weighted meridional flux, (H+1, W)
 
     # --- Zonal divergence term: (Fx_w[j,i] - Fx_w[j,i-1]) / (a dlam) ---
-    # This is -d/dlam applied to Fx_w (roll by +1 brings i-1 into position i).
+    # Backward difference — SBP adjoint of the forward difference in grad_faces.
     dFx = (Fx_w - np.roll(Fx_w, 1, axis=1)) / (g.a * g.dlam)    # (H, W)
 
     # --- Meridional divergence term ---
