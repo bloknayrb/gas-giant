@@ -2,7 +2,13 @@
 
 **Date:** 2026-06-15
 **Branch:** `v2-shallow-water`
-**Decision:** ⏳ PENDING USER BLIND-PANEL CALL (the kill-gate is a human decision)
+**Decision:** ✅ **PROCEED TO M1 (eyes open)** — user call, 2026-06-15.
+The SW solver is validated and eddies emerge; the M0 visual loss to v1.6 is
+judged resolution-bound (192×96 CPU vs 4096 GPU), not a refutation. M1 (GPU
+C-grid solver at 4096, Williamson-validated) + M2 (semi-implicit, usable dt)
+become the *fair* visual test. Risk accepted: even at 4096 the SW morphology may
+not beat v1.6's tuned appearance — M1's render-fidelity check (spec §5 M3) is the
+next real go/no-go.
 
 ## What M0 built
 
