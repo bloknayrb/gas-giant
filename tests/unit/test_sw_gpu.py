@@ -343,3 +343,40 @@ def test_gpu_deterministic(gpu):
     h_init, u_init_arr, v_init_arr = h0, u0, v0
     evolved = (not np.array_equal(u_final, u_init_arr)) or (not np.array_equal(v_final, v_init_arr))
     assert evolved, "field did not evolve (u and v unchanged after 50 steps) — possible no-op"
+
+
+# ---------------------------------------------------------------------------
+# Task 14: Checkpoint byte-exact round-trip
+# ---------------------------------------------------------------------------
+
+def test_gpu_checkpoint_roundtrip(gpu, tmp_path):
+    from gasgiant.sim import sw_gpu
+    import numpy as np
+
+    # Build solver A with the same Williamson-2 constants used by other tests.
+    solver = sw_gpu.SwGpuSolver.from_williamson2(
+        gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0
+    )
+
+    # Advance 30 steps, then save checkpoint.
+    for _ in range(30):
+        solver.step()
+
+    pathA = tmp_path / "ckpt.npz"
+    solver.save_checkpoint(pathA)
+
+    # Advance 10 more steps on the original solver (state A).
+    for _ in range(10):
+        solver.step()
+    hA, uA, vA = solver.download_state()
+
+    # Build a fresh solver by loading the checkpoint; advance 10 steps (state B).
+    solver_b = sw_gpu.SwGpuSolver.load_checkpoint(gpu, pathA)
+    for _ in range(10):
+        solver_b.step()
+    hB, uB, vB = solver_b.download_state()
+
+    # States must be byte-identical (GPU pipeline is deterministic).
+    assert np.array_equal(hA, hB), "h not byte-identical after checkpoint round-trip"
+    assert np.array_equal(uA, uB), "u not byte-identical after checkpoint round-trip"
+    assert np.array_equal(vA, vB), "v not byte-identical after checkpoint round-trip"

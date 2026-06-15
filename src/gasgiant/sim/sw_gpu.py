@@ -605,6 +605,87 @@ class SwGpuSolver:
         ens = 0.5 * abs_vort * abs_vort / h_corner * cos_v
         return float(np.sum(ens) * self.a * self.a * g.dlam * g.dphi)
 
+    # -- Checkpoint I/O -------------------------------------------------------
+
+    def save_checkpoint(self, path) -> None:
+        """Save solver state to a .npz file.
+
+        Stores all scalar parameters and the current h, u, v field arrays
+        as float32.  The file can be reloaded with :meth:`load_checkpoint`.
+
+        Parameters
+        ----------
+        path : path-like
+            Destination file (a ``.npz`` extension is appended by ``np.savez``
+            if not already present).
+        """
+        h, u, v = self.download_state()
+        np.savez(
+            path,
+            version=np.int32(1),
+            W=np.int32(self.W),
+            H=np.int32(self.H),
+            a=np.float64(self.a),
+            gp=np.float64(self.gp),
+            omega=np.float64(self.omega),
+            dt=np.float64(self.dt),
+            h_floor=np.float64(self.h_floor),
+            h=h.astype(np.float32),
+            u=u.astype(np.float32),
+            v=v.astype(np.float32),
+        )
+
+    @classmethod
+    def load_checkpoint(cls, gpu: "GpuContext", path) -> "SwGpuSolver":
+        """Reconstruct a :class:`SwGpuSolver` from a checkpoint written by
+        :meth:`save_checkpoint`.
+
+        Parameters
+        ----------
+        gpu  : GpuContext
+        path : path-like
+            Path to the ``.npz`` checkpoint file.
+
+        Returns
+        -------
+        SwGpuSolver
+            Solver with GPU field textures pre-loaded from the checkpoint.
+
+        Raises
+        ------
+        ValueError
+            If the checkpoint version is not 1.
+        """
+        data = np.load(path)
+        version = int(data["version"])
+        if version != 1:
+            raise ValueError(f"Unsupported checkpoint version {version!r}; expected 1")
+
+        sg = cls(
+            gpu=gpu,
+            W=int(data["W"]),
+            H=int(data["H"]),
+            a=float(data["a"]),
+            gp=float(data["gp"]),
+            omega=float(data["omega"]),
+            dt=float(data["dt"]),
+            h_floor=float(data["h_floor"]),
+        )
+
+        # Upload saved fields to GPU textures (bit-exact float32).
+        h = data["h"].astype(np.float32)
+        u = data["u"].astype(np.float32)
+        v = data["v"].astype(np.float32)
+        sg._tex_h.write(h.tobytes())
+        sg._tex_u.write(u.tobytes())
+        sg._tex_v.write(v.tobytes())
+
+        # Restore initial velocity fields so velocity_l2_drift() stays callable.
+        sg.u_init = u.copy()
+        sg.v_init = v.copy()
+
+        return sg
+
     # -- Step -----------------------------------------------------------------
 
     def step(self) -> None:
