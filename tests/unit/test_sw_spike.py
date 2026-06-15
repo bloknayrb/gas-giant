@@ -182,3 +182,20 @@ def test_checkerboard_pressure_perturbation_does_not_grow():
         st = solver.step(st, dt=st.dt)
     amp1 = solver.checkerboard_amplitude(st.h1)
     assert amp1 <= amp0 * 1.5    # bounded, not exponentially growing
+
+
+def test_init_equatorial_velocity_is_finite():
+    from gasgiant.sim.sw_spike import init
+    st = init.emergent_init(W=128, H=64, f0=4.0, gp=(1.0, 0.05),
+                            n_bands=10, band_contrast=0.4)
+    assert np.all(np.isfinite(st.u1)) and np.all(np.isfinite(st.u2))
+    eqrow = st.g.H // 2
+    assert np.max(np.abs(st.u1[eqrow])) < 5.0
+
+
+def test_h_eq_has_band_structure():
+    from gasgiant.sim.sw_spike import init
+    heq = init.h_eq_profile(H=64, n_bands=10, band_contrast=0.4, h_mean=5.0)
+    assert heq.shape == (64,)
+    d = np.diff(np.sign(np.diff(heq)))
+    assert np.count_nonzero(d) >= 6
