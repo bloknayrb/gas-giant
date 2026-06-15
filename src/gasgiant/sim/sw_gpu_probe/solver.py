@@ -236,3 +236,67 @@ def run_grad_montgomery(
         tex.release()
 
     return result
+
+
+def run_vorticity(
+    gpu: "GpuContext",
+    u: np.ndarray,
+    v: np.ndarray,
+) -> np.ndarray:
+    """GPU relative vorticity ζ at corners (H+1, W).
+
+    Ports vorticity() from sw_spike/operators.py.
+
+    Parameters
+    ----------
+    gpu : GpuContext
+    u   : (H, W) float32 — zonal velocity at cell centres
+    v   : (H+1, W) float32 — meridional velocity at v-faces
+
+    Returns
+    -------
+    (H+1, W) float32 — relative vorticity at corners; poles forced to 0.
+    """
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+
+    H, W = u.shape
+    ctx = gpu.ctx
+
+    # Input textures.
+    tex_u = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_zeta = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    tex_u.write(u.tobytes())
+    tex_v.write(v.tobytes())
+
+    # Compile (or reuse) the vorticity kernel.
+    k = gpu.compute(_KERNELS, "swp_vorticity.comp")
+
+    # Uniforms — names must match GLSL declarations exactly.
+    _set(k, "u_size", (W, H))
+
+    # Bind samplers.
+    tex_u.use(location=0)
+    _set(k, "u_u", 0)
+    tex_v.use(location=1)
+    _set(k, "u_v", 1)
+
+    # Bind output image.
+    tex_zeta.bind_to_image(0, read=False, write=True)
+
+    # Dispatch over (W, H+1) to cover all corner rows.
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # Download result.
+    result = gpu.read_texture(tex_zeta)[..., 0]
+
+    # Release temporaries.
+    for tex in (tex_u, tex_v, tex_zeta):
+        tex.release()
+
+    return result
