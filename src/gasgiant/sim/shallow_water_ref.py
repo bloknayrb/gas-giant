@@ -452,7 +452,9 @@ def helmholtz_apply(
 # ---------------------------------------------------------------------------
 
 def helmholtz_rhs(
-    h_star_expl: np.ndarray,
+    h_n: np.ndarray,
+    u_n: np.ndarray,
+    v_n: np.ndarray,
     u_star: np.ndarray,
     v_star: np.ndarray,
     dh_prev: np.ndarray,
@@ -463,49 +465,52 @@ def helmholtz_rhs(
     dt: float,
     g: Grid,
 ) -> np.ndarray:
-    """Assemble the RHS of the semi-implicit Helmholtz linear system.
+    """Assemble the RHS of the semi-implicit Helmholtz system for the increment.
 
-    Returns the RHS vector b such that the Picard iteration solves:
+    Solves for the height INCREMENT dh = h^{n+1} - h^n via
+
         L_sym(dh) = b    (L_sym = helmholtz_apply)
 
-    The three terms are:
+    This is the textbook theta-scheme (Crank-Nicolson at theta=0.5) in which the
+    linear gravity-wave terms are time-centered.  The momentum predictor carries
+    only the (1-theta) explicit half of the pressure gradient; the theta-implicit
+    half acts on the FULL height h^{n+1} = h^n + dh through velocity_backsub, so
+    the implicit pressure is the dominant restoring force and the explicit
+    gravity-wave CFL is removed (unconditional stability, neutral at theta=0.5).
 
-    1. h_star_expl  — the explicit predictor height (the forcing).
+    Eliminating u^{n+1} from the theta-centered continuity equation
 
-    2. -theta*dt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
-       where (u_cs, v_cs) = coriolis_sandwich(u_star, v_star, omega, g, dt).
-       This is the height tendency due to the reference-layer divergence of the
-       Coriolis-rotated predictor velocities.
+        dh = -dt * div_H( H_ref * [theta * u^{n+1} + (1-theta) * C(u_n)] )
 
-    3. +(theta*dt)**2 * gp * divergence_helmholtz(du_cor, dv_cor, H_ref_lat, g)
-       where (u_pg, v_pg) = (theta*dt*gp) * grad_faces(dh_prev)  (pressure-gradient
-       response to the previous increment), and
-       (u_rot, v_rot) = coriolis_sandwich(u_pg, v_pg, omega, g, dt),
-       and (du_cor, dv_cor) = (u_rot - u_pg, v_rot - v_pg).
-       This is the DEFERRED Coriolis correction: only the (Coriolis - I) part of
-       the implicit pressure-gradient response, lagged at dh_prev.  The identity
-       part (I) is already on the LHS in L_sym and must NOT appear here.
+    with u^{n+1} = C(u_star) - theta*dt*gp * C( grad(h^n + dh) ) gives the three
+    RHS terms (the identity part of the implicit pressure goes to L_sym):
 
-    Zero-velocity invariant: with u_star=0, v_star=0, dh_prev=0 every correction
-    term vanishes and helmholtz_rhs returns h_star_expl exactly.
-    Proof: coriolis_sandwich(0,0)=(0,0) → term 2 = 0.
-           grad_faces(0)=(0,0) → u_pg=v_pg=0 → coriolis_sandwich(0,0)=(0,0)
-           → du_cor=dv_cor=0 → term 3 = 0.
+    1. refdiv = -dt * div_H( H_ref * [theta*C(u_star) + (1-theta)*C(u_n)] )
+       The theta-centered reference-layer divergence of the predictor velocities.
+       C(.) = coriolis_sandwich(., omega, g, dt).
 
-    NOTE: T4 (test_w2_geostrophic_stationary, test_backsub_continuity_consistency,
-    test_semi_implicit_reduces_to_m1_at_small_dt) is the end-to-end arbiter.
-    The split between the deferred Coriolis term and L_sym may be refined in T4
-    without violating the invariants tested here.
+    2. bg = +theta*dt * div_H( H_ref * C( theta*dt*gp * grad(h^n) ) )
+       The implicit pressure response to the (known, fixed) BACKGROUND height
+       gradient grad(h^n).  This is the (theta*dt)^2 cross term carrying the
+       full implicit pressure into the height update.  It is evaluated at h^n
+       (not dh) and is therefore exact — no Picard lag.
+
+    3. defer = +theta*dt * div_H( (C - I)( theta*dt*gp * grad(dh_prev) ) )
+       DEFERRED Coriolis correction for the increment: only the (Coriolis - I)
+       part of the implicit pressure response to dh, lagged at dh_prev.  The
+       identity (I) part is on the LHS in L_sym and must NOT appear here.
 
     Parameters
     ----------
-    h_star_expl : ndarray, shape (H, W)
-        Explicit predictor height (h^n minus the (1-theta) explicit gravity-wave
-        and FCT transport halves).
+    h_n : ndarray, shape (H, W)
+        Current height h^n (the background; its gradient is treated implicitly).
+    u_n, v_n : ndarrays
+        Current velocities (u^n at u-faces (H,W), v^n at v-faces (H+1,W)).
     u_star : ndarray, shape (H, W)
-        Provisional zonal velocity after the explicit advection step.
+        Provisional zonal velocity after the explicit advection + (1-theta)
+        pressure predictor (NO Coriolis).
     v_star : ndarray, shape (H+1, W)
-        Provisional meridional velocity after the explicit advection step.
+        Provisional meridional velocity from the predictor.
     dh_prev : ndarray, shape (H, W)
         Height increment from the previous Picard iteration (dh^(m)).
     H_ref_lat : ndarray, shape (H,)
@@ -526,26 +531,28 @@ def helmholtz_rhs(
     """
     tdt = theta * dt
 
-    # --- Term 2: height tendency from Coriolis-rotated predictor velocities ---
-    u_cs, v_cs = coriolis_sandwich(u_star, v_star, omega, g, dt)
-    term2 = -tdt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
+    # --- Term 1: theta-centered reference-layer divergence of predictor velocities ---
+    u_ncs, v_ncs = coriolis_sandwich(u_n, v_n, omega, g, dt)
+    u_pcs, v_pcs = coriolis_sandwich(u_star, v_star, omega, g, dt)
+    u_tc = theta * u_pcs + (1.0 - theta) * u_ncs
+    v_tc = theta * v_pcs + (1.0 - theta) * v_ncs
+    refdiv = -dt * divergence_helmholtz(u_tc, v_tc, H_ref_lat, g)
 
-    # --- Term 3: deferred Coriolis correction (only (Coriolis - I) part) ---
-    # Implicit pressure-gradient velocity increment (face values).
-    gx_prev, gy_prev = grad_faces(dh_prev, g)
-    u_pg = tdt * gp * gx_prev          # (H, W)  u-faces
-    v_pg = tdt * gp * gy_prev          # (H+1,W) v-faces
+    # --- Term 2: implicit pressure response to the background gradient grad(h^n) ---
+    gx_n, gy_n = grad_faces(h_n, g)
+    u_bg = tdt * gp * gx_n
+    v_bg = tdt * gp * gy_n
+    u_bgc, v_bgc = coriolis_sandwich(u_bg, v_bg, omega, g, dt)
+    bg = tdt * divergence_helmholtz(u_bgc, v_bgc, H_ref_lat, g)
 
-    # Coriolis rotation of the pressure-gradient increment.
-    u_rot, v_rot = coriolis_sandwich(u_pg, v_pg, omega, g, dt)
+    # --- Term 3: deferred Coriolis correction for the increment (only (C - I) part) ---
+    gx_d, gy_d = grad_faces(dh_prev, g)
+    u_d = tdt * gp * gx_d
+    v_d = tdt * gp * gy_d
+    u_dc, v_dc = coriolis_sandwich(u_d, v_d, omega, g, dt)
+    defer = tdt * divergence_helmholtz(u_dc - u_d, v_dc - v_d, H_ref_lat, g)
 
-    # Only the (Coriolis - I) part: subtract the identity contribution.
-    du_cor = u_rot - u_pg              # (H, W)
-    dv_cor = v_rot - v_pg              # (H+1,W)
-
-    term3 = tdt * divergence_helmholtz(du_cor, dv_cor, H_ref_lat, g)
-
-    return h_star_expl + term2 + term3
+    return refdiv + bg + defer
 
 
 def picard_contraction_factor(
@@ -942,25 +949,35 @@ def step(st: SwRefState) -> SwRefState:
 
 def _semi_implicit_predictor(
     h: np.ndarray, u: np.ndarray, v: np.ndarray,
-    gp: float, g: Grid, dt: float,
+    gp: float, g: Grid, dt: float, theta: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Explicit predictor (u_star, v_star): advection + Bernoulli, NO Coriolis.
+    """Explicit predictor (u_star, v_star): advection + KE + (1-theta) pressure.
 
-    Mirrors momentum_step's vector-invariant advection and the FULL Bernoulli
-    potential B = g'h + ke (pressure gradient explicit), but omits the Coriolis
-    sandwich.  The Coriolis rotation is applied later in velocity_backsub; the
-    implicit Helmholtz adds a gravity-wave correction dh on top of this explicit
-    pressure gradient.
+    Mirrors momentum_step's vector-invariant advection and the kinetic-energy
+    part of the Bernoulli potential, and adds ONLY the (1-theta) EXPLICIT half of
+    the pressure gradient -(1-theta)*dt*g'*grad(h^n).  Coriolis is omitted (it is
+    applied later in velocity_backsub).
 
-    NOTE (refinement vs. the T4 brief): the brief suggested dropping g'h from the
-    Bernoulli (kinetic energy only).  The W2-stationarity and back-substitution-
-    consistency gates — the declared arbiters — require the FULL explicit pressure
-    gradient here: with g'h dropped, the only pressure force restored is
-    theta*dt*g'*grad(dh), which is O(dt^2) and far too small to maintain the
-    geostrophic balance, leaving a ~1e-4 velocity drift (165x the explicit step).
-    Keeping g'h explicit makes the scheme reduce cleanly to the explicit step as
-    dh->0, so W2 stays stationary to the explicit-step tolerance.  This is the
-    "explicit pressure + implicit gravity-wave correction" semi-implicit variant.
+    The remaining theta half of the pressure gradient is carried IMPLICITLY by
+    velocity_backsub acting on the FULL solved height h^{n+1} = h^n + dh:
+
+        u^{n+1} = C( u_star - theta*dt*g'*grad(h^n + dh) )
+
+    so the total pressure kick on the velocity is the time-centered
+    -(1-theta)*dt*g'*grad(h^n) - theta*dt*g'*grad(h^{n+1}).  This is the textbook
+    theta-scheme split:
+
+      - At a balanced steady state (Williamson-2), dh -> 0 and the kick collapses
+        to -dt*g'*grad(h^n), the full explicit pressure that balances Coriolis, so
+        the velocity is stationary (matches momentum_step exactly).
+      - For a gravity wave about a flat resting layer, grad(h^n) = 0 and the kick
+        is purely the implicit -theta*dt*g'*grad(h^{n+1}); the explicit
+        gravity-wave velocity CFL is therefore REMOVED.
+
+    The earlier variant baked the FULL explicit pressure g'h into the predictor
+    Bernoulli; that retains the explicit gravity-wave kick (-dt*g'*grad(h^n)) and
+    the wave blows up at ~2x the explicit CFL.  Carrying only the (1-theta) half
+    here is what removes the CFL while keeping W2 stationary.
     """
     H, W = h.shape
     zeta = vorticity(u, v, g)
@@ -971,11 +988,16 @@ def _semi_implicit_predictor(
     u_c = 0.5 * (u + np.roll(u, 1, axis=1))
     u_at_vf = center_to_vface(u_c)
     ke = 0.5 * (u * u + v_c * v_c)
-    B = gp * h + ke
-    gx, gy = grad_faces(B, g)
-    u_star = u + dt * (zeta_uf * v_at_uf - gx)
-    v_star = np.zeros_like(v)
-    v_star[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gy[1:H])
+    gxk, gyk = grad_faces(ke, g)              # advective KE gradient
+    gxn, gyn = grad_faces(h, g)               # background height gradient grad(h^n)
+    # Advection + KE.
+    u_adv = u + dt * (zeta_uf * v_at_uf - gxk)
+    v_adv = np.zeros_like(v)
+    v_adv[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gyk[1:H])
+    # Subtract the (1-theta) EXPLICIT pressure half.
+    u_star = u_adv - (1.0 - theta) * dt * gp * gxn
+    v_star = v_adv.copy()
+    v_star[1:H] = v_adv[1:H] - (1.0 - theta) * dt * gp * gyn[1:H]
     return u_star, v_star
 
 
@@ -987,18 +1009,32 @@ def step_semi_implicit(
     sor_omega: float = 1.7,
     dh_warm: Optional[np.ndarray] = None,
 ) -> SwRefState:
-    """One semi-implicit shallow-water step.
+    """One semi-implicit shallow-water step (textbook theta-scheme).
 
-    Structure (see module docstring of helmholtz_rhs for the term split):
-      1. Predictor: explicit advection + full Bernoulli, no Coriolis.
-      2. h_star_expl: the (1-theta) explicit half of the gravity-wave height
-         tendency, -(1-theta)*dt*div_H(H_ref * Coriolis(u_star, v_star)).
-      3. H_ref: frozen per-latitude zonal-mean depth (reference_depth).
-      4. Picard loop (deferred Coriolis): rebuild rhs at the current dh and
-         re-solve the symmetric Helmholtz L_sym dh = rhs.
-      5. Back-substitution: velocity_backsub applies the implicit pressure
-         gradient and the Coriolis sandwich.
-      6. Final height: FCT continuity on the total h with the new velocities.
+    The linear gravity-wave terms are theta-time-centered (theta=0.5 =
+    Crank-Nicolson: unconditionally stable AND neutral), eliminating the explicit
+    gravity-wave CFL.  We solve for the height INCREMENT dh = h^{n+1} - h^n; the
+    implicit pressure acts on the FULL height h^{n+1} via velocity_backsub.
+
+    Structure (see helmholtz_rhs for the term split):
+      1. Predictor: advection + KE + (1-theta) explicit pressure half, no Coriolis.
+      2. H_ref: frozen per-latitude zonal-mean depth (reference_depth); c^2=g'H_ref.
+      3. Picard loop (deferred Coriolis): rebuild rhs at the current dh and
+         re-solve the symmetric Helmholtz L_sym dh = rhs (L_sym = helmholtz_apply).
+      4. Back-substitution: velocity_backsub applies the theta-implicit pressure
+         gradient of the FULL height h^{n+1} = h^n + dh and the Coriolis sandwich.
+      5. Final height: the matched theta-centered increment h^n + dh PLUS the
+         explicit nonlinear/anomaly transport (FCT on the total h minus its linear
+         reference-divergence part).  The theta-centered reference divergence is
+         implicit (in dh) and supplies the unconditional stability; only the slow
+         nonlinear anomaly transport is explicit.
+
+    NOTE (W2 height drift): the matched theta-scheme has an intrinsic O((theta*dt)^2)
+    steady-state height imbalance from the implicit pressure/Coriolis coupling on
+    the background gradient (it vanishes as dt -> 0; see
+    test_w2_geostrophic_stationary).  The velocity stays stationary to the
+    explicit step's tolerance.  This is the price of making the FULL pressure
+    implicit, which is what removes the gravity-wave CFL.
 
     Parameters
     ----------
@@ -1017,29 +1053,32 @@ def step_semi_implicit(
     h, u, v = st.h, st.u, st.v
     H, W = h.shape
 
-    # 1. Predictor.
-    u_star, v_star = _semi_implicit_predictor(h, u, v, gp, g, dt)
+    # 1. Predictor (advection + KE + (1-theta) explicit pressure half, no Coriolis).
+    u_star, v_star = _semi_implicit_predictor(h, u, v, gp, g, dt, theta)
 
-    # 3. Frozen reference depth (latitude-only zonal mean).
+    # 2. Frozen reference depth (latitude-only zonal mean).
     H_ref_lat = reference_depth(h)
 
-    # 2. Explicit (1-theta) gravity-wave height tendency.
-    u_cs, v_cs = coriolis_sandwich(u_star, v_star, omega, g, dt)
-    h_star_expl = -(1.0 - theta) * dt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
-
-    # 4. Picard loop with deferred Coriolis; SOR Helmholtz inner solve.
+    # 3. Picard loop with deferred Coriolis; SOR Helmholtz inner solve for dh.
     dh = np.zeros((H, W)) if dh_warm is None else dh_warm.copy()
     for _ in range(picard_iters):
-        rhs = helmholtz_rhs(h_star_expl, u_star, v_star, dh,
+        rhs = helmholtz_rhs(h, u, v, u_star, v_star, dh,
                             H_ref_lat, gp, omega, theta, dt, g)
         dh = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
                            poisson_iters, sor_omega, dh0=dh)
 
-    # 5. Back-substitution.
-    u_new, v_new = velocity_backsub(u_star, v_star, dh, gp, theta, dt, omega, g)
+    # 4. Back-substitution: implicit pressure of the FULL height h^{n+1} = h + dh.
+    u_new, v_new = velocity_backsub(u_star, v_star, h + dh, gp, theta, dt, omega, g)
 
-    # 6. Final height by FCT continuity on the total h.
-    h_new = continuity_step(h, u_new, v_new, g, dt, st.h_floor)
+    # 5. Final height: matched theta-centered increment + explicit nonlinear anomaly.
+    #    anomaly = FCT(total h, u_new) - explicit linear reference divergence(u_new).
+    #    At a balanced/linear state the anomaly is negligible; it carries the slow
+    #    (CFL-safe) nonlinear and positivity-limited transport beyond the linear
+    #    reference-divergence already represented implicitly in dh.
+    h_fct = continuity_step(h, u_new, v_new, g, dt, st.h_floor)
+    h_linref = h - dt * divergence_helmholtz(u_new, v_new, H_ref_lat, g)
+    anomaly = h_fct - h_linref
+    h_new = np.maximum(h + dh + anomaly, st.h_floor)
 
     return SwRefState(
         g=g, gp=gp,

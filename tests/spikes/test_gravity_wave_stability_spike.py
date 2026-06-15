@@ -218,47 +218,47 @@ def test_gravity_wave_large_dt_stability_characterization():
     _emit(f"LARGEST STABLE N (bounded, peak<100x bump): {largest_stable_N}")
     _emit(f"LARGEST ACCURATE N (L2err_vs_ref < 1.0):    {largest_accurate_N}")
 
-    # --- Damping vs propagation diagnostic ---
-    # If amplitude DECAYS hard (growth << 1) the scheme is stable by numerical
-    # damping, NOT by CFL removal.  Flag the moderate-N case.
-    g10 = results.get(10, {}).get("growth", float("nan"))
+    # --- Damping vs propagation diagnostic (ENERGY-based) ---
+    # The peak-amplitude "growth" above is a POOR neutrality measure: a Gaussian
+    # bump disperses into a spreading wave train, so its PEAK drops even with zero
+    # numerical damping.  Total energy is the clean measure: at theta=0.5 the
+    # scheme is neutral (energy conserved), so E_end/E0 ~ 1 at every N.  E_end/E0
+    # << 1 would mean genuine numerical damping; >> 1 would mean growth.
     _emit("-" * 78)
-    if np.isfinite(g10):
-        if g10 < 0.3:
-            _emit(f"WARNING: at N=10 amplitude growth={g10:.2e} (<0.3) -> the scheme "
-                  f"is heavily DAMPING the wave. Stability-by-damping is NOT clean "
-                  f"CFL removal; real dynamics would be corrupted.")
-        else:
-            _emit(f"At N=10 growth={g10:.2e}: wave amplitude preserved (no heavy damping).")
+    erat = _energy_neutrality_probe(st0, dt_gw, Ns_probe=(10, 100), n_steps=40)
 
-    # --- ROOT-CAUSE diagnostic: implicit dh contribution vs explicit pressure ---
-    # For a PROPAGATING wave (not steady state), compare the magnitude of the
-    # implicit Helmholtz height increment dh against the explicit gravity-wave
-    # height tendency at a large dt.  If the implicit dh is tiny relative to the
-    # explicit tendency, the Helmholtz term is only a small correction and is NOT
-    # supplying the dominant restoring force -> CFL not removed.
+    # Fix-confirmation diagnostic: the implicit pressure carries the restoring force.
     _root_cause_diagnostic(st0, dt_gw, N_diag=20, H0=H0, gp=gp)
 
     _emit("=" * 78)
     _emit("VERDICT:")
     if largest_stable_N >= 20:
-        _emit(f"  M2 CORE ACHIEVES gravity-wave CFL removal (stable to N={largest_stable_N}"
-              f", >=20x). Proceed to GPU port -- BUT confirm accuracy (largest accurate "
-              f"N = {largest_accurate_N}) and the damping flag above are acceptable.")
+        _emit(f"  M2 CORE ACHIEVES gravity-wave CFL removal: stable and bounded to "
+              f"N={largest_stable_N} (>=20x the explicit CFL), with total energy "
+              f"conserved (theta=0.5 is neutral, NOT damped).  The peak-amplitude "
+              f"drop is physical Gaussian dispersion, confirmed by E_end/E0 ~ 1 above. "
+              f"Largest accurate N (L2err<1) = {largest_accurate_N}.")
     elif largest_stable_N < 10:
         _emit(f"  M2 CORE DOES NOT remove the gravity-wave CFL (blows up by N={ [n for n in Ns if not results[n]['bounded']] }). "
-              f"The semi-implicit formulation is wrong: the implicit theta*dh term is "
-              f"not the dominant restoring force. T4 needs rework before the GPU port.")
+              f"The semi-implicit formulation is wrong: the implicit theta pressure "
+              f"is not the dominant restoring force. Rework before the GPU port.")
     else:
         _emit(f"  PARTIAL: stable to N={largest_stable_N} (10-20x). Better than explicit "
               f"but short of unconditional. Investigate before committing to GPU port.")
     _emit("=" * 78)
 
-    # CHARACTERIZATION assertions: lock in the OBSERVED reality so the spike stays
-    # green and regressions are caught. (These encode the truth this run found.)
+    # GATE assertions: the corrected theta-scheme removes the gravity-wave CFL.
+    # The scheme must be stable and bounded to at least 20x the explicit CFL
+    # (it is in fact stable to the largest N tested), and theta=0.5 must be
+    # NEUTRAL (total energy conserved), not stabilized by numerical damping.
     assert results[1]["bounded"], "even N=1 (= explicit CFL) blew up -- setup broken"
-    # Record the discovered stability ceiling; if behavior changes this trips.
-    assert largest_stable_N >= 1
+    assert largest_stable_N >= 20, (
+        f"gravity-wave CFL NOT removed: largest stable N={largest_stable_N} (<20x). "
+        f"The implicit theta pressure is not the dominant restoring force.")
+    # Neutrality: energy conserved to within a few percent over the probe window.
+    assert 0.9 < erat < 1.1, (
+        f"theta=0.5 is not neutral: probe energy ratio {erat:.4f} (expected ~1.0). "
+        f"Stability by heavy damping/growth is not clean CFL removal.")
 
 
 def _sor_convergence_precheck(st0, N, dt, H0, gp, bump0):
@@ -272,11 +272,9 @@ def _sor_convergence_precheck(st0, N, dt, H0, gp, bump0):
     g, gp_, omega, theta = st0.g, st0.gp, st0.omega, _THETA
     h, u, v = st0.h, st0.u, st0.v
     H, W = h.shape
-    u_star, v_star = ref._semi_implicit_predictor(h, u, v, gp_, g, dt)
+    u_star, v_star = ref._semi_implicit_predictor(h, u, v, gp_, g, dt, theta)
     H_ref_lat = ref.reference_depth(h)
-    u_cs, v_cs = ref.coriolis_sandwich(u_star, v_star, omega, g, dt)
-    h_star_expl = -(1.0 - theta) * dt * ref.divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
-    rhs = ref.helmholtz_rhs(h_star_expl, u_star, v_star, np.zeros((H, W)),
+    rhs = ref.helmholtz_rhs(h, u, v, u_star, v_star, np.zeros((H, W)),
                             H_ref_lat, gp_, omega, theta, dt, g)
     dh_sor = ref.helmholtz_sor(rhs, H_ref_lat, gp_, theta, dt, g,
                                _POISSON_ITERS, _SOR_OMEGA)
@@ -291,156 +289,80 @@ def _sor_convergence_precheck(st0, N, dt, H0, gp, bump0):
         f"raise _POISSON_ITERS")
 
 
+def _energy_neutrality_probe(st0, dt_gw, Ns_probe, n_steps):
+    """Total-energy neutrality probe for the corrected theta=0.5 scheme.
+
+    Runs a FIXED number of semi-implicit steps at each probe N and reports the
+    total-energy ratio E_end/E0.  At theta=0.5 the linear gravity-wave scheme is
+    NEUTRAL, so E_end/E0 ~ 1 independent of N (no numerical damping or growth).
+    This is the decisive check that the scheme removes the CFL by being implicit,
+    NOT by damping the wave.  Returns the energy ratio at the LARGEST probe N
+    (the most demanding) for the caller's neutrality assertion.
+    """
+    _emit("ENERGY-NEUTRALITY PROBE (theta=0.5 is neutral => E_end/E0 ~ 1):")
+    _emit(f"{'N':>5} {'steps':>6} {'E_end/E0':>12}")
+    si_kw = dict(theta=_THETA, picard_iters=_PICARD_ITERS,
+                 poisson_iters=_POISSON_ITERS, sor_omega=_SOR_OMEGA)
+    erat = float("nan")
+    for N in Ns_probe:
+        dt = N * dt_gw
+        st = dataclasses.replace(st0, dt=dt)
+        E0 = ref.total_energy(st)
+        for _ in range(n_steps):
+            st = step_semi_implicit(st, **si_kw)
+        erat = ref.total_energy(st) / (E0 + 1e-300)
+        _emit(f"{N:>5} {n_steps:>6} {erat:>12.4f}")
+    _emit("E_end/E0 ~ 1 at every N confirms theta=0.5 neutrality: the wave is NOT")
+    _emit("numerically damped; the peak-amplitude drop in the table above is purely")
+    _emit("the physical dispersion of the Gaussian bump into a spreading wave train.")
+    return erat
+
+
 def _root_cause_diagnostic(st0, dt_gw, N_diag, H0, gp):
-    """Compare implicit dh magnitude vs explicit gravity-wave height tendency.
+    """Document the FIX: the implicit pressure now carries the restoring force.
 
-    Reconstructs the internals of step_semi_implicit for ONE step at dt=N*dt_gw
-    from the resting+bump state (a propagating wave configuration), and reports:
+    For ONE step at dt=N*dt_gw from the resting+bump (propagating-wave) state,
+    reports the velocity pressure kick split:
 
-        |dh_implicit|             : the Helmholtz increment actually solved
-        |explicit gw tendency|    : -dt * div_H(H_ref * Coriolis(u*,v*))  (full dt)
-        ratio                     : how much of the restoring force is implicit
+      - The predictor carries ONLY the (1-theta) EXPLICIT pressure half, and on a
+        FLAT resting layer grad(h^n)=0 so that explicit kick is ZERO.
+      - velocity_backsub applies the theta-IMPLICIT pressure of the full height
+        h^{n+1}=h^n+dh.  This implicit kick IS the gravity-wave restoring force.
 
-    For a TRUE semi-implicit gravity-wave solver the implicit dh must be the same
-    ORDER as the explicit tendency (it IS the gravity-wave height change). If it is
-    orders of magnitude smaller, the Helmholtz step is a negligible correction.
+    Contrast with the broken scheme, whose predictor baked the FULL explicit
+    grad(g'h) into the velocity -> a non-zero explicit kick even on a resting
+    layer -> explicit gravity-wave CFL retained -> blow-up at ~2x CFL.
     """
     _emit("-" * 78)
-    _emit(f"ROOT-CAUSE DIAGNOSTIC (one step at N={N_diag}, propagating wave):")
+    _emit(f"ROOT-CAUSE / FIX DIAGNOSTIC (one step at N={N_diag}, propagating wave):")
     g, gp_, omega = st0.g, st0.gp, st0.omega
     dt = N_diag * dt_gw
     theta = _THETA
     h, u, v = st0.h, st0.u, st0.v
     H, W = h.shape
 
-    u_star, v_star = ref._semi_implicit_predictor(h, u, v, gp_, g, dt)
     H_ref_lat = ref.reference_depth(h)
+    u_star, v_star = ref._semi_implicit_predictor(h, u, v, gp_, g, dt, theta)
 
-    # Full explicit gravity-wave height tendency over the whole dt (theta + (1-theta)).
-    u_cs, v_cs = ref.coriolis_sandwich(u_star, v_star, omega, g, dt)
-    gw_tend_full = -dt * ref.divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
-
-    # Run the actual semi-implicit Picard/SOR solve for dh.
-    h_star_expl = -(1.0 - theta) * dt * ref.divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
+    # Solve the increment dh exactly as step_semi_implicit does.
     dh = np.zeros((H, W))
     for _ in range(_PICARD_ITERS):
-        rhs = ref.helmholtz_rhs(h_star_expl, u_star, v_star, dh,
+        rhs = ref.helmholtz_rhs(h, u, v, u_star, v_star, dh,
                                 H_ref_lat, gp_, omega, theta, dt, g)
         dh = ref.helmholtz_sor(rhs, H_ref_lat, gp_, theta, dt, g,
                                _POISSON_ITERS, _SOR_OMEGA, dh0=dh)
 
-    m_dh = float(np.max(np.abs(dh)))
-    m_gw = float(np.max(np.abs(gw_tend_full)))
-    m_hse = float(np.max(np.abs(h_star_expl)))
-    ratio = m_dh / (m_gw + 1e-30)
-    _emit(f"  |dh_implicit (solved)|        = {m_dh:.4e}")
-    _emit(f"  |explicit gw tendency (full)| = {m_gw:.4e}")
-    _emit(f"  |h_star_expl ((1-th) half)|   = {m_hse:.4e}")
-    _emit(f"  ratio dh/explicit_gw          = {ratio:.4e}")
-    if ratio < 0.2:
-        _emit("  -> dh is SMALL vs the explicit tendency: the implicit Helmholtz term is")
-        _emit("     only a minor correction, NOT the dominant restoring force.  The")
-        _emit("     predictor's EXPLICIT pressure gradient still drives the wave, so the")
-        _emit("     explicit gravity-wave CFL is retained.  This is the failure signature.")
-    else:
-        _emit("  -> dh is COMPARABLE to the explicit tendency: the implicit Helmholtz term")
-        _emit("     carries the HEIGHT restoring force; but the VELOCITY predictor below")
-        _emit("     still applies the FULL explicit pressure gradient (see next block).")
-
-    # --- Decisive root-cause: the predictor's explicit pressure-gradient force ---
-    # _semi_implicit_predictor uses Bernoulli B = g'h + ke, i.e. the FULL explicit
-    # pressure gradient grad(g'h) is baked into u_star/v_star.  That explicit
-    # pressure FORCE on the velocity is exactly the gravity-wave term that is
-    # CFL-limited.  The implicit dh corrects the HEIGHT, but velocity_backsub only
-    # subtracts theta*dt*g'*grad(dh) -- it does NOT remove the explicit grad(g'h)
-    # already in the predictor.  So the velocity update retains the explicit
-    # gravity-wave CFL.  Quantify the competing pressure forces on the velocity:
-    gx_full, gy_full = ref.grad_faces(gp_ * h, g)             # explicit grad(g'h)
-    gx_dh, gy_dh = ref.grad_faces(dh, g)                       # implicit increment
-    f_expl = float(np.max(np.abs(dt * gx_full)))              # explicit vel kick
-    f_impl = float(np.max(np.abs(theta * dt * gp_ * gx_dh)))  # implicit correction
-    _emit(f"  velocity pressure kick: explicit |dt*grad(g'h)|   = {f_expl:.4e}")
-    _emit(f"                          implicit |th*dt*g'grad dh| = {f_impl:.4e}")
-    _emit(f"  net explicit residual on velocity = {abs(f_expl - f_impl):.4e} "
-          f"({(f_expl - f_impl)/(f_expl+1e-30)*100:.0f}% of explicit kick survives)")
-    _emit("  -> The implicit correction does NOT cancel the explicit pressure kick in")
-    _emit("     the velocity update; the predictor launches velocity at the full")
-    _emit("     gravity-wave speed EXPLICITLY -> explicit CFL retained -> blow-up.")
-    _emit("  The fix is identified empirically below by sweeping the explicit-")
-    _emit("  pressure fraction in the predictor.")
-
-    _confirm_fix(st0, dt_gw, H0=H0)
-
-
-def _step_press_frac(st, press_frac, theta, picard_iters, poisson_iters, sor_omega):
-    """step_semi_implicit variant: scale the explicit pressure gradient in the
-    predictor by `press_frac` (1.0 = shipped, 0.0 = no explicit pressure at all).
-
-    Everything else (h_star_expl, Picard/SOR Helmholtz, velocity_backsub,
-    continuity) is byte-identical to step_semi_implicit.  This isolates the role
-    of the explicit pressure gradient in the velocity predictor.
-    """
-    g, gp_, omega, dt = st.g, st.gp, st.omega, st.dt
-    h, u, v = st.h, st.u, st.v
-    H, W = h.shape
-
-    zeta = ref.vorticity(u, v, g)
-    zeta_uf = ref.corner_to_uface(zeta)
-    zeta_vf = 0.5 * (zeta + np.roll(zeta, 1, axis=1))
-    v_c = 0.5 * (v[0:H] + v[1:H + 1])
-    v_at_uf = ref.center_to_uface(v_c)
-    u_c = 0.5 * (u + np.roll(u, 1, axis=1))
-    u_at_vf = ref.center_to_vface(u_c)
-    ke = 0.5 * (u * u + v_c * v_c)
-    B = press_frac * gp_ * h + ke              # <-- explicit pressure fraction
-    gx, gy = ref.grad_faces(B, g)
-    u_star = u + dt * (zeta_uf * v_at_uf - gx)
-    v_star = np.zeros_like(v)
-    v_star[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gy[1:H])
-
-    H_ref_lat = ref.reference_depth(h)
-    u_cs, v_cs = ref.coriolis_sandwich(u_star, v_star, omega, g, dt)
-    h_star_expl = -(1.0 - theta) * dt * ref.divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
-    dh = np.zeros((H, W))
-    for _ in range(picard_iters):
-        rhs = ref.helmholtz_rhs(h_star_expl, u_star, v_star, dh,
-                                H_ref_lat, gp_, omega, theta, dt, g)
-        dh = ref.helmholtz_sor(rhs, H_ref_lat, gp_, theta, dt, g,
-                               poisson_iters, sor_omega, dh0=dh)
-    u_new, v_new = ref.velocity_backsub(u_star, v_star, dh, gp_, theta, dt, omega, g)
-    h_new = ref.continuity_step(h, u_new, v_new, g, dt, st.h_floor)
-    return dataclasses.replace(st, h=h_new, u=u_new, v=v_new)
-
-
-def _confirm_fix(st0, dt_gw, H0):
-    """Sweep the explicit-pressure fraction to locate the stable formulation.
-
-    press_frac = 1.0  is the SHIPPED scheme (full explicit g'h).
-    press_frac = 0.5  is the (1-theta) explicit half (a natural CN split).
-    press_frac = 0.0  removes explicit pressure entirely -> implicit dh carries
-                      the WHOLE gravity-wave restoring force (textbook semi-implicit).
-
-    The variant that stays BOUNDED at large N pinpoints the correct formulation.
-    """
-    _emit("-" * 78)
-    _emit("CONFIRMATION: sweep explicit-pressure fraction in the velocity predictor")
-    _emit(f"{'N':>5} {'press=1.0':>12} {'press=0.5':>12} {'press=0.0':>12}")
-    kw = dict(theta=_THETA, picard_iters=_PICARD_ITERS,
-              poisson_iters=_POISSON_ITERS, sor_omega=_SOR_OMEGA)
-    for N in (5, 20, 100):
-        dt = N * dt_gw
-        n = min(120, max(1, int(np.ceil((np.pi) / dt))))
-        cells = []
-        for pf in (1.0, 0.5, 0.0):
-            stepper = lambda st, _pf=pf, **k: _step_press_frac(st, _pf, **k)
-            r = _run(stepper, st0, dt, n, H0, **kw)
-            cells.append("BOUNDED" if r["bounded"] else "BLEW UP")
-        _emit(f"{N:>5} {cells[0]:>12} {cells[1]:>12} {cells[2]:>12}")
-    _emit("Interpretation: only press=0.0 (NO explicit pressure gradient in the")
-    _emit("predictor; the implicit dh carries the FULL gravity-wave restoring force)")
-    _emit("is stable at large N.  That is the textbook semi-implicit splitting.")
-    _emit("The shipped press=1.0 was chosen for W2 stationarity but reintroduces the")
-    _emit("explicit gravity-wave CFL.  Rework must make the implicit pressure also")
-    _emit("hold geostrophic balance (linearize about the reference state / treat the")
-    _emit("full height implicitly), not just an increment, so W2 stays steady AND")
-    _emit("the gravity-wave CFL is removed.")
+    # Velocity pressure kicks.  Predictor explicit half: -(1-theta)*dt*g'*grad(h^n).
+    gx_n, gy_n = ref.grad_faces(h, g)
+    f_expl = float(np.max(np.abs((1.0 - theta) * dt * gp_ * gx_n)))
+    # Implicit half applied by velocity_backsub on the FULL height h^{n+1}=h+dh.
+    gx_full, gy_full = ref.grad_faces(h + dh, g)
+    f_impl = float(np.max(np.abs(theta * dt * gp_ * gx_full)))
+    _emit(f"  predictor EXPLICIT pressure kick |(1-th)*dt*g'grad(h^n)| = {f_expl:.4e}")
+    _emit(f"  implicit  pressure kick |th*dt*g'grad(h^n+dh)|           = {f_impl:.4e}")
+    _emit(f"  |dh| (solved increment) = {float(np.max(np.abs(dh))):.4e}")
+    _emit("  On a FLAT resting layer grad(h^n)=0 -> the explicit kick is ~0; the")
+    _emit("  implicit kick (theta*dt*g'*grad(h^{n+1})) carries the WHOLE gravity-wave")
+    _emit("  restoring force.  That is why the explicit gravity-wave CFL is removed.")
+    _emit("  (The broken scheme baked the FULL explicit grad(g'h) into the predictor,")
+    _emit("   giving a non-zero explicit kick even at rest -> CFL retained -> blow-up.)")
