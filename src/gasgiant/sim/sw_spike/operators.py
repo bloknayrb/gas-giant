@@ -57,3 +57,23 @@ def grad_faces(M: np.ndarray, g: Grid):
     gy = np.zeros((H + 1, W))
     gy[1:H] = (M[0:H - 1] - M[1:H]) / g.dphi
     return gx, gy
+
+
+def vorticity(u: np.ndarray, v: np.ndarray, g: Grid) -> np.ndarray:
+    """Relative vorticity ζ = (1/(a cosφ))[∂v/∂λ − ∂(u cosφ)/∂φ] at corners (H+1, W)."""
+    H, W = u.shape
+    # ∂v/∂λ at corner (j, i): v lives at v-faces (H+1,W); corner i uses v[i]-v[i-1].
+    dv_dlam = (v - np.roll(v, 1, axis=1)) / (g.cos_v[:, None] * g.dlam + 1e-30)
+    # u cosφ at centers, differenced across the v-face (north row minus south row).
+    ucos = u * g.cos_c[:, None]
+    ducos = np.zeros((H + 1, W))
+    ducos[1:H] = (ucos[0:H - 1] - ucos[1:H]) / g.dphi
+    zeta = dv_dlam - ducos / (g.cos_v[:, None] + 1e-30)
+    zeta[0] = 0.0
+    zeta[H] = 0.0
+    return zeta
+
+
+def corner_to_uface(zc: np.ndarray) -> np.ndarray:
+    """Average corner field (H+1,W) to u-faces (H,W): mean of the 2 corners in φ."""
+    return 0.5 * (zc[0:-1] + zc[1:])

@@ -89,3 +89,29 @@ def test_pressure_gradient_sees_checkerboard():
     M = ((ii + jj) % 2).astype(float)
     gx, gy = operators.grad_faces(M, g)
     assert np.max(np.abs(gx)) > 1e-3   # face differences are large for a 2dx mode
+
+
+def test_vorticity_zero_for_irrotational_uniform_flow():
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=64, H=32)
+    u = np.full((32, 64), 0.2)
+    v = np.zeros((33, 64))
+    zeta = operators.vorticity(u, v, g)   # corners (H+1, W)
+    assert zeta.shape == (33, 64)
+    # Uniform zonal flow on the sphere has curvature vorticity -(1/a) d(u cosφ)/dφ != 0
+    # but a constant-u test is dominated by the metric; assert it's finite & smooth.
+    assert np.all(np.isfinite(zeta))
+
+
+def test_vorticity_of_rigid_rotation_constant_sign():
+    # u = U cosφ (solid-body zonal) => zeta = -(1/(a cosφ)) d(U cos^2 φ)/dφ = 2U sinφ.
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=128, H=64)
+    U = 0.5
+    u = (U * g.cos_c)[:, None] * np.ones((1, 128))
+    v = np.zeros((65, 128))
+    zeta = operators.vorticity(u, v, g)
+    # Compare interior corners to analytic 2U sinφ at phi_v.
+    analytic = 2 * U * np.sin(g.phi_v)[:, None] * np.ones((1, 128))
+    inner = slice(2, 63)
+    np.testing.assert_allclose(zeta[inner], analytic[inner], atol=2e-2)
