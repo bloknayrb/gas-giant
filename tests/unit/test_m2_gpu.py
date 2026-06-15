@@ -388,6 +388,103 @@ def test_gpu_si_deterministic(gpu):
 
 
 # --------------------------------------------------------------------------
+# M2-T7c: checkpoint version-2 round-trip (SI params + H_ref must survive)
+# --------------------------------------------------------------------------
+
+def test_gpu_si_checkpoint_roundtrip(gpu, tmp_path):
+    """Checkpoint v2 round-trip: SI params + H_ref + warm-state must be bit-exact."""
+    from gasgiant.sim import sw_gpu
+
+    p = _w2_params()
+
+    # Build a semi_implicit=True solver and run a few steps.
+    solver = sw_gpu.SwGpuSolver.from_williamson2(
+        gpu,
+        W=p["W"], H=p["H"], a=p["a"], omega=p["omega"], u0=p["u0"],
+        gp=p["gp"], h0=p["h0"],
+        semi_implicit=True, theta=0.5, sor_omega=1.7,
+        helmholtz_iters=200, picard_iters=3, dt_multiplier=1.0,
+    )
+    for _ in range(5):
+        solver.step()
+
+    # Save checkpoint at step 5.
+    path_ckpt = tmp_path / "si_ckpt.npz"
+    solver.save_checkpoint(path_ckpt)
+
+    # Advance original solver 5 more steps → state A.
+    for _ in range(5):
+        solver.step()
+    hA, uA, vA = solver.download_state()
+
+    # Load into a fresh solver; advance 5 more steps → state B.
+    solver2 = sw_gpu.SwGpuSolver.load_checkpoint(gpu, path_ckpt)
+    for _ in range(5):
+        solver2.step()
+    hB, uB, vB = solver2.download_state()
+
+    # Continuation must be bit-exact: SI params + H_ref must have round-tripped.
+    assert np.array_equal(hA, hB), "h not byte-identical after v2 checkpoint round-trip"
+    assert np.array_equal(uA, uB), "u not byte-identical after v2 checkpoint round-trip"
+    assert np.array_equal(vA, vB), "v not byte-identical after v2 checkpoint round-trip"
+
+    # Verify that the loaded solver has SI params correctly restored.
+    assert solver2.semi_implicit is True
+    assert solver2.theta == 0.5
+    assert solver2.sor_omega == 1.7
+    assert solver2.helmholtz_iters == 200
+    assert solver2.picard_iters == 3
+    assert solver2.dt_multiplier == 1.0
+    assert solver2.H_ref is not None
+    np.testing.assert_array_equal(
+        solver2.H_ref.astype(np.float32),
+        solver.H_ref.astype(np.float32),
+    )
+
+
+def test_gpu_v1_checkpoint_still_loads(gpu, tmp_path):
+    """Version-1 checkpoint (explicit solver) must still load cleanly (backward-compat)."""
+    from gasgiant.sim import sw_gpu
+
+    # Build an explicit (M1-style) solver and checkpoint it.
+    solver = sw_gpu.SwGpuSolver.from_williamson2(
+        gpu, W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0
+    )
+    for _ in range(10):
+        solver.step()
+
+    path_v1 = tmp_path / "v1_ckpt.npz"
+    solver.save_checkpoint(path_v1)
+
+    # Forcibly write a version=1 file to mimic an old M1 checkpoint.
+    # (save_checkpoint already writes version=2 for explicit solvers by default —
+    # so we patch it to truly test the v1 back-compat path.)
+    with np.load(path_v1) as d:
+        arrays = dict(d)
+    arrays["version"] = np.int32(1)
+    # Remove any v2-only keys that shouldn't be in a true v1 file.
+    for key in ("semi_implicit", "theta", "sor_omega", "helmholtz_iters",
+                "picard_iters", "dt_multiplier", "H_ref"):
+        arrays.pop(key, None)
+    np.savez(path_v1, **arrays)
+
+    # Load must succeed and produce an explicit solver.
+    solver_loaded = sw_gpu.SwGpuSolver.load_checkpoint(gpu, path_v1)
+    assert solver_loaded.semi_implicit is False
+
+    # 10 more steps from both (using the saved-then-loaded state) must agree
+    # with 10 more steps from the original (they share the same state).
+    for _ in range(10):
+        solver.step()
+        solver_loaded.step()
+    hA, uA, vA = solver.download_state()
+    hB, uB, vB = solver_loaded.download_state()
+    assert np.array_equal(hA, hB)
+    assert np.array_equal(uA, uB)
+    assert np.array_equal(vA, vB)
+
+
+# --------------------------------------------------------------------------
 # T7a deferred: smooth-dh tight apply test (complements the high-freq rtol case)
 # --------------------------------------------------------------------------
 

@@ -813,10 +813,15 @@ class SwGpuSolver:
     # -- Checkpoint I/O -------------------------------------------------------
 
     def save_checkpoint(self, path: str | os.PathLike) -> None:
-        """Save solver state to a .npz file.
+        """Save solver state to a .npz file (version 2).
 
-        Stores all scalar parameters and the current h, u, v field arrays
-        as float32.  The file can be reloaded with :meth:`load_checkpoint`.
+        Version 2 stores all M1 scalar parameters (W, H, a, gp, omega, dt,
+        h_floor) PLUS the M2 semi-implicit parameters (semi_implicit, theta,
+        sor_omega, helmholtz_iters, picard_iters, dt_multiplier) and H_ref
+        (the latitude reference-depth profile, or absent when None).
+
+        Files are always written as version=2; version=1 files written by
+        older code can still be loaded via :meth:`load_checkpoint`.
 
         Parameters
         ----------
@@ -825,9 +830,8 @@ class SwGpuSolver:
             if not already present).
         """
         h, u, v = self.download_state()
-        np.savez(
-            path,
-            version=np.int32(1),
+        arrays: dict = dict(
+            version=np.int32(2),
             W=np.int32(self.W),
             H=np.int32(self.H),
             a=np.float64(self.a),
@@ -838,12 +842,26 @@ class SwGpuSolver:
             h=h.astype(np.float32),
             u=u.astype(np.float32),
             v=v.astype(np.float32),
+            # M2 SI parameters
+            semi_implicit=np.bool_(self.semi_implicit),
+            theta=np.float64(self.theta),
+            sor_omega=np.float64(self.sor_omega),
+            helmholtz_iters=np.int32(self.helmholtz_iters),
+            picard_iters=np.int32(self.picard_iters),
+            dt_multiplier=np.float64(self.dt_multiplier),
         )
+        # H_ref: persist only if present (semi_implicit=True sets it).
+        if self.H_ref is not None:
+            arrays["H_ref"] = np.asarray(self.H_ref, dtype=np.float32)
+        np.savez(path, **arrays)
 
     @classmethod
     def load_checkpoint(cls, gpu: "GpuContext", path: str | os.PathLike) -> "SwGpuSolver":
-        """Reconstruct a :class:`SwGpuSolver` from a checkpoint written by
-        :meth:`save_checkpoint`.
+        """Reconstruct a :class:`SwGpuSolver` from a checkpoint.
+
+        Accepts both **version 1** (M1 explicit solver — semi_implicit defaults
+        to False) and **version 2** (M2 semi-implicit — restores SI params and
+        H_ref so that continuation is bit-exact).
 
         Parameters
         ----------
@@ -854,20 +872,22 @@ class SwGpuSolver:
         Returns
         -------
         SwGpuSolver
-            Solver with GPU field textures pre-loaded from the checkpoint.
+            Solver with GPU field textures and all parameters pre-loaded.
 
         Raises
         ------
         ValueError
-            If the checkpoint version is not 1.
+            If the checkpoint version is not 1 or 2.
         """
         # Context manager guarantees the .npz zip handle is released before the
         # caller (e.g. pytest tmp_path) tries to clean up — matters on Windows,
         # where a lingering handle blocks file removal (WinError 32).
         with np.load(path) as data:
             version = int(data["version"])
-            if version != 1:
-                raise ValueError(f"Unsupported checkpoint version {version!r}; expected 1")
+            if version not in (1, 2):
+                raise ValueError(
+                    f"Unsupported checkpoint version {version!r}; expected 1 or 2"
+                )
             W = int(data["W"])
             H = int(data["H"])
             a = float(data["a"])
@@ -880,6 +900,29 @@ class SwGpuSolver:
             u = data["u"].astype(np.float32)
             v = data["v"].astype(np.float32)
 
+            # M2 SI parameters — present only in version 2.
+            if version == 2:
+                semi_implicit = bool(data["semi_implicit"])
+                theta = float(data["theta"])
+                sor_omega = float(data["sor_omega"])
+                helmholtz_iters = int(data["helmholtz_iters"])
+                picard_iters = int(data["picard_iters"])
+                dt_multiplier = float(data["dt_multiplier"])
+                H_ref = (
+                    data["H_ref"].astype(np.float32)
+                    if "H_ref" in data
+                    else None
+                )
+            else:
+                # version 1: explicit solver, no SI state.
+                semi_implicit = False
+                theta = 0.5
+                sor_omega = 1.7
+                helmholtz_iters = 200
+                picard_iters = 3
+                dt_multiplier = 1.0
+                H_ref = None
+
         sg = cls(
             gpu=gpu,
             W=W,
@@ -889,6 +932,12 @@ class SwGpuSolver:
             omega=omega,
             dt=dt,
             h_floor=h_floor,
+            semi_implicit=semi_implicit,
+            theta=theta,
+            sor_omega=sor_omega,
+            helmholtz_iters=helmholtz_iters,
+            picard_iters=picard_iters,
+            dt_multiplier=dt_multiplier,
         )
 
         # Upload saved fields to GPU textures (bit-exact float32).
@@ -899,6 +948,9 @@ class SwGpuSolver:
         # Restore initial velocity fields so velocity_l2_drift() stays callable.
         sg.u_init = u.copy()
         sg.v_init = v.copy()
+
+        # Restore H_ref for SI continuation.
+        sg.H_ref = H_ref
 
         return sg
 
