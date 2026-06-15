@@ -34,3 +34,28 @@ def test_center_to_vface_zeroed_at_poles():
     np.testing.assert_allclose(vf[0], [0.0, 0.0])   # north pole face: no cell north
     np.testing.assert_allclose(vf[1], [3.0, 3.0])   # between rows 0,1
     np.testing.assert_allclose(vf[2], [0.0, 0.0])   # south pole face
+
+
+def test_divergence_of_solid_body_zonal_flow_is_zero():
+    # Purely zonal, longitude-independent u, constant h => mass divergence ~ 0.
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=64, H=32)
+    h = np.ones((32, 64))
+    u = np.ones((32, 64)) * 0.3          # uniform zonal face velocity
+    v = np.zeros((33, 64))
+    div = operators.divergence_hu(h, u, v, g)
+    # Zonal-uniform, v=0, constant h => divergence is machine-zero.
+    assert np.max(np.abs(div)) < 1e-12
+
+
+def test_divergence_has_no_checkerboard_null_mode():
+    # The whole reason for the C-grid: a checkerboard in h must NOT be invisible.
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=64, H=32)
+    jj, ii = np.indices((32, 64))
+    h = 1.0 + 0.01 * ((ii + jj) % 2)     # 2dx checkerboard thickness
+    u = np.ones((32, 64)) * 0.1
+    v = np.zeros((33, 64))
+    div = operators.divergence_hu(h, u, v, g)
+    # On a C-grid the checkerboard produces real flux divergence (non-null).
+    assert np.max(np.abs(div)) > 1e-4
