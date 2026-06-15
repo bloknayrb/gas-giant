@@ -230,7 +230,7 @@ def test_spinup_runs_stable_and_develops_eddies():
     from gasgiant.sim.sw_spike import init, solver
     st = init.emergent_init(W=128, H=64, f0=4.0, gp=(1.0, 0.05),
                             n_bands=14, band_contrast=0.5)
-    # default nu4 is now the validated 0.05.
+    # default nu4 is now the validated 0.08 (set in emergent_init).
     e0 = solver.eddy_vorticity_std(st)
     for _ in range(4000):
         st = solver.step(st, dt=st.dt)
@@ -238,3 +238,6 @@ def test_spinup_runs_stable_and_develops_eddies():
     e1 = solver.eddy_vorticity_std(st)
     # Baroclinic instability must AMPLIFY the non-zonal eddy field by a clear margin.
     assert e1 > 5.0 * e0, f"eddies did not grow: e0={e0:.4g} e1={e1:.4g}"
+    # Absolute floor: the eddy field must be O(1), not just larger than machine-epsilon noise.
+    # Observed value on this config ≈ 0.886; 0.05 is a conservative lower bound for real eddies.
+    assert e1 > 0.05, f"eddy signal too weak to be real eddies: e1={e1:.4g}"
