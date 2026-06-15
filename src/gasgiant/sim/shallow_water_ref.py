@@ -221,7 +221,7 @@ def coriolis_sandwich(
 def velocity_backsub(
     u_star: np.ndarray,
     v_star: np.ndarray,
-    dh: np.ndarray,
+    h_impl: np.ndarray,
     gp: float,
     theta: float,
     dt: float,
@@ -230,17 +230,23 @@ def velocity_backsub(
 ) -> tuple[np.ndarray, np.ndarray]:
     """M2 semi-implicit back-substitution: subtract pressure gradient, then rotate.
 
-    Computes the implicit pressure-gradient correction and applies the Coriolis
-    sandwich.  When dh is zero the output equals coriolis_sandwich exactly.
+    Computes the theta-implicit pressure-gradient correction and applies the
+    Coriolis sandwich.  The predictor u_star/v_star already carries the
+    (1-theta) explicit pressure half, so the field passed here is the FULL
+    implicit height h^{n+1} (not an increment); its gradient supplies the
+    theta-weighted implicit pressure.  When h_impl has zero gradient (uniform
+    field) the output equals coriolis_sandwich(u_star, v_star) exactly.
 
     Parameters
     ----------
     u_star : ndarray, shape (H, W)
-        Provisional zonal velocity after the explicit step.
+        Provisional zonal velocity after the explicit step (incl. the (1-theta)
+        explicit pressure half).
     v_star : ndarray, shape (H+1, W)
         Provisional meridional velocity after the explicit step.
-    dh : ndarray, shape (H, W)
-        Height perturbation from the semi-implicit solver.
+    h_impl : ndarray, shape (H, W)
+        Full implicit layer height h^{n+1} = h^n + dh at which the theta
+        pressure gradient is evaluated.
     gp : float
         Reduced gravity g'.
     theta : float
@@ -256,7 +262,7 @@ def velocity_backsub(
     u_new : ndarray, shape (H, W)
     v_new : ndarray, shape (H+1, W)
     """
-    gx, gy = grad_faces(dh, g)                            # (H,W), (H+1,W)
+    gx, gy = grad_faces(h_impl, g)                        # (H,W), (H+1,W)
     u_corr = u_star - theta * dt * gp * gx
     v_corr = v_star - theta * dt * gp * gy
     return coriolis_sandwich(u_corr, v_corr, omega, g, dt)
@@ -980,6 +986,10 @@ def _semi_implicit_predictor(
     here is what removes the CFL while keeping W2 stationary.
     """
     H, W = h.shape
+    # NOTE: the vorticity-flux + KE-interpolation block below mirrors
+    # momentum_step's vector-invariant advection (it omits only the g'h pressure
+    # and the Coriolis sandwich). If you change momentum_step's advection stencil,
+    # mirror it here AND re-run test_semi_implicit_reduces_to_m1_at_small_dt.
     zeta = vorticity(u, v, g)
     zeta_uf = corner_to_uface(zeta)
     zeta_vf = 0.5 * (zeta + np.roll(zeta, 1, axis=1))

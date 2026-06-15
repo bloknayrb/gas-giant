@@ -188,8 +188,11 @@ def test_coriolis_sandwich_matches_momentum() -> None:
     )
 
 
-def test_velocity_backsub_zero_dh() -> None:
-    """velocity_backsub with dh=0 equals coriolis_sandwich (no pressure correction)."""
+def test_velocity_backsub_uniform_height() -> None:
+    """velocity_backsub with a UNIFORM h_impl (zero gradient) equals coriolis_sandwich.
+
+    h_impl is the full implicit height h^{n+1}; a uniform field has zero pressure
+    gradient so no correction is applied. (Production passes h_n + dh.)"""
     rng = np.random.default_rng(5678)
     W, H = 16, 8
     g = _make_grid(W=W, H=H, a=6.4e6)
@@ -203,32 +206,33 @@ def test_velocity_backsub_zero_dh() -> None:
     v_star[0] = 0.0
     v_star[H] = 0.0
 
-    dh = np.zeros((H, W))
+    h_impl = np.full((H, W), 5.0)   # uniform -> zero gradient
 
-    u_back, v_back = velocity_backsub(u_star, v_star, dh, gp, theta, dt, omega, g)
+    u_back, v_back = velocity_backsub(u_star, v_star, h_impl, gp, theta, dt, omega, g)
     u_sand, v_sand = coriolis_sandwich(u_star, v_star, omega, g, dt)
 
     assert np.array_equal(u_back, u_sand), (
-        "velocity_backsub with dh=0 differs from coriolis_sandwich in u"
+        "velocity_backsub with uniform h_impl differs from coriolis_sandwich in u"
     )
     assert np.array_equal(v_back, v_sand), (
-        "velocity_backsub with dh=0 differs from coriolis_sandwich in v"
+        "velocity_backsub with uniform h_impl differs from coriolis_sandwich in v"
     )
 
 
 def test_velocity_backsub_nonzero_dh() -> None:
-    """A non-zero dh must change the back-substituted velocity (catches a
-    dropped/sign-flipped pressure-gradient correction)."""
+    """A non-uniform h_impl must change the back-substituted velocity (catches a
+    dropped/sign-flipped pressure-gradient correction). Mirrors the production
+    convention: h_impl = h_n + dh."""
     rng = np.random.default_rng(9999)
     W, H = 16, 8
     g = _make_grid(W=W, H=H, a=6.4e6)
     omega, dt, gp, theta = 7.292e-5, 300.0, 9.8, 0.5
 
     u_star = rng.standard_normal((H, W))
-    v_star = np.zeros((H + 1, W))          # isolate the dh effect
-    dh = rng.standard_normal((H, W))
+    v_star = np.zeros((H + 1, W))          # isolate the pressure effect
+    h_impl = 5.0 + rng.standard_normal((H, W))   # full height h_n + dh
 
-    u_back, v_back = velocity_backsub(u_star, v_star, dh, gp, theta, dt, omega, g)
+    u_back, v_back = velocity_backsub(u_star, v_star, h_impl, gp, theta, dt, omega, g)
     u_sand, v_sand = coriolis_sandwich(u_star, v_star, omega, g, dt)
 
     assert not np.array_equal(u_back, u_sand), (
@@ -446,8 +450,11 @@ def test_w2_geostrophic_stationary() -> None:
     assert vel_si <= 2.0 * vel_expl + 1e-9, (
         f"semi-implicit velocity drift {vel_si:.3e} exceeds explicit {vel_expl:.3e}"
     )
-    # Height: the matched theta-scheme's intrinsic O((theta*dt)^2) imbalance.
-    # At the W2 polar-CFL dt this is ~1.5e-6 on an O(1) height; bound it at 5e-6.
+    # Height: the matched theta-scheme's intrinsic O((theta*dt)^2) imbalance
+    # (verified to scale as dt^2). At the W2 polar-CFL dt this is ~1.5e-6 on an
+    # O(1) height; 5e-6 is a ~3x margin. See step_semi_implicit's
+    # "NOTE (W2 height drift)" for the derivation. This is the price of making
+    # the full pressure implicit (what removes the gravity-wave CFL).
     assert h_si < 5e-6, (
         f"semi-implicit height drift {h_si:.3e} exceeds the theta-scheme dt^2 bound "
         f"(explicit step drift {h_expl:.3e})"
