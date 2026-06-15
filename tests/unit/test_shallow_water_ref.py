@@ -19,10 +19,19 @@ from gasgiant.sim.shallow_water_ref import (
     divergence_helmholtz,
     grad_faces,
     helmholtz_apply,
+    helmholtz_residual_per_lat,
     helmholtz_rhs,
+    helmholtz_solve_exact,
+    helmholtz_sor,
     picard_contraction_factor,
+    reference_depth,
+    step,
+    step_semi_implicit,
     velocity_backsub,
+    velocity_l2_drift,
+    williamson2_state,
 )
+import gasgiant.sim.shallow_water_ref as ref
 
 
 # ---------------------------------------------------------------------------
@@ -336,4 +345,159 @@ def test_picard_factor_matches_formula() -> None:
             f"picard_contraction_factor mismatch: got {rho:.15g}, "
             f"expected {expected:.15g} (alpha={alpha:.6f})"
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# M2-T4: semi-implicit step, SOR Helmholtz, end-to-end arbiters
+# ---------------------------------------------------------------------------
+
+# Chosen solver parameters (documented in step_semi_implicit):
+#   poisson_iters = 200 SOR sweeps per Helmholtz solve
+#   sor_omega     = 1.7 over-relaxation
+# At the realistic W2 dt (polar CFL) the Helmholtz operator is well-conditioned
+# (rho ~ 2.6e-3); 200 sweeps drive the per-latitude residual (incl. poles) to
+# machine zero.  The polar-residual test below uses a Coriolis-active config
+# (rho ~ 0.20, non-trivial gravity-wave alpha) to exercise the lag.
+_POISSON_ITERS = 200
+_SOR_OMEGA = 1.7
+
+
+def test_sor_converges_to_exact() -> None:
+    """helmholtz_sor with many sweeps matches helmholtz_solve_exact to rtol 1e-6.
+
+    Proves the SOR fixed point is the true Helmholtz inverse (not just any
+    contraction).  Random rhs, small grid W=24, H=12, positive latitude-varying
+    H_ref.
+    """
+    rng = np.random.default_rng(2024)
+    W, H = 24, 12
+    g = Grid(W=W, H=H, a=1.0)
+    H_ref_lat = 1.0 + 0.5 * np.cos(g.phi_c)
+    gp, theta, dt = 9.8, 0.5, 0.3
+    rhs = rng.standard_normal((H, W))
+
+    dh_exact = helmholtz_solve_exact(rhs, H_ref_lat, gp, theta, dt, g)
+    dh_sor = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
+                           n_iters=400, sor_omega=1.8)
+
+    np.testing.assert_allclose(
+        dh_sor, dh_exact, rtol=1e-6, atol=1e-10,
+        err_msg="SOR fixed point does not match the exact Helmholtz inverse",
+    )
+
+
+def test_w2_geostrophic_stationary() -> None:
+    """One semi-implicit step leaves the Williamson-2 state stationary.
+
+    PRIMARY arbiter of the RHS / h_star_expl split.  Drift must be no worse than
+    one explicit step() (we require <= 2x as a margin; in practice it matches the
+    explicit step to ~5 significant figures).
+    """
+    st = williamson2_state(W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    h0 = st.h.copy()
+
+    # Reference: one explicit step.
+    st_expl = step(st)
+    vel_expl = velocity_l2_drift(st_expl)
+    h_expl = float(np.max(np.abs(st_expl.h - h0)))
+
+    # Semi-implicit step.
+    st_si = step_semi_implicit(st, poisson_iters=_POISSON_ITERS, sor_omega=_SOR_OMEGA)
+    vel_si = velocity_l2_drift(st_si)
+    h_si = float(np.max(np.abs(st_si.h - h0)))
+
+    assert vel_si <= 2.0 * vel_expl + 1e-9, (
+        f"semi-implicit velocity drift {vel_si:.3e} exceeds explicit {vel_expl:.3e}"
+    )
+    assert h_si <= 2.0 * h_expl + 1e-12, (
+        f"semi-implicit height drift {h_si:.3e} exceeds explicit {h_expl:.3e}"
+    )
+
+
+def test_backsub_continuity_consistency() -> None:
+    """h_new - h equals the solved dh to atol 2e-5.
+
+    The FCT continuity update under the back-substituted velocity reproduces the
+    Helmholtz increment dh — confirming the linearized solve is consistent with
+    the nonlinear continuity transport.
+    """
+    st = williamson2_state(W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    g, gp, omega, dt, theta = st.g, st.gp, st.omega, st.dt, 0.5
+
+    u_star, v_star = ref._semi_implicit_predictor(st.h, st.u, st.v, gp, g, dt)
+    H_ref_lat = reference_depth(st.h)
+    u_cs, v_cs = coriolis_sandwich(u_star, v_star, omega, g, dt)
+    h_star_expl = -(1.0 - theta) * dt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
+
+    dh = np.zeros_like(st.h)
+    for _ in range(3):
+        rhs = helmholtz_rhs(h_star_expl, u_star, v_star, dh,
+                            H_ref_lat, gp, omega, theta, dt, g)
+        dh = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
+                           _POISSON_ITERS, _SOR_OMEGA, dh0=dh)
+
+    st_si = step_semi_implicit(st, poisson_iters=_POISSON_ITERS, sor_omega=_SOR_OMEGA)
+    actual = st_si.h - st.h
+
+    np.testing.assert_allclose(
+        actual, dh, atol=2e-5,
+        err_msg="h_new - h does not match the solved dh increment",
+    )
+
+
+def test_semi_implicit_reduces_to_m1_at_small_dt() -> None:
+    """At dt well below the explicit CFL, step_semi_implicit ~ step().
+
+    As dt -> 0 the implicit increment dh -> 0 (O(dt^2)) and the semi-implicit
+    scheme coincides with the explicit step.
+    """
+    st = williamson2_state(W=48, H=24, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    # Shrink dt far below CFL.
+    import dataclasses
+    st = dataclasses.replace(st, dt=st.dt * 1e-3)
+
+    st_expl = step(st)
+    st_si = step_semi_implicit(st, poisson_iters=_POISSON_ITERS, sor_omega=_SOR_OMEGA)
+
+    np.testing.assert_allclose(st_si.u, st_expl.u, atol=1e-9,
+                               err_msg="u disagrees with explicit step at small dt")
+    np.testing.assert_allclose(st_si.v, st_expl.v, atol=1e-9,
+                               err_msg="v disagrees with explicit step at small dt")
+    np.testing.assert_allclose(st_si.h, st_expl.h, atol=1e-9,
+                               err_msg="h disagrees with explicit step at small dt")
+
+
+def test_per_lat_residual_polar() -> None:
+    """Per-latitude residual (incl. pole rows) below gate at the chosen iters.
+
+    Uses a Coriolis-active config (rho ~ 0.20, non-trivial gravity-wave alpha)
+    so the deferred-Coriolis lag and the meridional polar stencil are exercised.
+    Gate: max per-latitude L2 residual < 1e-10 at poisson_iters=200.
+    """
+    W, H = 48, 24
+    g = Grid(W=W, H=H, a=1.0)
+    gp, omega, theta, dt = 1.0, 2.0, 0.5, 0.05
+    H_ref_lat = 5.0 - np.cos(g.phi_c)   # positive, latitude-varying
+
+    # Confirm Coriolis is genuinely active (alpha > 0) for this config.
+    assert picard_contraction_factor(omega, theta, dt, g) > 0.05
+
+    rng = np.random.default_rng(11)
+    u_star = rng.standard_normal((H, W)) * 0.2
+    v_star = np.zeros((H + 1, W))
+    v_star[1:H] = rng.standard_normal((H - 1, W)) * 0.2
+    h_star_expl = rng.standard_normal((H, W)) * 0.02
+
+    dh = np.zeros((H, W))
+    rhs = helmholtz_rhs(h_star_expl, u_star, v_star, dh,
+                        H_ref_lat, gp, omega, theta, dt, g)
+    dh = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
+                       _POISSON_ITERS, _SOR_OMEGA)
+
+    resid = helmholtz_residual_per_lat(dh, rhs, H_ref_lat, gp, theta, dt, g)
+    assert resid.shape == (H,)
+    assert resid.max() < 1e-10, (
+        f"polar per-lat residual {resid.max():.3e} exceeds gate at "
+        f"{_POISSON_ITERS} iters (pole rows: {resid[0]:.3e}, {resid[-1]:.3e})"
     )

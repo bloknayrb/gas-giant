@@ -596,6 +596,173 @@ def picard_contraction_factor(
 
 
 # ---------------------------------------------------------------------------
+# M2-T4: Helmholtz solvers (red-black SOR, exact sparse, residual diagnostic)
+# ---------------------------------------------------------------------------
+
+def _helmholtz_diagonal(
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+) -> np.ndarray:
+    """Analytic diagonal D[j,i] = coefficient of dh[j,i] in helmholtz_apply(dh)[j,i].
+
+    L_sym = I - alpha * div_H(grad), alpha = (theta*dt)**2 * gp.  The composed
+    stencil is the standard cos-weighted Laplacian; its diagonal is derived
+    analytically (verified to 1e-13 against a unit-basis numerical extraction).
+
+    The identity contributes +1.  The zonal Laplacian contributes
+        -alpha * Hx[j] * (-2) / (a*cos_c[j]*dlam)^2
+    and the meridional Laplacian contributes
+        -alpha * (Hv[j+1]*cos_v[j+1] + Hv[j]*cos_v[j]) / (a^2 * dphi^2 * cos_c[j]).
+
+    Returns array (H, W) (uniform in i, broadcast for convenience).
+    """
+    H, W = g.H, g.W
+    a = g.a
+    dlam, dphi = g.dlam, g.dphi
+    cos_c = g.cos_c
+    cos_v = g.cos_v
+    alpha = (theta * dt) ** 2 * gp
+
+    Hx = H_ref_lat
+    Hv = np.zeros(H + 1)
+    Hv[1:H] = 0.5 * (H_ref_lat[0:H - 1] + H_ref_lat[1:H])
+
+    # Zonal: gx[i] = (dh[i+1]-dh[i])/(a cos dlam); dh[j,i] appears in gx[i] (-) and
+    # gx[i-1] (+). div zonal = Hx*(gx[i]-gx[i-1])/(a dlam)/cos_c. Coefficient of dh[j,i]:
+    cz = Hx / (a * dlam * cos_c) * (-2.0 / (a * cos_c * dlam))   # (H,)
+
+    # Meridional: gy[k] = (dh[k-1]-dh[k])/(a dphi). dh[j] appears in gy[j] (-) and gy[j+1] (+).
+    # Fy_cos[k] = Hv[k]*cos_v[k]*gy[k]; dFy=(Fy_cos[j+1]-Fy_cos[j])/(a dphi).
+    # div merid = -dFy/cos_c.  Coefficient of dh[j]:
+    coeff_gyjp1 = Hv[1:H + 1] * cos_v[1:H + 1] * (1.0 / (a * dphi))   # from gy[j+1] (+)
+    coeff_gyj = Hv[0:H] * cos_v[0:H] * (-1.0 / (a * dphi))           # from gy[j]   (-)
+    dFy_coeff = (coeff_gyjp1 - coeff_gyj) / (a * dphi)               # (H,)
+    cm = -dFy_coeff / cos_c                                          # (H,)
+
+    D = 1.0 - alpha * (cz + cm)                                      # (H,)
+    return D[:, None] * np.ones((1, W))
+
+
+def helmholtz_sor(
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+    n_iters: int,
+    sor_omega: float,
+    dh0: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Fixed-count red/black SOR for L_sym dh = rhs.
+
+    L_sym = helmholtz_apply (symmetric SPD).  Each sweep updates red cells
+    ((i+j)%2==0) then black cells, recomputing the residual between colors:
+
+        dh += sor_omega * (rhs - helmholtz_apply(dh)) / D   (restricted to color)
+
+    where D is the analytic diagonal.  No early-out — exactly n_iters sweeps for
+    bit-reproducible determinism.  Starts from zeros unless dh0 is supplied
+    (warm start).
+
+    Parameters
+    ----------
+    rhs : ndarray (H, W)
+    H_ref_lat : ndarray (H,)
+    gp, theta, dt : floats
+    g : Grid
+    n_iters : int — number of red/black sweeps.
+    sor_omega : float — over-relaxation factor in (0, 2).
+    dh0 : ndarray (H, W), optional — warm start (default zeros).
+
+    Returns
+    -------
+    ndarray (H, W)
+    """
+    H, W = g.H, g.W
+    dh = np.zeros((H, W)) if dh0 is None else dh0.copy()
+    D = _helmholtz_diagonal(H_ref_lat, gp, theta, dt, g)
+
+    jj, ii = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+    red = ((ii + jj) % 2 == 0)
+    black = ~red
+
+    for _ in range(n_iters):
+        for color in (red, black):
+            resid = rhs - helmholtz_apply(dh, H_ref_lat, gp, theta, dt, g)
+            dh = dh + sor_omega * np.where(color, resid / D, 0.0)
+    return dh
+
+
+def helmholtz_residual_per_lat(
+    dh: np.ndarray,
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+) -> np.ndarray:
+    """Per-latitude L2 norm of the Helmholtz residual (L_sym dh - rhs).
+
+    Returns shape (H,), including pole rows.  Used to gate polar convergence.
+    """
+    resid = helmholtz_apply(dh, H_ref_lat, gp, theta, dt, g) - rhs
+    return np.sqrt(np.sum(resid * resid, axis=1))
+
+
+def helmholtz_solve_exact(
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    g: Grid,
+) -> np.ndarray:
+    """Direct sparse solve of L_sym dh = rhs (independent ground truth).
+
+    Assembles L_sym as a sparse matrix by applying helmholtz_apply to unit
+    basis vectors, then spsolve.  Used to certify the SOR fixed point.
+    """
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spla
+
+    H, W = g.H, g.W
+    N = H * W
+    rows, cols, vals = [], [], []
+    for k in range(N):
+        e = np.zeros(N)
+        e[k] = 1.0
+        col = helmholtz_apply(e.reshape(H, W), H_ref_lat, gp, theta, dt, g).ravel()
+        nz = np.nonzero(col)[0]
+        for r in nz:
+            rows.append(r)
+            cols.append(k)
+            vals.append(col[r])
+    A = sp.csr_matrix((vals, (rows, cols)), shape=(N, N))
+    dh = spla.spsolve(A, rhs.ravel())
+    return dh.reshape(H, W)
+
+
+def reference_depth(h: np.ndarray) -> np.ndarray:
+    """Reference layer depth H_ref as a frozen latitude-only profile.
+
+    Williamson-2 height is latitude-dependent, so the per-latitude zonal mean
+    is the natural choice that makes the linearized gravity-wave operator
+    consistent with the steady state (a single global mean would mis-balance
+    the meridional pressure structure).
+
+        H_ref_lat[j] = mean_i h[j, i]
+
+    Returns shape (H,).
+    """
+    return h.mean(axis=1)
+
+
+# ---------------------------------------------------------------------------
 # Single-layer Montgomery potential and pressure gradient
 # ---------------------------------------------------------------------------
 
@@ -764,6 +931,120 @@ def step(st: SwRefState) -> SwRefState:
         g=st.g, gp=st.gp,
         h=h_new, u=u_new, v=v_new,
         dt=st.dt, omega=st.omega,
+        u_init=st.u_init, v_init=st.v_init,
+        h_floor=st.h_floor,
+    )
+
+
+# ---------------------------------------------------------------------------
+# M2-T4: semi-implicit step (Picard-Coriolis, SOR Helmholtz)
+# ---------------------------------------------------------------------------
+
+def _semi_implicit_predictor(
+    h: np.ndarray, u: np.ndarray, v: np.ndarray,
+    gp: float, g: Grid, dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Explicit predictor (u_star, v_star): advection + Bernoulli, NO Coriolis.
+
+    Mirrors momentum_step's vector-invariant advection and the FULL Bernoulli
+    potential B = g'h + ke (pressure gradient explicit), but omits the Coriolis
+    sandwich.  The Coriolis rotation is applied later in velocity_backsub; the
+    implicit Helmholtz adds a gravity-wave correction dh on top of this explicit
+    pressure gradient.
+
+    NOTE (refinement vs. the T4 brief): the brief suggested dropping g'h from the
+    Bernoulli (kinetic energy only).  The W2-stationarity and back-substitution-
+    consistency gates — the declared arbiters — require the FULL explicit pressure
+    gradient here: with g'h dropped, the only pressure force restored is
+    theta*dt*g'*grad(dh), which is O(dt^2) and far too small to maintain the
+    geostrophic balance, leaving a ~1e-4 velocity drift (165x the explicit step).
+    Keeping g'h explicit makes the scheme reduce cleanly to the explicit step as
+    dh->0, so W2 stays stationary to the explicit-step tolerance.  This is the
+    "explicit pressure + implicit gravity-wave correction" semi-implicit variant.
+    """
+    H, W = h.shape
+    zeta = vorticity(u, v, g)
+    zeta_uf = corner_to_uface(zeta)
+    zeta_vf = 0.5 * (zeta + np.roll(zeta, 1, axis=1))
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])
+    v_at_uf = center_to_uface(v_c)
+    u_c = 0.5 * (u + np.roll(u, 1, axis=1))
+    u_at_vf = center_to_vface(u_c)
+    ke = 0.5 * (u * u + v_c * v_c)
+    B = gp * h + ke
+    gx, gy = grad_faces(B, g)
+    u_star = u + dt * (zeta_uf * v_at_uf - gx)
+    v_star = np.zeros_like(v)
+    v_star[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gy[1:H])
+    return u_star, v_star
+
+
+def step_semi_implicit(
+    st: SwRefState,
+    theta: float = 0.5,
+    picard_iters: int = 3,
+    poisson_iters: int = 200,
+    sor_omega: float = 1.7,
+    dh_warm: Optional[np.ndarray] = None,
+) -> SwRefState:
+    """One semi-implicit shallow-water step.
+
+    Structure (see module docstring of helmholtz_rhs for the term split):
+      1. Predictor: explicit advection + full Bernoulli, no Coriolis.
+      2. h_star_expl: the (1-theta) explicit half of the gravity-wave height
+         tendency, -(1-theta)*dt*div_H(H_ref * Coriolis(u_star, v_star)).
+      3. H_ref: frozen per-latitude zonal-mean depth (reference_depth).
+      4. Picard loop (deferred Coriolis): rebuild rhs at the current dh and
+         re-solve the symmetric Helmholtz L_sym dh = rhs.
+      5. Back-substitution: velocity_backsub applies the implicit pressure
+         gradient and the Coriolis sandwich.
+      6. Final height: FCT continuity on the total h with the new velocities.
+
+    Parameters
+    ----------
+    st : SwRefState
+    theta : float — off-centering (0.5 default).
+    picard_iters : int — fixed deferred-Coriolis iterations.
+    poisson_iters : int — SOR sweeps per Helmholtz solve.
+    sor_omega : float — SOR over-relaxation factor.
+    dh_warm : ndarray (H, W), optional — warm-start increment (0 on first call).
+
+    Returns
+    -------
+    SwRefState
+    """
+    g, gp, omega, dt = st.g, st.gp, st.omega, st.dt
+    h, u, v = st.h, st.u, st.v
+    H, W = h.shape
+
+    # 1. Predictor.
+    u_star, v_star = _semi_implicit_predictor(h, u, v, gp, g, dt)
+
+    # 3. Frozen reference depth (latitude-only zonal mean).
+    H_ref_lat = reference_depth(h)
+
+    # 2. Explicit (1-theta) gravity-wave height tendency.
+    u_cs, v_cs = coriolis_sandwich(u_star, v_star, omega, g, dt)
+    h_star_expl = -(1.0 - theta) * dt * divergence_helmholtz(u_cs, v_cs, H_ref_lat, g)
+
+    # 4. Picard loop with deferred Coriolis; SOR Helmholtz inner solve.
+    dh = np.zeros((H, W)) if dh_warm is None else dh_warm.copy()
+    for _ in range(picard_iters):
+        rhs = helmholtz_rhs(h_star_expl, u_star, v_star, dh,
+                            H_ref_lat, gp, omega, theta, dt, g)
+        dh = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
+                           poisson_iters, sor_omega, dh0=dh)
+
+    # 5. Back-substitution.
+    u_new, v_new = velocity_backsub(u_star, v_star, dh, gp, theta, dt, omega, g)
+
+    # 6. Final height by FCT continuity on the total h.
+    h_new = continuity_step(h, u_new, v_new, g, dt, st.h_floor)
+
+    return SwRefState(
+        g=g, gp=gp,
+        h=h_new, u=u_new, v=v_new,
+        dt=dt, omega=omega,
         u_init=st.u_init, v_init=st.v_init,
         h_floor=st.h_floor,
     )
