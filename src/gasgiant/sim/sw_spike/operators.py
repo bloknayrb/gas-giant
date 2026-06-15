@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from .grid import Grid, center_to_vface
+from .grid import Grid, center_to_uface, center_to_vface
 
 
 def divergence_hu(h: np.ndarray, u: np.ndarray, v: np.ndarray, g: Grid) -> np.ndarray:
@@ -90,3 +90,54 @@ def coriolis_trapezoidal(u: np.ndarray, v: np.ndarray, f: np.ndarray, dt: float)
     u_new = ((1.0 - a * a) * u + 2.0 * a * v) / denom
     v_new = ((1.0 - a * a) * v - 2.0 * a * u) / denom
     return u_new, v_new
+
+
+def _mass_fluxes(h, u, v, g):
+    """Low-order (donor-cell / upwind) and high-order (centered) mass fluxes."""
+    H, W = h.shape
+    # Zonal east-face flux. Upwind donor by sign of u.
+    hE_up = np.where(u >= 0, h, np.roll(h, -1, axis=1))
+    Fx_low = hE_up * u
+    Fx_high = center_to_uface(h) * u
+    # Meridional v-face flux. Upwind donor: v>0 means flow toward south (row j),
+    # so donor is the north row (j-1).
+    h_north = np.zeros((H + 1, W)); h_north[1:H] = h[0:H - 1]
+    h_south = np.zeros((H + 1, W)); h_south[1:H] = h[1:H]
+    hV_up = np.where(v >= 0, h_north, h_south)
+    Fy_low = hV_up * v
+    Fy_high = center_to_vface(h) * v
+    return Fx_low, Fx_high, Fy_low, Fy_high
+
+
+def _apply_fluxes(h, Fx, Fy, g, dt):
+    H, W = h.shape
+    dFx = (Fx - np.roll(Fx, 1, axis=1)) / g.dlam
+    Fy_c = Fy * g.cos_v[:, None]
+    dFy = (Fy_c[0:H] - Fy_c[1:H + 1]) / g.dphi
+    return h - dt * (dFx + dFy) / g.cos_c[:, None]
+
+
+def continuity_step(h, u, v, g, dt, h_floor):
+    """Flux-corrected transport: mass-conserving AND positivity-preserving.
+
+    Zalesak-style limiter: blend high-order toward low-order so the update
+    introduces no new extremum below the floor.
+    """
+    Fx_low, Fx_high, Fy_low, Fy_high = _mass_fluxes(h, u, v, g)
+    h_low = _apply_fluxes(h, Fx_low, Fy_low, g, dt)           # monotone, positive
+    h_low = np.maximum(h_low, h_floor)
+    # Anti-diffusive flux = high - low.
+    Ax = Fx_high - Fx_low
+    Ay = Fy_high - Fy_low
+    # Limit each anti-diffusive flux so it cannot pull any cell below the floor.
+    # Outgoing capacity of each cell above the floor:
+    cap = np.maximum(h_low - h_floor, 0.0) * g.cos_c[:, None] / dt
+    # Scale anti-diffusive fluxes by the most-restrictive adjacent capacity.
+    sx = np.minimum(1.0, cap / (np.abs(Ax) + 1e-30))
+    Ax_lim = Ax * np.minimum(sx, np.roll(sx, -1, axis=1))
+    # Meridional limiter (simple, conservative): clamp by the donor-row capacity.
+    cap_v = np.zeros((g.H + 1, g.W)); cap_v[1:g.H] = np.minimum(cap[0:g.H - 1], cap[1:g.H])
+    sy = np.minimum(1.0, cap_v / (np.abs(Ay) + 1e-30))
+    Ay_lim = Ay * sy
+    h_new = _apply_fluxes(h, Fx_low + Ax_lim, Fy_low + Ay_lim, g, dt)
+    return np.maximum(h_new, h_floor)

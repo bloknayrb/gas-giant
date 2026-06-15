@@ -126,3 +126,32 @@ def test_trapezoidal_coriolis_conserves_speed():
         u, v = operators.coriolis_trapezoidal(u, v, f, dt)
     speed = np.hypot(u, v)
     np.testing.assert_allclose(speed, 1.0, atol=1e-10)
+
+
+def test_continuity_conserves_total_mass():
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=48, H=24)
+    rng = np.random.default_rng(0)
+    h = 1.0 + 0.1 * rng.standard_normal((24, 48))
+    h = np.clip(h, 0.2, None)
+    u = 0.05 * rng.standard_normal((24, 48))
+    v = np.zeros((25, 48)); v[1:24] = 0.05 * rng.standard_normal((23, 48))
+    area = g.cos_c[:, None] * np.ones((24, 48))
+    m0 = np.sum(h * area)
+    # dt below the near-pole zonal CFL limit so the donor-cell low-order step
+    # stays monotone (no floor clamp) -> flux-form conserves mass exactly.
+    h2 = operators.continuity_step(h, u, v, g, dt=0.02, h_floor=0.05)
+    m1 = np.sum(h2 * area)
+    np.testing.assert_allclose(m1, m0, rtol=1e-12)  # flux-form => machine precision
+
+
+def test_continuity_preserves_positivity_under_strong_gradient():
+    from gasgiant.sim.sw_spike import grid, operators
+    g = grid.Grid(W=32, H=16)
+    h = np.full((16, 32), 0.06)          # near the floor
+    h[:, 8] = 1.0                        # a spike that will be advected hard
+    u = np.full((16, 32), 0.9)           # strong outflow
+    v = np.zeros((17, 32))
+    h2 = operators.continuity_step(h, u, v, g, dt=0.5, h_floor=0.05)
+    assert np.min(h2) >= 0.05 - 1e-9     # FCT keeps h >= floor, no negatives
+    assert np.all(np.isfinite(h2))
