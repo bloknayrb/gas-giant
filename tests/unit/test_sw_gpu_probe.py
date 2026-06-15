@@ -29,3 +29,28 @@ def test_swp_divergence_matches_ref(gpu):
     # Compare the PRE-division flux (cos_c * div) so f32 polar 1/cos amplification cancels.
     cos_c = g.cos_c[:, None]
     np.testing.assert_allclose(cos_c * div_gpu, cos_c * div_cpu, atol=2e-5)
+
+
+def test_swp_grad_montgomery_matches_ref(gpu):
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import operators, grid
+    import numpy as np
+    rng = np.random.default_rng(5)
+    W, H = 64, 32
+    h1 = (5.0 + 0.3 * rng.standard_normal((H, W))).astype(np.float32)
+    h2 = (3.0 + 0.3 * rng.standard_normal((H, W))).astype(np.float32)
+    gp = (1.0, 0.05)
+    g = grid.Grid(W, H)
+    M1c, M2c = operators.montgomery_2layer(h1.astype(np.float64), h2.astype(np.float64), gp)
+    gx1c, gy1c = operators.grad_faces(M1c, g)
+    gx2c, gy2c = operators.grad_faces(M2c, g)
+    out = solver.run_grad_montgomery(gpu, h1, h2, gp)  # dict: M1,M2 (H,W); gx1,gx2 (H,W); gy1,gy2 (H+1,W)
+    cos_c = g.cos_c[:, None]
+    # M values: no division -> flat 2e-5
+    np.testing.assert_allclose(out["M1"], M1c, atol=2e-5)
+    np.testing.assert_allclose(out["M2"], M2c, atol=2e-5)
+    # face gradients: compare PRE-division (multiply zonal by cos_c*dlam, meridional is /dphi only so already O(1))
+    np.testing.assert_allclose((cos_c * g.dlam) * out["gx1"], (cos_c * g.dlam) * gx1c, atol=2e-5)
+    np.testing.assert_allclose((cos_c * g.dlam) * out["gx2"], (cos_c * g.dlam) * gx2c, atol=2e-5)
+    np.testing.assert_allclose(out["gy1"][1:H], gy1c[1:H], atol=2e-5)  # gy has no 1/cos, only /dphi
+    np.testing.assert_allclose(out["gy2"][1:H], gy2c[1:H], atol=2e-5)

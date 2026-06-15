@@ -144,3 +144,95 @@ def run_divergence(
         tex.release()
 
     return result
+
+
+def run_grad_montgomery(
+    gpu: "GpuContext",
+    h1: np.ndarray,
+    h2: np.ndarray,
+    gp: tuple[float, float],
+) -> dict[str, np.ndarray]:
+    """GPU Montgomery potentials and their face gradients for the 2-layer SWP.
+
+    Ports montgomery_2layer() + grad_faces() from sw_spike/operators.py.
+
+    Parameters
+    ----------
+    gpu : GpuContext
+    h1  : (H, W) float32 — layer-1 depth
+    h2  : (H, W) float32 — layer-2 depth
+    gp  : (g1, g2) reduced-gravity pair
+
+    Returns
+    -------
+    dict with keys:
+      M1, M2   : (H, W)   — Montgomery potentials at cell centres
+      gx1, gx2 : (H, W)   — zonal gradient at u-faces (east face)
+      gy1, gy2 : (H+1, W) — meridional gradient at v-faces
+    """
+    h1 = np.asarray(h1, dtype=np.float32)
+    h2 = np.asarray(h2, dtype=np.float32)
+    g1, g2 = float(gp[0]), float(gp[1])
+
+    H, W = h1.shape
+    ctx = gpu.ctx
+
+    # Input textures — cell-centred (W, H)
+    tex_h1 = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_h2 = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_h1.write(h1.tobytes())
+    tex_h2.write(h2.tobytes())
+
+    # Output textures — cell-centred (W, H)
+    tex_M1  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_M2  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_gx1 = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_gx2 = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    # Output textures — v-face (W, H+1)
+    tex_gy1 = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gy2 = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    # Compile (or reuse) the kernel.
+    k = gpu.compute(_KERNELS, "swp_grad_montgomery.comp")
+
+    # Uniforms — names must match GLSL declarations exactly.
+    _set(k, "u_size", (W, H))
+    _set(k, "u_g1", g1)
+    _set(k, "u_g2", g2)
+
+    # Bind samplers (location matches uniform sampler2D binding order).
+    tex_h1.use(location=0)
+    _set(k, "u_h1", 0)
+    tex_h2.use(location=1)
+    _set(k, "u_h2", 1)
+
+    # Bind output images (binding indices match layout qualifiers in GLSL).
+    tex_M1.bind_to_image(0,  read=False, write=True)
+    tex_M2.bind_to_image(1,  read=False, write=True)
+    tex_gx1.bind_to_image(2, read=False, write=True)
+    tex_gx2.bind_to_image(3, read=False, write=True)
+    tex_gy1.bind_to_image(4, read=False, write=True)
+    tex_gy2.bind_to_image(5, read=False, write=True)
+
+    # Dispatch over (W, H+1) to cover all v-face rows.
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    # Download results.
+    result = {
+        "M1":  gpu.read_texture(tex_M1)[...,  0],
+        "M2":  gpu.read_texture(tex_M2)[...,  0],
+        "gx1": gpu.read_texture(tex_gx1)[..., 0],
+        "gx2": gpu.read_texture(tex_gx2)[..., 0],
+        "gy1": gpu.read_texture(tex_gy1)[..., 0],
+        "gy2": gpu.read_texture(tex_gy2)[..., 0],
+    }
+
+    # Release temporaries.
+    for tex in (tex_h1, tex_h2, tex_M1, tex_M2, tex_gx1, tex_gx2, tex_gy1, tex_gy2):
+        tex.release()
+
+    return result
