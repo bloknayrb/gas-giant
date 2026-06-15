@@ -8,26 +8,16 @@ layout(r32f, binding = 0) uniform image2D out_div;   // center (W,H)
 uniform ivec2 u_size;       // (W,H)
 uniform float u_a, u_dlam, u_dphi;
 
-// sin-based forms avoid cos(pi/2 - small) precision loss near poles.
-// cosCenter(row,H) = sin((row+0.5)*PI/H); cosVface(row,H) = sin(row*PI/H) zeroed at poles.
-float sinCenter(int row, int H) {
-    return sin((float(row) + 0.5) * PI / float(H));
-}
-float sinVface(int row, int H) {
-    if (row <= 0 || row >= H) return 0.0;
-    return sin(float(row) * PI / float(H));
-}
-
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     int W = u_size.x, H = u_size.y;
     if (px.x >= W || px.y >= H) return;
-    float cphi = sinCenter(px.y, H);
+    float cphi = cosCenter(px.y, H);
     float FxE = texelFetch(u_h, px, 0).r * texelFetch(u_u, px, 0).r;
     ivec2 pw = ivec2(wrapX(px.x - 1, W), px.y);   // branch-form wrapX -- NEVER ((x%w)+w)%w
     float FxW = texelFetch(u_h, pw, 0).r * texelFetch(u_u, pw, 0).r;
     float dFx = (FxE - FxW) / u_dlam;
-    float cN = sinVface(px.y, H), cS = sinVface(px.y + 1, H);
+    float cN = cosVface(px.y, H), cS = cosVface(px.y + 1, H);
     float hN = 0.5 * (texelFetch(u_h, ivec2(px.x, max(px.y-1,0)), 0).r + texelFetch(u_h, px, 0).r);
     float hS = 0.5 * (texelFetch(u_h, px, 0).r + texelFetch(u_h, ivec2(px.x, min(px.y+1,H-1)), 0).r);
     float FyN = (px.y == 0)   ? 0.0 : hN * texelFetch(u_v, ivec2(px.x, px.y),   0).r * cN;

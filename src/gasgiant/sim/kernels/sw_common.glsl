@@ -6,16 +6,17 @@
 #define PI 3.14159265358979
 
 // cos(phi) at cell-centre row `row` (0 = northernmost).
-// phi_c[row] = 0.5*PI - (row + 0.5)*PI/H  (descending latitude).
+// Uses sin((row+0.5)*PI/H) == cos(PI/2 - ...) because GPU cos near PI/2 loses
+// ~74 ULPs near the poles; sin near 0 is accurate (M3-carry lesson, 2026-06).
 float cosCenter(int row, int H) {
-    return cos(0.5 * PI - (float(row) + 0.5) * PI / float(H));
+    return sin((float(row) + 0.5) * PI / float(H));
 }
 
 // cos(phi) at v-face row `row` (0 = north pole, H = south pole).
-// phi_v[row] = 0.5*PI - row*PI/H; zeroed at both poles.
+// Same sin-based form for pole accuracy; zeroed at both poles.
 float cosVface(int row, int H) {
     if (row <= 0 || row >= H) return 0.0;
-    return cos(0.5 * PI - float(row) * PI / float(H));
+    return sin(float(row) * PI / float(H));
 }
 
 // Periodic wrap in X (longitude).
