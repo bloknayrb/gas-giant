@@ -12,8 +12,41 @@
 > go/no-go (the next render gate is M3, the 2-layer baroclinic solver, per spec).
 > Rev 2 also folds the 3 surviving majors (radius `a` tested at a≠1; explicit
 > branch-form wrap; reuse the existing `gpu` fixture) and the M0.5 build lessons.
+>
+> **Rev 3 (second adversarial review — 0 fatal, 4 major, folded as binding corrections):**
+> 1. **WRAP-1:** purge every `((x%w)+w)%w` / `% W` wrap and "texelFetch wraps"
+>    claim from ALL kernel listings + notes — use `wrapX(i±1,W)` (branch form)
+>    everywhere; add a non-power-of-2 W (e.g. 96) per-field diff case so the
+>    banned form can't silently pass (pow-2 widths mask it).
+> 2. **GN2 / VM3-1 — radius-`a` shared blind spot:** the GPU-vs-CPU per-field diff
+>    CANNOT catch a radius-`a` miss because BOTH the M0 CPU ops and the M0.5 GPU
+>    kernels omit `a` (it's only in docstrings) — a correlated omission cancels in
+>    the diff. So add **INDEPENDENT analytic `a`-scaling tests** (not GPU-vs-CPU):
+>    for each ported kernel, run at a=1 and a=2 on identical inputs and assert the
+>    known scaling — `run_grad`/`run_divergence`/`run_vorticity` outputs at a=2 ==
+>    a=1 output × ½ (interior rows); `run_vorticity` rigid-rotation at a=2 gives
+>    `ζ=2U·sinφ/a`; `total_mass`/`total_energy` scale by `a²`. ALSO add one
+>    **absolute GPU-vs-CPU integrated test at a=2.0** (Task 9 one-step or Task 10
+>    N-step compares assembled-step GPU h,u,v to the ref) to catch an `a` uniform
+>    not threaded into the assembled `SwGpuSolver.step`. Note in the plan that
+>    `a`-threading is verified by self-referential scaling, not the diff — don't
+>    delete these as "redundant."
+> 3. **GN5 — momentum a-sites:** see the momentum bullet in the §VM3 list (reuse
+>    the `sw_grad` kernel for the Bernoulli gradient; else enumerate all 9 sites +
+>    a=2 momentum diff).
+> 4. **VV2 — honest gate name:** rename Task 12 / the exit-gate framing from
+>    "conservation budget closure" to **"mass conservation (closed, ~1e-5 R32F) +
+>    energy/enstrophy drift MONITORING (bounded, not closed)."** True §6 budget
+>    closure (forcing-in = dissipation-out) is an **M3** gate — M1 has no
+>    forcing/drag/hypervisc, so the only energy sink is the FCT floor. Either
+>    tighten the 1% energy bound to what the floor-clip predicts for a near-steady
+>    Williamson-2 state, or justify 1% quantitatively; state this in `m1-verdict.md`.
+> 5. **PATH-1 (minor):** the graduated-kernel source paths are
+>    `src/gasgiant/sim/kernels/swp_*.comp` (the grad source is
+>    `swp_grad_montgomery.comp`); `swp_common.glsl` lives in `sim/kernels/`, not a
+>    probe subdir. Correct any path references accordingly.
 
-**Goal:** A single-layer, equirect-only, GPU **Arakawa C-grid** reduced-gravity shallow-water solver, validated per-field against a NumPy CPU reference and against the Williamson et al. (1992) test 2, with the split solution-accuracy + self-budget-closure gate, determinism, and byte-exact checkpoint.
+**Goal:** A single-layer, equirect-only, GPU **Arakawa C-grid** reduced-gravity shallow-water solver, validated per-field against a NumPy CPU reference and against the Williamson et al. (1992) test 2, with solution-accuracy (l2) + **mass-conservation-closed / energy-drift-monitored** gates (true §6 budget closure is deferred to M3 — M1 has no forcing), determinism, and byte-exact checkpoint.
 
 **Architecture (rev 2 — graduate, don't rewrite).** M0.5 already produced WORKING, per-field-validated GPU kernels in `src/gasgiant/sim/sw_gpu_probe/` (2-layer). M1 **graduates the single-layer subset of those kernels** into production `src/gasgiant/sim/kernels/sw_*.comp` — they already carry the hard-won fixes (branch-form `wrapX`, the FCT east-face limiter fix, the C-grid metric, the Coriolis structure). The validated M0 CPU operators (`sw_spike/operators.py`) graduate into a clean single-layer **`shallow_water_ref.py`** (adds planetary radius `a`, drops layer 2, adds the Williamson-2 analytic state) — the authoritative ground truth. M1's NEW work over M0.5 is: thread radius `a` through every metric site (incl. continuity + the conserved integrals), the Williamson-2 analytic validation, the split solution-accuracy + self-budget-closure conservation gate, GPU determinism/hash, and byte-exact checkpoint. Validation flow: per-field diffs (incl. a≠1) → 1-step → N-step GPU≈CPU → Williamson-2 balance + l2 → conservation budget closure → determinism/hash → checkpoint.
 
@@ -63,7 +96,8 @@ Kernels are pure (one responsibility each), mirroring the CPU reference function
 - `vorticity`: prefactor `1/(a·cosφ)`.
 - **`_apply_fluxes` (continuity): the SAME `1/(a·cosφ)` prefactor and `a·dλ`/`a·dφ` in the flux divergence — it has the identical metric structure to `divergence_hu` and was the omitted site.**
 - **`total_mass`: area weight `a²·cosφ·dλ·dφ`. `total_energy`: same `a²` area weight.**
-Keep the M0 sign conventions (validated) verbatim; just thread `a` through. A wrong/absent `a` is invisible at the default `a=1.0` (1/1==1), so it MUST be exercised at a≠1 (Task 1 grad test + Task 2 integrated Williamson + Task 4/7 per-field diffs all run an a=2.0 case).
+- **The momentum kernel's Bernoulli face-gradient** (`grad_faces(B)`, with `B=g'h+½|u|²`) — same `a·cosφ·dλ` / `a·dφ` divisors as `grad_faces` (rev-3 major GN5: the GPU momentum kernel inlines this grad in THREE places → 9 `a`-sites; STRONGLY PREFER having the GPU momentum kernel compute `B` into a texture and reuse the `sw_grad` kernel — collapses 9 `a`-sites to 1 and removes the triplication-mismatch risk).
+Keep the M0 sign conventions (validated) verbatim; just thread `a` through. A wrong/absent `a` is invisible at the default `a=1.0` (1/1==1), so it MUST be exercised at a≠1 — see the **rev-3 `a`-coverage addendum below** (independent GPU analytic scaling tests + an a=2.0 GPU integrated test), because GPU-vs-CPU per-field diffs alone have a SHARED BLIND SPOT (both M0 CPU ops and M0.5 GPU kernels omit `a`, so a correlated miss passes the diff).
 
 - [ ] **Step 1: Write the failing tests** (these are the M0 analytic checks, re-asserted with `a`)
 
@@ -243,7 +277,7 @@ void main() {
     float cphi = cosCenter(px.y, H);                 // cos at this center row
     // same-index zonal flux Fx[i] = h[i]*u[i]; west neighbor at i-1 (periodic).
     float FxE = texelFetch(u_h, px, 0).r * texelFetch(u_u, px, 0).r;
-    ivec2 pw = ivec2((px.x - 1 + W) % W, px.y);
+    ivec2 pw = ivec2(wrapX(px.x - 1, W), px.y);   // branch-form wrapX from sw_common.glsl — NEVER ((x%w)+w)%w
     float FxW = texelFetch(u_h, pw, 0).r * texelFetch(u_u, pw, 0).r;
     float dFx = (FxE - FxW) / u_dlam;
     // meridional: Fy_c = h_vface * v * cos_vface, north face row = px.y, south = px.y+1.
@@ -380,13 +414,13 @@ def test_gpu_continuity_conserves_mass(gpu):
 
 ---
 
-## Task 12: Conservation budget closure (self-budget gate)
+## Task 12: Mass conservation (closed) + energy/enstrophy drift monitoring (bounded)
 
 **Files:** Modify `scripts/sw_m1_williamson.py`; test.
 
-**Context:** The conservation half of the split gate (spec §6): mass to ~1e-5 (flux-form, R32F); energy/enstrophy drift accounted by the diagnosed dissipation (in M1 there is NO forcing/hypervisc, so the only sink is the FCT floor + numerical truncation — energy should be NEARLY conserved, drift bounded and one-signed from FCT diffusion).
+**Context (rev-3 VV2 — honest naming):** M1 has NO forcing/drag/hypervisc, so the spec §6 "budget closure" (forcing-in = dissipation-out, residual≈0) is **an M3 gate, not M1's.** M1 closes only MASS and MONITORS energy/enstrophy as bounded drift. The only energy sink in M1 is the FCT floor + numerical truncation. **Closure-flavored strengthening:** instrument the FCT limiter/floor to report the mass (and, if cheap, energy) it clips per step, and assert the energy drift is one-signed and the same order as that clipped quantity — a real check against the only sink that exists.
 
-- [ ] **Step 1: Failing test** `test_gpu_conservation_budget`: Williamson-2, 80 steps, no forcing; assert mass drift `< 1e-5`, total-energy drift `< 1%` (bounded by FCT numerical diffusion), and potential-enstrophy finite/bounded. Document that exact energy conservation is not claimed (collocated-vs-Cgrid AL caveat from the spec; M1 monitors bounded drift).
+- [ ] **Step 1: Failing test** `test_gpu_mass_closed_energy_bounded`: Williamson-2, 80 steps, no forcing; assert mass drift `< 1e-5` (CLOSED, f64 reduction of the f32 readback). For energy: assert drift is one-signed and bounded by the FCT-clip budget (tighten below 1% to what the near-steady state actually predicts, OR justify 1% quantitatively in the docstring — a loose 1% one-sided bound can hide an asymmetric-flux / wrong-Bernoulli bug). Potential-enstrophy finite/bounded (diagnostic, no hard gate). Document: exact energy conservation is NOT claimed (collocated-vs-Cgrid AL caveat); true §6 closure is deferred to M3.
 - [ ] **Step 2-4:** Implement diagnostics + run. - [ ] **Step 5: Commit** `git commit -m "M1: conservation budget-closure diagnostics"`
 
 ---
@@ -428,7 +462,7 @@ def test_gpu_continuity_conserves_mass(gpu):
 ## Self-review notes (for the implementer)
 
 - **The CPU reference is the spec.** Every GPU kernel is judged by per-field `atol=2e-5` diff against `shallow_water_ref.py`. If a diff fails, the bug is in the GLSL port (indexing, sign, metric, a pole guard) — localize against the reference field; NEVER loosen `atol`.
-- **C-grid GLSL indexing is the #1 risk.** `v`/`ζ` textures have height `H+1`; centers/`u` have height `H`. Pole rows (0 and H of the vface/corner textures) must store 0. Periodic longitude via `(i±1+W)%W` (and `repeat_x=True` makes `texelFetch` wrap too — but be explicit).
+- **C-grid GLSL indexing is the #1 risk.** `v`/`ζ` textures have height `H+1`; centers/`u` have height `H`. Pole rows (0 and H of the vface/corner textures) must store 0. Periodic longitude ALWAYS via `wrapX(i±1, W)` (the branch form in Conventions) — NEVER `((x%w)+w)%w`, and `texelFetch` does NOT honor `repeat_x`.
 - **Coriolis: relative vorticity only in the flux** (carried M0 bug-fix #1) — `f` is handled solely by the trapezoidal step. Do not reintroduce `q=ζ+f`.
 - **FCT two-pass** avoids the limiter read-write race; verify pass A intermediates before blaming pass B.
 - **Precision:** GPU is R32F; GPU-vs-CPU is a DRIFT bound (~5e-4 over 50 steps), GPU-vs-GPU is byte-identical (determinism). Don't conflate them.
