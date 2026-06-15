@@ -250,3 +250,22 @@ def test_gpu_step_matches_ref_one_step(gpu):
         np.testing.assert_allclose(hg, st.h, atol=2e-5)
         np.testing.assert_allclose(ug, st.u, atol=2e-5)
         np.testing.assert_allclose(vg[1:64], st.v[1:64], atol=2e-5)
+
+
+# ---------------------------------------------------------------------------
+# Task 10: N-step GPU-vs-CPU agreement (50 steps)
+# ---------------------------------------------------------------------------
+
+def test_gpu_matches_ref_n_steps(gpu):
+    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    import numpy as np
+    W, H = 128, 64
+    st = ref.williamson2_state(W=W, H=H, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=W, H=H, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+    for _ in range(50):
+        st = ref.step(st); sg.step()
+    hg, ug, vg = sg.download_state()
+    assert np.all(np.isfinite(hg))
+    assert np.max(np.abs(hg - st.h)) < 5e-4     # f32 GPU vs f64 CPU drift over 50 steps
+    assert np.max(np.abs(ug - st.u)) < 5e-4
+    assert np.max(np.abs(vg[1:H] - st.v[1:H])) < 5e-4
