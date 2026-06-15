@@ -440,6 +440,13 @@ class SwGpuSolver:
         omega: float,
         dt: float,
         h_floor: float = 0.05,
+        *,
+        semi_implicit: bool = False,
+        theta: float = 0.5,
+        sor_omega: float = 1.7,
+        helmholtz_iters: int = 200,
+        picard_iters: int = 3,
+        dt_multiplier: float = 1.0,
     ) -> None:
         self.gpu = gpu
         self.ctx = gpu.ctx
@@ -450,6 +457,17 @@ class SwGpuSolver:
         self.omega = float(omega)
         self.dt = float(dt)
         self.h_floor = float(h_floor)
+
+        # -- Semi-implicit path flag + inert parameter slots (T7 wires the SI path) --
+        self.semi_implicit = bool(semi_implicit)
+        self.theta = float(theta)
+        self.sor_omega = float(sor_omega)
+        self.helmholtz_iters = int(helmholtz_iters)
+        self.picard_iters = int(picard_iters)
+        self.dt_multiplier = float(dt_multiplier)
+        # H_ref is populated by the constructor after upload (set to None here;
+        # from_williamson2 sets it when semi_implicit=True).
+        self.H_ref: np.ndarray | None = None
 
         # Dispatch group counts.
         self._gx_c = (W + _GROUP - 1) // _GROUP
@@ -503,6 +521,13 @@ class SwGpuSolver:
         gp: float,
         h0: float,
         h_floor: float = 0.05,
+        *,
+        semi_implicit: bool = False,
+        theta: float = 0.5,
+        sor_omega: float = 1.7,
+        helmholtz_iters: int = 200,
+        picard_iters: int = 3,
+        dt_multiplier: float = 1.0,
     ) -> "SwGpuSolver":
         """Build a SwGpuSolver from the analytic Williamson-2 initial condition.
 
@@ -512,14 +537,25 @@ class SwGpuSolver:
         from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
         st = ref.williamson2_state(W=W, H=H, a=a, omega=omega, u0=u0, gp=gp,
                                    h0=h0, h_floor=h_floor)
-        sg = cls(gpu=gpu, W=W, H=H, a=a, gp=gp, omega=omega,
-                 dt=st.dt, h_floor=h_floor)
+        sg = cls(
+            gpu=gpu, W=W, H=H, a=a, gp=gp, omega=omega,
+            dt=st.dt, h_floor=h_floor,
+            semi_implicit=semi_implicit,
+            theta=theta,
+            sor_omega=sor_omega,
+            helmholtz_iters=helmholtz_iters,
+            picard_iters=picard_iters,
+            dt_multiplier=dt_multiplier,
+        )
         sg._tex_h.write(st.h.astype(np.float32).tobytes())
         sg._tex_u.write(st.u.astype(np.float32).tobytes())
         sg._tex_v.write(st.v.astype(np.float32).tobytes())
         # Store initial velocity fields for velocity_l2_drift().
         sg.u_init = st.u.astype(np.float32).copy()
         sg.v_init = st.v.astype(np.float32).copy()
+        # Compute and store H_ref (latitude profile) when semi-implicit path is requested.
+        if semi_implicit:
+            sg.H_ref = ref.reference_depth(st.h.astype(np.float32))
         return sg
 
     # -- Public I/O -----------------------------------------------------------
