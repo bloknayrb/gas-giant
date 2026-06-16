@@ -26,6 +26,7 @@ class CouplingStats:
     baro_seconds: float = 0.0
     upload_seconds: float = 0.0
     v16_seconds: float = 0.0
+    baro_outcropped: bool = False  # the baroclinic source froze (outcropped) mid-run
 
 
 def residency_recommendation(stats: CouplingStats) -> str:
@@ -53,8 +54,7 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
 
         remaining = sim.steps_target - sim.steps_done
         n = min(update_every, remaining)
-        sim.solver.step(n)
-        sim._tracers_changed = True
+        sim.tick(n)  # advances n v1.6 steps + flags the preview dirty
         t3 = time.perf_counter()
 
         stats.baro_seconds += t1 - t0
@@ -62,4 +62,5 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
         stats.v16_seconds += t3 - t2
         stats.v16_steps += n
         stats.source_updates += 1
+    stats.baro_outcropped = driver.outcropped
     return stats

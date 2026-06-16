@@ -24,6 +24,12 @@ class BaroclinicSourceDriver:
             pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0,
         )
         self.advance(warmup_steps)
+        if self.outcropped:
+            raise RuntimeError(
+                f"BaroclinicSourceDriver: warmup outcropped within {warmup_steps} "
+                f"steps -- the source never reached a finite-amplitude state. "
+                f"Reduce warmup_steps or xi_unstable."
+            )
 
     def advance(self, n: int) -> None:
         """Advance the baroclinic solver n steps; on outcrop (ValueError) latch
