@@ -1,6 +1,76 @@
 {
   "testModules": [
     {
+      "moduleId": "tests/unit/test_m2_adv_ref.py",
+      "tests": [
+        {
+          "name": "test_departure_solid_body_zonal",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_departure_solid_body_zonal",
+          "state": "passed"
+        },
+        {
+          "name": "test_departure_a_scaling_invariant",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_departure_a_scaling_invariant",
+          "state": "passed"
+        },
+        {
+          "name": "test_departure_meridional_shift",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_departure_meridional_shift",
+          "state": "passed"
+        },
+        {
+          "name": "test_ppm_remap_conserves_and_preserves_uniform",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_ppm_remap_conserves_and_preserves_uniform",
+          "state": "passed"
+        },
+        {
+          "name": "test_ppm_remap_no_new_extrema",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_ppm_remap_no_new_extrema",
+          "state": "passed"
+        },
+        {
+          "name": "test_ppm_remap_integer_shift_is_roll",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_ppm_remap_integer_shift_is_roll",
+          "state": "passed"
+        },
+        {
+          "name": "test_slice_advance_conserves_mass",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_conserves_mass",
+          "state": "passed"
+        },
+        {
+          "name": "test_slice_advance_a_scaling",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_a_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_slice_advance_meridional_wall_conserves",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_meridional_wall_conserves",
+          "state": "passed"
+        },
+        {
+          "name": "test_slice_advance_strong_shear_conserves_and_stays_positive",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_strong_shear_conserves_and_stays_positive",
+          "state": "passed"
+        },
+        {
+          "name": "test_sl_momentum_advects_bump_zonally",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_sl_momentum_advects_bump_zonally",
+          "state": "passed"
+        },
+        {
+          "name": "test_sl_momentum_predictor_resting_layer_is_pressure_only",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_sl_momentum_predictor_resting_layer_is_pressure_only",
+          "state": "passed"
+        },
+        {
+          "name": "test_slsi_matches_m2core_at_small_dt",
+          "fullName": "tests/unit/test_m2_adv_ref.py::test_slsi_matches_m2core_at_small_dt",
+          "state": "passed"
+        }
+      ]
+    },
+    {
       "moduleId": "tests/spikes/test_slsi_fastjet_spike.py",
       "tests": [
         {
@@ -11,22 +81,12 @@
         {
           "name": "test_reference_is_self_converged",
           "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_reference_is_self_converged",
-          "state": "failed",
-          "errors": [
-            {
-              "message": "def test_reference_is_self_converged():\n>       ref1 = _run(step_slsi, dt_mult=1, n_big=160)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests\\spikes\\test_slsi_fastjet_spike.py:21: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\ntests\\spikes\\test_slsi_fastjet_spike.py:10: in _run\n    st = step_fn(st, theta=0.5, picard_iters=3, poisson_iters=300, dh_warm=dh)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1589: in step_slsi\n    assert_positivity(h_raw, st.h_floor)\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nh_raw = array([[6226.48056557, 6226.49010478, 6226.46833601, ..., 6226.4852818 ,\n        6226.48332627, 6226.48387973],\n      ...00.03027221, 8000.03079329, 8000.03120132, ..., 8000.02824373,\n        8000.02897256, 8000.02965739]], shape=(64, 128))\nh_floor = 1.0\n\n    def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:\n        \"\"\"Loud positivity guard shared by the CPU and GPU semi-implicit steps.\n    \n        continuity_step_conservative keeps h >= h_floor only in the donor-cell\n        sub-CFL regime; a floor cell drained through BOTH faces by a divergent\n        meridional velocity (meridional Courant >~ 1) can still dip below the floor.\n        A subsequent np.maximum floor clamp would then SILENTLY inject mass\n        (defeating mass closure), so we reject loudly instead \u2014 same hard-reject\n        philosophy as the Picard contraction certificate.  The 1e-9 slack absorbs\n        f64 round-off in the flux-form sums (h is O(1-10), round-off O(1e-15)).\n        \"\"\"\n        h_min = float(h_raw.min())\n        if h_min < h_floor - 1e-9:\n>           raise ValueError(\n                f\"semi-implicit positivity violation: min(h)={h_min:.3e} < \"\n                f\"h_floor={h_floor:.3e}. The velocity field drove a floor cell below \"\n                f\"the floor (meridional Courant too large); the conservative limiter \"\n                f\"cannot keep mass closed here. Reduce dt or relax forcing.\"\n            )\nE           ValueError: semi-implicit positivity violation: min(h)=-4.517e+03 < h_floor=1.000e+00. The velocity field drove a floor cell below the floor (meridional Courant too large); the conservative limiter cannot keep mass closed here. Reduce dt or relax forcing.\n\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1128: ValueError"
-            }
-          ]
+          "state": "skipped"
         },
         {
           "name": "test_slsi_fastjet_accuracy_at_large_courant",
           "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_slsi_fastjet_accuracy_at_large_courant",
-          "state": "failed",
-          "errors": [
-            {
-              "message": "def test_slsi_fastjet_accuracy_at_large_courant():\n>       ref = _run(step_slsi, dt_mult=1, n_big=160)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests\\spikes\\test_slsi_fastjet_spike.py:27: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\ntests\\spikes\\test_slsi_fastjet_spike.py:10: in _run\n    st = step_fn(st, theta=0.5, picard_iters=3, poisson_iters=300, dh_warm=dh)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1589: in step_slsi\n    assert_positivity(h_raw, st.h_floor)\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nh_raw = array([[6226.48056557, 6226.49010478, 6226.46833601, ..., 6226.4852818 ,\n        6226.48332627, 6226.48387973],\n      ...00.03027221, 8000.03079329, 8000.03120132, ..., 8000.02824373,\n        8000.02897256, 8000.02965739]], shape=(64, 128))\nh_floor = 1.0\n\n    def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:\n        \"\"\"Loud positivity guard shared by the CPU and GPU semi-implicit steps.\n    \n        continuity_step_conservative keeps h >= h_floor only in the donor-cell\n        sub-CFL regime; a floor cell drained through BOTH faces by a divergent\n        meridional velocity (meridional Courant >~ 1) can still dip below the floor.\n        A subsequent np.maximum floor clamp would then SILENTLY inject mass\n        (defeating mass closure), so we reject loudly instead \u2014 same hard-reject\n        philosophy as the Picard contraction certificate.  The 1e-9 slack absorbs\n        f64 round-off in the flux-form sums (h is O(1-10), round-off O(1e-15)).\n        \"\"\"\n        h_min = float(h_raw.min())\n        if h_min < h_floor - 1e-9:\n>           raise ValueError(\n                f\"semi-implicit positivity violation: min(h)={h_min:.3e} < \"\n                f\"h_floor={h_floor:.3e}. The velocity field drove a floor cell below \"\n                f\"the floor (meridional Courant too large); the conservative limiter \"\n                f\"cannot keep mass closed here. Reduce dt or relax forcing.\"\n            )\nE           ValueError: semi-implicit positivity violation: min(h)=-4.517e+03 < h_floor=1.000e+00. The velocity field drove a floor cell below the floor (meridional Courant too large); the conservative limiter cannot keep mass closed here. Reduce dt or relax forcing.\n\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1128: ValueError"
-            }
-          ]
+          "state": "skipped"
         },
         {
           "name": "test_eulerian_path_fails_the_same_gate",

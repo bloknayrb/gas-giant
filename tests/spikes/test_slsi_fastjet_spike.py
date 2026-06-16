@@ -1,5 +1,15 @@
-"""M2-adv crux gate."""
+"""M2-adv crux gate.
+
+OUTCOME: NO-GO. The SLSI approach is FALSIFIED on the lat-lon grid (Earth-like
+params). The accuracy gate below is marked xfail: step_slsi is unconditionally
+unstable at the large dt the gate requires (the binding constraint after M2-core is
+the polar gravity-wave/theta imbalance, NOT advection; the SL operators regress
+stability vs the Eulerian scheme). See docs/superpowers/specs/m2-adv-verdict.md for
+the full evidence. The CPU SL operators (Tasks 1-4) are correct/conserving and kept
+for reuse; no GPU kernels were built.
+"""
 import numpy as np
+import pytest
 from gasgiant.sim.shallow_water_ref import (
     fast_jet_state, step_slsi, step_semi_implicit, total_mass)
 
@@ -17,12 +27,19 @@ def test_crux_setup_is_nonvacuous():
     assert C > 3.0, f"crux gate vacuous: max advective C={C:.2f} (need >>1)"
     assert np.max(np.abs(st.h - st.h.mean(axis=1, keepdims=True))) > 1.0
 
+@pytest.mark.xfail(reason="M2-adv falsified: step_slsi unstable at large dt; "
+                          "balanced reference does not survive. See m2-adv-verdict.md.",
+                   strict=False)
 def test_reference_is_self_converged():
     ref1 = _run(step_slsi, dt_mult=1, n_big=160)
     ref2 = _run(step_slsi, dt_mult=2, n_big=80)
     drift = float(np.sqrt(np.mean((ref2.h - ref1.h) ** 2)) / np.sqrt(np.mean(ref1.h ** 2)))
     assert drift < 0.02, f"reference not converged (self-L2={drift:.4f}); gate tol unsafe"
 
+@pytest.mark.xfail(reason="M2-adv falsified: SLSI is unconditionally unstable at the "
+                          "large dt this gate requires (premise does not hold on the "
+                          "lat-lon grid). See m2-adv-verdict.md.",
+                   strict=False)
 def test_slsi_fastjet_accuracy_at_large_courant():
     ref = _run(step_slsi, dt_mult=1, n_big=160)
     big = _run(step_slsi, dt_mult=8, n_big=20)

@@ -1594,24 +1594,20 @@ def step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200,
                       u_init=st.u_init, v_init=st.v_init, h_floor=st.h_floor)
 
 
-def fast_jet_state(W=128, H=64, a=6.4e6, u0=80.0, dt_mult=1, C_base=0.5, m_wave=4, amp=0.04):
-    """Fast mid-latitude zonal jet (phi_jet=45deg) with a wavenumber-m height
-    perturbation, for the M2-adv crux gate. dt is set by the ADVECTIVE Courant
-    limit AT THE JET (not the polar gravity-wave CFL): dt = dt_mult*C_base*
-    a*cos(phi_jet)*dlam/u0, so the advective Courant at the jet = C_base*dt_mult."""
-    g = Grid(W=W, H=H, a=a)
-    gp = 9.8; omega = 7.292e-5; H0 = 8000.0
-    phi = g.phi_c; lam = np.arange(W) * g.dlam
-    phi_jet = np.deg2rad(45.0); sigma = np.deg2rad(10.0)
-    u_prof = u0 * np.exp(-((phi - phi_jet) / sigma) ** 2)
-    u = np.repeat(u_prof[:, None], W, axis=1)
-    f = 2.0 * omega * np.sin(phi)
-    h_prof = H0 + np.cumsum((-(a / gp) * f * u_prof * g.dphi)[::-1])[::-1]
-    h = np.repeat(h_prof[:, None], W, axis=1)
-    env = np.exp(-((phi - phi_jet) / sigma) ** 2)[:, None]
-    h = h + amp * H0 * env * np.cos(m_wave * lam)[None, :]
-    v = np.zeros((H + 1, W))
-    cphi_jet = np.cos(phi_jet)
-    dt = dt_mult * C_base * (a * cphi_jet * g.dlam) / u0
-    return SwRefState(g=g, gp=gp, h=h, u=u, v=v, dt=dt, omega=omega,
-                      u_init=u.copy(), v_init=v.copy(), h_floor=1.0)
+def fast_jet_state(W=128, H=64, a=6.4e6, u0=120.0, dt_mult=1, C_base=0.5, m_wave=4, amp=0.02):
+    """Barotropically STABLE fast zonal flow for the M2-adv advective-CFL gate:
+    solid-body rotation u0*cosφ (an exact, Rayleigh-stable SWE steady state) plus a
+    small zonal wavenumber-m height perturbation that advects with the flow.  Unlike
+    a narrow Gaussian jet, solid-body rotation has no inflection point, so the
+    reference run survives and the gate measures ADVECTION ACCURACY (not a physical
+    barotropic instability).  dt is set by the advective Courant: for solid body the
+    Courant u/(a cosφ dλ)*dt = u0/(a dλ)*dt is latitude-independent = C_base*dt_mult."""
+    st = williamson2_state(W=W, H=H, a=a, omega=7.292e-5, u0=u0, gp=9.8, h0=8000.0)
+    g = st.g
+    lam = np.arange(W) * g.dlam
+    phi = g.phi_c
+    env = np.exp(-((phi - np.deg2rad(45.0)) / np.deg2rad(20.0)) ** 2)[:, None]  # broad, smooth
+    h = st.h + amp * 8000.0 * env * np.cos(m_wave * lam)[None, :]
+    dt = dt_mult * C_base * (a * g.dlam) / u0
+    return SwRefState(g=g, gp=st.gp, h=h, u=st.u, v=st.v, dt=dt, omega=st.omega,
+                      u_init=st.u_init, v_init=st.v_init, h_floor=st.h_floor)
