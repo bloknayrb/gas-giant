@@ -31,3 +31,18 @@ def test_enabled_with_vorticity_ok():
 def test_existing_preset_without_block_loads():
     p = load_factory_preset("jupiter_vorticity")
     assert p.solver.baroclinic.enabled is False
+
+
+def test_jupiter_baroclinic_preset_enables_coupling():
+    from gasgiant.params.presets import load_factory_preset
+    p = load_factory_preset("jupiter_baroclinic")
+    assert p.solver.type == SolverType.VORTICITY
+    assert p.solver.baroclinic.enabled is True
+    assert p.solver.baroclinic.gain == 0.5
+
+
+def test_baroclinic_fields_have_no_rand():
+    # randomize() must never flip these on; lock the trap against future edits.
+    from gasgiant.params.model import BaroclinicParams, field_meta
+    for f in ("enabled", "gain", "warmup_steps", "baro_steps_per_update", "update_every"):
+        assert "rand" not in field_meta(BaroclinicParams, f), f
