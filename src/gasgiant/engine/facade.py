@@ -120,7 +120,7 @@ class Simulation:
             tex.repeat_x = True
             self.solver.external_omega_tex = tex
         else:
-            tex.write(arr.tobytes())
+            tex.write(arr)  # arr is contiguous float32; avoid a per-call copy
         self.solver.external_gain = float(gain)
 
     # -- parameters ---------------------------------------------------------------
