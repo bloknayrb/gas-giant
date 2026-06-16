@@ -1,5 +1,6 @@
-"""Honest M3 render-gate metrics: latitude concentration and high-frequency
-texture energy."""
+"""Honest M3 render-gate metrics: the hero banded-coherent-fraction, the
+high-frequency texture-energy proxy, and the broadband latitude-concentration
+diagnostic."""
 from __future__ import annotations
 
 import numpy as np
