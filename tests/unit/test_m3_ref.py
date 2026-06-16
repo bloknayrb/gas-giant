@@ -97,3 +97,62 @@ def test_2layer_williamson2_balance_stationary():
         st = step_2layer(st)
     assert np.max(np.abs(st.u1 - u1_0)) < 1e-2
     assert np.max(np.abs(st.h1 - h1_0)) / h1_0.mean() < 1e-3
+
+
+# ---------------------------------------------------------------------------
+# M3 Task 7: conservation + budget closure + determinism gates
+# ---------------------------------------------------------------------------
+
+def test_mass_conserved_per_layer_unforced():
+    """Unforced (tau off, sponge off), per-layer mass conserves to round-off.
+    Achievable because step_2layer uses continuity_step_conservative; the polar
+    sponge injects mass (relaxes h->h_eq) so it must be off here."""
+    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer, layer_mass
+    st = baroclinic_test_state(W=64, H=32, unstable=False, seed=1)
+    st.tau_rad = 0.0; st.tau_drag = 0.0; st.nu4 = 0.0; st.sponge_rate = 0.0
+    m0 = layer_mass(st)
+    for _ in range(50): st = step_2layer(st)
+    m1 = layer_mass(st)
+    assert abs(m1[0]-m0[0])/m0[0] < 1e-9 and abs(m1[1]-m0[1])/m0[1] < 1e-9
+
+
+def test_determinism_2layer():
+    """Two identical runs produce byte-identical state (SHA1)."""
+    import hashlib
+    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer
+    def run():
+        st = baroclinic_test_state(W=48, H=24, unstable=True, seed=3)
+        st.sponge_rate = 0.0
+        for _ in range(20): st = step_2layer(st)
+        m = hashlib.sha1()
+        for f in (st.h1, st.u1, st.v1, st.h2, st.u2, st.v2):
+            m.update(np.ascontiguousarray(f, dtype=np.float64).tobytes())
+        return m.hexdigest()
+    assert run() == run()
+
+
+def test_forcing_params_change_output():
+    """v1.6 no-op guard: each forcing param must actually change the evolved state
+    (guard against a forcing term silently doing nothing)."""
+    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer
+    import numpy as np
+    def evolve(field, **over):
+        st = baroclinic_test_state(W=48, H=24, unstable=True, seed=4)
+        st.sponge_rate = 0.0
+        for k, v in over.items(): setattr(st, k, v)
+        for _ in range(15): st = step_2layer(st)
+        return getattr(st, field).copy()
+    # Bottom drag acts on the LOWER layer (u2/v2), hyperviscosity on u1/u2; each
+    # term's effect surfaces directly in the field it drives but only weakly
+    # (indirectly, via Montgomery coupling) in the upper-layer h1. Check each
+    # guard against the field the term actually drives.
+    assert not np.allclose(evolve("u2"), evolve("u2", tau_drag=20.0)), "bottom drag had no effect"
+    assert not np.allclose(evolve("u1"), evolve("u1", nu4=0.05)), "hyperviscosity had no effect"
+
+
+def test_total_energy_2layer_finite_positive():
+    """total_energy_2layer is finite and strictly positive on a balanced state."""
+    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, total_energy_2layer
+    st = baroclinic_test_state(W=48, H=24, unstable=True, seed=5)
+    e = total_energy_2layer(st)
+    assert np.isfinite(e) and e > 0.0

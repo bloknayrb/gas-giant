@@ -1720,6 +1720,30 @@ def layer_mass(st):
     return float(np.sum(st.h1 * w)), float(np.sum(st.h2 * w))
 
 
+def total_energy_2layer(st) -> float:
+    """Global 2-layer total energy diagnostic (cos-weighted area integral).
+
+    Per layer i: kinetic ½ h_i (u_i² + v_c_i²) plus Montgomery potential energy
+    ½ M_i h_i, where M_i is the reduced-gravity Montgomery potential from
+    montgomery_2layer (M1 = gp1·η1, M2 = gp1·η1 + gp2·h2).  Using ½ M_i h_i (rather
+    than a single-layer ½ g' h²) is the natural stacked-layer PE: it reduces to the
+    single-layer ½ gp1 h1² when h2→0 (then M1→gp1·h1).  Summed over both layers and
+    integrated with cosφ · a² dλ dφ.  Diagnostic only (not a conserved invariant of
+    the discrete scheme); used to confirm the energy budget is finite and positive.
+    """
+    g = st.g
+    H = g.H
+    M1, M2 = montgomery_2layer(st.h1, st.h2, st.gp1, st.gp2)
+    v1_c = 0.5 * (st.v1[0:H] + st.v1[1:H + 1])
+    v2_c = 0.5 * (st.v2[0:H] + st.v2[1:H + 1])
+    ke1 = 0.5 * st.h1 * (st.u1 * st.u1 + v1_c * v1_c)
+    ke2 = 0.5 * st.h2 * (st.u2 * st.u2 + v2_c * v2_c)
+    pe1 = 0.5 * M1 * st.h1
+    pe2 = 0.5 * M2 * st.h2
+    e_density = (ke1 + ke2 + pe1 + pe2) * g.cos_c[:, None]
+    return float(np.sum(e_density) * g.a * g.a * g.dlam * g.dphi)
+
+
 def _biharmonic(field: np.ndarray) -> np.ndarray:
     """Grid-normalized ∇⁴ proxy: iterated 5-point Laplacian on the lon-lat grid.
 
