@@ -1,321 +1,36 @@
 {
   "testModules": [
     {
-      "moduleId": "tests/unit/test_m2_gpu.py",
+      "moduleId": "tests/spikes/test_slsi_fastjet_spike.py",
       "tests": [
         {
-          "name": "test_gpu_helmholtz_apply_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_apply_matches_ref",
+          "name": "test_crux_setup_is_nonvacuous",
+          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_crux_setup_is_nonvacuous",
           "state": "passed"
         },
         {
-          "name": "test_gpu_helmholtz_apply_a_scaling",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_apply_a_scaling",
-          "state": "passed"
+          "name": "test_reference_is_self_converged",
+          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_reference_is_self_converged",
+          "state": "failed",
+          "errors": [
+            {
+              "message": "def test_reference_is_self_converged():\n>       ref1 = _run(step_slsi, dt_mult=1, n_big=160)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests\\spikes\\test_slsi_fastjet_spike.py:21: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\ntests\\spikes\\test_slsi_fastjet_spike.py:10: in _run\n    st = step_fn(st, theta=0.5, picard_iters=3, poisson_iters=300, dh_warm=dh)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1589: in step_slsi\n    assert_positivity(h_raw, st.h_floor)\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nh_raw = array([[6226.48056557, 6226.49010478, 6226.46833601, ..., 6226.4852818 ,\n        6226.48332627, 6226.48387973],\n      ...00.03027221, 8000.03079329, 8000.03120132, ..., 8000.02824373,\n        8000.02897256, 8000.02965739]], shape=(64, 128))\nh_floor = 1.0\n\n    def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:\n        \"\"\"Loud positivity guard shared by the CPU and GPU semi-implicit steps.\n    \n        continuity_step_conservative keeps h >= h_floor only in the donor-cell\n        sub-CFL regime; a floor cell drained through BOTH faces by a divergent\n        meridional velocity (meridional Courant >~ 1) can still dip below the floor.\n        A subsequent np.maximum floor clamp would then SILENTLY inject mass\n        (defeating mass closure), so we reject loudly instead \u2014 same hard-reject\n        philosophy as the Picard contraction certificate.  The 1e-9 slack absorbs\n        f64 round-off in the flux-form sums (h is O(1-10), round-off O(1e-15)).\n        \"\"\"\n        h_min = float(h_raw.min())\n        if h_min < h_floor - 1e-9:\n>           raise ValueError(\n                f\"semi-implicit positivity violation: min(h)={h_min:.3e} < \"\n                f\"h_floor={h_floor:.3e}. The velocity field drove a floor cell below \"\n                f\"the floor (meridional Courant too large); the conservative limiter \"\n                f\"cannot keep mass closed here. Reduce dt or relax forcing.\"\n            )\nE           ValueError: semi-implicit positivity violation: min(h)=-4.517e+03 < h_floor=1.000e+00. The velocity field drove a floor cell below the floor (meridional Courant too large); the conservative limiter cannot keep mass closed here. Reduce dt or relax forcing.\n\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1128: ValueError"
+            }
+          ]
         },
         {
-          "name": "test_gpu_helmholtz_sor_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_sor_matches_ref",
-          "state": "passed"
+          "name": "test_slsi_fastjet_accuracy_at_large_courant",
+          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_slsi_fastjet_accuracy_at_large_courant",
+          "state": "failed",
+          "errors": [
+            {
+              "message": "def test_slsi_fastjet_accuracy_at_large_courant():\n>       ref = _run(step_slsi, dt_mult=1, n_big=160)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests\\spikes\\test_slsi_fastjet_spike.py:27: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\ntests\\spikes\\test_slsi_fastjet_spike.py:10: in _run\n    st = step_fn(st, theta=0.5, picard_iters=3, poisson_iters=300, dh_warm=dh)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1589: in step_slsi\n    assert_positivity(h_raw, st.h_floor)\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nh_raw = array([[6226.48056557, 6226.49010478, 6226.46833601, ..., 6226.4852818 ,\n        6226.48332627, 6226.48387973],\n      ...00.03027221, 8000.03079329, 8000.03120132, ..., 8000.02824373,\n        8000.02897256, 8000.02965739]], shape=(64, 128))\nh_floor = 1.0\n\n    def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:\n        \"\"\"Loud positivity guard shared by the CPU and GPU semi-implicit steps.\n    \n        continuity_step_conservative keeps h >= h_floor only in the donor-cell\n        sub-CFL regime; a floor cell drained through BOTH faces by a divergent\n        meridional velocity (meridional Courant >~ 1) can still dip below the floor.\n        A subsequent np.maximum floor clamp would then SILENTLY inject mass\n        (defeating mass closure), so we reject loudly instead \u2014 same hard-reject\n        philosophy as the Picard contraction certificate.  The 1e-9 slack absorbs\n        f64 round-off in the flux-form sums (h is O(1-10), round-off O(1e-15)).\n        \"\"\"\n        h_min = float(h_raw.min())\n        if h_min < h_floor - 1e-9:\n>           raise ValueError(\n                f\"semi-implicit positivity violation: min(h)={h_min:.3e} < \"\n                f\"h_floor={h_floor:.3e}. The velocity field drove a floor cell below \"\n                f\"the floor (meridional Courant too large); the conservative limiter \"\n                f\"cannot keep mass closed here. Reduce dt or relax forcing.\"\n            )\nE           ValueError: semi-implicit positivity violation: min(h)=-4.517e+03 < h_floor=1.000e+00. The velocity field drove a floor cell below the floor (meridional Courant too large); the conservative limiter cannot keep mass closed here. Reduce dt or relax forcing.\n\nsrc\\gasgiant\\sim\\shallow_water_ref.py:1128: ValueError"
+            }
+          ]
         },
         {
-          "name": "test_gpu_helmholtz_sor_converges_to_exact",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_sor_converges_to_exact",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_helmholtz_residual_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_residual_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_si_predictor_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_predictor_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_helmholtz_rhs_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_rhs_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_velocity_backsub_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_velocity_backsub_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_continuity_conservative_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_continuity_conservative_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_si_step_matches_ref",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_step_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_si_gravity_wave_stable",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_gravity_wave_stable",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_si_deterministic",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_deterministic",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_si_checkpoint_roundtrip",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_checkpoint_roundtrip",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_v1_checkpoint_still_loads",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_v1_checkpoint_still_loads",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_helmholtz_apply_smooth_tight",
-          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_apply_smooth_tight",
-          "state": "passed"
-        }
-      ]
-    },
-    {
-      "moduleId": "tests/unit/test_sw_gpu.py",
-      "tests": [
-        {
-          "name": "test_sw_gpu_state_roundtrip",
-          "fullName": "tests/unit/test_sw_gpu.py::test_sw_gpu_state_roundtrip",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_williamson2_stays_balanced",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_williamson2_stays_balanced",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_williamson2_balanced_at_a2",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_williamson2_balanced_at_a2",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_total_mass_radius_scaling",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_total_mass_radius_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_divergence_solid_body_zero",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_divergence_solid_body_zero",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_vorticity_rigid_rotation",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_vorticity_rigid_rotation",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_grad_radius_scaling",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_grad_radius_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_divergence_radius_scaling",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_divergence_radius_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_ref_continuity_radius_scaling",
-          "fullName": "tests/unit/test_sw_gpu.py::test_ref_continuity_radius_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_divergence_matches_ref",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_divergence_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_divergence_radius_scaling",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_divergence_radius_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_grad_matches_ref",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_grad_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_grad_radius_scaling",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_grad_radius_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_vorticity_matches_ref",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_vorticity_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_vorticity_rigid_rotation_a2",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_vorticity_rigid_rotation_a2",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_continuity_matches_ref",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_continuity_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_momentum_matches_ref",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_momentum_matches_ref",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_continuity_conserves_mass",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_continuity_conserves_mass",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_step_matches_ref_one_step",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_step_matches_ref_one_step",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_matches_ref_n_steps",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_matches_ref_n_steps",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_williamson2_balanced",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_williamson2_balanced",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_mass_closed_energy_bounded",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_mass_closed_energy_bounded",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_deterministic",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_deterministic",
-          "state": "passed"
-        },
-        {
-          "name": "test_gpu_checkpoint_roundtrip",
-          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_checkpoint_roundtrip",
-          "state": "passed"
-        }
-      ]
-    },
-    {
-      "moduleId": "tests/unit/test_shallow_water_ref.py",
-      "tests": [
-        {
-          "name": "test_helmholtz_adjoint[1.0]",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_helmholtz_adjoint[1.0]",
-          "state": "passed"
-        },
-        {
-          "name": "test_helmholtz_adjoint[6400000.0]",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_helmholtz_adjoint[6400000.0]",
-          "state": "passed"
-        },
-        {
-          "name": "test_helmholtz_conserves",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_helmholtz_conserves",
-          "state": "passed"
-        },
-        {
-          "name": "test_coriolis_sandwich_matches_momentum",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_coriolis_sandwich_matches_momentum",
-          "state": "passed"
-        },
-        {
-          "name": "test_velocity_backsub_uniform_height",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_velocity_backsub_uniform_height",
-          "state": "passed"
-        },
-        {
-          "name": "test_velocity_backsub_nonzero_dh",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_velocity_backsub_nonzero_dh",
-          "state": "passed"
-        },
-        {
-          "name": "test_rhs_zero_velocity",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_rhs_zero_velocity",
-          "state": "passed"
-        },
-        {
-          "name": "test_picard_rho_below_half",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_picard_rho_below_half",
-          "state": "passed"
-        },
-        {
-          "name": "test_picard_factor_matches_formula",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_picard_factor_matches_formula",
-          "state": "passed"
-        },
-        {
-          "name": "test_sor_converges_to_exact",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_sor_converges_to_exact",
-          "state": "passed"
-        },
-        {
-          "name": "test_w2_geostrophic_stationary",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_w2_geostrophic_stationary",
-          "state": "passed"
-        },
-        {
-          "name": "test_backsub_continuity_consistency",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_backsub_continuity_consistency",
-          "state": "passed"
-        },
-        {
-          "name": "test_semi_implicit_reduces_to_m1_at_small_dt",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_semi_implicit_reduces_to_m1_at_small_dt",
-          "state": "passed"
-        },
-        {
-          "name": "test_per_lat_residual_polar",
-          "fullName": "tests/unit/test_shallow_water_ref.py::test_per_lat_residual_polar",
-          "state": "passed"
-        }
-      ]
-    },
-    {
-      "moduleId": "tests/unit/test_sw_conservation.py",
-      "tests": [
-        {
-          "name": "test_mass_conserved_si",
-          "fullName": "tests/unit/test_sw_conservation.py::test_mass_conserved_si",
-          "state": "passed"
-        },
-        {
-          "name": "test_href_must_be_lat_only",
-          "fullName": "tests/unit/test_sw_conservation.py::test_href_must_be_lat_only",
-          "state": "passed"
-        },
-        {
-          "name": "test_no_new_negative_h",
-          "fullName": "tests/unit/test_sw_conservation.py::test_no_new_negative_h",
-          "state": "passed"
-        },
-        {
-          "name": "test_continuity_conservative_exact_even_when_positivity_fails",
-          "fullName": "tests/unit/test_sw_conservation.py::test_continuity_conservative_exact_even_when_positivity_fails",
-          "state": "passed"
-        }
-      ]
-    },
-    {
-      "moduleId": "tests/unit/test_dual_path.py",
-      "tests": [
-        {
-          "name": "test_explicit_path_byte_identical",
-          "fullName": "tests/unit/test_dual_path.py::test_explicit_path_byte_identical",
-          "state": "passed"
-        },
-        {
-          "name": "test_si_construction_isolated",
-          "fullName": "tests/unit/test_dual_path.py::test_si_construction_isolated",
+          "name": "test_eulerian_path_fails_the_same_gate",
+          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_eulerian_path_fails_the_same_gate",
           "state": "passed"
         }
       ]

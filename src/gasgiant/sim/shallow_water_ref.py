@@ -1546,3 +1546,72 @@ def sl_momentum_predictor(h, u, v, gp, g, dt, theta):
     v_star = v.copy() * 0.0
     v_star[1:H] = v_sl[1:H] - dt * (gyk[1:H] + c * gp * gyn[1:H])
     return u_star, v_star
+
+
+# ---------------------------------------------------------------------------
+# M2-adv crux: semi-Lagrangian semi-implicit (SLSI) step + fast-jet config
+# ---------------------------------------------------------------------------
+
+def step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200,
+              sor_omega=1.7, dh_warm=None):
+    """Semi-Lagrangian semi-implicit step: M2-core's SI core with the two explicit
+    Eulerian transport operators replaced by SL equivalents (advective-CFL-free).
+      site #1  _semi_implicit_predictor -> sl_momentum_predictor (SL momentum)
+      site #2  continuity_step_conservative -> slice_remap_advance (SLICE remap)
+    The Helmholtz solve (dh), Picard-Coriolis, and velocity_backsub are reused
+    verbatim, preserving M2-core's gravity-wave CFL removal."""
+    g, gp, omega, dt = st.g, st.gp, st.omega, st.dt
+    h, u, v = st.h, st.u, st.v
+    H, W = h.shape
+
+    # 1. SL predictor (SL momentum transport, no Coriolis).
+    u_star, v_star = sl_momentum_predictor(h, u, v, gp, g, dt, theta)
+
+    # 2-4. Reuse M2-core verbatim: H_ref, Picard Helmholtz dh, back-substitution.
+    H_ref_lat = reference_depth(h)
+    dh = np.zeros((H, W)) if dh_warm is None else dh_warm.copy()
+    for _ in range(picard_iters):
+        rhs = helmholtz_rhs(h, u, v, u_star, v_star, dh,
+                            H_ref_lat, gp, omega, theta, dt, g)
+        dh = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
+                           poisson_iters, sor_omega, dh0=dh)
+    u_new, v_new = velocity_backsub(u_star, v_star, h + dh, gp, theta, dt, omega, g)
+
+    # 5. SL nonlinear anomaly via SLICE conservative remap. The reference part MUST
+    #    be removed in the SAME conservative-remap form as h_sl (NOT the Eulerian
+    #    divergence_helmholtz), or it fails to cancel at Courant>>1 and double-counts
+    #    against dh. Remap the broadcast H_ref by the same trajectory and subtract.
+    H_ref_field = np.broadcast_to(H_ref_lat[:, None], h.shape)
+    h_sl = slice_remap_advance(h, u_new, v_new, dt, g)
+    href_sl = slice_remap_advance(H_ref_field, u_new, v_new, dt, g)
+    anomaly = (h_sl - h) - (href_sl - H_ref_field)
+    h_raw = h + dh + anomaly
+    assert_positivity(h_raw, st.h_floor)
+    h_new = np.maximum(h_raw, st.h_floor)
+
+    return SwRefState(g=g, gp=gp, h=h_new, u=u_new, v=v_new,
+                      dt=dt, omega=omega,
+                      u_init=st.u_init, v_init=st.v_init, h_floor=st.h_floor)
+
+
+def fast_jet_state(W=128, H=64, a=6.4e6, u0=80.0, dt_mult=1, C_base=0.5, m_wave=4, amp=0.04):
+    """Fast mid-latitude zonal jet (phi_jet=45deg) with a wavenumber-m height
+    perturbation, for the M2-adv crux gate. dt is set by the ADVECTIVE Courant
+    limit AT THE JET (not the polar gravity-wave CFL): dt = dt_mult*C_base*
+    a*cos(phi_jet)*dlam/u0, so the advective Courant at the jet = C_base*dt_mult."""
+    g = Grid(W=W, H=H, a=a)
+    gp = 9.8; omega = 7.292e-5; H0 = 8000.0
+    phi = g.phi_c; lam = np.arange(W) * g.dlam
+    phi_jet = np.deg2rad(45.0); sigma = np.deg2rad(10.0)
+    u_prof = u0 * np.exp(-((phi - phi_jet) / sigma) ** 2)
+    u = np.repeat(u_prof[:, None], W, axis=1)
+    f = 2.0 * omega * np.sin(phi)
+    h_prof = H0 + np.cumsum((-(a / gp) * f * u_prof * g.dphi)[::-1])[::-1]
+    h = np.repeat(h_prof[:, None], W, axis=1)
+    env = np.exp(-((phi - phi_jet) / sigma) ** 2)[:, None]
+    h = h + amp * H0 * env * np.cos(m_wave * lam)[None, :]
+    v = np.zeros((H + 1, W))
+    cphi_jet = np.cos(phi_jet)
+    dt = dt_mult * C_base * (a * cphi_jet * g.dlam) / u0
+    return SwRefState(g=g, gp=gp, h=h, u=u, v=v, dt=dt, omega=omega,
+                      u_init=u.copy(), v_init=v.copy(), h_floor=1.0)
