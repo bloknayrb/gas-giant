@@ -2105,17 +2105,24 @@ def predicted_growth_rate_fplane(st):
     """f-plane Phillips closed-form max growth rate (M3 Task 6 physics note 2).
 
     For a 2-layer reduced-gravity stack with deformation wavenumber
-        k_d^2 = 2*f0^2/(gp2*H),   L_D = 1/k_d,
+        k_d^2 = f0^2/gp2 * (1/H1 + 1/H2) = 4*f0^2/(gp2*H)  for H1=H2=H/2,
+        L_D = 1/k_d,
     the f-plane growth rate is sigma(K) = U_s*K*sqrt((k_d^2-K^2)/(k_d^2+K^2)),
     maximized at K_max^2 = k_d^2*(sqrt2-1), giving
         sigma_max = U_s*k_d*sqrt(3-2*sqrt2) = 0.31*U_s*k_d = 0.31*U_s/L_D.
     Here U_s = (U1-U2)/2 (the peak in-band shear half), f0 = 2*omega*sin(phi_test),
     H = layer-mean total depth.  (sqrt(3-2*sqrt2) = sqrt2-1 = 0.4142..., and
     sqrt((sqrt2-1)) factor folds in; 0.31 is the standard Phillips coefficient.)
+
+    CORRECTION (M3 finalize): the prior code cited the plan's
+    `k_d^2 = 2*f0^2/(gp2*H)`, which is a factor sqrt(2) too low. The correct
+    equal-layer (H1=H2=H/2) 2-layer QG deformation wavenumber is
+    `k_d^2 = f0^2/gp2 * (1/H1 + 1/H2) = 4*f0^2/(gp2*H)`. Fixed here; sigma_max
+    rises by sqrt(2), reducing the measured-vs-theory ratio accordingly.
     """
     f0 = 2.0 * st.omega * np.sin(st._phi_test)
     U_s = 0.5 * st._shear          # U_s = (U1-U2)/2, the band-centre shear half
-    kd = np.sqrt(2.0 * f0 * f0 / (st.gp2 * st._H_mean))
+    kd = np.sqrt(4.0 * f0 * f0 / (st.gp2 * st._H_mean))
     return float(0.31 * U_s * kd)
 
 
