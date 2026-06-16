@@ -1621,3 +1621,71 @@ def montgomery_2layer(h1, h2, gp1, gp2):
     M1 = gp1 * eta1
     M2 = gp1 * eta1 + gp2 * h2
     return M1, M2
+
+
+# ---------------------------------------------------------------------------
+# M3-T2: Montgomery-driven momentum step
+# ---------------------------------------------------------------------------
+
+def momentum_step_M(
+    h: np.ndarray, u: np.ndarray, v: np.ndarray,
+    M: np.ndarray, omega: float, g: Grid, dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Vector-invariant momentum update driven by a precomputed Montgomery
+    potential M (Bernoulli B = M + ke), generalizing M1's momentum_step.
+
+    This is a verbatim copy of momentum_step's body with the single pressure
+    line changed from `B = gp * h + ke` to `B = M + ke`. With M = gp*h it is
+    byte-identical to momentum_step (see test_momentum_step_M_reduces_to_m1).
+
+    NOTE: `h` is now VESTIGIAL -- it is used only for its shape (H, W); the
+    pressure forcing comes entirely from M. NOTE: the vorticity-flux block and
+    the Coriolis sandwich below are SHARED logic with momentum_step (and with
+    sw_spike/solver.py::_layer_momentum) and MUST be kept in sync. If you change
+    the explicit advection or the Coriolis sequence here, update momentum_step,
+    coriolis_sandwich, and this copy together, then re-run the reduction and
+    decoupled tests.
+    """
+    H, W = h.shape
+
+    # Relative vorticity at corners (H+1, W).
+    zeta = vorticity(u, v, g)
+
+    # Interpolate ζ to u-faces and v-faces.
+    zeta_uf = corner_to_uface(zeta)                                      # (H, W)
+    zeta_vf = 0.5 * (zeta + np.roll(zeta, 1, axis=1))                   # (H+1, W) corner→v-face
+
+    # v at cell centers, then interpolated to u-faces.
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])                                   # (H, W)
+    v_at_uf = center_to_uface(v_c)                                       # (H, W)
+
+    # u at cell centers, then interpolated to v-faces.
+    u_c = 0.5 * (u + np.roll(u, 1, axis=1))                              # (H, W) centers
+    u_at_vf = center_to_vface(u_c)                                       # (H+1, W)
+
+    # Bernoulli potential B = M + ½(u² + v_c²) at centers (M replaces g'h).
+    ke = 0.5 * (u * u + v_c * v_c)
+    B = M + ke
+    gx, gy = grad_faces(B, g)                                             # face gradients
+
+    # Explicit step: advection by relative vorticity + pressure gradient.
+    u_star = u + dt * (zeta_uf * v_at_uf - gx)
+    v_star = v.copy()
+    v_star[1:H] = v[1:H] + dt * (-zeta_vf[1:H] * u_at_vf[1:H] - gy[1:H])
+
+    # Coriolis sandwich (f only; ζ already applied above).
+    # NOTE: this block is byte-identical to coriolis_sandwich(). It is kept
+    # inline (not a call) to guarantee the explicit path's byte-identity. If you
+    # change the Coriolis sequence, update coriolis_sandwich AND this copy
+    # together, then re-run test_coriolis_sandwich_matches_momentum.
+    f_uf = 2.0 * omega * np.sin(g.phi_c)[:, None] * np.ones((1, W))    # (H, W)
+
+    # Trapezoidal Coriolis rotation on (u_star, v_star collapsed to centers).
+    v_star_c = 0.5 * (v_star[0:H] + v_star[1:H + 1])                   # (H, W)
+    u_new, v_c_new = coriolis_trapezoidal(u_star, v_star_c, f_uf, dt)
+
+    # Scatter v_c_new back to v-faces: interior faces = avg of adjacent center rows.
+    v_new = np.zeros_like(v)
+    v_new[1:H] = 0.5 * (v_c_new[0:H - 1] + v_c_new[1:H])
+
+    return u_new, v_new
