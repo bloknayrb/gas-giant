@@ -1112,6 +1112,27 @@ def _semi_implicit_predictor(
     return u_star, v_star
 
 
+def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:
+    """Loud positivity guard shared by the CPU and GPU semi-implicit steps.
+
+    continuity_step_conservative keeps h >= h_floor only in the donor-cell
+    sub-CFL regime; a floor cell drained through BOTH faces by a divergent
+    meridional velocity (meridional Courant >~ 1) can still dip below the floor.
+    A subsequent np.maximum floor clamp would then SILENTLY inject mass
+    (defeating mass closure), so we reject loudly instead — same hard-reject
+    philosophy as the Picard contraction certificate.  The 1e-9 slack absorbs
+    f64 round-off in the flux-form sums (h is O(1-10), round-off O(1e-15)).
+    """
+    h_min = float(h_raw.min())
+    if h_min < h_floor - 1e-9:
+        raise ValueError(
+            f"semi-implicit positivity violation: min(h)={h_min:.3e} < "
+            f"h_floor={h_floor:.3e}. The velocity field drove a floor cell below "
+            f"the floor (meridional Courant too large); the conservative limiter "
+            f"cannot keep mass closed here. Reduce dt or relax forcing."
+        )
+
+
 def step_semi_implicit(
     st: SwRefState,
     theta: float = 0.5,
@@ -1207,22 +1228,7 @@ def step_semi_implicit(
     h_linref = h - dt * divergence_helmholtz(u_new, v_new, H_ref_lat, g)
     anomaly = h_fct - h_linref
     h_raw = h + dh + anomaly
-    # Positivity guard: continuity_step_conservative keeps h_fct >= h_floor only
-    # in the donor-cell sub-CFL regime; a floor cell drained through BOTH faces by
-    # a divergent meridional velocity (meridional Courant >~ 1) can still dip below
-    # the floor.  If that happens, np.maximum below would SILENTLY inject mass
-    # (defeating M2-T5).  Reject loudly instead — same hard-reject philosophy as the
-    # Picard contraction certificate: the dt/flow exceeds the positivity regime.
-    # 1e-9 slack absorbs f64 round-off in the flux-form sums (h is O(1-10),
-    # round-off O(1e-15)); anything beyond it is a real positivity violation.
-    h_min = float(h_raw.min())
-    if h_min < st.h_floor - 1e-9:
-        raise ValueError(
-            f"step_semi_implicit positivity violation: min(h)={h_min:.3e} < "
-            f"h_floor={st.h_floor:.3e}. The velocity field drove a floor cell "
-            f"below the floor (meridional Courant too large); the conservative "
-            f"limiter cannot keep mass closed here. Reduce dt or relax forcing."
-        )
+    assert_positivity(h_raw, st.h_floor)
     h_new = np.maximum(h_raw, st.h_floor)
 
     return SwRefState(

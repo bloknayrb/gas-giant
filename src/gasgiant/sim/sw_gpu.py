@@ -956,6 +956,15 @@ class SwGpuSolver:
 
     # -- Step -----------------------------------------------------------------
 
+    def _si_grid(self):
+        """Cached CPU-reference Grid for the SI anomaly assembly (built once)."""
+        g = getattr(self, "_si_grid_cache", None)
+        if g is None:
+            from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+            g = ref.Grid(self.W, self.H, self.a)
+            self._si_grid_cache = g
+        return g
+
     def _step_semi_implicit(self) -> None:
         """One M2 semi-implicit step on the GPU (mirrors ref.step_semi_implicit).
 
@@ -1001,18 +1010,11 @@ class SwGpuSolver:
         # 5. Final height: matched theta-centered increment + explicit anomaly.
         h_fct = run_continuity_conservative(gpu, h, u_new, v_new, a, dt, h_floor)
         from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
-        g = ref.Grid(W, H, a)
-        h_linref = h - dt * ref.divergence_helmholtz(u_new, v_new, H_ref.astype(np.float64), g)
+        h_linref = h - dt * ref.divergence_helmholtz(
+            u_new, v_new, H_ref.astype(np.float64), self._si_grid())
         anomaly = h_fct - h_linref
         h_raw = h + dh + anomaly
-        h_min = float(h_raw.min())
-        if h_min < h_floor - 1e-9:
-            raise ValueError(
-                f"_step_semi_implicit positivity violation: min(h)={h_min:.3e} < "
-                f"h_floor={h_floor:.3e}. The velocity field drove a floor cell "
-                f"below the floor (meridional Courant too large); the conservative "
-                f"limiter cannot keep mass closed here. Reduce dt or relax forcing."
-            )
+        ref.assert_positivity(h_raw, h_floor)        # shared CPU/GPU guard
         h_new = np.maximum(h_raw, h_floor).astype(np.float32)
 
         self._tex_h.write(h_new.tobytes())
@@ -1317,12 +1319,12 @@ def run_velocity_backsub(
     H, W = h_impl.shape
     ctx = gpu.ctx
 
-    gx, gy = run_grad(gpu, h_impl, gp=1.0, a=a)
+    grad_x, grad_y = run_grad(gpu, h_impl, gp=1.0, a=a)
 
     tex_us = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_us.write(u_star.tobytes())
     tex_vs = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
-    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gx.write(gx.astype(np.float32).tobytes())
-    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gy.write(gy.astype(np.float32).tobytes())
+    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gx.write(grad_x.astype(np.float32).tobytes())
+    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gy.write(grad_y.astype(np.float32).tobytes())
     tex_u  = gpu.texture2d((W, H),     components=1, dtype="f4")
     tex_v  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
 
@@ -1339,9 +1341,9 @@ def run_velocity_backsub(
     tex_u.bind_to_image(0, read=False, write=True)
     tex_v.bind_to_image(1, read=False, write=True)
 
-    gx_g = (W + _GROUP - 1) // _GROUP
-    gy_g = (H + 1 + _GROUP - 1) // _GROUP
-    k.run(gx_g, gy_g, 1)
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
     ctx.memory_barrier()
 
     u_new = gpu.read_texture(tex_u)[..., 0]

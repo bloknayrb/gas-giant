@@ -43,7 +43,7 @@ float fy_high_k(int i, int k, int W, int H) {
 float s_cell_low(int i, int j, int W, int H) {
     float pref = u_dt / (u_a * cosCenter(j, H));
     float avail = max(cc_h(i, j, W) - u_h_floor, 0.0);
-    float dlam = u_size.x > 0 ? (2.0 * PI / float(W)) : 0.0;
+    float dlam = 2.0 * PI / float(W);
     float dphi = PI / float(H);
 
     float fxe = fx_low_e(i,     j, W);       // east face of cell i
