@@ -38,3 +38,49 @@ def test_disabled_has_no_driver(gpu):
         assert sim._baro_driver is None
     finally:
         sim._release_sim()
+
+
+def _dev_render_bytes(p: PlanetParams, gpu) -> bytes:
+    sim = Simulation(p, gpu)
+    try:
+        return sim.render_maps(512)["color"].tobytes()
+    finally:
+        sim._release_sim()
+
+
+def test_off_path_byte_identical(gpu):
+    """baroclinic.enabled=False renders byte-identically to plain vorticity."""
+    base = _dev_render_bytes(_baro_params(enabled=False), gpu)
+    p = load_factory_preset("jupiter_vorticity").model_copy(update={"seed": 7})
+    p.sim.resolution = 512
+    p.sim.dev_steps = 40
+    p.solver.type = SolverType.VORTICITY
+    plain = _dev_render_bytes(p, gpu)
+    assert base == plain, "default-off baroclinic must not change the render"
+
+
+def test_preview_equals_export(gpu):
+    """Developing via many small tick(2) calls must match one run_to_completion."""
+    p = _baro_params(dev_steps=48)
+    export = Simulation(p, gpu)
+    try:
+        export.run_to_completion(chunk=64)
+        export_bytes = export.render_maps(512)["color"].tobytes()
+    finally:
+        export._release_sim()
+
+    preview = Simulation(_baro_params(dev_steps=48), gpu)
+    try:
+        while preview.tick(2):
+            pass
+        preview_bytes = preview.render_maps(512)["color"].tobytes()
+    finally:
+        preview._release_sim()
+
+    assert preview_bytes == export_bytes, "preview chunking must equal export"
+
+
+def test_enabled_changes_render(gpu):
+    on = _dev_render_bytes(_baro_params(enabled=True), gpu)
+    off = _dev_render_bytes(_baro_params(enabled=False), gpu)
+    assert on != off, "enabled coupling must change the render"

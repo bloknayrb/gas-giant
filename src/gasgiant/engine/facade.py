@@ -123,6 +123,19 @@ class Simulation:
             self._baro_driver = None
             self._baro_key = None
 
+    def _update_baroclinic_source(self) -> None:
+        """Advance the baroclinic solver and re-upload the coherent source. On
+        mid-run incoherence/outcrop, degrade to uncoupled and continue."""
+        try:
+            self._baro_driver.advance(self._baro_steps_per_update)
+            src = self._baro_driver.current_source()
+        except (ValueError, RuntimeError) as exc:
+            log.warning("baroclinic source disabled mid-run: %s", exc)
+            self.set_external_vorticity_source(None)
+            self._baro_driver = None
+            return
+        self.set_external_vorticity_source(src, gain=self._baro_gain)
+
     @property
     def tracers(self):
         """Equirect tracer state (tests and diagnostics)."""
@@ -201,11 +214,22 @@ class Simulation:
 
     def tick(self, max_steps: int = 2) -> bool:
         """Advance up to max_steps of the development run. Returns True if the
-        sim stepped (callers re-derive the preview)."""
+        sim stepped (callers re-derive the preview). When baroclinic coupling is
+        active, the source is refreshed at fixed step_index boundaries and a step
+        chunk never straddles a boundary -- so preview (small chunks) and export
+        (large chunks) develop bit-identically."""
         remaining = self.steps_target - self.solver.step_index
         if remaining <= 0:
             return False
-        self.solver.step(min(max_steps, remaining))
+        if self._baro_driver is not None:
+            if self.solver.step_index >= self._baro_next_update:
+                self._update_baroclinic_source()
+                self._baro_next_update += self._baro_update_every
+            n = min(max_steps, remaining,
+                    self._baro_next_update - self.solver.step_index)
+        else:
+            n = min(max_steps, remaining)
+        self.solver.step(n)
         self._tracers_changed = True
         return True
 
