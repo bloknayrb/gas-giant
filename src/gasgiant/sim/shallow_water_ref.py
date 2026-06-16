@@ -1464,3 +1464,85 @@ def _ppm_remap_1d_clamped(m, edges):
             lo = seg_hi; s += 1
         out[k] = total
     return out
+
+
+def sl_advect_velocity(q, u, v, dt, g, kind):
+    """Semi-Lagrangian transport of a face field q by (u,v) over dt.
+    kind="u": q at u-faces (H,W); kind="v": q at v-faces (H+1,W) with pole rows 0.
+    Bicubic (Catmull-Rom) interpolation at the departure points."""
+    H, W = u.shape
+    i_dep, j_dep = departure_points(u, v, dt, g, n_iter=2)
+    if kind == "u":
+        return _bicubic_periodic(q, i_dep, j_dep, g)
+    i_dep_vf = np.zeros((H + 1, W)); j_dep_vf = np.zeros((H + 1, W))
+    i_dep_vf[1:H] = 0.5 * (i_dep[0:H - 1] + i_dep[1:H])
+    j_dep_vf[1:H] = 0.5 * (j_dep[0:H - 1] + j_dep[1:H]) - 0.5
+    out = _bicubic_periodic_vface(q, i_dep_vf, j_dep_vf, g)
+    out[0] = 0.0; out[H] = 0.0
+    return out
+
+
+def _catmull_rom_w(t):
+    """4-point Catmull-Rom weights for fractional offset t in [0,1)."""
+    t2 = t * t; t3 = t2 * t
+    return np.stack([
+        -0.5 * t3 + t2 - 0.5 * t,
+        1.5 * t3 - 2.5 * t2 + 1.0,
+        -1.5 * t3 + 2.0 * t2 + 0.5 * t,
+        0.5 * t3 - 0.5 * t2], axis=0)
+
+
+def _bicubic_periodic(field, i_idx, j_idx, g):
+    """Bicubic sample of a center-row field (H,W) at (i_idx zonal, j_idx center
+    coord). Zonal periodic; meridional clamped at the poles."""
+    H, W = field.shape
+    jj = np.clip(j_idx - 0.5, 0.0, H - 1.0)
+    j0 = np.floor(jj).astype(int); fy = jj - j0
+    i0 = np.floor(i_idx).astype(int); fx = i_idx - i0
+    wx = _catmull_rom_w(fx); wy = _catmull_rom_w(fy)
+    acc = np.zeros_like(i_idx)
+    for dj in range(-1, 3):
+        jr = np.clip(j0 + dj, 0, H - 1)
+        row = np.zeros_like(i_idx)
+        for di in range(-1, 3):
+            ic = (i0 + di) % W
+            row = row + wx[di + 1] * field[jr, ic]
+        acc = acc + wy[dj + 1] * row
+    return acc
+
+
+def _bicubic_periodic_vface(field, i_idx, j_idx, g):
+    """Bicubic sample of a v-face field (H+1,W) at (i_idx zonal, j_idx v-face row
+    coord). Zonal periodic; meridional clamped to [0, H]."""
+    Hp1, W = field.shape
+    H = Hp1 - 1
+    jj = np.clip(j_idx, 0.0, float(H))
+    j0 = np.floor(jj).astype(int); fy = jj - j0
+    i0 = np.floor(i_idx).astype(int); fx = i_idx - i0
+    wx = _catmull_rom_w(fx); wy = _catmull_rom_w(fy)
+    acc = np.zeros_like(i_idx)
+    for dj in range(-1, 3):
+        jr = np.clip(j0 + dj, 0, H)
+        row = np.zeros_like(i_idx)
+        for di in range(-1, 3):
+            ic = (i0 + di) % W
+            row = row + wx[di + 1] * field[jr, ic]
+        acc = acc + wy[dj + 1] * row
+    return acc
+
+
+def sl_momentum_predictor(h, u, v, gp, g, dt, theta):
+    """SL replacement for _semi_implicit_predictor: SL parcel transport of (u,v)
+    PLUS the unchanged KE-gradient and (1-theta) explicit pressure half, no Coriolis."""
+    H, W = h.shape
+    u_sl = sl_advect_velocity(u, u, v, dt, g, kind="u")
+    v_sl = sl_advect_velocity(v, u, v, dt, g, kind="v")
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])
+    ke = 0.5 * (u * u + v_c * v_c)
+    gxk, gyk = grad_faces(ke, g)
+    gxn, gyn = grad_faces(h, g)
+    c = 1.0 - theta
+    u_star = u_sl - dt * (gxk + c * gp * gxn)
+    v_star = v.copy() * 0.0
+    v_star[1:H] = v_sl[1:H] - dt * (gyk[1:H] + c * gp * gyn[1:H])
+    return u_star, v_star

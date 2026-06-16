@@ -107,3 +107,24 @@ def test_slice_advance_strong_shear_conserves_and_stays_positive():
     assert abs(m1 - m0) / abs(m0) < 1e-10, "shear-crossing mass leak (edge monotonization missing)"
     assert h2.min() >= -1e-9, "PPM produced spurious negative h under shear"
     assert np.isfinite(h2).all()
+
+
+def test_sl_momentum_advects_bump_zonally():
+    from gasgiant.sim.shallow_water_ref import Grid, sl_advect_velocity
+    g = Grid(W=128, H=4, a=6.4e6)
+    j0 = 2; C = 3.0
+    cosphi = g.cos_c[j0]
+    u_adv = C * g.a * cosphi * g.dlam / 600.0
+    u = np.full((g.H, g.W), u_adv)
+    v = np.zeros((g.H + 1, g.W))
+    q = np.zeros((g.H, g.W)); q[j0, 40:48] = 1.0
+    q_adv = sl_advect_velocity(q, u, v, 600.0, g, kind="u")
+    assert np.allclose(q_adv[j0], np.roll(q[j0], 3), atol=1e-9)
+
+
+def test_sl_momentum_predictor_resting_layer_is_pressure_only():
+    from gasgiant.sim.shallow_water_ref import Grid, sl_momentum_predictor
+    g = Grid(W=16, H=8, a=6.4e6)
+    h = np.full((g.H, g.W), 1000.0); u = np.zeros((g.H, g.W)); v = np.zeros((g.H + 1, g.W))
+    us, vs = sl_momentum_predictor(h, u, v, 9.8, g, 600.0, 0.5)
+    assert np.allclose(us, 0.0, atol=1e-12) and np.allclose(vs, 0.0, atol=1e-12)
