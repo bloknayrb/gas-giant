@@ -1290,3 +1290,49 @@ def total_potential_enstrophy(st: SwRefState) -> float:
     cos_v = g.cos_v[:, None] * np.ones((1, W))
     ens = 0.5 * abs_vort * abs_vort / h_corner * cos_v
     return float(np.sum(ens) * g.a * g.a * g.dlam * g.dphi)
+
+
+# ---------------------------------------------------------------------------
+# M2: semi-Lagrangian advection — departure-point trajectory solver
+# ---------------------------------------------------------------------------
+
+def departure_points(u, v, dt, g, n_iter=2):
+    """Back-trajectory departure points for arrival CELL CENTERS, in fractional
+    grid-index space (i_dep zonal, j_dep meridional).  Row 0 = north, phi descending.
+
+    Angular velocities: lam_dot = u/(a cosphi), phi_dot = v/a.  Index velocities:
+      di/dt = lam_dot / dlam ;  dj/dt = -phi_dot / dphi   (j increases southward).
+    Two-iteration implicit midpoint: evaluate the velocity at the current
+    midpoint estimate, refine.  Velocities are sampled at cell centers by
+    averaging the C-grid faces (u east+west, v north+south).
+    """
+    H, W = u.shape
+    u_c = 0.5 * (u + np.roll(u, 1, axis=1))                 # (H,W) west+east face
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])                       # (H,W) north+south face
+    cosphi = g.cos_c[:, None]                               # (H,1)
+    di = (u_c / (g.a * cosphi)) * dt / g.dlam               # eastward => +i
+    dj = -(v_c / g.a) * dt / g.dphi                         # northward (v>0) => -j (toward row 0)
+    i_arr = np.arange(W)[None, :] + np.zeros((H, 1))        # (H,W) arrival i
+    j_arr = np.arange(H)[:, None] + 0.5                     # (H,W) arrival j (center)
+    a_i, a_j = di.copy(), dj.copy()
+    for _ in range(n_iter):
+        im = i_arr - 0.5 * a_i
+        jm = j_arr - 0.5 * a_j
+        a_i = _bilinear_periodic(di, im, jm, g)
+        a_j = _bilinear_periodic(dj, im, jm, g)
+    return i_arr - a_i, j_arr - a_j
+
+
+def _bilinear_periodic(field, i_idx, j_idx, g):
+    """Bilinear sample of a center field at fractional (i_idx zonal, j_idx-0.5
+    row).  Zonal periodic wrap; meridional clamp to [0, H-1]."""
+    H, W = field.shape
+    jj = np.clip(j_idx - 0.5, 0.0, H - 1.0)
+    j0 = np.floor(jj).astype(int); j1 = np.minimum(j0 + 1, H - 1)
+    fy = jj - j0
+    i0f = np.floor(i_idx); fx = i_idx - i0f
+    i0 = i0f.astype(int) % W; i1 = (i0 + 1) % W
+    f00 = field[j0, i0]; f10 = field[j0, i1]
+    f01 = field[j1, i0]; f11 = field[j1, i1]
+    return ((1 - fx) * (1 - fy) * f00 + fx * (1 - fy) * f10
+            + (1 - fx) * fy * f01 + fx * fy * f11)
