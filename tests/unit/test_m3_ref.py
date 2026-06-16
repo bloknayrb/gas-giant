@@ -85,3 +85,15 @@ def test_bottom_drag_only_lower_layer():
     apply_forcing(st)
     assert np.allclose(st.u1, u1_before)
     assert st.u2.mean() < 5.0
+
+
+def test_2layer_williamson2_balance_stationary():
+    """A 2-layer geostrophically-balanced state stays stationary to scheme tolerance
+    -- pins the Montgomery sign/coefficient matrix (design §2.2)."""
+    from gasgiant.sim.shallow_water_ref import balanced_2layer_state, step_2layer
+    st = balanced_2layer_state(W=64, H=32, a=6.4e6, omega=7.292e-5, gp1=9.8, gp2=0.3, u0=20.0)
+    u1_0 = st.u1.copy(); h1_0 = st.h1.copy()
+    for _ in range(10):
+        st = step_2layer(st)
+    assert np.max(np.abs(st.u1 - u1_0)) < 1e-2
+    assert np.max(np.abs(st.h1 - h1_0)) / h1_0.mean() < 1e-3

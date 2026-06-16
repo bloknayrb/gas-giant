@@ -1785,6 +1785,115 @@ def apply_forcing(st):
     return None
 
 
+# ---------------------------------------------------------------------------
+# M3-T5: balanced 2-layer init + h_eq profiles + Montgomery balance gate
+# ---------------------------------------------------------------------------
+
+def heq_profiles(g: Grid, h0_1: float = 5000.0, h0_2: float = 5000.0,
+                 tilt1: float = 800.0, tilt2: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+    """Radiative-equilibrium thickness targets h_eq_i(phi), a-aware (latitude-only).
+
+    Repurposed from sw_spike/init.py::h_eq_profile but stripped to a simple
+    pole-to-equator tilt suitable for the M3 forcing (Task 6 swaps in the
+    unstable banded tilt).  The tilt is a sin^2(phi) bump so the top layer is
+    THICKER at the equator (warm) and thinner at the poles, like Williamson-2:
+
+        h_eq1(phi) = h0_1 + tilt1 * (1 - sin^2 phi)  =  h0_1 + tilt1 * cos^2 phi
+        h_eq2(phi) = h0_2 + tilt2 * cos^2 phi
+
+    Returns (h_eq1, h_eq2), each shape (H, W) (broadcast uniform in lambda).
+    """
+    cos2 = (g.cos_c ** 2)[:, None] * np.ones((1, g.W))   # (H, W)
+    h_eq1 = h0_1 + tilt1 * cos2
+    h_eq2 = h0_2 + tilt2 * cos2
+    return h_eq1, h_eq2
+
+
+def balanced_2layer_state(
+    W: int, H: int, a: float,
+    omega: float, gp1: float, gp2: float, u0: float,
+    h0_1: float = 25000.0, h0_2: float = 25000.0,
+    dt_safety: float = 0.3, h_floor: float = 1.0,
+) -> Sw2State:
+    """Geostrophically-balanced 2-layer steady state (Williamson-2 generalization).
+
+    The top layer carries a solid-body zonal jet u1 = u0 cosφ (v1 = 0); the lower
+    layer is quiescent (u2 = v2 = 0).  Both layers are in balance, which PINS the
+    Montgomery coupling (M1 = gp1*eta1, M2 = gp1*eta1 + gp2*h2):
+
+    Balance derivation (design §2.2)
+    --------------------------------
+    The momentum step forms the Bernoulli potential B_i = M_i + ke_i and balances
+    -grad(B_i) against Coriolis.  For zonal flow the binding (meridional) balance
+    is  (1/a) dB_i/dφ = -f u_i,  f = 2Ω sinφ.
+
+    TOP LAYER (u1 = u0 cosφ, ke1 = ½u1²):  B1 = gp1*eta1 + ½u0²cos²φ.
+        (1/a) d/dφ[gp1 eta1 + ½u0²cos²φ] = -f u0 cosφ
+    Integrating exactly as Williamson-2 (the u0²/2 KE term folds in identically):
+        eta1(φ) = eta1_0 - (a Ω u0 + ½u0²) sin²φ / gp1.
+    (Check: d/dφ of the RHS = -(aΩu0+½u0²)(2 sinφ cosφ)/gp1; multiply by gp1/a and
+     add the KE-gradient (1/a)d(½u0²cos²φ)/dφ = -(u0²/a)sinφcosφ; total
+     = -(2Ωu0+u0²/a)sinφcosφ·... ⇒ -f u1 exactly, same algebra as williamson2_state.)
+
+    LOWER LAYER (u2 = 0, ke2 = 0):  B2 = M2 = gp1 eta1 + gp2 h2.  Quiescent balance
+    needs (1/a) dM2/dφ = 0 ⇒ M2 = const ⇒
+        h2(φ) = (M2_const - gp1 eta1(φ)) / gp2.
+    Choosing M2_const so that mean(h2) = h0_2 fixes the lower-layer thickness:
+        h2 = h0_2 + gp1/gp2 * (mean(eta1) - eta1(φ)).
+    Then h1 = eta1 - h2.  BOTH layers are balanced; if the Montgomery sign or the
+    gp1/gp2 coupling is wrong the state drifts/blows up (the balance gate).
+
+    The default reference thicknesses h0_1 = h0_2 = 25000 are deliberately LARGE:
+    the lower-layer interface tilt is amplified by gp1/gp2 (≈33 here), so h2 swings
+    by ~gp1/gp2 times the eta1 tilt and h1 = eta1 - h2 swings oppositely.  The mean
+    thicknesses must dominate that swing to keep both layers strictly positive
+    (no floor clipping — clipping would break the balance and the gate would fail).
+
+    dt uses the PRODUCTION a-aware polar CFL with the barotropic external-mode
+    speed c_gw = sqrt(gp1*(h1+h2).max()) (mirrors williamson2_state's dx_min).
+    """
+    g = Grid(W, H, a)
+
+    cos_c = g.cos_c[:, None] * np.ones((1, W))            # (H, W)
+    sin_c = np.sin(g.phi_c)[:, None] * np.ones((1, W))    # (H, W)
+
+    # Top-layer solid-body zonal jet (Williamson-2), v1 = 0.
+    u1 = u0 * cos_c
+    v1 = np.zeros((H + 1, W))
+
+    # Balanced eta1 = h1 + h2 (full gradient-wind incl. KE, as williamson2_state).
+    # eta1_0 is a free offset; set so mean(eta1) lands near h0_1 + h0_2 (the
+    # total column).  We pin the offset AFTER computing the shape.
+    eta1_shape = -(a * omega * u0 + 0.5 * u0 * u0) * sin_c * sin_c / gp1   # (H, W)
+    # cos-weighted mean of the shape (each latitude column is uniform in lambda):
+    eta1_shape_mean = float((g.cos_c * eta1_shape[:, 0]).sum() / g.cos_c.sum())
+    eta1_0 = (h0_1 + h0_2) - eta1_shape_mean
+    eta1 = eta1_0 + eta1_shape                                            # (H, W)
+
+    # Lower-layer balance: M2 = const ⇒ h2 = h0_2 + (gp1/gp2)*(mean(eta1) - eta1).
+    eta1_mean = float((g.cos_c * eta1[:, 0]).sum() / g.cos_c.sum())
+    h2 = h0_2 + (gp1 / gp2) * (eta1_mean - eta1)                          # (H, W)
+    h1 = eta1 - h2                                                        # (H, W)
+
+    h1 = np.maximum(h1, h_floor)
+    h2 = np.maximum(h2, h_floor)
+    u2 = np.zeros((H, W))
+    v2 = np.zeros((H + 1, W))
+
+    # Production a-aware polar CFL with the barotropic external-mode speed.
+    c_gw = np.sqrt(gp1 * (h1 + h2).max())
+    cos_min = max(g.cos_c.min(), 1e-6)
+    dx_min = min(cos_min * g.a * g.dlam, g.a * g.dphi)
+    dt = dt_safety * dx_min / c_gw
+
+    return Sw2State(
+        g=g, omega=omega, gp1=gp1, gp2=gp2,
+        h1=h1.copy(), u1=u1.copy(), v1=v1.copy(),
+        h2=h2.copy(), u2=u2.copy(), v2=v2.copy(),
+        dt=dt, h_floor=h_floor,
+    )
+
+
 def step_2layer(st):
     M1, M2 = montgomery_2layer(st.h1, st.h2, st.gp1, st.gp2)
     u1, v1 = momentum_step_M(st.h1, st.u1, st.v1, M1, st.omega, st.g, st.dt)
