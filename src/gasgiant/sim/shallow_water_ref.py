@@ -1399,3 +1399,68 @@ def _accumulate_interval(x0, x1, n, integral):
         lo = seg_hi
         s += 1
     return total
+
+def slice_remap_advance(h, u, v, dt, g):
+    """Conservative semi-Lagrangian advance of total h over dt by (u,v).
+    Drop-in, advective-CFL-free replacement for continuity_step_conservative.
+    Cascade: zonal 1-D conservative remap, then meridional. m = h*cosφ."""
+    H, W = h.shape
+    i_dep, j_dep = departure_points(u, v, dt, g, n_iter=2)
+    cosc = g.cos_c[:, None]
+    m = h * cosc
+
+    m_zon = np.empty_like(m)
+    for j in range(H):
+        centers = i_dep[j]
+        edges = np.empty(W + 1)
+        edges[1:W] = 0.5 * (centers[0:W - 1] + centers[1:W])
+        edges[0] = centers[0] - 0.5 * (centers[1] - centers[0])
+        edges[W] = edges[0] + W
+        # FIX (FATAL): monotonize crossed edges. Clamp interior edges into the
+        # fixed periodic frame [edges[0], edges[W]] BEFORE accumulating so the
+        # W-wide span (required for periodic mass conservation) is preserved.
+        edges[1:W] = np.clip(edges[1:W], edges[0], edges[W])
+        edges[1:W] = np.maximum.accumulate(edges[1:W])
+        m_zon[j] = ppm_remap_1d_periodic(m[j], edges)
+
+    m_out = np.empty_like(m_zon)
+    for i in range(W):
+        centers = j_dep[:, i]
+        m_out[:, i] = _remap_1d_meridional(m_zon[:, i], centers, H)
+
+    return m_out / cosc
+
+def _remap_1d_meridional(m_col, centers, H):
+    """Conservative 1-D remap on a NON-periodic column (poles are walls; no mass
+    flux across φ=±π/2). Clamps edges to [0, H]."""
+    c = centers - 0.5
+    edges = np.empty(H + 1)
+    edges[1:H] = 0.5 * (c[0:H - 1] + c[1:H])
+    edges[0] = 0.0; edges[H] = float(H)
+    edges = np.clip(edges, 0.0, float(H))
+    edges = np.maximum.accumulate(edges)   # FIX (FATAL): same crossing guard
+    return _ppm_remap_1d_clamped(m_col, edges)
+
+def _ppm_remap_1d_clamped(m, edges):
+    n = len(m)
+    mL = np.concatenate([m[:1], m[:-1]])
+    mR = np.concatenate([m[1:], m[-1:]])
+    mLL = np.concatenate([m[:1], m[:1], m[:-2]])
+    aL_raw = (7.0 * (m + mL) - (mR + mLL)) / 12.0
+    aL = _ppm_monotone_edge(aL_raw, mL, m)
+    aR = np.concatenate([aL[1:], aL[-1:]])
+    aL, aR = _ppm_limit_parabola(m, aL, aR)
+    def integral(s, x0, x1):
+        d = aR[s] - aL[s]; c6 = 6.0 * (m[s] - 0.5 * (aL[s] + aR[s]))
+        F = lambda x: aL[s] * x + 0.5 * d * x * x + c6 * (0.5 * x * x - x ** 3 / 3.0)
+        return F(x1) - F(x0)
+    out = np.empty(n)
+    for k in range(n):
+        x0, x1 = edges[k], edges[k + 1]
+        total = 0.0; lo = x0; s = min(int(np.floor(x0)), n - 1)
+        while lo < x1 - 1e-15 and s < n:
+            s_hi = s + 1.0; seg_hi = min(x1, s_hi)
+            total += integral(s, lo - s, seg_hi - s)
+            lo = seg_hi; s += 1
+        out[k] = total
+    return out

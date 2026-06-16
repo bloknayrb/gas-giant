@@ -53,3 +53,57 @@ def test_ppm_remap_integer_shift_is_roll():
     edges = np.arange(33, dtype=float) - 3.0
     out = ppm_remap_1d_periodic(m, edges)
     assert np.allclose(out, np.roll(m, 3), atol=1e-9)
+
+
+def test_slice_advance_conserves_mass():
+    from gasgiant.sim.shallow_water_ref import Grid, slice_remap_advance
+    g = Grid(W=64, H=32, a=6.4e6)
+    rng = np.random.default_rng(1)
+    h = 1000.0 + 50.0 * rng.standard_normal((g.H, g.W))
+    u = 40.0 * np.ones((g.H, g.W)); v = np.zeros((g.H + 1, g.W))
+    dt = 1800.0
+    h2 = slice_remap_advance(h, u, v, dt, g)
+    m0 = float(np.sum(h * g.cos_c[:, None])); m1 = float(np.sum(h2 * g.cos_c[:, None]))
+    assert abs(m1 - m0) / abs(m0) < 1e-12
+
+def test_slice_advance_a_scaling():
+    from gasgiant.sim.shallow_water_ref import Grid, slice_remap_advance
+    for a in (1.0, 6.4e6):
+        g = Grid(W=48, H=24, a=a)
+        h = 800.0 + np.zeros((g.H, g.W)); h[10, 12] = 900.0
+        u = np.full((g.H, g.W), 25.0 * (a / 6.4e6)); v = np.zeros((g.H + 1, g.W))
+        h2 = slice_remap_advance(h, u, v, 900.0, g)
+        m0 = np.sum(h * g.cos_c[:, None]); m1 = np.sum(h2 * g.cos_c[:, None])
+        assert abs(m1 - m0) / m0 < 1e-12
+
+def test_slice_advance_meridional_wall_conserves():
+    from gasgiant.sim.shallow_water_ref import Grid, slice_remap_advance
+    g = Grid(W=16, H=40, a=6.4e6)
+    h = 500.0 + np.zeros((g.H, g.W)); h[20] = 600.0
+    u = np.zeros((g.H, g.W)); v = np.full((g.H + 1, g.W), 8.0); v[0] = 0.0; v[-1] = 0.0
+    h2 = slice_remap_advance(h, u, v, 1200.0, g)
+    assert abs(np.sum(h2 * g.cos_c[:, None]) - np.sum(h * g.cos_c[:, None])) / np.sum(h * g.cos_c[:, None]) < 1e-12
+
+def test_slice_advance_strong_shear_conserves_and_stays_positive():
+    """REGRESSION (FATAL class): a sheared row whose cross-cell Courant gradient > 1
+    makes departure points cross. Without the span-preserving edge monotonization
+    this silently double-counts -> ~1.2% mass leak. Uniform-velocity tests cannot
+    catch it; this MASS assertion does (it fires at ~1.2e-2 without the fix).
+
+    NOTE: we do NOT assert h2.max() <= h.max(). The flow here is strongly
+    *convergent* (du/dlam large), and conservative continuity Dh/Dt = -h*div(u)
+    REQUIRES h to pile up where the flow converges -- a new, larger maximum is
+    correct physics, not an overshoot. The maximum principle only holds for
+    non-divergent flow. We assert positivity (no spurious negative mass) + exact
+    mass instead."""
+    from gasgiant.sim.shallow_water_ref import Grid, slice_remap_advance
+    g = Grid(W=64, H=8, a=6.4e6)
+    lam = np.arange(g.W) * g.dlam
+    u = (150.0 * (1.0 + np.tanh(8.0 * np.sin(lam))))[None, :] * np.ones((g.H, 1))
+    v = np.zeros((g.H + 1, g.W))
+    h = 1000.0 + 100.0 * np.sin(4.0 * lam)[None, :] * np.ones((g.H, 1))
+    h2 = slice_remap_advance(h, u, v, 6000.0, g)
+    m0 = np.sum(h * g.cos_c[:, None]); m1 = np.sum(h2 * g.cos_c[:, None])
+    assert abs(m1 - m0) / abs(m0) < 1e-10, "shear-crossing mass leak (edge monotonization missing)"
+    assert h2.min() >= -1e-9, "PPM produced spurious negative h under shear"
+    assert np.isfinite(h2).all()
