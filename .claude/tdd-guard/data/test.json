@@ -1,0 +1,324 @@
+{
+  "testModules": [
+    {
+      "moduleId": "tests/unit/test_m2_gpu.py",
+      "tests": [
+        {
+          "name": "test_gpu_helmholtz_apply_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_apply_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_helmholtz_apply_a_scaling",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_apply_a_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_helmholtz_sor_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_sor_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_helmholtz_sor_converges_to_exact",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_sor_converges_to_exact",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_helmholtz_residual_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_residual_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_si_predictor_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_predictor_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_helmholtz_rhs_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_rhs_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_velocity_backsub_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_velocity_backsub_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_continuity_conservative_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_continuity_conservative_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_si_step_matches_ref",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_step_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_si_gravity_wave_stable",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_gravity_wave_stable",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_si_deterministic",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_deterministic",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_si_checkpoint_roundtrip",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_si_checkpoint_roundtrip",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_v1_checkpoint_still_loads",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_v1_checkpoint_still_loads",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_helmholtz_apply_smooth_tight",
+          "fullName": "tests/unit/test_m2_gpu.py::test_gpu_helmholtz_apply_smooth_tight",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/unit/test_sw_gpu.py",
+      "tests": [
+        {
+          "name": "test_sw_gpu_state_roundtrip",
+          "fullName": "tests/unit/test_sw_gpu.py::test_sw_gpu_state_roundtrip",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_williamson2_stays_balanced",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_williamson2_stays_balanced",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_williamson2_balanced_at_a2",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_williamson2_balanced_at_a2",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_total_mass_radius_scaling",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_total_mass_radius_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_divergence_solid_body_zero",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_divergence_solid_body_zero",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_vorticity_rigid_rotation",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_vorticity_rigid_rotation",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_grad_radius_scaling",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_grad_radius_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_divergence_radius_scaling",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_divergence_radius_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_ref_continuity_radius_scaling",
+          "fullName": "tests/unit/test_sw_gpu.py::test_ref_continuity_radius_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_divergence_matches_ref",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_divergence_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_divergence_radius_scaling",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_divergence_radius_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_grad_matches_ref",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_grad_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_grad_radius_scaling",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_grad_radius_scaling",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_vorticity_matches_ref",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_vorticity_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_vorticity_rigid_rotation_a2",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_vorticity_rigid_rotation_a2",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_continuity_matches_ref",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_continuity_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_momentum_matches_ref",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_momentum_matches_ref",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_continuity_conserves_mass",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_continuity_conserves_mass",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_step_matches_ref_one_step",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_step_matches_ref_one_step",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_matches_ref_n_steps",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_matches_ref_n_steps",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_williamson2_balanced",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_williamson2_balanced",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_mass_closed_energy_bounded",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_mass_closed_energy_bounded",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_deterministic",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_deterministic",
+          "state": "passed"
+        },
+        {
+          "name": "test_gpu_checkpoint_roundtrip",
+          "fullName": "tests/unit/test_sw_gpu.py::test_gpu_checkpoint_roundtrip",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/unit/test_shallow_water_ref.py",
+      "tests": [
+        {
+          "name": "test_helmholtz_adjoint[1.0]",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_helmholtz_adjoint[1.0]",
+          "state": "passed"
+        },
+        {
+          "name": "test_helmholtz_adjoint[6400000.0]",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_helmholtz_adjoint[6400000.0]",
+          "state": "passed"
+        },
+        {
+          "name": "test_helmholtz_conserves",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_helmholtz_conserves",
+          "state": "passed"
+        },
+        {
+          "name": "test_coriolis_sandwich_matches_momentum",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_coriolis_sandwich_matches_momentum",
+          "state": "passed"
+        },
+        {
+          "name": "test_velocity_backsub_uniform_height",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_velocity_backsub_uniform_height",
+          "state": "passed"
+        },
+        {
+          "name": "test_velocity_backsub_nonzero_dh",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_velocity_backsub_nonzero_dh",
+          "state": "passed"
+        },
+        {
+          "name": "test_rhs_zero_velocity",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_rhs_zero_velocity",
+          "state": "passed"
+        },
+        {
+          "name": "test_picard_rho_below_half",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_picard_rho_below_half",
+          "state": "passed"
+        },
+        {
+          "name": "test_picard_factor_matches_formula",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_picard_factor_matches_formula",
+          "state": "passed"
+        },
+        {
+          "name": "test_sor_converges_to_exact",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_sor_converges_to_exact",
+          "state": "passed"
+        },
+        {
+          "name": "test_w2_geostrophic_stationary",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_w2_geostrophic_stationary",
+          "state": "passed"
+        },
+        {
+          "name": "test_backsub_continuity_consistency",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_backsub_continuity_consistency",
+          "state": "passed"
+        },
+        {
+          "name": "test_semi_implicit_reduces_to_m1_at_small_dt",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_semi_implicit_reduces_to_m1_at_small_dt",
+          "state": "passed"
+        },
+        {
+          "name": "test_per_lat_residual_polar",
+          "fullName": "tests/unit/test_shallow_water_ref.py::test_per_lat_residual_polar",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/unit/test_sw_conservation.py",
+      "tests": [
+        {
+          "name": "test_mass_conserved_si",
+          "fullName": "tests/unit/test_sw_conservation.py::test_mass_conserved_si",
+          "state": "passed"
+        },
+        {
+          "name": "test_href_must_be_lat_only",
+          "fullName": "tests/unit/test_sw_conservation.py::test_href_must_be_lat_only",
+          "state": "passed"
+        },
+        {
+          "name": "test_no_new_negative_h",
+          "fullName": "tests/unit/test_sw_conservation.py::test_no_new_negative_h",
+          "state": "passed"
+        },
+        {
+          "name": "test_continuity_conservative_exact_even_when_positivity_fails",
+          "fullName": "tests/unit/test_sw_conservation.py::test_continuity_conservative_exact_even_when_positivity_fails",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/unit/test_dual_path.py",
+      "tests": [
+        {
+          "name": "test_explicit_path_byte_identical",
+          "fullName": "tests/unit/test_dual_path.py::test_explicit_path_byte_identical",
+          "state": "passed"
+        },
+        {
+          "name": "test_si_construction_isolated",
+          "fullName": "tests/unit/test_dual_path.py::test_si_construction_isolated",
+          "state": "passed"
+        }
+      ]
+    }
+  ]
+}
