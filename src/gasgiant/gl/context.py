@@ -63,6 +63,11 @@ class FullscreenPass:
 class GpuContext:
     def __init__(self, ctx: moderngl.Context) -> None:
         self.ctx = ctx
+        # Compiled compute shaders are immutable and finite — cache them by
+        # (package, name, defines) so repeated calls (e.g. the per-step run_*
+        # helpers in a long sim loop) reuse one program instead of leaking a
+        # fresh GL program object every dispatch.
+        self._compute_cache: dict[tuple, moderngl.ComputeShader] = {}
 
     @classmethod
     def headless(cls) -> GpuContext:
@@ -155,16 +160,28 @@ class GpuContext:
     def compute(
         self, package: str, name: str, defines: dict[str, str] | None = None
     ) -> moderngl.ComputeShader:
-        """Load a compute shader from package data, expanding #include lines."""
+        """Load a compute shader from package data, expanding #include lines.
+
+        Programs are cached by (package, name, defines): compiled shaders are
+        immutable, so a long step loop reuses one program per kernel variant
+        instead of compiling (and leaking) a new GL program on every dispatch.
+        """
+        key = (package, name, tuple(sorted((defines or {}).items())))
+        cached = self._compute_cache.get(key)
+        if cached is not None:
+            return cached
         source, smap = _load_flattened(package, name, defines or {})
         try:
-            return self.ctx.compute_shader(source)
+            prog = self.ctx.compute_shader(source)
         except moderngl.Error as exc:
             raise ShaderError(
                 f"compile failed for {package}/{name}:\n{format_glsl_error(str(exc), smap)}"
             ) from exc
+        self._compute_cache[key] = prog
+        return prog
 
     def release(self) -> None:
+        self._compute_cache.clear()
         self.ctx.release()
 
 
