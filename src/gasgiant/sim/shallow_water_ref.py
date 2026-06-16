@@ -1611,3 +1611,13 @@ def fast_jet_state(W=128, H=64, a=6.4e6, u0=120.0, dt_mult=1, C_base=0.5, m_wave
     dt = dt_mult * C_base * (a * g.dlam) / u0
     return SwRefState(g=g, gp=st.gp, h=h, u=st.u, v=st.v, dt=dt, omega=st.omega,
                       u_init=st.u_init, v_init=st.v_init, h_floor=st.h_floor)
+
+
+def montgomery_2layer(h1, h2, gp1, gp2):
+    """Reduced-gravity Montgomery potentials for the 2-layer stack (design §2.2).
+    M1 = gp1*(h1+h2); M2 = gp1*(h1+h2) + gp2*h2. A potential (no metric, a-agnostic);
+    the planetary radius a enters only via grad_faces when -grad(M) is taken."""
+    eta1 = h1 + h2
+    M1 = gp1 * eta1
+    M2 = gp1 * eta1 + gp2 * h2
+    return M1, M2
