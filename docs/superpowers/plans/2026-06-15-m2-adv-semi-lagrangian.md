@@ -27,9 +27,21 @@
    h_raw    = h + dh + anomaly
    ```
 
-**The M2-adv surgery:** replace site #1 (`_semi_implicit_predictor`'s advection) and site #2 (`continuity_step_conservative`) with SL operators. Site #2 becomes `h_sl = slice_remap_advance(h, u_new, v_new, dt, g)`; everything else in step 5 is unchanged (the `h_linref` subtraction still removes the linear part now carried implicitly in `dh`). Site #1's vorticity-flux advection becomes SL departure-point interpolation of `u, v`, keeping the same KE-gradient and `(1-θ)` pressure terms.
+**The M2-adv surgery:** replace site #1 (`_semi_implicit_predictor`'s advection) and site #2 (`continuity_step_conservative`) with SL operators. Site #1's vorticity-flux advection becomes SL departure-point interpolation of `u, v`, keeping the same KE-gradient and `(1-θ)` pressure terms.
 
-**Why this is conservative:** SLICE conserves mass by construction (Σ remapped ≡ Σ source in the `cosφ·a²` measure), so `Σ h_sl·cosφ = Σ h·cosφ` exactly — the same identity `continuity_step_conservative` provides today, so the `anomaly` stays mass-neutral and `Σ dh·cosφ = 0` (flux-form Helmholtz) still holds. The mass-conservation gate (M2-core T5) carries over unchanged.
+Site #2 is **not** a one-line swap — this is the coupling subtlety the adversarial review caught (FATAL). M2-core's step-5 used `anomaly = h_fct − h_linref` where both `h_fct` (FCT) **and** `h_linref = h − dt·divergence_helmholtz(u_new, v_new, H_ref, g)` are *Eulerian flux-divergence* transports, so the reference flux `div(H_ref·u_new)` cancels term-by-term, leaving the anomaly transport `−dt·div((h−H_ref)·u_new)`. If we keep the Eulerian `h_linref` but make `h_sl` a *finite-Courant Lagrangian* remap, the reference flux no longer cancels (the SL reference part is multi-order in Courant, the Eulerian one is first-order) — the reference divergence is partially double-counted against the implicit `dh`, with an O(1) error exactly at Courant ≫ 1. **Mass conservation does NOT detect this** (each term is individually flux-form). The fix: remove the reference part in the **same conservative-remap form** as `h_sl`, by remapping the (broadcast) `H_ref` field along the same trajectory:
+
+```python
+H_ref_field = np.broadcast_to(H_ref_lat[:, None], h.shape)
+h_sl    = slice_remap_advance(h,           u_new, v_new, dt, g)   # remap of full h     ≈ -dt div(h u)
+href_sl = slice_remap_advance(H_ref_field, u_new, v_new, dt, g)   # remap of H_ref      ≈ -dt div(H_ref u)
+anomaly = (h_sl - h) - (href_sl - H_ref_field)                    # = -dt div((h-H_ref) u), Courant-consistent
+h_raw   = h + dh + anomaly
+```
+
+Now both pieces of `anomaly` are conservative-remap form, so the reference flux cancels at **all** Courant numbers, and `dh` keeps the implicit θ-centered reference divergence exactly as M2-core does (no double-count). Because conservative remap of a zonally-uniform `H_ref` under a *divergent* `u` concentrates/dilutes it, `href_sl − H_ref` captures the full `−dt·div(H_ref·u)` (including the `H_ref·∇·u` gravity-wave part) — the finite-Courant-correct version of M2-core's `divergence_helmholtz` term. `helmholtz_rhs` is therefore genuinely reused verbatim.
+
+**Why this is conservative:** SLICE conserves mass by construction (Σ remapped ≡ Σ source in the `cosφ·a²` measure), so `Σ h_sl·cosφ = Σ h·cosφ` and `Σ href_sl·cosφ = Σ H_ref·cosφ` exactly; hence `Σ anomaly·cosφ = 0` and (with `Σ dh·cosφ = 0` from the flux-form Helmholtz) `Σ h_raw·cosφ = Σ h·cosφ`. The mass-conservation gate (M2-core T5) carries over — but note it is **insensitive** to the coupling bug above, so the crux accuracy gate (Task 5) and a dedicated balanced-anomaly coupling test (Task 5 Step 5c) are the real guards.
 
 **Determinism discipline (every task):** fixed iteration counts, no convergence early-out, no in-loop branching on data; `wrapX` branch form (`if(x<0)return x+W; if(x>=W)return x-W;`) never `((x%W)+W)%W`; reuse the session `gpu` fixture; independent a-scaling test (`a=1` vs `a=6.4e6`) at every metric site.
 
@@ -339,8 +351,16 @@ def slice_remap_advance(h, u, v, dt, g):
         centers = i_dep[j]                           # fractional source-i of arrival centers
         edges = np.empty(W + 1)
         edges[1:W] = 0.5 * (centers[0:W - 1] + centers[1:W])
-        edges[0] = edges[W - 1] - W if False else (centers[0] - 0.5 * (centers[1] - centers[0]))
+        edges[0] = centers[0] - 0.5 * (centers[1] - centers[0])
         edges[W] = edges[0] + W                      # periodic wrap of the ring
+        # ADVERSARIAL-REVIEW FIX (FATAL): under strong cross-cell shear the
+        # midpoint edges can become NON-MONOTONIC (departure points cross), which
+        # makes _accumulate_interval integrate negative-width / overlapping cells
+        # -> silent mass double-count (~5% leak) + 3x overshoots.  Monotonizing the
+        # destination edges collapses crossed cells to zero width (they were
+        # unphysically over-resolved), keeping the partition valid and mass exactly
+        # closed.  np.maximum.accumulate preserves the ring length (end-start == W).
+        edges = np.maximum.accumulate(edges)
         m_zon[j] = ppm_remap_1d_periodic(m[j], edges)
 
     # --- Meridional pass: per column, remap with NON-periodic clamped edges. ---
@@ -361,6 +381,7 @@ def _remap_1d_meridional(m_col, centers, H):
     edges[1:H] = 0.5 * (c[0:H - 1] + c[1:H])
     edges[0] = 0.0; edges[H] = float(H)               # wall: outermost edges fixed
     edges = np.clip(edges, 0.0, float(H))
+    edges = np.maximum.accumulate(edges)              # FIX (FATAL): same crossing guard as the zonal pass
     return _ppm_remap_1d_clamped(m_col, edges)
 ```
 
@@ -417,9 +438,27 @@ def test_slice_advance_meridional_wall_conserves():
     u = np.zeros((g.H, g.W)); v = np.full((g.H + 1, g.W), 8.0); v[0] = 0.0; v[-1] = 0.0
     h2 = slice_remap_advance(h, u, v, 1200.0, g)
     assert abs(np.sum(h2 * g.cos_c[:, None]) - np.sum(h * g.cos_c[:, None])) / np.sum(h * g.cos_c[:, None]) < 1e-12
+
+def test_slice_advance_strong_shear_conserves_and_no_overshoot():
+    """ADVERSARIAL-REVIEW REGRESSION (FATAL class): a STRONGLY SHEARED row whose
+    cross-cell Courant gradient > 1 makes departure points cross.  Without the
+    np.maximum.accumulate edge-monotonization this leaks ~5% mass and overshoots
+    3x.  The uniform-velocity tests above CANNOT catch this; this one must."""
+    from gasgiant.sim.shallow_water_ref import Grid, slice_remap_advance
+    g = Grid(W=64, H=8, a=6.4e6)
+    # A sharp zonal jet flank: u varies by >1 Courant-unit per cell.
+    lam = np.arange(g.W) * g.dlam
+    u = (150.0 * (1.0 + np.tanh(8.0 * np.sin(lam))))[None, :] * np.ones((g.H, 1))
+    v = np.zeros((g.H + 1, g.W))
+    h = 1000.0 + 100.0 * np.sin(4.0 * lam)[None, :] * np.ones((g.H, 1))
+    h2 = slice_remap_advance(h, u, v, 6000.0, g)            # dt large -> crossing edges
+    m0 = np.sum(h * g.cos_c[:, None]); m1 = np.sum(h2 * g.cos_c[:, None])
+    assert abs(m1 - m0) / abs(m0) < 1e-10, "shear-crossing mass leak (edge monotonization missing)"
+    assert h2.max() <= h.max() + 1e-6, "shear-crossing overshoot (limiter/edge bug)"
+    assert h2.min() >= h.min() - 1e-6, "shear-crossing undershoot"
 ```
 
-- [ ] **Step 6: Run all** → PASS. **Commit** `M2-adv: 2-D cascade conservative remap (slice_remap_advance)`.
+- [ ] **Step 6: Run all** → PASS (the shear test FAILS without the `np.maximum.accumulate` lines — verify by temporarily removing them). **Commit** `M2-adv: 2-D cascade conservative remap (slice_remap_advance)`.
 
 ---
 
@@ -554,7 +593,9 @@ def test_slsi_matches_m2core_at_small_dt():
     both reduce to the same physics; SL vs FCT transport differ only at O(dt^2)."""
     import numpy as np
     from gasgiant.sim.shallow_water_ref import williamson2_state, step_slsi, step_semi_implicit
-    st = williamson2_state(W=64, H=32, a=6.4e6, u0=20.0)
+    # NOTE (API): williamson2_state(W, H, a, omega, u0, gp, h0, h_floor=0.05) — omega,
+    # gp, h0 are MANDATORY (shallow_water_ref.py:929).  Mirror test_sw_conservation.py.
+    st = williamson2_state(W=64, H=32, a=6.4e6, omega=7.292e-5, u0=20.0, gp=9.8, h0=8000.0)
     a = step_semi_implicit(st, theta=0.5, picard_iters=3, poisson_iters=200)
     b = step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200)
     # Velocities (geostrophically balanced, transport-light) agree tightly.
@@ -599,9 +640,15 @@ def step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200,
     u_new, v_new = velocity_backsub(u_star, v_star, h + dh, gp, theta, dt, omega, g)
 
     # 5. SL: nonlinear anomaly via SLICE conservative remap (replaces FCT).
-    h_sl = slice_remap_advance(h, u_new, v_new, dt, g)            # SL: was continuity_step_conservative
-    h_linref = h - dt * divergence_helmholtz(u_new, v_new, H_ref_lat, g)
-    anomaly = h_sl - h_linref
+    #    ADVERSARIAL-REVIEW FIX (FATAL): the reference part must be removed in the
+    #    SAME conservative-remap form as h_sl (NOT the Eulerian divergence_helmholtz),
+    #    or it fails to cancel at Courant>>1 and double-counts against dh.  Remap the
+    #    broadcast H_ref by the same trajectory and subtract; both remaps conserve,
+    #    so anomaly is mass-neutral and Courant-consistent.  See the Background note.
+    H_ref_field = np.broadcast_to(H_ref_lat[:, None], h.shape)
+    h_sl = slice_remap_advance(h, u_new, v_new, dt, g)            # was continuity_step_conservative
+    href_sl = slice_remap_advance(H_ref_field, u_new, v_new, dt, g)
+    anomaly = (h_sl - h) - (href_sl - H_ref_field)               # -dt div((h-H_ref) u), finite-Courant
     h_raw = h + dh + anomaly
     assert_positivity(h_raw, st.h_floor)
     h_new = np.maximum(h_raw, st.h_floor)
@@ -613,68 +660,130 @@ def step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200,
 
 - [ ] **Step 4: Run the small-dt test** → PASS (tune the three tolerances to the observed transport-scheme delta if needed; they bound SL−FCT at this dt, not correctness).
 
-- [ ] **Step 5: Write the CRUX accuracy gate** — fast jet, large advective C, vs fine-dt reference
+- [ ] **Step 5a: Add `fast_jet_state`** to `shallow_water_ref.py`.
+
+ADVERSARIAL-REVIEW FIX (FATAL — vacuous gate): the naive version (polar jet, dt from the gravity-wave/polar CFL, zonally symmetric) gave advective C≈0.077 (NOT ≫1) *and* had ∂/∂λ≡0 so SL zonal advection was identity — it tested nothing (the M2-core stationarity trap again). Two corrections: (1) **dt is set by the ADVECTIVE limit AT THE JET** (`dt = dt_mult · C_base · a·cosφ_jet·dλ / u0`), so `dt_mult=8` genuinely gives advective C≈8 at the jet; (2) **add a balanced zonal wavenumber-`m` perturbation** so zonal advection actually transports a propagating feature.
 
 ```python
-# tests/spikes/test_slsi_fastjet_spike.py
-"""M2-adv crux gate: SLSI must advect a FAST polar jet at advective C>>1 with
-ACCURACY (not just boundedness) matching a fine-dt reference, AND conserve mass.
-Falsifies the SLSI+SLICE approach early if it fails."""
-import numpy as np
-from gasgiant.sim.shallow_water_ref import fast_jet_state, step_slsi, total_mass
+def fast_jet_state(W=128, H=64, a=6.4e6, u0=80.0, dt_mult=1, C_base=0.5, m_wave=4, amp=0.04):
+    """Fast mid-latitude zonal jet with a wavenumber-m height perturbation, for
+    the M2-adv crux gate.  The jet (φ_jet=45°) advects the perturbation zonally at
+    ~u0; the SL scheme must track that translation at large advective Courant.
 
-def _run(state_factory, dt_mult, n_big):
-    st = state_factory(dt_mult=dt_mult)
-    dh = None
-    for _ in range(n_big):
-        st = step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=300, dh_warm=dh)
-    return st
-
-def test_slsi_fastjet_accuracy_at_large_courant():
-    # Reference: small dt (advective C<0.5 everywhere), many steps.
-    ref = _run(fast_jet_state, dt_mult=1, n_big=200)
-    # Test: 8x dt (polar advective C ~ several), 1/8 the steps -> same physical time.
-    big = _run(fast_jet_state, dt_mult=8, n_big=25)
-    # (a) bounded & positive.
-    assert np.isfinite(big.h).all() and big.h.min() > 0.0
-    # (b) ACCURACY gate: retained large-scale flow matches the fine-dt reference.
-    l2 = np.sqrt(np.mean((big.h - ref.h) ** 2)) / np.sqrt(np.mean(ref.h ** 2))
-    print(f"\n[slsi-spike] 8x-dt vs fine-dt relative L2(h) = {l2:.4f}")
-    assert l2 < 0.05, f"SLSI accuracy gate FAILED at 8x dt: L2={l2:.4f} (approach falsified)"
-    # (c) mass conserved to round-off over the large-dt run.
-    assert abs(total_mass(big) - total_mass(ref)) / abs(total_mass(ref)) < 1e-6
-```
-
-- [ ] **Step 5b: Add `fast_jet_state`** to `shallow_water_ref.py` — a balanced fast zonal jet centred near the pole (high `u0` so the polar advective Courant number at `dt_mult=8` is well above 1; geostrophically initialised like `williamson2_state` but with a jet profile `u(φ) = u0·exp(−((φ−φ_jet)/σ)²)`, `dt = dt_mult · 0.3·dx_min/√(g'H)`).
-
-```python
-def fast_jet_state(W=64, H=64, a=6.4e6, u0=120.0, dt_mult=1):
-    """A fast, narrow, geostrophically balanced zonal jet near the pole.
-    u0=120 m/s with a polar jet centre makes the polar advective Courant number
-    exceed 1 at dt_mult>=4, exercising the advective-CFL regime SLSI must remove.
-    Height balanced by integrating the geostrophic relation g' dh/dφ = -a f u."""
+    dt is set by the ADVECTIVE Courant limit AT THE JET (not the polar gravity-wave
+    CFL, which M2-core already removed): dt = dt_mult * C_base * a*cosφ_jet*dλ / u0,
+    so the advective Courant at the jet is C_base*dt_mult (=4 at dt_mult=8, C_base=0.5).
+    """
     g = Grid(W=W, H=H, a=a)
     gp = 9.8; omega = 7.292e-5; H0 = 8000.0
-    phi = g.phi_c
-    phi_jet = np.deg2rad(70.0); sigma = np.deg2rad(8.0)
-    u_prof = u0 * np.exp(-((phi - phi_jet) / sigma) ** 2)          # (H,)
+    phi = g.phi_c; lam = np.arange(W) * g.dlam
+    phi_jet = np.deg2rad(45.0); sigma = np.deg2rad(10.0)
+    u_prof = u0 * np.exp(-((phi - phi_jet) / sigma) ** 2)             # (H,)
     u = np.repeat(u_prof[:, None], W, axis=1)
-    # Geostrophic height: integrate dh/dφ = -(a/g') f u from the south pole up.
+    # Geostrophic mean height: integrate dh/dφ = -(a/g') f u from south pole up.
     f = 2.0 * omega * np.sin(phi)
-    integrand = -(a / gp) * f * u_prof * g.dphi
-    h_prof = H0 + np.cumsum(integrand[::-1])[::-1]
+    h_prof = H0 + np.cumsum((-(a / gp) * f * u_prof * g.dphi)[::-1])[::-1]
     h = np.repeat(h_prof[:, None], W, axis=1)
+    # Zonal wavenumber-m perturbation localized on the jet (gives ∂/∂λ != 0 so the
+    # zonal SL remap is genuinely exercised).  Small amplitude -> stays positive.
+    env = np.exp(-((phi - phi_jet) / sigma) ** 2)[:, None]
+    h = h + amp * H0 * env * np.cos(m_wave * lam)[None, :]
     v = np.zeros((H + 1, W))
-    dt = dt_mult * 0.3 * (a * g.cos_c.min() * g.dlam) / np.sqrt(gp * (h.max() - H0 + H0))
+    cphi_jet = np.cos(phi_jet)
+    dt = dt_mult * C_base * (a * cphi_jet * g.dlam) / u0
     return SwRefState(g=g, gp=gp, h=h, u=u, v=v, dt=dt, omega=omega,
                       u_init=u.copy(), v_init=v.copy(), h_floor=1.0)
 ```
 
-- [ ] **Step 6: Run the crux gate** — `pytest tests/spikes/test_slsi_fastjet_spike.py -v -s`.
-  - **PASS** → the SLSI approach is validated; proceed to Task 6.
-  - **FAIL** (L2 ≥ 0.05) → **STOP**. The combined SLSI+SLICE approach is falsified at large Courant. Record the L2 in `docs/superpowers/specs/m2-adv-verdict.md`, do NOT build GPU kernels, and re-enter brainstorming with the fallbacks from the spec §5 (reduced polar grid keeping explicit FCT; or non-conservative SL + global mass fixer). This is the milestone's crux — treat a failure as data, not a blocker to force past.
+- [ ] **Step 5b: Write the CRUX accuracy gate** — with a self-convergence-calibrated tol and a no-op falsification check.
 
-- [ ] **Step 7: Commit** `M2-adv: step_slsi assembly + crux fast-jet accuracy gate`.
+```python
+# tests/spikes/test_slsi_fastjet_spike.py
+"""M2-adv crux gate: SLSI must advect a fast jet's zonal perturbation at advective
+C~4 with ACCURACY (not just boundedness) matching a fine-dt reference, AND conserve
+mass.  Falsifies the SLSI+SLICE approach early if it fails."""
+import numpy as np
+from gasgiant.sim.shallow_water_ref import (
+    fast_jet_state, step_slsi, step_semi_implicit, total_mass)
+
+def _run(step_fn, dt_mult, n_big):
+    st = fast_jet_state(dt_mult=dt_mult)
+    dh = None
+    for _ in range(n_big):
+        st = step_fn(st, theta=0.5, picard_iters=3, poisson_iters=300, dh_warm=dh)
+    return st
+
+def test_crux_setup_is_nonvacuous():
+    """Guard against the M2-core stationarity trap: the gate must actually exercise
+    the large-advective-Courant regime AND carry zonal structure."""
+    st = fast_jet_state(dt_mult=8)
+    # advective Courant at the jet must be >> 1 (target ~4).
+    u_c = 0.5 * (st.u + np.roll(st.u, 1, axis=1))
+    C = np.max(np.abs(u_c) * st.dt / (st.g.a * st.g.cos_c[:, None] * st.g.dlam))
+    assert C > 3.0, f"crux gate vacuous: max advective C={C:.2f} (need >>1)"
+    # zonal structure must be present (else SL zonal advection is identity).
+    assert np.max(np.abs(st.h - st.h.mean(axis=1, keepdims=True))) > 1.0
+
+def test_reference_is_self_converged():
+    """Calibration: the fine-dt reference must be converged, else the accuracy gate
+    could fail on reference drift.  L2 between dt_mult=1 and dt_mult=2 must be small
+    relative to the 0.05 gate tol (if not, drop the reference dt_mult)."""
+    ref1 = _run(step_slsi, dt_mult=1, n_big=160)
+    ref2 = _run(step_slsi, dt_mult=2, n_big=80)        # same physical time, coarser
+    drift = float(np.sqrt(np.mean((ref2.h - ref1.h) ** 2)) / np.sqrt(np.mean(ref1.h ** 2)))
+    assert drift < 0.02, f"reference not converged (self-L2={drift:.4f}); gate tol unsafe"
+
+def test_slsi_fastjet_accuracy_at_large_courant():
+    ref = _run(step_slsi, dt_mult=1, n_big=160)        # converged fine-dt baseline
+    big = _run(step_slsi, dt_mult=8, n_big=20)         # same physical time (8*20 == 1*160)
+    assert np.isfinite(big.h).all() and big.h.min() > 0.0          # (a) bounded & positive
+    def l2(a, b): return float(np.sqrt(np.mean((a - b) ** 2)) / np.sqrt(np.mean(b ** 2)))
+    err = l2(big.h, ref.h)
+    print(f"\n[slsi-spike] 8x-dt vs fine-dt relative L2(h) = {err:.4f}")
+    assert err < 0.05, f"SLSI accuracy gate FAILED at 8x dt: L2={err:.4f} (approach falsified)"
+    assert abs(total_mass(big) - total_mass(ref)) / abs(total_mass(ref)) < 1e-6  # (c) mass
+
+def test_eulerian_path_fails_the_same_gate():
+    """NO-OP-TEST discipline (this project's hard-won lesson): prove the gate CAN
+    fail.  The unmodified M2-core Eulerian step (step_semi_implicit, explicit FCT
+    advection) must blow up or badly miss at dt_mult=8 — otherwise the gate isn't
+    isolating advective-CFL removal."""
+    try:
+        big_eul = _run(step_semi_implicit, dt_mult=8, n_big=20)
+        ref = _run(step_slsi, dt_mult=1, n_big=160)
+        err = float(np.sqrt(np.mean((big_eul.h - ref.h) ** 2)) / np.sqrt(np.mean(ref.h ** 2)))
+        assert err > 0.05 or not np.isfinite(big_eul.h).all(), (
+            f"gate not discriminating: Eulerian path also passes (L2={err:.4f})")
+    except (ValueError, FloatingPointError):
+        pass   # Eulerian FCT blew up / tripped the positivity guard at C>1 — expected.
+```
+
+- [ ] **Step 5c: Write the balanced-anomaly coupling test** (catches the FATAL coupling bug that mass conservation cannot — added at the first reviewer's request).
+
+```python
+# in tests/unit/test_m2_adv_ref.py
+def test_slsi_steady_anomaly_no_spurious_tendency():
+    """A state whose ANOMALY (h - H_ref) is ~steady but with u != 0 at large Courant:
+    the correct anomaly tendency is ~0, so step_slsi must leave h ~ h + dh.  The
+    buggy Eulerian-h_linref coupling shows an O(1) spurious height tendency here
+    that mass conservation hides."""
+    import numpy as np
+    from gasgiant.sim.shallow_water_ref import fast_jet_state, step_slsi, reference_depth
+    st = fast_jet_state(dt_mult=6, amp=0.0)            # balanced jet, NO perturbation
+    H_ref = reference_depth(st.h)[:, None]
+    anom0 = st.h - H_ref
+    out = step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=300)
+    anom1 = out.h - reference_depth(out.h)[:, None]
+    # Anomaly should barely change (balanced, zonally symmetric -> no zonal transport).
+    drift = np.max(np.abs(anom1 - anom0)) / (np.max(np.abs(anom0)) + 1e-9)
+    assert drift < 1e-2, f"spurious anomaly tendency {drift:.4f} (coupling double-count?)"
+```
+
+- [ ] **Step 6: Run the crux gate** — `pytest tests/spikes/test_slsi_fastjet_spike.py tests/unit/test_m2_adv_ref.py::test_slsi_steady_anomaly_no_spurious_tendency -v -s`. First confirm `test_crux_setup_is_nonvacuous` and `test_eulerian_path_fails_the_same_gate` PASS (the gate is real and can fail), then the accuracy gate:
+  - **PASS** → the SLSI approach is validated; proceed to Task 6.
+  - **FAIL** (L2 ≥ 0.05, or the coupling test trips) → **STOP**. If the coupling test fails, the `step_slsi` step-5 composition is still wrong — revisit before declaring the approach falsified. If only the accuracy gate fails with the coupling test passing, the combined SLSI+SLICE approach is genuinely falsified at large Courant: record the L2 in `docs/superpowers/specs/m2-adv-verdict.md`, do NOT build GPU kernels, and re-enter brainstorming with the spec §5 fallbacks (reduced polar grid keeping explicit FCT; or non-conservative SL + global mass fixer). Treat a failure as data.
+
+- [ ] **Step 7: Commit** `M2-adv: step_slsi assembly + non-vacuous crux fast-jet accuracy gate + coupling test`.
 
 ---
 
@@ -691,28 +800,43 @@ def fast_jet_state(W=64, H=64, a=6.4e6, u0=120.0, dt_mult=1):
 ```python
 # tests/unit/test_dual_path_adv.py
 import numpy as np
-from gasgiant.sim.sw_gpu import SwGpuSolver
+import hashlib
+import numpy as np
+from gasgiant.sim import sw_gpu
 
-def test_fast_advection_false_byte_identical_to_m2core(gpu, tmp_path):
-    """fast_advection=False reproduces the M2-core SI checkpoint byte-for-byte."""
-    common = dict(W=64, H=32, a=6.4e6, semi_implicit=True, theta=0.5)
-    base = SwGpuSolver(gpu, **common)                          # M2-core path
-    adv = SwGpuSolver(gpu, **common, fast_advection=False)     # M2-adv flag, off
-    for _ in range(5):
-        base.step(); adv.step()
-    pb = tmp_path / "b.npz"; pa = tmp_path / "a.npz"
-    base.save_checkpoint(pb); adv.save_checkpoint(pa)
-    assert pb.read_bytes() == pa.read_bytes()
+# NOTE (API): use the from_williamson2 classmethod (the canonical GPU entry point,
+# used by every existing GPU test) — SwGpuSolver.__init__ requires gp/omega/dt
+# positionally.  Compare state via np.array_equal + SHA1, NOT raw .npz bytes (zip
+# metadata/ordering is not guaranteed byte-stable).  Mirror test_dual_path.py.
+_IC = dict(W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
+
+def _sha1_state(h, u, v):
+    m = hashlib.sha1()
+    for f in (h, u, v):
+        m.update(np.ascontiguousarray(f, dtype=np.float32).tobytes())
+    return m.hexdigest()
+
+def test_fast_advection_false_byte_identical_to_m2core(gpu):
+    """fast_advection=False reproduces the M2-core SI state byte-for-byte."""
+    def run(**kw):
+        sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, **_IC, semi_implicit=True, theta=0.5, **kw)
+        for _ in range(5):
+            sg.step()
+        return sg.download_state()
+    h_b, u_b, v_b = run()                          # M2-core path (no flag)
+    h_a, u_a, v_a = run(fast_advection=False)      # M2-adv flag, off
+    assert np.array_equal(h_a, h_b) and np.array_equal(u_a, u_b) and np.array_equal(v_a, v_b)
+    assert _sha1_state(h_a, u_a, v_a) == _sha1_state(h_b, u_b, v_b)
 
 def test_no_sl_state_in_shared_init(gpu):
     """SL-only buffers must not exist when fast_advection=False."""
-    s = SwGpuSolver(gpu, W=32, H=16, a=6.4e6, semi_implicit=True, fast_advection=False)
+    s = sw_gpu.SwGpuSolver.from_williamson2(gpu, **_IC, semi_implicit=True, fast_advection=False)
     assert not getattr(s, "_has_sl_buffers", False)
 ```
 
 - [ ] **Step 2: Run to verify it fails** → FAIL (`fast_advection` kwarg unknown).
 
-- [ ] **Step 3: Implement** the flag + guarded dispatch in `SwGpuSolver.__init__` and `step()`: add `self.fast_advection`; in `step()`, `if self.semi_implicit and self.fast_advection: self._step_slsi() elif self.semi_implicit: self._step_semi_implicit() else: <M1 explicit>`. Allocate SL buffers (`_has_sl_buffers=True`) only inside the `fast_advection` branch's lazy init, never in shared `__init__`.
+- [ ] **Step 3: Implement** the flag + guarded dispatch. Add `fast_advection: bool = False` and `sl_iters: int = 2` to BOTH `SwGpuSolver.__init__` AND the `from_williamson2` classmethod (it must forward the new kwargs — the M2-core test pattern always constructs via `from_williamson2`). In `step()`: `if self.semi_implicit and self.fast_advection: self._step_slsi() elif self.semi_implicit: self._step_semi_implicit() else: <M1 explicit>`. Allocate SL buffers (`_has_sl_buffers=True`) only inside the `fast_advection` branch's lazy init, never in shared `__init__`.
 
 - [ ] **Step 4: Run to verify it passes** → PASS.
 
@@ -779,10 +903,12 @@ Each kernel diffs against its CPU-ref counterpart at `atol=2e-5` on pre-division
 - **(f)** Determinism: byte-identical SHA1 over a fixed warm-started multi-step run. *(Task 8)*
 - **(g)** Long-run conservation: `total_mass` rtol `< 1e-6` (un-renormalized); potential enstrophy bounded `< 1e-2`. *(Task 8)*
 
-## Risks (for the adversarial plan review)
+## Risks (resolved by the adversarial plan review — fixes folded in)
 
-1. **SLICE cascade ordering / splitting error** — the zonal-then-meridional cascade is dimensionally split; at very large meridional Courant the split may degrade accuracy. The crux gate (d) measures it directly; if it fails on the meridional component, a Strang (half-zonal / full-meridional / half-zonal) cascade is the first fallback.
-2. **Coupling consistency** — `step_slsi` feeds SL state into `helmholtz_rhs` with `h_n = h` (background) unchanged; the linear `h_linref` subtraction must still exactly cancel the implicit reference divergence now that transport is SL not FCT. The small-dt consistency test (Task 5 Step 1) and the mass gate (g) are the guards.
-3. **Momentum SL non-conservation** — acceptable (only mass must conserve), but PV/enstrophy drift is gated (g); if it grows, a vorticity-conserving SL (PV-based) is the fallback.
-4. **Polar trajectory wrap** — departure points crossing the pole need the longitude-π wrap; the meridional remap uses pole-wall clamped edges (no trans-pole mass flux). Tested by `test_slice_advance_meridional_wall_conserves` (Task 3) and the polar jet crux (Task 5).
-5. **Realized factor may be accuracy-bound below the naive `c_gw/|u|`** — reported honestly as an accuracy factor in the verdict, never a bare stability number.
+1. **Coupling double-counts the reference divergence (was FATAL — FIXED).** The original `anomaly = h_sl − h_linref` subtracted an Eulerian first-order reference divergence from a finite-Courant Lagrangian SL height; they fail to cancel at C ≫ 1, double-counting against the implicit `dh`, and mass conservation cannot detect it. **Fixed** by removing the reference part in the same conservative-remap form: `anomaly = (h_sl − h) − (href_sl − H_ref_field)` (Task 5 Step 3 + Background). Guarded by the balanced-anomaly coupling test (Task 5 Step 5c), NOT the mass gate.
+2. **SLICE leaks under shear (was FATAL — FIXED).** Non-monotonic departure points (strong cross-cell shear, the fast-jet regime) make destination edges cross → silent mass double-count + overshoots. The uniform-velocity conservation tests cannot catch it. **Fixed** by `np.maximum.accumulate(edges)` in both cascade passes (Tasks 3) + a sheared-departure regression test (`test_slice_advance_strong_shear_conserves_and_no_overshoot`).
+3. **Crux gate was vacuous (was FATAL — FIXED).** The original `fast_jet_state` gave advective C ≈ 0.077 (dt throttled by the polar cell while the jet sat at 70°) AND was zonally symmetric (SL zonal advection = identity) — the M2-core stationarity trap. **Fixed** by basing dt on the advective limit at the jet and adding a zonal wavenumber-m perturbation, plus `test_crux_setup_is_nonvacuous` (asserts C > 3 and zonal structure) and `test_eulerian_path_fails_the_same_gate` (no-op-test: proves the gate can fail).
+4. **API grounding (was CRITICAL — FIXED).** `williamson2_state` and `SwGpuSolver` mandatory-arg signatures corrected; GPU tests use the `from_williamson2` classmethod; dual-path compares via `np.array_equal`/SHA1, not `.npz` bytes.
+5. **SLICE cascade splitting error (open, monitored).** The zonal-then-meridional cascade is dimensionally split; at very large meridional Courant the split may degrade accuracy. The crux gate (d) measures it; if it fails on the meridional component, a Strang (half-zonal / full-meridional / half-zonal) cascade is the first fallback.
+6. **Momentum SL non-conservation (acceptable, gated).** Only mass must conserve exactly; PV/enstrophy drift is gated (g); if it grows, a PV-conserving SL is the fallback.
+7. **Realized factor may be accuracy-bound below the naive `c_gw/|u|`** — reported honestly as an accuracy factor in the verdict, never a bare stability number.
