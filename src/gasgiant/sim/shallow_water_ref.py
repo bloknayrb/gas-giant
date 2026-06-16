@@ -1894,6 +1894,314 @@ def balanced_2layer_state(
     )
 
 
+# ---------------------------------------------------------------------------
+# M3-T6: baroclinic instability CRUX gate helpers
+#
+# These build a BALANCED 2-layer base with a controlled mid-latitude vertical
+# shear, add a BALANCED interface perturbation at the f-plane Phillips K_max,
+# and provide the eddy-variance diagnostic + the closed-form growth target.
+#
+# Design point (feasibility-tuned; see derivation in baroclinic_test_state):
+#   a=6.4e6, gp1=0.5 (LOWERED from 9.8 to enlarge the explicit dt; the
+#   baroclinic mode speed is set by gp2, not gp1, so this does not change the
+#   instability — only the barotropic external-wave CFL, which sets dt), gp2=0.3,
+#   H=25000, phi_test=45deg, zonal wavenumber m=5 (K = m/(a cos phi) ~ K_max).
+#   This gives an e-fold of ~9000 steps (< the 20000 budget) with L_D resolved
+#   (~1.4 cells) and K_max ~ 0.1*Nyquist (hyperviscosity-safe).
+# ---------------------------------------------------------------------------
+
+# Mid-latitude test band: shear + perturbation are confined here, away from the
+# polar sponge (|phi|>65deg) and the equator. f-plane Phillips theory assumes f0
+# roughly constant, so the band is centred on phi_test with a cos-bell envelope.
+_PHI_TEST_DEG = 45.0
+_BAND_HALFWIDTH_DEG = 25.0   # envelope -> 0 at phi_test +/- 25deg (i.e. 20..70deg)
+
+
+def _band_envelope(phi: np.ndarray, phi0: float, halfwidth: float) -> np.ndarray:
+    """Smooth cos^2 bell, 1 at phi0, 0 at phi0 +/- halfwidth (radians); 0 outside."""
+    x = (phi - phi0) / halfwidth
+    env = np.where(np.abs(x) < 1.0, np.cos(0.5 * np.pi * x) ** 2, 0.0)
+    return env
+
+
+def _balanced_sheared_base(
+    W, H, a, omega, gp1, gp2, H1_mean, H2_mean,
+    shear, phi_test_rad, band_hw_rad,
+):
+    """Construct a geostrophically-balanced 2-layer base with a LOCALIZED eastward
+    vertical shear (U1-U2 = shear at the band centre), with bounded thicknesses.
+
+    Design choice (bounded base): keep the top free surface FLAT, eta1=h1+h2=const,
+    so the top layer is quiescent (u1=0, see below) and the vertical shear lives
+    entirely in the LOWER layer (u2<0 => U1-U2 = -u2 > 0, eastward shear).  The
+    interface tilt is LOCALIZED in the band (a Gaussian-bump derivative), so h2
+    returns to its baseline on both sides and the thickness swing stays bounded --
+    avoiding the unbounded hemispheric swing of a globally-balanced single-signed
+    jet (which floors h1 and breaks balance).
+
+    Balance (zonal flow, meridional momentum), B_i = M_i + ke_i:
+        (1/a) dB_i/dphi = -f u_i,  f = 2*omega*sin(phi).
+      Layer1, eta1 flat: gp1 d(eta1)/dphi = -a f u1  =>  u1 = 0.
+      Layer2: d/dphi[gp1 eta1 + gp2 h2] = -a f u2  (eta1 flat, ke2 small)
+              =>  u2 = -(gp2/(a f)) dh2/dphi.
+    We PRESCRIBE dh2/dphi = A * bump(phi) (a localized Gaussian centred on the
+    band), so u2(phi) = -(gp2/(a f)) A bump, and choose A so that the band-centre
+    shear U1-U2 = -u2(phi_test) equals `shear`.  h2 = H2 + A*(cumint(bump) - mean).
+
+    Charney-Stern (LOWER layer): for this eastward shear the lower-layer QG PV
+    gradient beta2 = beta - (f0^2/(gp2*H2))*shear; supercritical shear drives it
+    negative (the instability criterion).
+
+    Returns (g, h1, h2, u1, v1, u2, v2) ready for Sw2State.
+    """
+    g = Grid(W, H, a)
+    phi = g.phi_c                                   # (H,) descending
+    f = 2.0 * omega * np.sin(phi)
+    f_test = 2.0 * omega * np.sin(phi_test_rad)
+
+    # Localized interface-slope bump (Gaussian); band_hw_rad ~ 2 sigma.
+    sigma_phi = 0.5 * band_hw_rad
+    bump = np.exp(-((phi - phi_test_rad) / sigma_phi) ** 2)   # (H,)
+
+    # Size A so band-centre shear U1-U2 = -u2(phi_test) = (gp2/(a f_test)) A = shear.
+    A = shear * a * f_test / gp2
+    u2_prof = -(gp2 / (a * f)) * A * bump            # (H,)  (u1 = 0)
+
+    # h2 from the localized slope: h2 = H2_mean + A*(cumint(bump) - cos-weighted mean).
+    dphi_arr = np.diff(phi)
+    cumint = np.concatenate([[0.0], np.cumsum(0.5 * (bump[:-1] + bump[1:]) * dphi_arr)])
+    cumint = cumint - float((g.cos_c * cumint).sum() / g.cos_c.sum())
+    h2_prof = H2_mean + A * cumint
+    # Flat top free surface: eta1 = H1_mean + H2_mean (const) => h1 = eta1 - h2.
+    h1_prof = (H1_mean + H2_mean) - h2_prof
+
+    h1 = h1_prof[:, None] * np.ones((1, W))
+    h2 = h2_prof[:, None] * np.ones((1, W))
+    u1 = np.zeros((H, W))
+    u2 = u2_prof[:, None] * np.ones((1, W))
+    v1 = np.zeros((H + 1, W))
+    v2 = np.zeros((H + 1, W))
+    return g, h1, h2, u1, v1, u2, v2
+
+
+def baroclinic_test_state(
+    W, H, unstable, seed, a=6.4e6,
+    omega=7.292e-5, gp1=0.5, gp2=0.3,
+    H1_mean=12500.0, H2_mean=12500.0,
+    m_zonal=5, pert_amp_frac=1e-3, dt_safety=0.3, h_floor=1.0,
+    nu4=0.0, xi_unstable=2.0, xi_stable=0.5,
+):
+    """Balanced 2-layer base with a mid-latitude eastward shear + balanced
+    interface perturbation at the f-plane Phillips K_max (M3 Task 6 Step 2).
+
+    Charney-Stern (LOWER layer): for eastward shear (U1-U2)>0 the lower-layer QG
+    PV gradient beta2 = beta - (f0^2/(gp2*H2))*(U1-U2) goes NEGATIVE when the
+    shear is supercritical. The `unstable` flag toggles the supercriticality
+    xi = (U1-U2)/U_crit, U_crit = beta*gp2*H2/f0^2 at phi_test:
+       unstable=True  -> xi = xi_unstable (>1, beta2<0)
+       unstable=False -> xi = xi_stable   (<1, both gradients positive)
+
+    The shear is realized as a balanced banded jet (top faster than bottom) via
+    _balanced_sheared_base (geostrophic/gradient-wind balance inverted from the
+    prescribed u(phi)). A balanced interface perturbation at zonal wavenumber
+    m_zonal (~K_max) is added: h2' = A*env*cos(m*lambda), with the perturbation
+    velocity in geostrophic balance (u' = -(gp2/f0)(1/a) dh2'/dphi,
+    v' = (gp2/f0)(1/(a cos)) dh2'/dlambda) so it does NOT radiate gravity waves
+    (the M2-adv lesson).
+
+    H = H1_mean + H2_mean is the total layer-mean depth used in L_D.
+    """
+    phi_test = np.radians(_PHI_TEST_DEG)
+    band_hw = np.radians(_BAND_HALFWIDTH_DEG)
+    f0 = 2.0 * omega * np.sin(phi_test)
+    beta = 2.0 * omega * np.cos(phi_test) / a
+    Htot = H1_mean + H2_mean
+
+    # Critical shear & the requested supercriticality.
+    U_crit = beta * gp2 * H2_mean / (f0 * f0)
+    xi = xi_unstable if unstable else xi_stable
+    shear = xi * U_crit          # = U1 - U2 (eastward) at the band centre
+
+    g, h1, h2, u1, v1, u2, v2 = _balanced_sheared_base(
+        W, H, a, omega, gp1, gp2, H1_mean, H2_mean,
+        shear, phi_test, band_hw,
+    )
+
+    # --- Balanced interface perturbation seeding the f-plane Phillips K_max ---
+    # Seed the single zonal mode m_zonal (~K_max) PLUS a small broadband interface
+    # noise, both confined to the band and balanced (geostrophic perturbation
+    # velocity).  The single mode gives the instability a clean target; the noise
+    # lets the discrete growing normal mode self-select (a pure single-K interface
+    # bump alone projects mostly onto neutral/decaying modes).  Both are tiny
+    # (pert_amp_frac of mean h2) so the run stays linear for many e-foldings.
+    rng = np.random.default_rng(seed)
+    phase = rng.uniform(0.0, 2.0 * np.pi)            # seed-dependent phase
+    lam = (np.arange(W) + 0.5) * g.dlam              # cell-center longitudes
+    env = _band_envelope(g.phi_c, phi_test, band_hw)[:, None] * np.ones((1, W))
+    h2_mean_local = float(h2.mean())
+    A = pert_amp_frac * h2_mean_local
+    cos_lam = np.cos(m_zonal * lam + phase)[None, :] * np.ones((H, 1))
+    noise = rng.standard_normal((H, W))
+    noise = noise - noise.mean(axis=1, keepdims=True)   # zero zonal mean (eddy only)
+    h2_pert = env * (A * cos_lam + 0.5 * A * noise)     # (H, W)
+
+    # Geostrophic perturbation velocity from the interface perturbation. Use the
+    # reduced gravity gp2 and the LOCAL f (Coriolis). u' = -(gp2/(a f)) dh2'/dphi,
+    # v' = (gp2/(a f cos)) dh2'/dlambda.  Built on the same C-grid faces as v.
+    f_c = 2.0 * omega * np.sin(g.phi_c)
+    f_safe = np.where(np.abs(f_c) < 1e-12, 1e-12, f_c)[:, None]
+    # dh2'/dphi at centers (descending phi): use central difference.
+    dh2_dphi = np.gradient(h2_pert, g.phi_c, axis=0)
+    u2_pert = -(gp2 / (a * f_safe)) * dh2_dphi        # (H, W) at u-faces (approx)
+    # dh2'/dlambda
+    dh2_dlam = np.gradient(h2_pert, g.dlam, axis=1)
+    v2c_pert = (gp2 / (a * f_safe * (g.cos_c[:, None] + 1e-30))) * dh2_dlam
+    # scatter v perturbation to v-faces (interior only)
+    v2_pert = np.zeros((H + 1, W))
+    v2_pert[1:H] = 0.5 * (v2c_pert[0:H - 1] + v2c_pert[1:H])
+
+    h2 = h2 + h2_pert
+    u2 = u2 + u2_pert
+    v2 = v2 + v2_pert
+    # keep eta1 fixed so the perturbation lives in the interface: h1 -= h2_pert
+    h1 = h1 - h2_pert
+
+    h1 = np.maximum(h1, h_floor)
+    h2 = np.maximum(h2, h_floor)
+
+    # dt: production a-aware polar CFL with the barotropic external-mode speed.
+    c_gw = np.sqrt(gp1 * (h1 + h2).max())
+    cos_min = max(g.cos_c.min(), 1e-6)
+    dx_min = min(cos_min * g.a * g.dlam, g.a * g.dphi)
+    dt = dt_safety * dx_min / c_gw
+
+    st = Sw2State(
+        g=g, omega=omega, gp1=gp1, gp2=gp2,
+        h1=h1.copy(), u1=u1.copy(), v1=v1.copy(),
+        h2=h2.copy(), u2=u2.copy(), v2=v2.copy(),
+        dt=dt, h_floor=h_floor, nu4=nu4,
+    )
+    # Stash diagnostics used by predicted_growth_rate_fplane / efold_steps_estimate.
+    st._phi_test = phi_test
+    st._shear = shear          # realized band-centre vertical shear U1-U2
+    st._H_mean = Htot
+    st._m_zonal = m_zonal
+    st._xi = xi
+    return st
+
+
+def eddy_interface_var(st):
+    """Variance of the eddy (non-zonal) interface height: var(h2 - zonal_mean(h2)).
+
+    The zonal mean is removed so only the wave/eddy signal remains; this grows
+    with the baroclinic mode and is NOT excited by gravity waves to leading order
+    (unlike kinetic energy)."""
+    zonal_mean = st.h2.mean(axis=1, keepdims=True)
+    eddy = st.h2 - zonal_mean
+    return float(np.var(eddy))
+
+
+def predicted_growth_rate_fplane(st):
+    """f-plane Phillips closed-form max growth rate (M3 Task 6 physics note 2).
+
+    For a 2-layer reduced-gravity stack with deformation wavenumber
+        k_d^2 = 2*f0^2/(gp2*H),   L_D = 1/k_d,
+    the f-plane growth rate is sigma(K) = U_s*K*sqrt((k_d^2-K^2)/(k_d^2+K^2)),
+    maximized at K_max^2 = k_d^2*(sqrt2-1), giving
+        sigma_max = U_s*k_d*sqrt(3-2*sqrt2) = 0.31*U_s*k_d = 0.31*U_s/L_D.
+    Here U_s = (U1-U2)/2 (the peak in-band shear half), f0 = 2*omega*sin(phi_test),
+    H = layer-mean total depth.  (sqrt(3-2*sqrt2) = sqrt2-1 = 0.4142..., and
+    sqrt((sqrt2-1)) factor folds in; 0.31 is the standard Phillips coefficient.)
+    """
+    f0 = 2.0 * st.omega * np.sin(st._phi_test)
+    U_s = 0.5 * st._shear          # U_s = (U1-U2)/2, the band-centre shear half
+    kd = np.sqrt(2.0 * f0 * f0 / (st.gp2 * st._H_mean))
+    return float(0.31 * U_s * kd)
+
+
+def efold_steps_estimate(st):
+    """Estimated e-folding time in solver STEPS: 1/(sigma_max*dt). The explicit
+    gravity-wave dt is tiny, so the run must span thousands of steps to see a few
+    e-foldings; this sizes the run length in the gate."""
+    sigma = predicted_growth_rate_fplane(st)
+    if sigma <= 0.0:
+        return 10 ** 9
+    return int(np.ceil(1.0 / (sigma * st.dt)))
+
+
+# ---------------------------------------------------------------------------
+# M3-T6 Step 4: finite-amplitude vortex coherence helpers (gate d)
+# ---------------------------------------------------------------------------
+
+def vortex_test_state(
+    W, H, seed, a=6.4e6, omega=7.292e-5, gp1=0.5, gp2=0.3,
+    H1_mean=12500.0, H2_mean=12500.0, ro_target=0.3,
+    dt_safety=0.3, h_floor=1.0,
+):
+    """A GRS-scale balanced anticyclonic vortex in the LOWER layer (Ro>0.1) for
+    the finite-amplitude coherence check. The vortex is a localized interface
+    depression in geostrophic/gradient-wind balance at phi_test; sized so the
+    local Rossby number exceeds 0.1."""
+    phi_test = np.radians(_PHI_TEST_DEG)
+    f0 = 2.0 * omega * np.sin(phi_test)
+    g = Grid(W, H, a)
+
+    # Resting balanced base (no shear), then add a balanced Gaussian interface bump.
+    g2, h1, h2, u1, v1, u2, v2 = _balanced_sheared_base(
+        W, H, a, omega, gp1, gp2, H1_mean, H2_mean,
+        0.0, phi_test, np.radians(_BAND_HALFWIDTH_DEG),
+    )
+    # Gaussian vortex centred at (phi_test, lambda_c) with radius L ~ deformation.
+    L_D = np.sqrt(gp2 * (H1_mean + H2_mean)) / (f0 * np.sqrt(2.0))
+    Lr = 2.0 * L_D                      # vortex radius
+    lam = (np.arange(W) + 0.5) * g.dlam
+    lam_c = np.pi
+    # great-circle-ish local distance on the band (small-angle): dx=a cos*dlam, dy=a*dphi
+    X = a * np.cos(g.phi_c)[:, None] * ((lam[None, :] - lam_c + np.pi) % (2 * np.pi) - np.pi)
+    Y = a * (g.phi_c[:, None] - phi_test)
+    r2 = (X * X + Y * Y) / (Lr * Lr)
+    # Amplitude sized to reach the target Rossby: Ro ~ gp2*amp/(f0^2 Lr^2) (geostrophic).
+    amp = ro_target * (f0 * f0) * (Lr * Lr) / gp2
+    bump = -amp * np.exp(-r2)           # anticyclone: interface depression
+    h2 = h2 + bump
+    h1 = h1 - bump
+
+    # Geostrophic vortex velocity from the bump (lower layer).
+    f_c = 2.0 * omega * np.sin(g.phi_c)
+    f_safe = np.where(np.abs(f_c) < 1e-12, 1e-12, f_c)[:, None]
+    dbump_dphi = np.gradient(bump, g.phi_c, axis=0)
+    dbump_dlam = np.gradient(bump, g.dlam, axis=1)
+    u2 = u2 - (gp2 / (a * f_safe)) * dbump_dphi
+    v2c = (gp2 / (a * f_safe * (g.cos_c[:, None] + 1e-30))) * dbump_dlam
+    v2 = np.zeros((H + 1, W))
+    v2[1:H] = 0.5 * (v2c[0:H - 1] + v2c[1:H])
+
+    h1 = np.maximum(h1, h_floor)
+    h2 = np.maximum(h2, h_floor)
+
+    c_gw = np.sqrt(gp1 * (h1 + h2).max())
+    cos_min = max(g.cos_c.min(), 1e-6)
+    dx_min = min(cos_min * g.a * g.dlam, g.a * g.dphi)
+    dt = dt_safety * dx_min / c_gw
+
+    st = Sw2State(
+        g=g, omega=omega, gp1=gp1, gp2=gp2,
+        h1=h1.copy(), u1=u1.copy(), v1=v1.copy(),
+        h2=h2.copy(), u2=u2.copy(), v2=v2.copy(),
+        dt=dt, h_floor=h_floor,
+    )
+    st._phi_test = phi_test
+    return st
+
+
+def local_rossby_number(st):
+    """Peak local Rossby number Ro = |zeta_2| / f0 of the lower-layer flow at the
+    test latitude (a finite-amplitude vortex must have Ro>0.1 to be meaningful)."""
+    f0 = 2.0 * st.omega * np.sin(getattr(st, "_phi_test", np.radians(_PHI_TEST_DEG)))
+    zeta2 = vorticity(st.u2, st.v2, st.g)
+    return float(np.abs(zeta2).max() / abs(f0))
+
+
 def step_2layer(st):
     M1, M2 = montgomery_2layer(st.h1, st.h2, st.gp1, st.gp2)
     u1, v1 = momentum_step_M(st.h1, st.u1, st.v1, M1, st.omega, st.g, st.dt)
