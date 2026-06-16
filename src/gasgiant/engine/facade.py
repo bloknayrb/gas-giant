@@ -49,6 +49,12 @@ class Simulation:
         self._post_dirty = True
         self._tracers_changed = True
         self._extra_steps = 0
+        self._baro_driver = None
+        self._baro_key: tuple | None = None
+        self._baro_next_update = 0
+        self._baro_update_every = 0
+        self._baro_gain = 0.0
+        self._baro_steps_per_update = 0
         self._build()
 
     # -- construction / restart -------------------------------------------------
@@ -75,6 +81,7 @@ class Simulation:
             profile_omega_tex=self.profile_omega,
         )
         self.solver.init_tracers()
+        self._init_baroclinic()
         self._tracers_changed = True
         self._post_dirty = True
         self._extra_steps = 0
@@ -87,6 +94,34 @@ class Simulation:
         self.profile_dyn.release()
         self.profile_stamp.release()
         self.profile_omega.release()
+
+    def _init_baroclinic(self) -> None:
+        """Build/reuse the baroclinic source driver when enabled. Caches on
+        (grid, warmup, seed) so unrelated RESTART edits don't re-warm. On warmup
+        outcrop, degrade to uncoupled (driver=None) -- never crash construction."""
+        bp = self.params.solver.baroclinic
+        self._baro_next_update = 0
+        self._baro_update_every = bp.update_every
+        self._baro_gain = bp.gain
+        self._baro_steps_per_update = bp.baro_steps_per_update
+        if not bp.enabled:
+            self._baro_driver = None
+            self._baro_key = None
+            return
+        w, h = self.solver.equirect.size
+        key = (w, h, bp.warmup_steps, self.params.seed)
+        if self._baro_driver is not None and self._baro_key == key:
+            return  # reuse cached driver (no re-warmup)
+        from gasgiant.sim.baroclinic_driver import BaroclinicSourceDriver
+        try:
+            self._baro_driver = BaroclinicSourceDriver(
+                grid_w=w, grid_h=h, warmup_steps=bp.warmup_steps,
+                seed=self.params.seed)
+            self._baro_key = key
+        except RuntimeError as exc:
+            log.warning("baroclinic coupling disabled: warmup outcropped (%s)", exc)
+            self._baro_driver = None
+            self._baro_key = None
 
     @property
     def tracers(self):
