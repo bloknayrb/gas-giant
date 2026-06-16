@@ -1720,8 +1720,68 @@ def layer_mass(st):
     return float(np.sum(st.h1 * w)), float(np.sum(st.h2 * w))
 
 
+def _biharmonic(field: np.ndarray) -> np.ndarray:
+    """Grid-normalized ∇⁴ proxy: iterated 5-point Laplacian on the lon-lat grid.
+
+    Index-space (no metric), a-agnostic — ports as-is from the M0 spike.
+    """
+    def lap(a):
+        return (np.roll(a, 1, 1) + np.roll(a, -1, 1)
+                + np.roll(a, 1, 0) + np.roll(a, -1, 0) - 4 * a)
+    return lap(lap(field))
+
+
+def _smoothstep(x: np.ndarray) -> np.ndarray:
+    x = np.clip(x, 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def _polar_sponge(phi: np.ndarray, lat0=np.radians(65.0), lat1=np.radians(85.0)) -> np.ndarray:
+    """Ramp 0->1 poleward of lat0; used to relax velocity->0 and h->h_eq near poles."""
+    return _smoothstep((np.abs(phi) - lat0) / (lat1 - lat0))
+
+
 def apply_forcing(st):
-    """Stub for Task 3; Task 4 fills it. With all forcing fields off (defaults), no-op."""
+    """2-layer forcing (M3 Task 4), ported from the M0 spike `_apply_forcing`.
+
+    All forcing is STEP-based (tau in steps), dt-independent — the explicit
+    gravity-wave dt is tiny so time-based timescales would be infeasible. Each
+    term is guarded on its field being active; with all fields off it is a no-op.
+
+    Order: (1) thermal relaxation both layers; (2) Rayleigh bottom drag on the
+    LOWER layer only; (3) biharmonic hyperviscosity (v1.6 /64 grid-norm) on
+    u1,u2; (4) polar sponge with st.sponge_rate; (5) positivity floor.
+    """
+    g = st.g
+    # (1) Thermal (mass) relaxation toward h_eq (per-step fraction 1/tau_rad).
+    if st.tau_rad > 0.0 and st.h_eq1 is not None:
+        st.h1 = st.h1 + (st.h_eq1 - st.h1) / st.tau_rad
+        st.h2 = st.h2 + (st.h_eq2 - st.h2) / st.tau_rad
+    # (2) Rayleigh bottom drag on the lower layer only (per-step).
+    if st.tau_drag > 0.0:
+        st.u2 = st.u2 * (1.0 - 1.0 / st.tau_drag)
+        st.v2 = st.v2 * (1.0 - 1.0 / st.tau_drag)
+    # (3) Grid-normalized biharmonic hyperviscosity on velocity (v1.6 lesson: /64).
+    if st.nu4 > 0.0:
+        st.u1 = st.u1 - (st.nu4 / 64.0) * _biharmonic(st.u1)
+        st.u2 = st.u2 - (st.nu4 / 64.0) * _biharmonic(st.u2)
+    # (4) Polar sponge: relax velocity->0 and h->h_eq poleward. rate is the
+    #     Sw2State field (M3 difference from the spike's hardcoded 0.5); when
+    #     sponge_rate == 0.0 the sponge is a no-op.
+    if st.sponge_rate > 0.0:
+        rate = st.sponge_rate
+        sc = _polar_sponge(g.phi_c)[:, None]    # (H,1) at centers
+        sv = _polar_sponge(g.phi_v)[:, None]    # (H+1,1) at v-faces
+        st.u1 = st.u1 * (1.0 - rate * sc)
+        st.u2 = st.u2 * (1.0 - rate * sc)
+        st.v1 = st.v1 * (1.0 - rate * sv)
+        st.v2 = st.v2 * (1.0 - rate * sv)
+        if st.h_eq1 is not None:
+            st.h1 = st.h1 + rate * sc * (st.h_eq1 - st.h1)
+            st.h2 = st.h2 + rate * sc * (st.h_eq2 - st.h2)
+    # (5) Positivity floor.
+    st.h1 = np.maximum(st.h1, st.h_floor)
+    st.h2 = np.maximum(st.h2, st.h_floor)
     return None
 
 

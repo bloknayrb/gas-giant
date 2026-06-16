@@ -60,3 +60,28 @@ def test_step_2layer_resting_stable():
     assert np.isfinite(st.h1).all() and st.h1.min() > 0 and st.h2.min() > 0
     m1_1, m2_1 = layer_mass(st)
     assert abs(m1_1 - m1_0)/m1_0 < 1e-10 and abs(m2_1 - m2_0)/m2_0 < 1e-10
+
+
+def test_relaxation_pulls_h_toward_heq():
+    from gasgiant.sim.shallow_water_ref import Grid, Sw2State, apply_forcing
+    g = Grid(W=16, H=8, a=6.4e6)
+    st = Sw2State(g=g, omega=0.0, gp1=9.8, gp2=0.3,
+                  h1=np.full((8,16),1000.0), u1=np.zeros((8,16)), v1=np.zeros((9,16)),
+                  h2=np.full((8,16),500.0),  u2=np.zeros((8,16)), v2=np.zeros((9,16)),
+                  dt=20.0, h_floor=1.0, tau_rad=10.0,
+                  h_eq1=np.full((8,16),1100.0), h_eq2=np.full((8,16),500.0))
+    apply_forcing(st)
+    assert 1000.0 < st.h1.mean() < 1100.0
+
+
+def test_bottom_drag_only_lower_layer():
+    from gasgiant.sim.shallow_water_ref import Grid, Sw2State, apply_forcing
+    g = Grid(W=16, H=8, a=6.4e6)
+    st = Sw2State(g=g, omega=0.0, gp1=9.8, gp2=0.3,
+                  h1=np.full((8,16),1000.0), u1=np.full((8,16),5.0), v1=np.zeros((9,16)),
+                  h2=np.full((8,16),500.0),  u2=np.full((8,16),5.0), v2=np.zeros((9,16)),
+                  dt=20.0, h_floor=1.0, tau_drag=10.0)
+    u1_before = st.u1.copy()
+    apply_forcing(st)
+    assert np.allclose(st.u1, u1_before)
+    assert st.u2.mean() < 5.0
