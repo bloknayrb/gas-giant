@@ -39,3 +39,26 @@ def test_coupled_run_develops_and_changes_render(gpu):
     assert stats.v16_steps >= 16
     assert stats.source_updates >= 4
     assert float(np.abs(coupled_rgb - base_rgb).mean()) > 1e-4
+
+
+def test_coupled_concentrates_eddies_in_band(gpu):
+    from gasgiant.render.m3_metrics import highfreq_energy, latitude_concentration
+
+    base = Simulation(_params(steps=24), gpu)
+    base_rgb = np.clip(base.render_maps(512)["color"][..., :3], 0, 1)
+    base._release_sim()
+
+    sim = Simulation(_params(steps=24), gpu)
+    w, h = sim.solver.equirect.size
+    driver = BaroclinicSourceDriver(grid_w=w, grid_h=h, warmup_steps=6000, seed=0)
+    run_coupled(sim, driver, gain=1.2, update_every=4, baro_steps_per_update=200)
+    coupled_rgb = np.clip(sim.render_maps(512)["color"][..., :3], 0, 1)
+    sim._release_sim()
+
+    base_conc = latitude_concentration(base_rgb)
+    coupled_conc = latitude_concentration(coupled_rgb)
+    # The source concentrates eddies in the active band (relative gain).
+    assert coupled_conc >= base_conc, (coupled_conc, base_conc)
+    # Natural texture preserved, not smoothed away (within 0.5x..2x of baseline).
+    ratio = highfreq_energy(coupled_rgb) / (highfreq_energy(base_rgb) + 1e-12)
+    assert 0.5 <= ratio <= 2.0, ratio
