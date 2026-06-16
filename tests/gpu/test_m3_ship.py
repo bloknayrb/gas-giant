@@ -207,3 +207,25 @@ def test_factory_preset_smoke(gpu):
     p2.solver.baroclinic = p2.solver.baroclinic.model_copy(update={"enabled": False})
     base = _dev_render(p2, gpu)
     assert np.abs(coupled - base).max() > 0.05, "factory coupling must change render"
+
+
+def test_mid_run_incoherence_degrades(gpu, monkeypatch):
+    """If the source goes incoherent mid-run, tick must degrade to uncoupled and
+    keep developing -- no exception escapes (the _update_baroclinic_source catch)."""
+    sim = Simulation(_baro_params(dev_steps=48), gpu)
+    try:
+        real = sim._baro_driver.current_source
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] == 2:  # fail the second refresh (at step_index 16)
+                raise ValueError("coherence gate (injected)")
+            return real()
+
+        monkeypatch.setattr(sim._baro_driver, "current_source", flaky)
+        sim.run_to_completion(chunk=8)  # must NOT raise
+        assert sim._baro_driver is None, "mid-run incoherence must disable coupling"
+        assert sim.is_developed, "development must complete after degrading"
+    finally:
+        sim._release_sim()
