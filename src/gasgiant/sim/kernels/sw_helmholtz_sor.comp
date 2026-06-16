@@ -1,0 +1,50 @@
+#version 430
+// sw_helmholtz_sor.comp — one red OR black red/black SOR sweep for L_sym dh = rhs.
+//
+// Compile twice: #define COLOR 0 (red) and #define COLOR 1 (black).  A cell
+// (i,j) updates only when ((i+j)&1) == COLOR; otherwise it passes through.
+//
+//   dh_new = dh + sor_omega * (rhs - L_sym(dh)) / D
+//
+// where D is the analytic diagonal (hh_diagonal).  Mirrors helmholtz_sor():
+// the driver dispatches red, memory_barrier, black, memory_barrier per sweep,
+// so each color sees the other color's freshly-updated values (Gauss-Seidel).
+//
+// dh is read via the u_dh sampler and written in place via out_dh bound to the
+// SAME texture.  A red cell only reads its black neighbors (untouched this
+// sweep) and itself, so in-place read/write is race-free per color.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform sampler2D u_dh;     // current dh, center (W,H)  (same texture as out_dh)
+uniform sampler2D u_Href;   // reference depth profile, size (1,H)
+uniform sampler2D u_rhs;    // RHS, center (W,H)
+uniform ivec2 u_size;       // (W,H)
+uniform float u_alpha;      // (theta*dt)^2 * gp
+uniform float u_a;          // planetary radius
+uniform float u_dlam;       // 2*PI/W
+uniform float u_dphi;       // PI/H
+uniform float u_sor_omega;  // SOR over-relaxation factor
+
+#include "sw_helmholtz_common.glsl"
+
+layout(r32f, binding = 0) writeonly uniform image2D out_dh;  // center (W,H), in place
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x, H = u_size.y;
+    if (px.x >= W || px.y >= H) return;
+    int i = px.x, j = px.y;
+
+    // Only this color updates; other color passes through unchanged.
+    if (((i + j) & 1) != COLOR) return;
+
+    float dh_c = texelFetch(u_dh, px, 0).r;
+    float Ldh = hh_apply(i, j, W, H);
+    float rhs = texelFetch(u_rhs, px, 0).r;
+    float D = hh_diagonal(j, H);
+    float dh_new = dh_c + u_sor_omega * (rhs - Ldh) / D;
+    imageStore(out_dh, px, vec4(dh_new, 0.0, 0.0, 0.0));
+}

@@ -415,6 +415,174 @@ def run_grad(
     return result_gx, result_gy
 
 
+def _upload_href(gpu: "GpuContext", H_ref_lat: np.ndarray, H: int):
+    """Upload H_ref_lat (H,) as a (1,H) R32F texture sampled by row index.
+
+    Cast to float32 before upload: reference_depth returns float64.
+    """
+    href = np.asarray(H_ref_lat, dtype=np.float32).reshape(H)
+    if href.shape != (H,):
+        raise ValueError(f"H_ref_lat must be shape ({H},), got {href.shape}")
+    tex = gpu.texture2d((1, H), components=1, dtype="f4")
+    tex.write(href.tobytes())
+    return tex
+
+
+def run_helmholtz_apply(
+    gpu: "GpuContext",
+    dh: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    a: float,
+) -> np.ndarray:
+    """GPU L_sym(dh) = dh - (theta*dt)^2*gp * div_H(grad(dh)), shape (H, W).
+
+    Ports helmholtz_apply() from shallow_water_ref.py exactly (radius `a`).
+    """
+    dh = np.asarray(dh, dtype=np.float32)
+    H, W = dh.shape
+    ctx = gpu.ctx
+    alpha = (theta * dt) ** 2 * gp
+
+    tex_dh   = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_dh.write(dh.tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+
+    k = gpu.compute(_KERNELS, "sw_helmholtz_apply.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_alpha", float(alpha))
+    _set(k, "u_a",     float(a))
+    _set(k, "u_dlam",  2.0 * math.pi / W)
+    _set(k, "u_dphi",  math.pi / H)
+    tex_dh.use(location=0);   _set(k, "u_dh",   0)
+    tex_href.use(location=1); _set(k, "u_Href", 1)
+    tex_out.bind_to_image(0, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_out)[..., 0]
+    for tex in (tex_dh, tex_out, tex_href):
+        tex.release()
+    return result
+
+
+def run_helmholtz_residual(
+    gpu: "GpuContext",
+    dh: np.ndarray,
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    a: float,
+) -> np.ndarray:
+    """GPU Helmholtz residual L_sym(dh) - rhs, shape (H, W)."""
+    dh = np.asarray(dh, dtype=np.float32)
+    rhs = np.asarray(rhs, dtype=np.float32)
+    H, W = dh.shape
+    ctx = gpu.ctx
+    alpha = (theta * dt) ** 2 * gp
+
+    tex_dh   = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_rhs  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_dh.write(dh.tobytes())
+    tex_rhs.write(rhs.tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+
+    k = gpu.compute(_KERNELS, "sw_helmholtz_residual.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_alpha", float(alpha))
+    _set(k, "u_a",     float(a))
+    _set(k, "u_dlam",  2.0 * math.pi / W)
+    _set(k, "u_dphi",  math.pi / H)
+    tex_dh.use(location=0);   _set(k, "u_dh",   0)
+    tex_href.use(location=1); _set(k, "u_Href", 1)
+    tex_rhs.use(location=2);  _set(k, "u_rhs",  2)
+    tex_out.bind_to_image(0, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_out)[..., 0]
+    for tex in (tex_dh, tex_rhs, tex_out, tex_href):
+        tex.release()
+    return result
+
+
+def run_helmholtz_sor(
+    gpu: "GpuContext",
+    rhs: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    a: float,
+    n_iters: int,
+    sor_omega: float,
+    dh0: np.ndarray | None = None,
+) -> np.ndarray:
+    """GPU fixed-count red/black SOR for L_sym dh = rhs, shape (H, W).
+
+    Ports helmholtz_sor() from shallow_water_ref.py: exactly n_iters sweeps,
+    each a red sweep (memory_barrier) then a black sweep (memory_barrier) with
+    the analytic diagonal D.  Starts from zeros unless dh0 is supplied.
+    The red and black kernels write IN PLACE into the same dh texture (each
+    color reads only the other color + itself, so the update is race-free).
+    """
+    rhs = np.asarray(rhs, dtype=np.float32)
+    H, W = rhs.shape
+    ctx = gpu.ctx
+    alpha = (theta * dt) ** 2 * gp
+
+    dh_init = (np.zeros((H, W), dtype=np.float32)
+               if dh0 is None else np.asarray(dh0, dtype=np.float32))
+
+    tex_dh   = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_rhs  = gpu.texture2d((W, H), components=1, dtype="f4")
+    tex_dh.write(dh_init.tobytes())
+    tex_rhs.write(rhs.tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+
+    k_red   = gpu.compute(_KERNELS, "sw_helmholtz_sor.comp", defines={"COLOR": "0"})
+    k_black = gpu.compute(_KERNELS, "sw_helmholtz_sor.comp", defines={"COLOR": "1"})
+
+    dlam, dphi = 2.0 * math.pi / W, math.pi / H
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+
+    def _bind(k):
+        _set(k, "u_size",      (W, H))
+        _set(k, "u_alpha",     float(alpha))
+        _set(k, "u_a",         float(a))
+        _set(k, "u_dlam",      dlam)
+        _set(k, "u_dphi",      dphi)
+        _set(k, "u_sor_omega", float(sor_omega))
+        tex_dh.use(location=0);   _set(k, "u_dh",   0)
+        tex_href.use(location=1); _set(k, "u_Href", 1)
+        tex_rhs.use(location=2);  _set(k, "u_rhs",  2)
+        tex_dh.bind_to_image(0, read=True, write=True)
+
+    for _ in range(int(n_iters)):
+        for k in (k_red, k_black):
+            _bind(k)
+            k.run(gx, gy, 1)
+            ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_dh)[..., 0]
+    for tex in (tex_dh, tex_rhs, tex_href):
+        tex.release()
+    return result
+
+
 class SwGpuSolver:
     """Resident-texture single-layer shallow-water solver (M1).
 
@@ -440,6 +608,13 @@ class SwGpuSolver:
         omega: float,
         dt: float,
         h_floor: float = 0.05,
+        *,
+        semi_implicit: bool = False,
+        theta: float = 0.5,
+        sor_omega: float = 1.7,
+        helmholtz_iters: int = 200,
+        picard_iters: int = 3,
+        dt_multiplier: float = 1.0,
     ) -> None:
         self.gpu = gpu
         self.ctx = gpu.ctx
@@ -450,6 +625,17 @@ class SwGpuSolver:
         self.omega = float(omega)
         self.dt = float(dt)
         self.h_floor = float(h_floor)
+
+        # -- Semi-implicit path flag + inert parameter slots (T7 wires the SI path) --
+        self.semi_implicit = bool(semi_implicit)
+        self.theta = float(theta)
+        self.sor_omega = float(sor_omega)
+        self.helmholtz_iters = int(helmholtz_iters)
+        self.picard_iters = int(picard_iters)
+        self.dt_multiplier = float(dt_multiplier)
+        # H_ref is populated by the constructor after upload (set to None here;
+        # from_williamson2 sets it when semi_implicit=True).
+        self.H_ref: np.ndarray | None = None
 
         # Dispatch group counts.
         self._gx_c = (W + _GROUP - 1) // _GROUP
@@ -503,6 +689,13 @@ class SwGpuSolver:
         gp: float,
         h0: float,
         h_floor: float = 0.05,
+        *,
+        semi_implicit: bool = False,
+        theta: float = 0.5,
+        sor_omega: float = 1.7,
+        helmholtz_iters: int = 200,
+        picard_iters: int = 3,
+        dt_multiplier: float = 1.0,
     ) -> "SwGpuSolver":
         """Build a SwGpuSolver from the analytic Williamson-2 initial condition.
 
@@ -512,14 +705,25 @@ class SwGpuSolver:
         from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
         st = ref.williamson2_state(W=W, H=H, a=a, omega=omega, u0=u0, gp=gp,
                                    h0=h0, h_floor=h_floor)
-        sg = cls(gpu=gpu, W=W, H=H, a=a, gp=gp, omega=omega,
-                 dt=st.dt, h_floor=h_floor)
+        sg = cls(
+            gpu=gpu, W=W, H=H, a=a, gp=gp, omega=omega,
+            dt=st.dt, h_floor=h_floor,
+            semi_implicit=semi_implicit,
+            theta=theta,
+            sor_omega=sor_omega,
+            helmholtz_iters=helmholtz_iters,
+            picard_iters=picard_iters,
+            dt_multiplier=dt_multiplier,
+        )
         sg._tex_h.write(st.h.astype(np.float32).tobytes())
         sg._tex_u.write(st.u.astype(np.float32).tobytes())
         sg._tex_v.write(st.v.astype(np.float32).tobytes())
         # Store initial velocity fields for velocity_l2_drift().
         sg.u_init = st.u.astype(np.float32).copy()
         sg.v_init = st.v.astype(np.float32).copy()
+        # Compute and store H_ref (latitude profile) when semi-implicit path is requested.
+        if semi_implicit:
+            sg.H_ref = ref.reference_depth(st.h.astype(np.float32))
         return sg
 
     # -- Public I/O -----------------------------------------------------------
@@ -609,10 +813,15 @@ class SwGpuSolver:
     # -- Checkpoint I/O -------------------------------------------------------
 
     def save_checkpoint(self, path: str | os.PathLike) -> None:
-        """Save solver state to a .npz file.
+        """Save solver state to a .npz file (version 2).
 
-        Stores all scalar parameters and the current h, u, v field arrays
-        as float32.  The file can be reloaded with :meth:`load_checkpoint`.
+        Version 2 stores all M1 scalar parameters (W, H, a, gp, omega, dt,
+        h_floor) PLUS the M2 semi-implicit parameters (semi_implicit, theta,
+        sor_omega, helmholtz_iters, picard_iters, dt_multiplier) and H_ref
+        (the latitude reference-depth profile, or absent when None).
+
+        Files are always written as version=2; version=1 files written by
+        older code can still be loaded via :meth:`load_checkpoint`.
 
         Parameters
         ----------
@@ -621,9 +830,8 @@ class SwGpuSolver:
             if not already present).
         """
         h, u, v = self.download_state()
-        np.savez(
-            path,
-            version=np.int32(1),
+        arrays: dict = dict(
+            version=np.int32(2),
             W=np.int32(self.W),
             H=np.int32(self.H),
             a=np.float64(self.a),
@@ -634,12 +842,26 @@ class SwGpuSolver:
             h=h.astype(np.float32),
             u=u.astype(np.float32),
             v=v.astype(np.float32),
+            # M2 SI parameters
+            semi_implicit=np.bool_(self.semi_implicit),
+            theta=np.float64(self.theta),
+            sor_omega=np.float64(self.sor_omega),
+            helmholtz_iters=np.int32(self.helmholtz_iters),
+            picard_iters=np.int32(self.picard_iters),
+            dt_multiplier=np.float64(self.dt_multiplier),
         )
+        # H_ref: persist only if present (semi_implicit=True sets it).
+        if self.H_ref is not None:
+            arrays["H_ref"] = np.asarray(self.H_ref, dtype=np.float32)
+        np.savez(path, **arrays)
 
     @classmethod
     def load_checkpoint(cls, gpu: "GpuContext", path: str | os.PathLike) -> "SwGpuSolver":
-        """Reconstruct a :class:`SwGpuSolver` from a checkpoint written by
-        :meth:`save_checkpoint`.
+        """Reconstruct a :class:`SwGpuSolver` from a checkpoint.
+
+        Accepts both **version 1** (M1 explicit solver — semi_implicit defaults
+        to False) and **version 2** (M2 semi-implicit — restores SI params and
+        H_ref so that continuation is bit-exact).
 
         Parameters
         ----------
@@ -650,20 +872,22 @@ class SwGpuSolver:
         Returns
         -------
         SwGpuSolver
-            Solver with GPU field textures pre-loaded from the checkpoint.
+            Solver with GPU field textures and all parameters pre-loaded.
 
         Raises
         ------
         ValueError
-            If the checkpoint version is not 1.
+            If the checkpoint version is not 1 or 2.
         """
         # Context manager guarantees the .npz zip handle is released before the
         # caller (e.g. pytest tmp_path) tries to clean up — matters on Windows,
         # where a lingering handle blocks file removal (WinError 32).
         with np.load(path) as data:
             version = int(data["version"])
-            if version != 1:
-                raise ValueError(f"Unsupported checkpoint version {version!r}; expected 1")
+            if version not in (1, 2):
+                raise ValueError(
+                    f"Unsupported checkpoint version {version!r}; expected 1 or 2"
+                )
             W = int(data["W"])
             H = int(data["H"])
             a = float(data["a"])
@@ -676,6 +900,29 @@ class SwGpuSolver:
             u = data["u"].astype(np.float32)
             v = data["v"].astype(np.float32)
 
+            # M2 SI parameters — present only in version 2.
+            if version == 2:
+                semi_implicit = bool(data["semi_implicit"])
+                theta = float(data["theta"])
+                sor_omega = float(data["sor_omega"])
+                helmholtz_iters = int(data["helmholtz_iters"])
+                picard_iters = int(data["picard_iters"])
+                dt_multiplier = float(data["dt_multiplier"])
+                H_ref = (
+                    data["H_ref"].astype(np.float32)
+                    if "H_ref" in data
+                    else None
+                )
+            else:
+                # version 1: explicit solver, no SI state.
+                semi_implicit = False
+                theta = 0.5
+                sor_omega = 1.7
+                helmholtz_iters = 200
+                picard_iters = 3
+                dt_multiplier = 1.0
+                H_ref = None
+
         sg = cls(
             gpu=gpu,
             W=W,
@@ -685,6 +932,12 @@ class SwGpuSolver:
             omega=omega,
             dt=dt,
             h_floor=h_floor,
+            semi_implicit=semi_implicit,
+            theta=theta,
+            sor_omega=sor_omega,
+            helmholtz_iters=helmholtz_iters,
+            picard_iters=picard_iters,
+            dt_multiplier=dt_multiplier,
         )
 
         # Upload saved fields to GPU textures (bit-exact float32).
@@ -696,12 +949,82 @@ class SwGpuSolver:
         sg.u_init = u.copy()
         sg.v_init = v.copy()
 
+        # Restore H_ref for SI continuation.
+        sg.H_ref = H_ref
+
         return sg
 
     # -- Step -----------------------------------------------------------------
 
+    def _si_grid(self):
+        """Cached CPU-reference Grid for the SI anomaly assembly (built once)."""
+        g = getattr(self, "_si_grid_cache", None)
+        if g is None:
+            from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+            g = ref.Grid(self.W, self.H, self.a)
+            self._si_grid_cache = g
+        return g
+
+    def _step_semi_implicit(self) -> None:
+        """One M2 semi-implicit step on the GPU (mirrors ref.step_semi_implicit).
+
+        Predictor -> Picard loop (warm-started dh) over {helmholtz_rhs +
+        helmholtz_sor} -> velocity_backsub -> conservative continuity -> assemble
+        h_new = h + dh + (h_fct - h_linref), with a loud positivity guard.
+
+        Uses self.dt * self.dt_multiplier as the SI dt.  All field math runs on
+        the GPU kernels; the small per-step assembly (anomaly, max-floor) is a
+        numpy op on f32 readbacks (matching the CPU's f64->the same algebra; the
+        per-field tolerance test documents the f32 vs f64 gap).
+        """
+        gpu = self.gpu
+        W, H, a, gp, omega = self.W, self.H, self.a, self.gp, self.omega
+        theta = self.theta
+        dt = self.dt * self.dt_multiplier
+        h_floor = self.h_floor
+        if self.H_ref is None:
+            raise ValueError("_step_semi_implicit requires H_ref (semi_implicit=True)")
+        H_ref = np.asarray(self.H_ref, dtype=np.float32)
+
+        # Resident state.
+        h = self.gpu.read_texture(self._tex_h)[..., 0]
+        u = self.gpu.read_texture(self._tex_u)[..., 0]
+        v = self.gpu.read_texture(self._tex_v)[..., 0]
+
+        # 1. Predictor (no Coriolis).
+        u_star, v_star = run_si_predictor(gpu, h, u, v, a, gp, dt, theta)
+
+        # 3. Picard loop with deferred Coriolis; warm-start dh across iters.
+        dh = np.zeros((H, W), dtype=np.float32)
+        for _ in range(self.picard_iters):
+            rhs = run_helmholtz_rhs(gpu, h, u, v, u_star, v_star, dh,
+                                    H_ref, gp, omega, theta, dt, a)
+            dh = run_helmholtz_sor(gpu, rhs, H_ref, gp, theta, dt, a,
+                                   self.helmholtz_iters, self.sor_omega, dh0=dh)
+
+        # 4. Back-substitution: implicit pressure of full height h + dh.
+        h_impl = (h + dh).astype(np.float32)
+        u_new, v_new = run_velocity_backsub(gpu, u_star, v_star, h_impl,
+                                            gp, theta, dt, omega, a)
+
+        # 5. Final height: matched theta-centered increment + explicit anomaly.
+        h_fct = run_continuity_conservative(gpu, h, u_new, v_new, a, dt, h_floor)
+        from gasgiant.sim import shallow_water_ref as ref  # noqa: PLC0415
+        h_linref = h - dt * ref.divergence_helmholtz(
+            u_new, v_new, H_ref.astype(np.float64), self._si_grid())
+        anomaly = h_fct - h_linref
+        h_raw = h + dh + anomaly
+        ref.assert_positivity(h_raw, h_floor)        # shared CPU/GPU guard
+        h_new = np.maximum(h_raw, h_floor).astype(np.float32)
+
+        self._tex_h.write(h_new.tobytes())
+        self._tex_u.write(u_new.astype(np.float32).tobytes())
+        self._tex_v.write(v_new.astype(np.float32).tobytes())
+
     def step(self) -> None:
         """One full step in CPU-reference order (no CPU round-trip).
+
+        For the semi-implicit path, delegate to _step_semi_implicit.
 
         Sequence (mirrors ref.step / ref.momentum_step order):
           1. vorticity(old u, v) → ζ
@@ -712,6 +1035,10 @@ class SwGpuSolver:
           6. continuity pass-B → h_new
           7. ping-pong: swap resident h/u/v ↔ h_new/u_new/v_new
         """
+        if self.semi_implicit:
+            self._step_semi_implicit()
+            return
+
         ctx = self.ctx
         W, H = self.W, self.H
         a = self.a
@@ -807,6 +1134,305 @@ class SwGpuSolver:
         self._tex_h, self._tex_h_new = self._tex_h_new, self._tex_h
         self._tex_u, self._tex_u_new = self._tex_u_new, self._tex_u
         self._tex_v, self._tex_v_new = self._tex_v_new, self._tex_v
+
+
+def run_continuity_conservative(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    a: float,
+    dt: float,
+    h_floor: float,
+) -> np.ndarray:
+    """GPU conservative FCT continuity step; ports continuity_step_conservative().
+
+    Five passes (s_pos -> cap -> Fx/Fy_tot -> s_tot -> h_new).  Returns (H,W).
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+    H, W = h.shape
+    ctx = gpu.ctx
+    KN = "sw_continuity_conservative.comp"
+
+    tex_h = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_h.write(h.tobytes())
+    tex_u = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_u.write(u.tobytes())
+    tex_v = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_v.write(v.tobytes())
+
+    tex_s_pos = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_cap   = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_fx    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_fy    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_s_tot = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_hnew  = gpu.texture2d((W, H),     components=1, dtype="f4")
+
+    gx_c = (W + _GROUP - 1) // _GROUP
+    gy_c = (H + _GROUP - 1) // _GROUP
+    gy_v = (H + 1 + _GROUP - 1) // _GROUP
+
+    def _common(k):
+        _set(k, "u_size",    (W, H))
+        _set(k, "u_dt",      float(dt))
+        _set(k, "u_h_floor", float(h_floor))
+        _set(k, "u_a",       float(a))
+        tex_h.use(location=0); _set(k, "u_h", 0)
+        tex_u.use(location=1); _set(k, "u_u", 1)
+        tex_v.use(location=2); _set(k, "u_v", 2)
+
+    # PASS 0: s_pos
+    k0 = gpu.compute(_KERNELS, KN, defines={"PASS": "0"})
+    _common(k0)
+    tex_s_pos.bind_to_image(0, read=False, write=True)
+    k0.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    # PASS 1: cap
+    k1 = gpu.compute(_KERNELS, KN, defines={"PASS": "1"})
+    _common(k1)
+    tex_s_pos.use(location=3); _set(k1, "u_s_pos", 3)
+    tex_cap.bind_to_image(0, read=False, write=True)
+    k1.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    # PASS 2: Fx_tot, Fy_tot
+    k2 = gpu.compute(_KERNELS, KN, defines={"PASS": "2"})
+    _common(k2)
+    tex_s_pos.use(location=3); _set(k2, "u_s_pos", 3)
+    tex_cap.use(location=4);   _set(k2, "u_cap",   4)
+    tex_fx.bind_to_image(0, read=False, write=True)
+    tex_fy.bind_to_image(1, read=False, write=True)
+    k2.run(gx_c, gy_v, 1); ctx.memory_barrier()
+
+    # PASS 3: s_tot
+    k3 = gpu.compute(_KERNELS, KN, defines={"PASS": "3"})
+    _common(k3)
+    tex_fx.use(location=3); _set(k3, "u_fx_tot", 3)
+    tex_fy.use(location=4); _set(k3, "u_fy_tot", 4)
+    tex_s_tot.bind_to_image(0, read=False, write=True)
+    k3.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    # PASS 4: h_new
+    k4 = gpu.compute(_KERNELS, KN, defines={"PASS": "4"})
+    _common(k4)
+    tex_fx.use(location=3);    _set(k4, "u_fx_tot", 3)
+    tex_fy.use(location=4);    _set(k4, "u_fy_tot", 4)
+    tex_s_tot.use(location=5); _set(k4, "u_s_tot",  5)
+    tex_hnew.bind_to_image(0, read=False, write=True)
+    k4.run(gx_c, gy_c, 1); ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_hnew)[..., 0]
+    for tex in (tex_h, tex_u, tex_v, tex_s_pos, tex_cap,
+                tex_fx, tex_fy, tex_s_tot, tex_hnew):
+        tex.release()
+    return result
+
+
+def run_helmholtz_rhs(
+    gpu: "GpuContext",
+    h_n: np.ndarray,
+    u_n: np.ndarray,
+    v_n: np.ndarray,
+    u_star: np.ndarray,
+    v_star: np.ndarray,
+    dh_prev: np.ndarray,
+    H_ref_lat: np.ndarray,
+    gp: float,
+    omega: float,
+    theta: float,
+    dt: float,
+    a: float,
+) -> np.ndarray:
+    """GPU Helmholtz RHS assembly; ports helmholtz_rhs() exactly, shape (H, W)."""
+    h_n = np.asarray(h_n, dtype=np.float32)
+    u_n = np.asarray(u_n, dtype=np.float32)
+    v_n = np.asarray(v_n, dtype=np.float32)
+    u_star = np.asarray(u_star, dtype=np.float32)
+    v_star = np.asarray(v_star, dtype=np.float32)
+    dh_prev = np.asarray(dh_prev, dtype=np.float32)
+    H, W = h_n.shape
+    ctx = gpu.ctx
+
+    # grad(h_n), grad(dh_prev) on faces (gp=1 so run_grad returns the bare grad).
+    gxn, gyn = run_grad(gpu, h_n, gp=1.0, a=a)
+    gxd, gyd = run_grad(gpu, dh_prev, gp=1.0, a=a)
+
+    tex_us  = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_us.write(u_star.tobytes())
+    tex_vs  = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
+    tex_un  = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_un.write(u_n.tobytes())
+    tex_vn  = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vn.write(v_n.tobytes())
+    tex_gxn = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gxn.write(gxn.astype(np.float32).tobytes())
+    tex_gyn = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gyn.write(gyn.astype(np.float32).tobytes())
+    tex_gxd = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gxd.write(gxd.astype(np.float32).tobytes())
+    tex_gyd = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gyd.write(gyd.astype(np.float32).tobytes())
+    tex_href = _upload_href(gpu, H_ref_lat, H)
+    tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
+
+    k = gpu.compute(_KERNELS, "sw_helmholtz_rhs.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_a",     float(a))
+    _set(k, "u_dlam",  2.0 * math.pi / W)
+    _set(k, "u_dphi",  math.pi / H)
+    _set(k, "u_omega", float(omega))
+    _set(k, "u_dt",    float(dt))
+    _set(k, "u_gp",    float(gp))
+    _set(k, "u_theta", float(theta))
+    tex_href.use(location=0); _set(k, "u_Href", 0)
+    tex_us.use(location=1);   _set(k, "u_us",  1)
+    tex_vs.use(location=2);   _set(k, "u_vs",  2)
+    tex_un.use(location=3);   _set(k, "u_un",  3)
+    tex_vn.use(location=4);   _set(k, "u_vn",  4)
+    tex_gxn.use(location=5);  _set(k, "u_gxn", 5)
+    tex_gyn.use(location=6);  _set(k, "u_gyn", 6)
+    tex_gxd.use(location=7);  _set(k, "u_gxd", 7)
+    tex_gyd.use(location=8);  _set(k, "u_gyd", 8)
+    tex_out.bind_to_image(0, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    result = gpu.read_texture(tex_out)[..., 0]
+    for tex in (tex_us, tex_vs, tex_un, tex_vn, tex_gxn, tex_gyn,
+                tex_gxd, tex_gyd, tex_href, tex_out):
+        tex.release()
+    return result
+
+
+def run_velocity_backsub(
+    gpu: "GpuContext",
+    u_star: np.ndarray,
+    v_star: np.ndarray,
+    h_impl: np.ndarray,
+    gp: float,
+    theta: float,
+    dt: float,
+    omega: float,
+    a: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU velocity back-substitution; ports velocity_backsub() exactly.
+
+    Returns (u_new (H,W), v_new (H+1,W)).
+    """
+    u_star = np.asarray(u_star, dtype=np.float32)
+    v_star = np.asarray(v_star, dtype=np.float32)
+    h_impl = np.asarray(h_impl, dtype=np.float32)
+    H, W = h_impl.shape
+    ctx = gpu.ctx
+
+    grad_x, grad_y = run_grad(gpu, h_impl, gp=1.0, a=a)
+
+    tex_us = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_us.write(u_star.tobytes())
+    tex_vs = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
+    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gx.write(grad_x.astype(np.float32).tobytes())
+    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gy.write(grad_y.astype(np.float32).tobytes())
+    tex_u  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    k = gpu.compute(_KERNELS, "sw_velocity_backsub.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_omega", float(omega))
+    _set(k, "u_dt",    float(dt))
+    _set(k, "u_gp",    float(gp))
+    _set(k, "u_theta", float(theta))
+    tex_us.use(location=0); _set(k, "u_us", 0)
+    tex_vs.use(location=1); _set(k, "u_vs", 1)
+    tex_gx.use(location=2); _set(k, "u_gx", 2)
+    tex_gy.use(location=3); _set(k, "u_gy", 3)
+    tex_u.bind_to_image(0, read=False, write=True)
+    tex_v.bind_to_image(1, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    u_new = gpu.read_texture(tex_u)[..., 0]
+    v_new = gpu.read_texture(tex_v)[..., 0]
+    for tex in (tex_us, tex_vs, tex_gx, tex_gy, tex_u, tex_v):
+        tex.release()
+    return u_new, v_new
+
+
+def run_si_predictor(
+    gpu: "GpuContext",
+    h: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    a: float,
+    gp: float,
+    dt: float,
+    theta: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """GPU semi-implicit explicit predictor; returns (u_star, v_star).
+
+    Ports _semi_implicit_predictor() from shallow_water_ref.py exactly:
+    advection (relative-vorticity flux) + KE-gradient + (1-theta) explicit
+    pressure half -(1-theta)*dt*gp*grad(h^n).  NO Coriolis.
+
+    Orchestration:
+      1. zeta  = run_vorticity(u, v, a)                  — corners (H+1, W)
+      2. ke    = 0.5*(u^2 + v_c^2) at centres (CPU-free) via numpy on GPU read?
+         We build ke on CPU from the already-resident arrays (h,u,v are inputs).
+      3. (gxk, gyk) = run_grad(ke, gp=1, a)
+      4. (gxn, gyn) = run_grad(h,  gp=1, a)
+      5. sw_si_predictor.comp combiner.
+    """
+    h = np.asarray(h, dtype=np.float32)
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+    H, W = h.shape
+    ctx = gpu.ctx
+
+    zeta = run_vorticity(gpu, u, v, a)                # (H+1, W)
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])
+    ke = (0.5 * (u * u + v_c * v_c)).astype(np.float32)
+    gxk, gyk = run_grad(gpu, ke, gp=1.0, a=a)
+    gxn, gyn = run_grad(gpu, h,  gp=1.0, a=a)
+
+    tex_zeta = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gxk  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gyk  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gxn  = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gyn  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_u    = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_v    = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_us   = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_vs   = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+
+    tex_zeta.write(zeta.astype(np.float32).tobytes())
+    tex_gxk.write(gxk.astype(np.float32).tobytes())
+    tex_gyk.write(gyk.astype(np.float32).tobytes())
+    tex_gxn.write(gxn.astype(np.float32).tobytes())
+    tex_gyn.write(gyn.astype(np.float32).tobytes())
+    tex_u.write(u.tobytes())
+    tex_v.write(v.tobytes())
+
+    k = gpu.compute(_KERNELS, "sw_si_predictor.comp")
+    _set(k, "u_size",  (W, H))
+    _set(k, "u_dt",    float(dt))
+    _set(k, "u_gp",    float(gp))
+    _set(k, "u_theta", float(theta))
+    tex_zeta.use(location=0); _set(k, "u_zeta", 0)
+    tex_gxk.use(location=1);  _set(k, "u_gxk",  1)
+    tex_gyk.use(location=2);  _set(k, "u_gyk",  2)
+    tex_gxn.use(location=3);  _set(k, "u_gxn",  3)
+    tex_gyn.use(location=4);  _set(k, "u_gyn",  4)
+    tex_u.use(location=5);    _set(k, "u_u",    5)
+    tex_v.use(location=6);    _set(k, "u_v",    6)
+    tex_us.bind_to_image(0, read=False, write=True)
+    tex_vs.bind_to_image(1, read=False, write=True)
+
+    gx = (W + _GROUP - 1) // _GROUP
+    gy = (H + 1 + _GROUP - 1) // _GROUP
+    k.run(gx, gy, 1)
+    ctx.memory_barrier()
+
+    u_star = gpu.read_texture(tex_us)[..., 0]
+    v_star = gpu.read_texture(tex_vs)[..., 0]
+    for tex in (tex_zeta, tex_gxk, tex_gyk, tex_gxn, tex_gyn,
+                tex_u, tex_v, tex_us, tex_vs):
+        tex.release()
+    return u_star, v_star
 
 
 def run_momentum(

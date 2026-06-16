@@ -1,0 +1,32 @@
+#version 430
+// sw_helmholtz_apply.comp — Apply the semi-implicit Helmholtz operator L_sym to dh.
+//
+//   L_sym(dh) = dh - alpha * divergence_helmholtz(*grad_faces(dh), H_ref_lat)
+//   alpha = (theta*dt)^2 * gp
+//
+// Ports helmholtz_apply() from shallow_water_ref.py EXACTLY (radius `a`).  The
+// composed grad->div_H stencil lives in sw_helmholtz_common.glsl::hh_apply.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform sampler2D u_dh;     // height perturbation, center (W,H)
+uniform sampler2D u_Href;   // reference depth profile, size (1,H)
+uniform ivec2 u_size;       // (W,H)
+uniform float u_alpha;      // (theta*dt)^2 * gp
+uniform float u_a;          // planetary radius
+uniform float u_dlam;       // 2*PI/W
+uniform float u_dphi;       // PI/H
+
+#include "sw_helmholtz_common.glsl"
+
+layout(r32f, binding = 0) writeonly uniform image2D out_Ldh;  // center (W,H)
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x, H = u_size.y;
+    if (px.x >= W || px.y >= H) return;
+    float out_val = hh_apply(px.x, px.y, W, H);
+    imageStore(out_Ldh, px, vec4(out_val, 0.0, 0.0, 0.0));
+}
