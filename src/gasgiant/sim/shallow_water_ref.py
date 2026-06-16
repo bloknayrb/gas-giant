@@ -1290,3 +1290,324 @@ def total_potential_enstrophy(st: SwRefState) -> float:
     cos_v = g.cos_v[:, None] * np.ones((1, W))
     ens = 0.5 * abs_vort * abs_vort / h_corner * cos_v
     return float(np.sum(ens) * g.a * g.a * g.dlam * g.dphi)
+
+
+# ---------------------------------------------------------------------------
+# M2: semi-Lagrangian advection — departure-point trajectory solver
+# ---------------------------------------------------------------------------
+
+def departure_points(u, v, dt, g, n_iter=2):
+    """Back-trajectory departure points for arrival CELL CENTERS, in fractional
+    grid-index space (i_dep zonal, j_dep meridional).  Row 0 = north, phi descending.
+
+    Angular velocities: lam_dot = u/(a cosphi), phi_dot = v/a.  Index velocities:
+      di/dt = lam_dot / dlam ;  dj/dt = -phi_dot / dphi   (j increases southward).
+    Two-iteration implicit midpoint: evaluate the velocity at the current
+    midpoint estimate, refine.  Velocities are sampled at cell centers by
+    averaging the C-grid faces (u east+west, v north+south).
+    """
+    H, W = u.shape
+    u_c = 0.5 * (u + np.roll(u, 1, axis=1))                 # (H,W) west+east face
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])                       # (H,W) north+south face
+    cosphi = g.cos_c[:, None]                               # (H,1)
+    di = (u_c / (g.a * cosphi)) * dt / g.dlam               # eastward => +i
+    dj = -(v_c / g.a) * dt / g.dphi                         # northward (v>0) => -j (toward row 0)
+    i_arr = np.arange(W)[None, :] + np.zeros((H, 1))        # (H,W) arrival i
+    j_arr = np.arange(H)[:, None] + 0.5                     # (H,W) arrival j (center)
+    a_i, a_j = di.copy(), dj.copy()
+    for _ in range(n_iter):
+        im = i_arr - 0.5 * a_i
+        jm = j_arr - 0.5 * a_j
+        a_i = _bilinear_periodic(di, im, jm, g)
+        a_j = _bilinear_periodic(dj, im, jm, g)
+    return i_arr - a_i, j_arr - a_j
+
+
+def _bilinear_periodic(field, i_idx, j_idx, g):
+    """Bilinear sample of a center field at fractional (i_idx zonal, j_idx-0.5
+    row).  Zonal periodic wrap; meridional clamp to [0, H-1]."""
+    H, W = field.shape
+    jj = np.clip(j_idx - 0.5, 0.0, H - 1.0)
+    j0 = np.floor(jj).astype(int); j1 = np.minimum(j0 + 1, H - 1)
+    fy = jj - j0
+    i0f = np.floor(i_idx); fx = i_idx - i0f
+    i0 = i0f.astype(int) % W; i1 = (i0 + 1) % W
+    f00 = field[j0, i0]; f10 = field[j0, i1]
+    f01 = field[j1, i0]; f11 = field[j1, i1]
+    return ((1 - fx) * (1 - fy) * f00 + fx * (1 - fy) * f10
+            + (1 - fx) * fy * f01 + fx * fy * f11)
+
+
+# ---------------------------------------------------------------------------
+# M2-adv Task 2: conservative 1-D PPM remap (SLICE kernel)
+# ---------------------------------------------------------------------------
+
+def ppm_remap_1d_periodic(m, edges):
+    """Conservative PPM remap of per-cell masses `m` (length n, periodic) onto a
+    new set of cell edges `edges` (length n+1, fractional source-index
+    coordinates; edges[k]..edges[k+1] is the k-th destination cell in the SOURCE
+    grid).  Returns remapped per-cell masses (length n).  Conservative: Σ∫ = Σm."""
+    n = len(m)
+    mL = np.roll(m, 1); mR = np.roll(m, -1)
+    aL_raw = (7.0 * (m + mL) - (mR + np.roll(m, 2))) / 12.0
+    aL = _ppm_monotone_edge(aL_raw, mL, m)
+    aR = np.roll(aL, -1)
+    aL, aR = _ppm_limit_parabola(m, aL, aR)
+    def integral(s, x0, x1):
+        d = aR[s] - aL[s]
+        c6 = 6.0 * (m[s] - 0.5 * (aL[s] + aR[s]))
+        def F(x):
+            return (aL[s] * x + 0.5 * d * x * x
+                    + c6 * (0.5 * x * x - x * x * x / 3.0))
+        return F(x1) - F(x0)
+    out = np.empty(n)
+    for k in range(n):
+        out[k] = _accumulate_interval(edges[k], edges[k + 1], n, integral)
+    return out
+
+def _ppm_monotone_edge(aL_raw, mL, m):
+    """Clamp the raw edge value into [min,max] of the two bounding cells."""
+    lo = np.minimum(mL, m); hi = np.maximum(mL, m)
+    return np.clip(aL_raw, lo, hi)
+
+def _ppm_limit_parabola(m, aL, aR):
+    """Colella-Woodward parabola limiter: kill overshoots / enforce monotonicity."""
+    aL = aL.copy(); aR = aR.copy()
+    d = aR - aL
+    excess = d * (m - 0.5 * (aL + aR))
+    d2 = d * d / 6.0
+    flat = (aR - m) * (m - aL) <= 0.0
+    over_l = excess > d2
+    over_r = excess < -d2
+    aL = np.where(flat, m, aL); aR = np.where(flat, m, aR)
+    aL = np.where(~flat & over_l, 3.0 * m - 2.0 * aR, aL)
+    aR = np.where(~flat & over_r, 3.0 * m - 2.0 * aL, aR)
+    return aL, aR
+
+def _accumulate_interval(x0, x1, n, integral):
+    """Integrate the reconstructed density over [x0, x1] in periodic source
+    coordinates, summing whole and partial source-cell contributions."""
+    total = 0.0
+    lo = x0
+    s = int(np.floor(x0))
+    while lo < x1 - 1e-15:
+        s_lo = float(s)
+        s_hi = s_lo + 1.0
+        seg_hi = min(x1, s_hi)
+        xi0 = lo - s_lo; xi1 = seg_hi - s_lo
+        total += integral(s % n, xi0, xi1)
+        lo = seg_hi
+        s += 1
+    return total
+
+def slice_remap_advance(h, u, v, dt, g):
+    """Conservative semi-Lagrangian advance of total h over dt by (u,v).
+    Drop-in, advective-CFL-free replacement for continuity_step_conservative.
+    Cascade: zonal 1-D conservative remap, then meridional. m = h*cosφ."""
+    H, W = h.shape
+    i_dep, j_dep = departure_points(u, v, dt, g, n_iter=2)
+    cosc = g.cos_c[:, None]
+    m = h * cosc
+
+    m_zon = np.empty_like(m)
+    for j in range(H):
+        centers = i_dep[j]
+        edges = np.empty(W + 1)
+        edges[1:W] = 0.5 * (centers[0:W - 1] + centers[1:W])
+        edges[0] = centers[0] - 0.5 * (centers[1] - centers[0])
+        edges[W] = edges[0] + W
+        # FIX (FATAL): monotonize crossed edges. Clamp interior edges into the
+        # fixed periodic frame [edges[0], edges[W]] BEFORE accumulating so the
+        # W-wide span (required for periodic mass conservation) is preserved.
+        edges[1:W] = np.clip(edges[1:W], edges[0], edges[W])
+        edges[1:W] = np.maximum.accumulate(edges[1:W])
+        m_zon[j] = ppm_remap_1d_periodic(m[j], edges)
+
+    m_out = np.empty_like(m_zon)
+    for i in range(W):
+        centers = j_dep[:, i]
+        m_out[:, i] = _remap_1d_meridional(m_zon[:, i], centers, H)
+
+    return m_out / cosc
+
+def _remap_1d_meridional(m_col, centers, H):
+    """Conservative 1-D remap on a NON-periodic column (poles are walls; no mass
+    flux across φ=±π/2). Clamps edges to [0, H]."""
+    c = centers - 0.5
+    edges = np.empty(H + 1)
+    edges[1:H] = 0.5 * (c[0:H - 1] + c[1:H])
+    edges[0] = 0.0; edges[H] = float(H)
+    edges = np.clip(edges, 0.0, float(H))
+    edges = np.maximum.accumulate(edges)   # FIX (FATAL): same crossing guard
+    return _ppm_remap_1d_clamped(m_col, edges)
+
+def _ppm_remap_1d_clamped(m, edges):
+    n = len(m)
+    mL = np.concatenate([m[:1], m[:-1]])
+    mR = np.concatenate([m[1:], m[-1:]])
+    mLL = np.concatenate([m[:1], m[:1], m[:-2]])
+    aL_raw = (7.0 * (m + mL) - (mR + mLL)) / 12.0
+    aL = _ppm_monotone_edge(aL_raw, mL, m)
+    aR = np.concatenate([aL[1:], aL[-1:]])
+    aL, aR = _ppm_limit_parabola(m, aL, aR)
+    def integral(s, x0, x1):
+        d = aR[s] - aL[s]; c6 = 6.0 * (m[s] - 0.5 * (aL[s] + aR[s]))
+        F = lambda x: aL[s] * x + 0.5 * d * x * x + c6 * (0.5 * x * x - x ** 3 / 3.0)
+        return F(x1) - F(x0)
+    out = np.empty(n)
+    for k in range(n):
+        x0, x1 = edges[k], edges[k + 1]
+        total = 0.0; lo = x0; s = min(int(np.floor(x0)), n - 1)
+        while lo < x1 - 1e-15 and s < n:
+            s_hi = s + 1.0; seg_hi = min(x1, s_hi)
+            total += integral(s, lo - s, seg_hi - s)
+            lo = seg_hi; s += 1
+        out[k] = total
+    return out
+
+
+def sl_advect_velocity(q, u, v, dt, g, kind):
+    """Semi-Lagrangian transport of a face field q by (u,v) over dt.
+    kind="u": q at u-faces (H,W); kind="v": q at v-faces (H+1,W) with pole rows 0.
+    Bicubic (Catmull-Rom) interpolation at the departure points."""
+    H, W = u.shape
+    i_dep, j_dep = departure_points(u, v, dt, g, n_iter=2)
+    if kind == "u":
+        return _bicubic_periodic(q, i_dep, j_dep, g)
+    i_dep_vf = np.zeros((H + 1, W)); j_dep_vf = np.zeros((H + 1, W))
+    i_dep_vf[1:H] = 0.5 * (i_dep[0:H - 1] + i_dep[1:H])
+    j_dep_vf[1:H] = 0.5 * (j_dep[0:H - 1] + j_dep[1:H]) - 0.5
+    out = _bicubic_periodic_vface(q, i_dep_vf, j_dep_vf, g)
+    out[0] = 0.0; out[H] = 0.0
+    return out
+
+
+def _catmull_rom_w(t):
+    """4-point Catmull-Rom weights for fractional offset t in [0,1)."""
+    t2 = t * t; t3 = t2 * t
+    return np.stack([
+        -0.5 * t3 + t2 - 0.5 * t,
+        1.5 * t3 - 2.5 * t2 + 1.0,
+        -1.5 * t3 + 2.0 * t2 + 0.5 * t,
+        0.5 * t3 - 0.5 * t2], axis=0)
+
+
+def _bicubic_periodic(field, i_idx, j_idx, g):
+    """Bicubic sample of a center-row field (H,W) at (i_idx zonal, j_idx center
+    coord). Zonal periodic; meridional clamped at the poles."""
+    H, W = field.shape
+    jj = np.clip(j_idx - 0.5, 0.0, H - 1.0)
+    j0 = np.floor(jj).astype(int); fy = jj - j0
+    i0 = np.floor(i_idx).astype(int); fx = i_idx - i0
+    wx = _catmull_rom_w(fx); wy = _catmull_rom_w(fy)
+    acc = np.zeros_like(i_idx)
+    for dj in range(-1, 3):
+        jr = np.clip(j0 + dj, 0, H - 1)
+        row = np.zeros_like(i_idx)
+        for di in range(-1, 3):
+            ic = (i0 + di) % W
+            row = row + wx[di + 1] * field[jr, ic]
+        acc = acc + wy[dj + 1] * row
+    return acc
+
+
+def _bicubic_periodic_vface(field, i_idx, j_idx, g):
+    """Bicubic sample of a v-face field (H+1,W) at (i_idx zonal, j_idx v-face row
+    coord). Zonal periodic; meridional clamped to [0, H]."""
+    Hp1, W = field.shape
+    H = Hp1 - 1
+    jj = np.clip(j_idx, 0.0, float(H))
+    j0 = np.floor(jj).astype(int); fy = jj - j0
+    i0 = np.floor(i_idx).astype(int); fx = i_idx - i0
+    wx = _catmull_rom_w(fx); wy = _catmull_rom_w(fy)
+    acc = np.zeros_like(i_idx)
+    for dj in range(-1, 3):
+        jr = np.clip(j0 + dj, 0, H)
+        row = np.zeros_like(i_idx)
+        for di in range(-1, 3):
+            ic = (i0 + di) % W
+            row = row + wx[di + 1] * field[jr, ic]
+        acc = acc + wy[dj + 1] * row
+    return acc
+
+
+def sl_momentum_predictor(h, u, v, gp, g, dt, theta):
+    """SL replacement for _semi_implicit_predictor: SL parcel transport of (u,v)
+    PLUS the unchanged KE-gradient and (1-theta) explicit pressure half, no Coriolis."""
+    H, W = h.shape
+    u_sl = sl_advect_velocity(u, u, v, dt, g, kind="u")
+    v_sl = sl_advect_velocity(v, u, v, dt, g, kind="v")
+    v_c = 0.5 * (v[0:H] + v[1:H + 1])
+    ke = 0.5 * (u * u + v_c * v_c)
+    gxk, gyk = grad_faces(ke, g)
+    gxn, gyn = grad_faces(h, g)
+    c = 1.0 - theta
+    u_star = u_sl - dt * (gxk + c * gp * gxn)
+    v_star = v.copy() * 0.0
+    v_star[1:H] = v_sl[1:H] - dt * (gyk[1:H] + c * gp * gyn[1:H])
+    return u_star, v_star
+
+
+# ---------------------------------------------------------------------------
+# M2-adv crux: semi-Lagrangian semi-implicit (SLSI) step + fast-jet config
+# ---------------------------------------------------------------------------
+
+def step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200,
+              sor_omega=1.7, dh_warm=None):
+    """Semi-Lagrangian semi-implicit step: M2-core's SI core with the two explicit
+    Eulerian transport operators replaced by SL equivalents (advective-CFL-free).
+      site #1  _semi_implicit_predictor -> sl_momentum_predictor (SL momentum)
+      site #2  continuity_step_conservative -> slice_remap_advance (SLICE remap)
+    The Helmholtz solve (dh), Picard-Coriolis, and velocity_backsub are reused
+    verbatim, preserving M2-core's gravity-wave CFL removal."""
+    g, gp, omega, dt = st.g, st.gp, st.omega, st.dt
+    h, u, v = st.h, st.u, st.v
+    H, W = h.shape
+
+    # 1. SL predictor (SL momentum transport, no Coriolis).
+    u_star, v_star = sl_momentum_predictor(h, u, v, gp, g, dt, theta)
+
+    # 2-4. Reuse M2-core verbatim: H_ref, Picard Helmholtz dh, back-substitution.
+    H_ref_lat = reference_depth(h)
+    dh = np.zeros((H, W)) if dh_warm is None else dh_warm.copy()
+    for _ in range(picard_iters):
+        rhs = helmholtz_rhs(h, u, v, u_star, v_star, dh,
+                            H_ref_lat, gp, omega, theta, dt, g)
+        dh = helmholtz_sor(rhs, H_ref_lat, gp, theta, dt, g,
+                           poisson_iters, sor_omega, dh0=dh)
+    u_new, v_new = velocity_backsub(u_star, v_star, h + dh, gp, theta, dt, omega, g)
+
+    # 5. SL nonlinear anomaly via SLICE conservative remap. The reference part MUST
+    #    be removed in the SAME conservative-remap form as h_sl (NOT the Eulerian
+    #    divergence_helmholtz), or it fails to cancel at Courant>>1 and double-counts
+    #    against dh. Remap the broadcast H_ref by the same trajectory and subtract.
+    H_ref_field = np.broadcast_to(H_ref_lat[:, None], h.shape)
+    h_sl = slice_remap_advance(h, u_new, v_new, dt, g)
+    href_sl = slice_remap_advance(H_ref_field, u_new, v_new, dt, g)
+    anomaly = (h_sl - h) - (href_sl - H_ref_field)
+    h_raw = h + dh + anomaly
+    assert_positivity(h_raw, st.h_floor)
+    h_new = np.maximum(h_raw, st.h_floor)
+
+    return SwRefState(g=g, gp=gp, h=h_new, u=u_new, v=v_new,
+                      dt=dt, omega=omega,
+                      u_init=st.u_init, v_init=st.v_init, h_floor=st.h_floor)
+
+
+def fast_jet_state(W=128, H=64, a=6.4e6, u0=120.0, dt_mult=1, C_base=0.5, m_wave=4, amp=0.02):
+    """Barotropically STABLE fast zonal flow for the M2-adv advective-CFL gate:
+    solid-body rotation u0*cosφ (an exact, Rayleigh-stable SWE steady state) plus a
+    small zonal wavenumber-m height perturbation that advects with the flow.  Unlike
+    a narrow Gaussian jet, solid-body rotation has no inflection point, so the
+    reference run survives and the gate measures ADVECTION ACCURACY (not a physical
+    barotropic instability).  dt is set by the advective Courant: for solid body the
+    Courant u/(a cosφ dλ)*dt = u0/(a dλ)*dt is latitude-independent = C_base*dt_mult."""
+    st = williamson2_state(W=W, H=H, a=a, omega=7.292e-5, u0=u0, gp=9.8, h0=8000.0)
+    g = st.g
+    lam = np.arange(W) * g.dlam
+    phi = g.phi_c
+    env = np.exp(-((phi - np.deg2rad(45.0)) / np.deg2rad(20.0)) ** 2)[:, None]  # broad, smooth
+    h = st.h + amp * 8000.0 * env * np.cos(m_wave * lam)[None, :]
+    dt = dt_mult * C_base * (a * g.dlam) / u0
+    return SwRefState(g=g, gp=st.gp, h=h, u=st.u, v=st.v, dt=dt, omega=st.omega,
+                      u_init=st.u_init, v_init=st.v_init, h_floor=st.h_floor)
