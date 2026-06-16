@@ -176,6 +176,12 @@ class Solver:
         self.dt = self._compute_dt()
         self._ssbo = gpu.ssbo(vortices.pack_ssbo(), binding=2)
 
+        # M3 SPIKE (opt-in, reversible): optional external vorticity source bound
+        # into omega_force SUBPASS 0 on the equirect domain. Default OFF — when
+        # external_omega_tex is None / gain==0 the inject path is a strict no-op.
+        self.external_omega_tex: moderngl.Texture | None = None
+        self.external_gain: float = 0.0
+
         # Vorticity-mode state — one per domain (built only in VORTICITY mode).
         self._omega_states: dict[int, _OmegaState] | None = None
         self._omega_state: _OmegaState | None = None  # alias for equirect (compat)
@@ -392,6 +398,13 @@ class Solver:
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
         _set(kf0, "u_vort_drag", p.solver.vort_drag)
+        # M3 SPIKE external source (equirect only; strict no-op when unset).
+        if domain.kind == DOMAIN_EQUIRECT and self.external_omega_tex is not None:
+            self.external_omega_tex.use(location=3)
+            _set(kf0, "u_external_omega", 3)
+            _set(kf0, "u_external_gain", float(self.external_gain))
+        else:
+            _set(kf0, "u_external_gain", 0.0)
         state.out.bind_to_image(0, read=False, write=True)
         kf0.run(gx, gy, 1)
         ctx.memory_barrier()

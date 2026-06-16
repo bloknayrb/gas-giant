@@ -90,6 +90,28 @@ class Simulation:
         """Equirect tracer state (tests and diagnostics)."""
         return self.solver.equirect.tracers
 
+    # -- M3 SPIKE (opt-in external vorticity source) --------------------------
+
+    def set_external_vorticity_source(
+        self, field: np.ndarray | None, gain: float = 0.0
+    ) -> None:
+        """Bind an optional external vorticity source onto the equirect solver.
+
+        `field` is an (H, W, 1) float32 array on the equirect grid (W, W//2);
+        injected each step as q += gain * field. Pass field=None to disable.
+        STRICT no-op on the default path (never called -> solver stays OFF).
+        """
+        if field is None:
+            self.solver.external_omega_tex = None
+            self.solver.external_gain = 0.0
+            return
+        h, w = self.solver.equirect.size[1], self.solver.equirect.size[0]
+        arr = np.ascontiguousarray(field.reshape(h, w, 1).astype(np.float32))
+        tex = self.gpu.texture2d((w, h), 1, "f4", data=arr, linear=True)
+        tex.repeat_x = True
+        self.solver.external_omega_tex = tex
+        self.solver.external_gain = float(gain)
+
     # -- parameters ---------------------------------------------------------------
 
     def update_params(self, new_params: PlanetParams) -> set[Tier]:
