@@ -11,7 +11,10 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import gaussian_filter, zoom
 
-# Validated unstable baroclinic config (the brief's crux config).
+# Validated unstable baroclinic config (the brief's crux config). These name the
+# grid + physics the source is BUILT from; they are consumed by the driver and
+# gate script that spin the baroclinic solver (baroclinic_driver, sw_m3_couple),
+# NOT by the functions below -- those read gp2 from the state object (st.gp2).
 SRC_W, SRC_H = 192, 96
 GP1, GP2, XI = 0.05, 0.3, 3.0
 
