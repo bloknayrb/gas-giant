@@ -45,3 +45,18 @@ def test_momentum_step_M_decoupled_matches_spike():
     u_a, v_a = momentum_step_M(h2, u2, v2, M2, omega, gp, dt)
     u_b, v_b = _layer_momentum(h2, u2, v2, M2, 2*omega, sg, dt)
     assert np.allclose(u_a, u_b, atol=1e-12) and np.allclose(v_a, v_b, atol=1e-12)
+
+
+def test_step_2layer_resting_stable():
+    from gasgiant.sim.shallow_water_ref import Grid, Sw2State, step_2layer, layer_mass
+    g = Grid(W=32, H=16, a=6.4e6)
+    st = Sw2State(g=g, omega=7.292e-5, gp1=9.8, gp2=0.3,
+                  h1=np.full((16,32),1000.0), u1=np.zeros((16,32)), v1=np.zeros((17,32)),
+                  h2=np.full((16,32),500.0),  u2=np.zeros((16,32)), v2=np.zeros((17,32)),
+                  dt=20.0, h_floor=1.0)
+    m1_0, m2_0 = layer_mass(st)
+    for _ in range(5):
+        st = step_2layer(st)
+    assert np.isfinite(st.h1).all() and st.h1.min() > 0 and st.h2.min() > 0
+    m1_1, m2_1 = layer_mass(st)
+    assert abs(m1_1 - m1_0)/m1_0 < 1e-10 and abs(m2_1 - m2_0)/m2_0 < 1e-10

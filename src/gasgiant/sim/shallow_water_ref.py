@@ -1689,3 +1689,50 @@ def momentum_step_M(
     v_new[1:H] = 0.5 * (v_c_new[0:H - 1] + v_c_new[1:H])
 
     return u_new, v_new
+
+
+# ---------------------------------------------------------------------------
+# M3-T3: 2-layer prognostic state + explicit step
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Sw2State:
+    g: Grid
+    omega: float
+    gp1: float
+    gp2: float
+    h1: np.ndarray; u1: np.ndarray; v1: np.ndarray
+    h2: np.ndarray; u2: np.ndarray; v2: np.ndarray
+    dt: float
+    h_floor: float = 1.0
+    # forcing fields (off by default; filled by Task 4)
+    tau_rad: float = 0.0
+    tau_drag: float = 0.0
+    nu4: float = 0.0
+    sponge_rate: float = 0.0
+    h_eq1: Optional[np.ndarray] = None
+    h_eq2: Optional[np.ndarray] = None
+
+
+def layer_mass(st):
+    """Per-layer global mass: Sum h_i * cos_c * a^2 * dlam * dphi."""
+    g = st.g; w = g.cos_c[:, None] * g.a * g.a * g.dlam * g.dphi
+    return float(np.sum(st.h1 * w)), float(np.sum(st.h2 * w))
+
+
+def apply_forcing(st):
+    """Stub for Task 3; Task 4 fills it. With all forcing fields off (defaults), no-op."""
+    return None
+
+
+def step_2layer(st):
+    M1, M2 = montgomery_2layer(st.h1, st.h2, st.gp1, st.gp2)
+    u1, v1 = momentum_step_M(st.h1, st.u1, st.v1, M1, st.omega, st.g, st.dt)
+    u2, v2 = momentum_step_M(st.h2, st.u2, st.v2, M2, st.omega, st.g, st.dt)
+    h1 = continuity_step_conservative(st.h1, u1, v1, st.g, st.dt, st.h_floor)
+    h2 = continuity_step_conservative(st.h2, u2, v2, st.g, st.dt, st.h_floor)
+    assert_positivity(h1, st.h_floor); assert_positivity(h2, st.h_floor)
+    st.h1, st.u1, st.v1 = h1, u1, v1
+    st.h2, st.u2, st.v2 = h2, u2, v2
+    apply_forcing(st)
+    return st
