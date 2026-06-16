@@ -105,3 +105,105 @@ def test_enabled_changes_render(gpu):
     off = _dev_render(_baro_params(enabled=False), gpu)
     maxdiff = np.abs(on - off).max()
     assert maxdiff > 0.05, f"enabled coupling must materially change the render (maxdiff={maxdiff})"
+
+
+def test_seed_determinism(gpu):
+    """Same enabled params + same seed -> same render (within noise); different
+    seed -> materially different storm pattern (proves seed is plumbed)."""
+    a = _dev_render(_baro_params(seed=11), gpu)
+    a2 = _dev_render(_baro_params(seed=11), gpu)
+    b = _dev_render(_baro_params(seed=12), gpu)
+    assert np.abs(a - a2).max() <= GPU_NOISE_ATOL, "same seed must reproduce"
+    assert np.abs(a - b).max() > 0.05, "different seed must change storm pattern"
+
+
+def test_graceful_warmup_outcrop(gpu):
+    """A warmup past the ~12500 outcrop must degrade to uncoupled (driver=None),
+    NOT crash construction, and render the same as the uncoupled run."""
+    p = _baro_params()
+    p.solver.baroclinic = p.solver.baroclinic.model_copy(update={"warmup_steps": 15000})
+    sim = Simulation(p, gpu)  # must NOT raise
+    try:
+        assert sim._baro_driver is None, "warmup outcrop must degrade to uncoupled"
+        outcropped = sim.render_maps(512)["color"].astype(np.float64)
+    finally:
+        sim._release_sim()
+    base = _dev_render(_baro_params(enabled=False), gpu)
+    assert np.abs(outcropped - base).max() <= GPU_NOISE_ATOL, "degraded == uncoupled"
+
+
+def test_driver_cache_reused_on_unrelated_restart(gpu):
+    """An unrelated RESTART-tier edit (same grid/warmup/seed) must REUSE the warm
+    driver object, not rebuild it (no 8000-step re-warmup)."""
+    sim = Simulation(_baro_params(), gpu)
+    try:
+        d0 = sim._baro_driver
+        assert d0 is not None
+        # change an unrelated RESTART-tier solver field (NOT seed/resolution/warmup)
+        new = sim.params.model_copy(update={
+            "solver": sim.params.solver.model_copy(update={"vort_hypervisc": 0.7})})
+        sim.update_params(new)
+        assert sim._baro_driver is d0, "unrelated RESTART must reuse cached driver"
+    finally:
+        sim._release_sim()
+
+
+def test_driver_rebuilt_on_seed_change(gpu):
+    """A seed change must REBUILD the driver (cache key includes seed)."""
+    sim = Simulation(_baro_params(seed=11), gpu)
+    try:
+        d0 = sim._baro_driver
+        new = sim.params.model_copy(update={"seed": 99})
+        sim.update_params(new)
+        assert sim._baro_driver is not d0, "seed change must rebuild driver"
+    finally:
+        sim._release_sim()
+
+
+def _refresh_schedule(p, gpu, chunk):
+    sim = Simulation(p, gpu)
+    fired = []
+    orig = sim._update_baroclinic_source
+    def spy():
+        fired.append(sim.solver.step_index)
+        orig()
+    sim._update_baroclinic_source = spy
+    try:
+        if chunk is None:
+            while sim.tick(2):
+                pass
+        else:
+            sim.run_to_completion(chunk=chunk)
+    finally:
+        sim._release_sim()
+    return fired
+
+
+def test_source_refresh_schedule_chunk_independent(gpu):
+    """The set of step indices at which the source is refreshed must be identical
+    for tick(2) (preview) and run_to_completion(64) (export) -- a deterministic
+    guard against a single-step clamp phase bug that the render tolerance can miss."""
+    preview = _refresh_schedule(_baro_params(dev_steps=48), gpu, None)
+    export = _refresh_schedule(_baro_params(dev_steps=48), gpu, 64)
+    assert preview == export, f"refresh schedule differs: {preview} vs {export}"
+    assert preview == [0, 16, 32], f"unexpected schedule {preview}"
+
+
+def test_factory_preset_smoke(gpu):
+    """jupiter_baroclinic builds, develops, renders; differs from uncoupled base."""
+    p = load_factory_preset("jupiter_baroclinic")
+    p.sim.resolution = 512
+    p.sim.dev_steps = 40
+    p.solver.baroclinic = p.solver.baroclinic.model_copy(update={
+        "warmup_steps": 600, "baro_steps_per_update": 60, "update_every": 16})
+    sim = Simulation(p, gpu)
+    try:
+        assert sim._baro_driver is not None
+        coupled = sim.render_maps(512)["color"].astype(np.float64)
+    finally:
+        sim._release_sim()
+    p2 = p.model_copy()
+    p2.solver.type = SolverType.VORTICITY
+    p2.solver.baroclinic = p2.solver.baroclinic.model_copy(update={"enabled": False})
+    base = _dev_render(p2, gpu)
+    assert np.abs(coupled - base).max() > 0.05, "factory coupling must change render"
