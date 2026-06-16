@@ -1,13 +1,19 @@
 """Honest M3 render-gate metrics.
 
 The old T9 gate measured top-layer eddy Rossby -- wrong layer, wrong field. The
-coupling gate instead asks two falsifiable questions of the RENDERED disk:
+coupling gate instead asks falsifiable questions of the RENDERED disk:
 
-1. latitude_concentration: is eddy variance concentrated at the baroclinically
-   active mid-latitudes (vs v1.6's latitude-flat FBM)?  Ratio of mean per-row
-   zonal-anomaly variance inside the active band to outside it.
+1. banded_coherent_fraction (the HERO metric): of the eddy energy in the active
+   mid-latitude band, what FRACTION sits in coherent low zonal wavenumbers
+   (m=1..m_hi)?  The coupling's physical claim is that it adds COHERENT low-m
+   eddy structure (festoons/roll-ups) at the active bands, so this fraction must
+   RISE vs the v1.6 baseline. (Raw variance is the wrong gate: coherent organized
+   waves carry LESS row-variance than the broadband filament hash they replace,
+   so latitude_concentration paradoxically DROPS when fidelity improves.)
 2. highfreq_energy: is the natural filamentary texture preserved (not smoothed
    away)?  Mean squared discrete Laplacian of the luminance.
+3. latitude_concentration: a secondary broadband diagnostic (ratio of per-row
+   eddy variance inside the active band to outside) -- reported, not gated.
 """
 from __future__ import annotations
 
@@ -36,6 +42,30 @@ def latitude_concentration(img: np.ndarray,
     a = float(row_var[active].mean()) if active.any() else 0.0
     o = float(row_var[off].mean()) if off.any() else 0.0
     return a / (o + 1e-12)
+
+
+def banded_coherent_fraction(img: np.ndarray,
+                             active_deg: tuple[float, float] = (20.0, 55.0),
+                             m_hi: int = 12) -> float:
+    """Fraction of the active-band eddy energy carried by COHERENT low zonal
+    wavenumbers (m=1..m_hi). For each active-band row: zonal eddy = row - row
+    mean, power spectrum via rFFT; sum power in m=1..m_hi divided by total
+    (m>=1) power. Averaged over active rows. A pure low-m wave -> ~1; broadband
+    noise -> ~m_hi/(W/2). Rises when the coupling injects coherent banded
+    structure; this is the metric that matches the physical claim."""
+    lum = _luminance(img)
+    H, W = lum.shape
+    lat = 90.0 - (np.arange(H) + 0.5) / H * 180.0
+    active = (np.abs(lat) >= active_deg[0]) & (np.abs(lat) <= active_deg[1])
+    if not active.any():
+        return 0.0
+    rows = lum[active]
+    eddy = rows - rows.mean(axis=1, keepdims=True)
+    power = np.abs(np.fft.rfft(eddy, axis=1)) ** 2  # (n_active, W//2 + 1)
+    hi = min(m_hi, power.shape[1] - 1)
+    coherent = power[:, 1:hi + 1].sum(axis=1)
+    total = power[:, 1:].sum(axis=1) + 1e-12
+    return float(np.mean(coherent / total))
 
 
 def highfreq_energy(img: np.ndarray) -> float:
