@@ -27,3 +27,29 @@ def test_departure_meridional_shift():
     u = np.zeros((g.H, g.W)); v = np.full((g.H + 1, g.W), 10.0); v[0] = 0.0; v[-1] = 0.0
     _, j_dep = departure_points(u, v, 300.0, g, n_iter=2)
     assert np.all(j_dep[5:25] > (np.arange(5, 25)[:, None] + 0.5) - 1e-9)
+
+
+def test_ppm_remap_conserves_and_preserves_uniform():
+    from gasgiant.sim.shallow_water_ref import ppm_remap_1d_periodic
+    n = 64
+    m = np.ones(n)
+    edges = np.arange(n + 1, dtype=float) - 0.37
+    out = ppm_remap_1d_periodic(m, edges)
+    assert abs(out.sum() - m.sum()) < 1e-12
+    assert np.allclose(out, 1.0, atol=1e-12)
+
+def test_ppm_remap_no_new_extrema():
+    from gasgiant.sim.shallow_water_ref import ppm_remap_1d_periodic
+    m = 1.0 + 0.5 * np.sin(np.linspace(0, 4 * np.pi, 96))
+    edges = np.arange(97, dtype=float) - 0.6
+    out = ppm_remap_1d_periodic(m, edges)
+    assert out.min() >= m.min() - 1e-9
+    assert out.max() <= m.max() + 1e-9
+    assert abs(out.sum() - m.sum()) < 1e-10
+
+def test_ppm_remap_integer_shift_is_roll():
+    from gasgiant.sim.shallow_water_ref import ppm_remap_1d_periodic
+    m = np.arange(32, dtype=float) ** 1.0 + 1.0
+    edges = np.arange(33, dtype=float) - 3.0
+    out = ppm_remap_1d_periodic(m, edges)
+    assert np.allclose(out, np.roll(m, 3), atol=1e-9)

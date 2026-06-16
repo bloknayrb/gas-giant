@@ -1336,3 +1336,66 @@ def _bilinear_periodic(field, i_idx, j_idx, g):
     f01 = field[j1, i0]; f11 = field[j1, i1]
     return ((1 - fx) * (1 - fy) * f00 + fx * (1 - fy) * f10
             + (1 - fx) * fy * f01 + fx * fy * f11)
+
+
+# ---------------------------------------------------------------------------
+# M2-adv Task 2: conservative 1-D PPM remap (SLICE kernel)
+# ---------------------------------------------------------------------------
+
+def ppm_remap_1d_periodic(m, edges):
+    """Conservative PPM remap of per-cell masses `m` (length n, periodic) onto a
+    new set of cell edges `edges` (length n+1, fractional source-index
+    coordinates; edges[k]..edges[k+1] is the k-th destination cell in the SOURCE
+    grid).  Returns remapped per-cell masses (length n).  Conservative: Σ∫ = Σm."""
+    n = len(m)
+    mL = np.roll(m, 1); mR = np.roll(m, -1)
+    aL_raw = (7.0 * (m + mL) - (mR + np.roll(m, 2))) / 12.0
+    aL = _ppm_monotone_edge(aL_raw, mL, m)
+    aR = np.roll(aL, -1)
+    aL, aR = _ppm_limit_parabola(m, aL, aR)
+    def integral(s, x0, x1):
+        d = aR[s] - aL[s]
+        c6 = 6.0 * (m[s] - 0.5 * (aL[s] + aR[s]))
+        def F(x):
+            return (aL[s] * x + 0.5 * d * x * x
+                    + c6 * (0.5 * x * x - x * x * x / 3.0))
+        return F(x1) - F(x0)
+    out = np.empty(n)
+    for k in range(n):
+        out[k] = _accumulate_interval(edges[k], edges[k + 1], n, integral)
+    return out
+
+def _ppm_monotone_edge(aL_raw, mL, m):
+    """Clamp the raw edge value into [min,max] of the two bounding cells."""
+    lo = np.minimum(mL, m); hi = np.maximum(mL, m)
+    return np.clip(aL_raw, lo, hi)
+
+def _ppm_limit_parabola(m, aL, aR):
+    """Colella-Woodward parabola limiter: kill overshoots / enforce monotonicity."""
+    aL = aL.copy(); aR = aR.copy()
+    d = aR - aL
+    excess = d * (m - 0.5 * (aL + aR))
+    d2 = d * d / 6.0
+    flat = (aR - m) * (m - aL) <= 0.0
+    over_l = excess > d2
+    over_r = excess < -d2
+    aL = np.where(flat, m, aL); aR = np.where(flat, m, aR)
+    aL = np.where(~flat & over_l, 3.0 * m - 2.0 * aR, aL)
+    aR = np.where(~flat & over_r, 3.0 * m - 2.0 * aL, aR)
+    return aL, aR
+
+def _accumulate_interval(x0, x1, n, integral):
+    """Integrate the reconstructed density over [x0, x1] in periodic source
+    coordinates, summing whole and partial source-cell contributions."""
+    total = 0.0
+    lo = x0
+    s = int(np.floor(x0))
+    while lo < x1 - 1e-15:
+        s_lo = float(s)
+        s_hi = s_lo + 1.0
+        seg_hi = min(x1, s_hi)
+        xi0 = lo - s_lo; xi1 = seg_hi - s_lo
+        total += integral(s % n, xi0, xi1)
+        lo = seg_hi
+        s += 1
+    return total
