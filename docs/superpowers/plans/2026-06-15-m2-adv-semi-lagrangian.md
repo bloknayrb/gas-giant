@@ -358,11 +358,13 @@ def slice_remap_advance(h, u, v, dt, g):
         # ADVERSARIAL-REVIEW FIX (FATAL): under strong cross-cell shear the
         # midpoint edges can become NON-MONOTONIC (departure points cross), which
         # makes _accumulate_interval integrate negative-width / overlapping cells
-        # -> silent mass double-count (~5% leak) + 3x overshoots.  Monotonizing the
-        # destination edges collapses crossed cells to zero width (they were
-        # unphysically over-resolved), keeping the partition valid and mass exactly
-        # closed.  np.maximum.accumulate preserves the ring length (end-start == W).
-        edges = np.maximum.accumulate(edges)
+        # -> silent mass double-count (~1.2% leak).  Monotonize the destination
+        # edges, but SPAN-PRESERVING: a plain np.maximum.accumulate on the full ring
+        # can lift an interior edge above edges[W], breaking the exact W-wide span
+        # (->0.27% leak).  Clip the interior edges into the FIXED frame [edges[0],
+        # edges[W]] first, then accumulate, so the ring length stays exactly W.
+        edges[1:W] = np.clip(edges[1:W], edges[0], edges[W])
+        edges[1:W] = np.maximum.accumulate(edges[1:W])
         m_zon[j] = ppm_remap_1d_periodic(m[j], edges)
 
     # --- Meridional pass: per column, remap with NON-periodic clamped edges. ---
@@ -441,14 +443,20 @@ def test_slice_advance_meridional_wall_conserves():
     h2 = slice_remap_advance(h, u, v, 1200.0, g)
     assert abs(np.sum(h2 * g.cos_c[:, None]) - np.sum(h * g.cos_c[:, None])) / np.sum(h * g.cos_c[:, None]) < 1e-12
 
-def test_slice_advance_strong_shear_conserves_and_no_overshoot():
+def test_slice_advance_strong_shear_conserves_and_stays_positive():
     """ADVERSARIAL-REVIEW REGRESSION (FATAL class): a STRONGLY SHEARED row whose
     cross-cell Courant gradient > 1 makes departure points cross.  Without the
-    np.maximum.accumulate edge-monotonization this leaks ~5% mass and overshoots
-    3x.  The uniform-velocity tests above CANNOT catch this; this one must."""
+    span-preserving edge monotonization this silently double-counts -> ~1.2% mass
+    leak.  The uniform-velocity tests above CANNOT catch this; the MASS assertion
+    here does (it fires at ~1.2e-2 without the fix).
+
+    Do NOT assert h2.max() <= h.max(): the flow is strongly *convergent*
+    (du/dlam large) and conservative continuity Dh/Dt = -h*div(u) REQUIRES h to
+    pile up where the flow converges -- a larger maximum is correct physics, not an
+    overshoot (the maximum principle only holds for non-divergent flow).  Assert
+    positivity + exact mass instead."""
     from gasgiant.sim.shallow_water_ref import Grid, slice_remap_advance
     g = Grid(W=64, H=8, a=6.4e6)
-    # A sharp zonal jet flank: u varies by >1 Courant-unit per cell.
     lam = np.arange(g.W) * g.dlam
     u = (150.0 * (1.0 + np.tanh(8.0 * np.sin(lam))))[None, :] * np.ones((g.H, 1))
     v = np.zeros((g.H + 1, g.W))
@@ -456,11 +464,11 @@ def test_slice_advance_strong_shear_conserves_and_no_overshoot():
     h2 = slice_remap_advance(h, u, v, 6000.0, g)            # dt large -> crossing edges
     m0 = np.sum(h * g.cos_c[:, None]); m1 = np.sum(h2 * g.cos_c[:, None])
     assert abs(m1 - m0) / abs(m0) < 1e-10, "shear-crossing mass leak (edge monotonization missing)"
-    assert h2.max() <= h.max() + 1e-6, "shear-crossing overshoot (limiter/edge bug)"
-    assert h2.min() >= h.min() - 1e-6, "shear-crossing undershoot"
+    assert h2.min() >= -1e-9, "PPM produced spurious negative h under shear"
+    assert np.isfinite(h2).all()
 ```
 
-- [ ] **Step 6: Run all** → PASS (the shear test FAILS without the `np.maximum.accumulate` lines — verify by temporarily removing them). **Commit** `M2-adv: 2-D cascade conservative remap (slice_remap_advance)`.
+- [ ] **Step 6: Run all** → PASS (the shear test's MASS assertion FAILS without the span-preserving edge lines — verify by temporarily removing them; observed ~1.2% leak). **Commit** `M2-adv: 2-D cascade conservative remap (slice_remap_advance)`.
 
 ---
 
