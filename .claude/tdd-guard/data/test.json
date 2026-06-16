@@ -1,96 +1,26 @@
 {
   "testModules": [
     {
-      "moduleId": "tests/unit/test_m2_adv_ref.py",
+      "moduleId": "tests/unit/test_m3_ref.py",
       "tests": [
         {
-          "name": "test_departure_solid_body_zonal",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_departure_solid_body_zonal",
+          "name": "test_montgomery_2layer_matches_spike",
+          "fullName": "tests/unit/test_m3_ref.py::test_montgomery_2layer_matches_spike",
           "state": "passed"
         },
         {
-          "name": "test_departure_a_scaling_invariant",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_departure_a_scaling_invariant",
+          "name": "test_montgomery_reduces_to_single_layer",
+          "fullName": "tests/unit/test_m3_ref.py::test_montgomery_reduces_to_single_layer",
           "state": "passed"
         },
         {
-          "name": "test_departure_meridional_shift",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_departure_meridional_shift",
+          "name": "test_momentum_step_M_reduces_to_m1",
+          "fullName": "tests/unit/test_m3_ref.py::test_momentum_step_M_reduces_to_m1",
           "state": "passed"
         },
         {
-          "name": "test_ppm_remap_conserves_and_preserves_uniform",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_ppm_remap_conserves_and_preserves_uniform",
-          "state": "passed"
-        },
-        {
-          "name": "test_ppm_remap_no_new_extrema",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_ppm_remap_no_new_extrema",
-          "state": "passed"
-        },
-        {
-          "name": "test_ppm_remap_integer_shift_is_roll",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_ppm_remap_integer_shift_is_roll",
-          "state": "passed"
-        },
-        {
-          "name": "test_slice_advance_conserves_mass",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_conserves_mass",
-          "state": "passed"
-        },
-        {
-          "name": "test_slice_advance_a_scaling",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_a_scaling",
-          "state": "passed"
-        },
-        {
-          "name": "test_slice_advance_meridional_wall_conserves",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_meridional_wall_conserves",
-          "state": "passed"
-        },
-        {
-          "name": "test_slice_advance_strong_shear_conserves_and_stays_positive",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_slice_advance_strong_shear_conserves_and_stays_positive",
-          "state": "passed"
-        },
-        {
-          "name": "test_sl_momentum_advects_bump_zonally",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_sl_momentum_advects_bump_zonally",
-          "state": "passed"
-        },
-        {
-          "name": "test_sl_momentum_predictor_resting_layer_is_pressure_only",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_sl_momentum_predictor_resting_layer_is_pressure_only",
-          "state": "passed"
-        },
-        {
-          "name": "test_slsi_matches_m2core_at_small_dt",
-          "fullName": "tests/unit/test_m2_adv_ref.py::test_slsi_matches_m2core_at_small_dt",
-          "state": "passed"
-        }
-      ]
-    },
-    {
-      "moduleId": "tests/spikes/test_slsi_fastjet_spike.py",
-      "tests": [
-        {
-          "name": "test_crux_setup_is_nonvacuous",
-          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_crux_setup_is_nonvacuous",
-          "state": "passed"
-        },
-        {
-          "name": "test_reference_is_self_converged",
-          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_reference_is_self_converged",
-          "state": "skipped"
-        },
-        {
-          "name": "test_slsi_fastjet_accuracy_at_large_courant",
-          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_slsi_fastjet_accuracy_at_large_courant",
-          "state": "skipped"
-        },
-        {
-          "name": "test_eulerian_path_fails_the_same_gate",
-          "fullName": "tests/spikes/test_slsi_fastjet_spike.py::test_eulerian_path_fails_the_same_gate",
+          "name": "test_momentum_step_M_decoupled_matches_spike",
+          "fullName": "tests/unit/test_m3_ref.py::test_momentum_step_M_decoupled_matches_spike",
           "state": "passed"
         }
       ]

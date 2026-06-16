@@ -80,6 +80,9 @@ class Simulation:
         self._extra_steps = 0
 
     def _release_sim(self) -> None:
+        if self.solver.external_omega_tex is not None:
+            self.solver.external_omega_tex.release()
+            self.solver.external_omega_tex = None
         self.solver.release()
         self.profile_dyn.release()
         self.profile_stamp.release()
@@ -89,6 +92,36 @@ class Simulation:
     def tracers(self):
         """Equirect tracer state (tests and diagnostics)."""
         return self.solver.equirect.tracers
+
+    # -- M3 SPIKE (opt-in external vorticity source) --------------------------
+
+    def set_external_vorticity_source(
+        self, field: np.ndarray | None, gain: float = 0.0
+    ) -> None:
+        """Bind an optional external vorticity source onto the equirect solver.
+
+        `field` is an (H, W) or (H, W, 1) float32 array on the equirect grid
+        (W, W//2); injected each step as q += gain * field. Pass field=None to
+        disable. STRICT no-op on the default path (never called). Re-uploading a
+        same-size source writes into the existing texture (no per-call alloc)."""
+        if field is None:
+            if self.solver.external_omega_tex is not None:
+                self.solver.external_omega_tex.release()
+            self.solver.external_omega_tex = None
+            self.solver.external_gain = 0.0
+            return
+        w, h = self.solver.equirect.size
+        arr = np.ascontiguousarray(field.reshape(h, w, 1).astype(np.float32))
+        tex = self.solver.external_omega_tex
+        if tex is None or tex.size != (w, h):
+            if tex is not None:
+                tex.release()
+            tex = self.gpu.texture2d((w, h), 1, "f4", data=arr, linear=True)
+            tex.repeat_x = True
+            self.solver.external_omega_tex = tex
+        else:
+            tex.write(arr)  # arr is contiguous float32; avoid a per-call copy
+        self.solver.external_gain = float(gain)
 
     # -- parameters ---------------------------------------------------------------
 

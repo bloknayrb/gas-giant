@@ -1,0 +1,43 @@
+#version 430
+// sw_montgomery.comp — 2-layer reduced-gravity Montgomery potentials (a-agnostic).
+//
+// Ports montgomery_2layer() from shallow_water_ref.py exactly (a potential — no
+// metric, so no planetary-radius factor enters here; `a` first appears when the
+// face gradient of M is taken in the production sw_grad.comp / sw_bernoulli seam):
+//
+//   eta1 = h1 + h2
+//   M1   = gp1 * eta1
+//   M2   = gp1 * eta1 + gp2 * h2
+//
+// Cell-centred fields only — dispatch over (W, H).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform ivec2 u_size;   // (W, H)
+uniform float u_gp1;    // reduced gravity layer 1
+uniform float u_gp2;    // reduced gravity layer 2
+
+uniform sampler2D u_h1; // cell-centred h1 (W, H)
+uniform sampler2D u_h2; // cell-centred h2 (W, H)
+
+layout(r32f, binding = 0) writeonly uniform image2D out_M1;  // (W, H)
+layout(r32f, binding = 1) writeonly uniform image2D out_M2;  // (W, H)
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+    if (px.x >= W || px.y >= H) return;
+
+    float h1 = texelFetch(u_h1, px, 0).r;
+    float h2 = texelFetch(u_h2, px, 0).r;
+
+    float eta1 = h1 + h2;
+    float M1 = u_gp1 * eta1;
+    float M2 = u_gp1 * eta1 + u_gp2 * h2;
+
+    imageStore(out_M1, px, vec4(M1, 0.0, 0.0, 0.0));
+    imageStore(out_M2, px, vec4(M2, 0.0, 0.0, 0.0));
+}

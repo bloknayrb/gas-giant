@@ -1,0 +1,195 @@
+#version 430
+// sw_forcing.comp — a-aware production 2-layer forcing.
+//
+// Promoted from swp_forcing.comp (M0.5 probe) to match the production CPU
+// reference shallow_water_ref.apply_forcing() EXACTLY.  Differences from the
+// probe version (which targeted the spike's hardcoded constants):
+//   * relaxation/drag fraction is 1/tau (STEP-based; NO dt_scale) — matches the
+//     CPU ref, which is dt-independent step-based forcing.
+//   * the polar-sponge rate is the uniform u_sponge_rate (the Sw2State field),
+//     NOT a hardcoded 0.5.
+//   * the sponge h-relaxation toward h_eq only fires when h_eq is present; the
+//     caller binds h_eq textures and the CPU ref guards on h_eq1 is not None,
+//     which the 2-layer solver always supplies, so it is unconditional here.
+//
+// Order (identical to apply_forcing):
+//   1. thermal relaxation h1,h2 toward h_eq   (fraction 1/tau_rad)
+//   2. Rayleigh bottom drag on LOWER layer only: u2,v2 *= (1 - 1/tau_drag)
+//   3. biharmonic hyperviscosity on u1,u2: u -= (nu4/64)*lap(lap(u))   (grid-norm)
+//   4. polar sponge: u,v *= (1 - rate*s);  h += rate*sc*(h_eq - h)
+//   5. positivity floor on h1,h2
+//
+// Two passes (hypervisc reads neighbours of the post-drag u):
+//   PASS0: relaxation + drag    -> scratch
+//   PASS1: hypervisc + sponge + floor -> final
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "sw_common.glsl"
+
+uniform ivec2  u_size;        // (W, H)
+uniform float  u_tau_rad;     // relaxation timescale (steps); 0 = disabled
+uniform float  u_tau_drag;    // drag timescale (steps); 0 = disabled
+uniform float  u_nu4;         // hyperviscosity coefficient; 0 = disabled
+uniform float  u_sponge_rate; // polar-sponge rate; 0 = disabled
+uniform float  u_h_floor;     // positivity floor
+
+// PASS 0 input samplers
+uniform sampler2D u_h1;
+uniform sampler2D u_h2;
+uniform sampler2D u_u1;
+uniform sampler2D u_u2;
+uniform sampler2D u_v1;
+uniform sampler2D u_v2;
+uniform sampler2D u_h_eq1;
+uniform sampler2D u_h_eq2;
+
+layout(r32f, binding = 0) writeonly uniform image2D out_h1;
+layout(r32f, binding = 1) writeonly uniform image2D out_h2;
+layout(r32f, binding = 2) writeonly uniform image2D out_u1;
+layout(r32f, binding = 3) writeonly uniform image2D out_u2;
+layout(r32f, binding = 4) writeonly uniform image2D out_v1;
+layout(r32f, binding = 5) writeonly uniform image2D out_v2;
+
+// PASS 1 scratch samplers
+uniform sampler2D u_s_h1;
+uniform sampler2D u_s_h2;
+uniform sampler2D u_s_u1;
+uniform sampler2D u_s_u2;
+uniform sampler2D u_s_v1;
+uniform sampler2D u_s_v2;
+
+float sponge_smooth(float x) {
+    float c = clamp(x, 0.0, 1.0);
+    return c * c * (3.0 - 2.0 * c);
+}
+
+#define LAT0 1.1344640137963142
+#define LAT1 1.4835298641951802
+
+float polar_sponge_center(int row, int H) {
+    float phi = 0.5 * PI - (float(row) + 0.5) * PI / float(H);
+    return sponge_smooth((abs(phi) - LAT0) / (LAT1 - LAT0));
+}
+
+float polar_sponge_vface(int row, int H) {
+    float phi = 0.5 * PI - float(row) * PI / float(H);
+    return sponge_smooth((abs(phi) - LAT0) / (LAT1 - LAT0));
+}
+
+// Meridional wrap replicating np.roll axis=0 (row -1 -> H-1, row H -> 0).
+int wrapYroll(int y, int H) {
+    if (y < 0)  return y + H;
+    if (y >= H) return y - H;
+    return y;
+}
+
+float fetchC(sampler2D tex, int i, int j, int W, int H) {
+    return texelFetch(tex, ivec2(wrapX(i, W), wrapYroll(j, H)), 0).r;
+}
+
+float lap(sampler2D tex, int i, int j, int W, int H) {
+    float c = fetchC(tex, i, j, W, H);
+    float e = fetchC(tex, i + 1, j, W, H);
+    float w = fetchC(tex, i - 1, j, W, H);
+    float n = fetchC(tex, i, j - 1, W, H);
+    float s = fetchC(tex, i, j + 1, W, H);
+    return e + w + n + s - 4.0 * c;
+}
+
+float biharmonic(sampler2D tex, int i, int j, int W, int H) {
+    float lap_c = lap(tex, i,     j,     W, H);
+    float lap_e = lap(tex, i + 1, j,     W, H);
+    float lap_w = lap(tex, i - 1, j,     W, H);
+    float lap_n = lap(tex, i,     j - 1, W, H);
+    float lap_s = lap(tex, i,     j + 1, W, H);
+    return lap_e + lap_w + lap_n + lap_s - 4.0 * lap_c;
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    int W = u_size.x;
+    int H = u_size.y;
+    int i = px.x;
+    int j = px.y;
+    if (i >= W || j > H) return;
+
+#ifdef PASS0
+    // v-face fields (j in 0..H): drag on v2 only.
+    {
+        float v1_val = texelFetch(u_v1, px, 0).r;
+        float v2_val = texelFetch(u_v2, px, 0).r;
+        if (u_tau_drag > 0.0) {
+            v2_val = v2_val * (1.0 - 1.0 / u_tau_drag);
+        }
+        imageStore(out_v1, px, vec4(v1_val, 0.0, 0.0, 0.0));
+        imageStore(out_v2, px, vec4(v2_val, 0.0, 0.0, 0.0));
+    }
+    // cell-centre fields (j in 0..H-1): relaxation + drag(u2).
+    if (j < H) {
+        float h1_val = texelFetch(u_h1, px, 0).r;
+        float h2_val = texelFetch(u_h2, px, 0).r;
+        float u1_val = texelFetch(u_u1, px, 0).r;
+        float u2_val = texelFetch(u_u2, px, 0).r;
+        float heq1   = texelFetch(u_h_eq1, px, 0).r;
+        float heq2   = texelFetch(u_h_eq2, px, 0).r;
+
+        if (u_tau_rad > 0.0) {
+            h1_val = h1_val + (heq1 - h1_val) / u_tau_rad;
+            h2_val = h2_val + (heq2 - h2_val) / u_tau_rad;
+        }
+        if (u_tau_drag > 0.0) {
+            u2_val = u2_val * (1.0 - 1.0 / u_tau_drag);
+        }
+        imageStore(out_h1, px, vec4(h1_val, 0.0, 0.0, 0.0));
+        imageStore(out_h2, px, vec4(h2_val, 0.0, 0.0, 0.0));
+        imageStore(out_u1, px, vec4(u1_val, 0.0, 0.0, 0.0));
+        imageStore(out_u2, px, vec4(u2_val, 0.0, 0.0, 0.0));
+    }
+#else // PASS1
+    // v-face fields: polar sponge on v1, v2.
+    {
+        float v1_val = texelFetch(u_s_v1, px, 0).r;
+        float v2_val = texelFetch(u_s_v2, px, 0).r;
+        if (u_sponge_rate > 0.0) {
+            float sv = polar_sponge_vface(j, H);
+            float r = u_sponge_rate * sv;
+            v1_val = v1_val * (1.0 - r);
+            v2_val = v2_val * (1.0 - r);
+        }
+        imageStore(out_v1, px, vec4(v1_val, 0.0, 0.0, 0.0));
+        imageStore(out_v2, px, vec4(v2_val, 0.0, 0.0, 0.0));
+    }
+    // cell-centre fields: hypervisc + sponge + floor.
+    if (j < H) {
+        float h1_val = texelFetch(u_s_h1, px, 0).r;
+        float h2_val = texelFetch(u_s_h2, px, 0).r;
+        float u1_val = texelFetch(u_s_u1, px, 0).r;
+        float u2_val = texelFetch(u_s_u2, px, 0).r;
+        float heq1   = texelFetch(u_h_eq1, px, 0).r;
+        float heq2   = texelFetch(u_h_eq2, px, 0).r;
+
+        if (u_nu4 > 0.0) {
+            float bh_u1 = biharmonic(u_s_u1, i, j, W, H);
+            float bh_u2 = biharmonic(u_s_u2, i, j, W, H);
+            u1_val = u1_val - (u_nu4 / 64.0) * bh_u1;
+            u2_val = u2_val - (u_nu4 / 64.0) * bh_u2;
+        }
+        if (u_sponge_rate > 0.0) {
+            float sc = polar_sponge_center(j, H);
+            float r = u_sponge_rate * sc;
+            u1_val = u1_val * (1.0 - r);
+            u2_val = u2_val * (1.0 - r);
+            h1_val = h1_val + r * (heq1 - h1_val);
+            h2_val = h2_val + r * (heq2 - h2_val);
+        }
+        h1_val = max(h1_val, u_h_floor);
+        h2_val = max(h2_val, u_h_floor);
+
+        imageStore(out_h1, px, vec4(h1_val, 0.0, 0.0, 0.0));
+        imageStore(out_h2, px, vec4(h2_val, 0.0, 0.0, 0.0));
+        imageStore(out_u1, px, vec4(u1_val, 0.0, 0.0, 0.0));
+        imageStore(out_u2, px, vec4(u2_val, 0.0, 0.0, 0.0));
+    }
+#endif
+}
