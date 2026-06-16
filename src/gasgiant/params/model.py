@@ -489,6 +489,36 @@ class SolverType(StrEnum):
     VORTICITY = "vorticity"   # v1.6 prognostic vorticity-streamfunction (opt-in)
 
 
+class BaroclinicParams(_Params):
+    """Opt-in 2-layer baroclinic vorticity source coupled into the vorticity
+    solver's equirect pass (M3). OFF by default => byte-identical to plain v1.6.
+    Ships the validated visual operating point (gain=0.5: bands + physically-
+    grounded mid-latitude storms). The cadence fields are fixed (non-UI): they
+    keep the baroclinic CPU solver in its healthy pre-outcrop window."""
+
+    enabled: bool = pfield(
+        False, tier=Tier.RESTART, ui="Solver",
+        description="Inject the evolving baroclinic vorticity source into the "
+                    "vorticity solver (adds physically-grounded mid-latitude "
+                    "storms; requires solver type=vorticity). Off = plain v1.6. "
+                    "No rand: randomize() must never silently enable it.")
+    gain: float = pfield(
+        0.5, tier=Tier.RESTART, lo=0.0, hi=2.0, ui="Solver",
+        description="Baroclinic source amplitude as a fraction of coriolis_f0 "
+                    "(~3). 0.5 = validated operating point. No rand.")
+    warmup_steps: int = pfield(
+        8000, tier=Tier.RESTART, lo=500, hi=20000, ui="",
+        description="Baroclinic spin-up before coupling (fixed cadence). No rand. "
+                    "hi=20000 leaves headroom past the ~12500 outcrop so a forced "
+                    "outcrop can be exercised by tests.")
+    baro_steps_per_update: int = pfield(
+        150, tier=Tier.RESTART, lo=10, hi=1000, ui="",
+        description="Baroclinic steps per source refresh (fixed cadence). No rand.")
+    update_every: int = pfield(
+        32, tier=Tier.RESTART, lo=1, hi=512, ui="",
+        description="v1.6 steps between source refreshes (fixed cadence). No rand.")
+
+
 class SolverParams(_Params):
     type: SolverType = pfield(SolverType.KINEMATIC, tier=Tier.RESTART, ui="Solver",
         description="Streamfunction solver: kinematic (analytic, v1.5) or "
@@ -517,12 +547,22 @@ class SolverParams(_Params):
         description="Linear (Rayleigh) drag fraction on relative vorticity per "
                     "step; absorbs the 2D inverse-cascade energy that piles up at "
                     "large scales (0 = off). Vorticity mode.")
+    baroclinic: BaroclinicParams = Field(default_factory=BaroclinicParams)
 
     @model_validator(mode="after")
     def _validate_sor_omega(self) -> SolverParams:
         if not (1.0 < self.sor_omega < 2.0):
             raise ValueError(
                 f"sor_omega={self.sor_omega} must be strictly in (1.0, 2.0) exclusive"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_baroclinic(self) -> SolverParams:
+        if self.baroclinic.enabled and self.type != SolverType.VORTICITY:
+            raise ValueError(
+                f"baroclinic.enabled requires solver type=vorticity "
+                f"(got {self.type})"
             )
         return self
 
