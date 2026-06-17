@@ -1,8 +1,11 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import numpy as np
-from .grid import Grid, center_to_uface, center_to_vface
+
 from . import operators as ops
+from .grid import Grid, center_to_uface, center_to_vface
 
 
 @dataclass
@@ -68,12 +71,12 @@ def _smoothstep(x: np.ndarray) -> np.ndarray:
     return x * x * (3.0 - 2.0 * x)
 
 
-def _polar_sponge(phi: np.ndarray, lat0=np.radians(65.0), lat1=np.radians(85.0)) -> np.ndarray:
+def _polar_sponge(phi: np.ndarray, lat0=np.radians(65.0), lat1=np.radians(85.0)) -> np.ndarray:  # noqa: B008
     """Ramp 0->1 poleward of lat0; used to relax velocity->0 and h->h_eq near poles."""
     return _smoothstep((np.abs(phi) - lat0) / (lat1 - lat0))
 
 
-def _apply_forcing(st: "SwState") -> None:
+def _apply_forcing(st: SwState) -> None:
     """All forcing is STEP-based (tau in steps), dt-independent — the explicit
     gravity-wave dt is tiny so time-based timescales would be infeasible."""
     g = st.g

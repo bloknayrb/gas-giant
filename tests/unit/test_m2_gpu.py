@@ -9,7 +9,6 @@ H_ref interp/wrapX) — NEVER loosen atol to hide it.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from gasgiant.sim import shallow_water_ref as ref
 
@@ -151,7 +150,6 @@ def test_gpu_helmholtz_residual_matches_ref(gpu):
 
 def _random_sw_state(W, H, a, seed=0, scale_uv=0.1):
     """A smooth, O(1) random shallow-water state (h>0, v poles zeroed)."""
-    rng = _rng(seed)
     g = ref.Grid(W=W, H=H, a=a)
     # Smooth h around 5.0 with a small latitude+longitude modulation.
     lam = np.linspace(0.0, 2 * np.pi, W, endpoint=False)[None, :]
@@ -366,6 +364,7 @@ def test_gpu_si_gravity_wave_stable(gpu):
 
 def test_gpu_si_deterministic(gpu):
     import hashlib
+
     from gasgiant.sim import sw_gpu
 
     p = _w2_params()

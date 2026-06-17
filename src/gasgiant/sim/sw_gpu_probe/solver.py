@@ -27,13 +27,14 @@ import numpy as np
 
 if TYPE_CHECKING:
     import moderngl
+
     from gasgiant.gl.context import GpuContext
 
 _KERNELS = "gasgiant.sim.kernels"
 _GROUP = 16
 
 
-def _set(prog: "moderngl.ComputeShader", name: str, value) -> None:
+def _set(prog: moderngl.ComputeShader, name: str, value) -> None:
     """Set a uniform if the compiler kept it."""
     with contextlib.suppress(KeyError):
         prog[name].value = value
@@ -73,7 +74,7 @@ class SwpState:
 
 
 def run_divergence(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -93,7 +94,6 @@ def run_divergence(
     -------
     (H, W) float32 — divergence field, same contract as the CPU function.
     """
-    import moderngl  # noqa: PLC0415 — local import to avoid hard dep at module level
 
     h = np.asarray(h, dtype=np.float32)
     u = np.asarray(u, dtype=np.float32)
@@ -147,7 +147,7 @@ def run_divergence(
 
 
 def run_grad_montgomery(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h1: np.ndarray,
     h2: np.ndarray,
     gp: tuple[float, float],
@@ -239,7 +239,7 @@ def run_grad_montgomery(
 
 
 def run_continuity(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -335,7 +335,7 @@ def run_continuity(
 
 
 def run_momentum(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     M: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -419,7 +419,7 @@ def run_momentum(
 
 
 def run_forcing(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     fields: dict[str, np.ndarray],
     v1: np.ndarray,
     v2: np.ndarray,
@@ -600,7 +600,7 @@ class SwpSolver:
 
     def __init__(
         self,
-        gpu: "GpuContext",
+        gpu: GpuContext,
         W: int,
         H: int,
         f0: float,
@@ -612,7 +612,6 @@ class SwpSolver:
         nu4: float,
         forcing_dt_scale: float = 1.0,
     ) -> None:
-        import moderngl  # noqa: PLC0415
 
         self.gpu = gpu
         self.ctx = gpu.ctx
@@ -652,7 +651,7 @@ class SwpSolver:
         def _vf(name):
             return gpu.texture2d((W, H + 1), components=1, dtype="f4")
 
-        self._tex: dict[str, "moderngl.Texture"] = {
+        self._tex: dict[str, moderngl.Texture] = {
             "h1":    _cc("h1"),   "u1":    _cc("u1"),   "v1":    _vf("v1"),
             "h2":    _cc("h2"),   "u2":    _cc("u2"),   "v2":    _vf("v2"),
             "h_eq1": _cc("h_eq1"), "h_eq2": _cc("h_eq2"),
@@ -692,7 +691,7 @@ class SwpSolver:
     # ── Public constructors / I/O ─────────────────────────────────────────────
 
     @classmethod
-    def from_cpu_state(cls, gpu: "GpuContext", st, forcing_dt_scale: float = 1.0) -> "SwpSolver":
+    def from_cpu_state(cls, gpu: GpuContext, st, forcing_dt_scale: float = 1.0) -> SwpSolver:
         """Build a SwpSolver from a CPU ``SwState``, copying all fields to GPU.
 
         Parameters
@@ -734,9 +733,9 @@ class SwpSolver:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _swap(self, name: str, tmp: "moderngl.Texture") -> None:
+    def _swap(self, name: str, tmp: moderngl.Texture) -> None:
         """Swap a resident texture with a scratch texture (ping-pong)."""
-        self._tex[name], tmp_ref = tmp, self._tex[name]
+        self._tex[name] = tmp
         # Put the old resident back in tmp so caller can reuse it next step.
         # We achieve this by returning the old value — but since Python is
         # reference-based we just mutate self._tex; caller holds the *old*
@@ -770,7 +769,7 @@ class SwpSolver:
         f0    = self.f0
         g1, g2 = self.g1, self.g2
 
-        gx_c, gy_c, gy_v = self._gx_c, self._gy_c, self._gy_v
+        gx_c, gy_v = self._gx_c, self._gy_v
 
         # Shortcuts to resident textures.
         t = self._tex
@@ -995,7 +994,7 @@ class SwpSolver:
 
 
 def run_vorticity(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     u: np.ndarray,
     v: np.ndarray,
 ) -> np.ndarray:

@@ -37,7 +37,6 @@ from gasgiant.sim.shallow_water_ref import (
     williamson2_state,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers / shared IC construction
 # ---------------------------------------------------------------------------
@@ -110,7 +109,7 @@ def test_mass_conserved_si() -> None:
     )
 
     max_drift = 0.0
-    for step_idx in range(_N_STEPS):
+    for _step_idx in range(_N_STEPS):
         st = step_semi_implicit(st, poisson_iters=_POISSON_ITS, sor_omega=_SOR_OMEGA)
         M = total_mass(st)
         drift = abs(M - M0) / abs(M0)

@@ -1,5 +1,5 @@
 import numpy as np
-import pytest
+
 from gasgiant.sim import shallow_water_ref as ref
 
 
@@ -14,7 +14,7 @@ def test_sw_gpu_state_roundtrip(gpu):
 def test_ref_williamson2_stays_balanced():
     from gasgiant.sim import shallow_water_ref as ref
     st = ref.williamson2_state(W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
-    m0 = ref.total_mass(st); e0 = ref.total_energy(st)
+    m0 = ref.total_mass(st)
     for _ in range(80):
         st = ref.step(st)
     assert np.all(np.isfinite(st.h))
@@ -39,7 +39,6 @@ def test_ref_total_mass_radius_scaling():
     # a^2 area weight: total_mass at a=2 is 4x a=1 for the same h field.
     from gasgiant.sim import shallow_water_ref as ref
     st1 = ref.williamson2_state(W=64, H=32, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
-    st2 = ref.williamson2_state(W=64, H=32, a=2.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
     # same h0/profile shape; compare mass of the SAME h on both grids:
     import numpy as np
     st2b = ref.williamson2_state(W=64, H=32, a=2.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
@@ -113,7 +112,8 @@ def _div_inputs(W, H, seed):
 
 
 def test_gpu_divergence_matches_ref(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     for W, H in [(64, 32), (96, 48)]:   # incl. NON-power-of-2 W (wrapX bug surfaces here)
         h, u, v = _div_inputs(W, H, 1)
         g = ref.Grid(W, H, a=1.0)
@@ -138,7 +138,8 @@ def test_gpu_divergence_radius_scaling(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_grad_matches_ref(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     for W, H in [(64, 32), (96, 48)]:
         rng = np.random.default_rng(5)
         h = (5.0 + 0.3 * rng.standard_normal((H, W))).astype(np.float32)
@@ -166,8 +167,10 @@ def test_gpu_grad_radius_scaling(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_vorticity_matches_ref(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     for W, H in [(64, 32), (96, 48)]:
         rng = np.random.default_rng(7)
         u = (0.2 * rng.standard_normal((H, W))).astype(np.float32)
@@ -180,8 +183,10 @@ def test_gpu_vorticity_matches_ref(gpu):
 
 def test_gpu_vorticity_rigid_rotation_a2(gpu):
     # u=U cosφ -> zeta = 2U sinφ / a ; at a=2 the analytic is halved.
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     W, H = 128, 64; U = 0.5; g = ref.Grid(W, H, a=2.0)
     u = (U * g.cos_c)[:, None] * np.ones((1, W), np.float32)
     v = np.zeros((H+1, W), np.float32)
@@ -195,8 +200,10 @@ def test_gpu_vorticity_rigid_rotation_a2(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_continuity_matches_ref(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     for W, H, a in [(64, 32, 1.0), (96, 48, 1.0), (64, 32, 2.0)]:
         rng = np.random.default_rng(2)
         h = np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
@@ -208,8 +215,10 @@ def test_gpu_continuity_matches_ref(gpu):
         np.testing.assert_allclose(got,cpu,atol=2e-5)
 
 def test_gpu_momentum_matches_ref(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     for W, H, a in [(64, 32, 1.0), (96, 48, 1.0), (64, 32, 2.0)]:
         rng = np.random.default_rng(9)
         h = (5.0 + 0.3*rng.standard_normal((H,W))).astype(np.float32)
@@ -223,8 +232,10 @@ def test_gpu_momentum_matches_ref(gpu):
 
 
 def test_gpu_continuity_conserves_mass(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     rng=np.random.default_rng(3); W,H=64,32
     h=np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
     u=(0.03*rng.standard_normal((H,W))).astype(np.float32); v=np.zeros((H+1,W),np.float32)
@@ -240,8 +251,10 @@ def test_gpu_continuity_conserves_mass(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_step_matches_ref_one_step(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     for a in [1.0, 2.0]:
         st = ref.williamson2_state(W=128, H=64, a=a, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
         sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=a, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
@@ -257,8 +270,10 @@ def test_gpu_step_matches_ref_one_step(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_matches_ref_n_steps(gpu):
-    from gasgiant.sim import sw_gpu, shallow_water_ref as ref
     import numpy as np
+
+    from gasgiant.sim import shallow_water_ref as ref
+    from gasgiant.sim import sw_gpu
     W, H = 128, 64
     st = ref.williamson2_state(W=W, H=H, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
     sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=W, H=H, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
@@ -276,8 +291,9 @@ def test_gpu_matches_ref_n_steps(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_williamson2_balanced(gpu):
-    from gasgiant.sim import sw_gpu
     import numpy as np
+
+    from gasgiant.sim import sw_gpu
     sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
     m0 = sg.total_mass()
     for _ in range(80):
@@ -293,8 +309,9 @@ def test_gpu_williamson2_balanced(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_mass_closed_energy_bounded(gpu):
-    from gasgiant.sim import sw_gpu
     import numpy as np
+
+    from gasgiant.sim import sw_gpu
     sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
     m0 = sg.total_mass(); e0 = sg.total_energy()
     energies = [e0]
@@ -318,8 +335,11 @@ def test_gpu_mass_closed_energy_bounded(gpu):
 # ---------------------------------------------------------------------------
 
 def test_gpu_deterministic(gpu):
+    import hashlib
+
+    import numpy as np
+
     from gasgiant.sim import sw_gpu
-    import numpy as np, hashlib
     def run():
         sg = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
         for _ in range(50):
@@ -328,7 +348,7 @@ def test_gpu_deterministic(gpu):
     h0, u0, v0 = sw_gpu.SwGpuSolver.from_williamson2(gpu, W=128, H=64, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0).download_state()
     a_state = run(); b_state = run()
     # byte-identical between the two runs (GPU-vs-GPU, not a precision bound)
-    for fa, fb in zip(a_state, b_state):
+    for fa, fb in zip(a_state, b_state, strict=False):
         assert np.array_equal(fa, fb), "GPU run not deterministic"
     # SHA1 of concatenated f4 bytes matches
     def sha(state):
@@ -340,7 +360,7 @@ def test_gpu_deterministic(gpu):
     # so h stays byte-identical in f32; u and v accumulate numerical drift — check those.
     # If BOTH are unchanged the solver is a no-op (the v1.6 trap).
     h_final, u_final, v_final = a_state
-    h_init, u_init_arr, v_init_arr = h0, u0, v0
+    u_init_arr, v_init_arr = u0, v0
     evolved = (not np.array_equal(u_final, u_init_arr)) or (not np.array_equal(v_final, v_init_arr))
     assert evolved, "field did not evolve (u and v unchanged after 50 steps) — possible no-op"
 

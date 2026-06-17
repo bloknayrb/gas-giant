@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import numpy as np
+
 from .grid import Grid
 from .solver import SwState
 
@@ -11,7 +13,7 @@ def h_eq_profile(H, n_bands, band_contrast, h_mean):
     return heq
 
 
-def _gradient_wind_u(heq, g, f0, geff, phi_eq=np.radians(8.0)):
+def _gradient_wind_u(heq, g, f0, geff, phi_eq=np.radians(8.0)):  # noqa: B008
     """Invert balance for u. Geostrophic poleward; finite (capped) near equator."""
     phi = g.phi_c
     dheq_dphi = np.gradient(heq, phi)

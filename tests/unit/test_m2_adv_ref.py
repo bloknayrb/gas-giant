@@ -1,5 +1,7 @@
 import numpy as np
+
 from gasgiant.sim.shallow_water_ref import Grid, departure_points
+
 
 def test_departure_solid_body_zonal():
     g = Grid(W=64, H=32, a=6.4e6)
@@ -138,7 +140,8 @@ def test_slsi_matches_m2core_at_small_dt():
     NOTE: step_slsi itself is NO-GO at large dt (premise falsified, m2-adv-verdict.md);
     this small-dt consistency check still holds and exercises the operators."""
     import numpy as np
-    from gasgiant.sim.shallow_water_ref import williamson2_state, step_slsi, step_semi_implicit
+
+    from gasgiant.sim.shallow_water_ref import step_semi_implicit, step_slsi, williamson2_state
     st = williamson2_state(W=64, H=32, a=6.4e6, omega=7.292e-5, u0=20.0, gp=9.8, h0=8000.0)
     a = step_semi_implicit(st, theta=0.5, picard_iters=3, poisson_iters=200)
     b = step_slsi(st, theta=0.5, picard_iters=3, poisson_iters=200)

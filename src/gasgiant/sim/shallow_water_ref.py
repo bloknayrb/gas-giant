@@ -15,11 +15,9 @@ a-scaling tests are the only way to catch a missing `a`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Grid
@@ -474,7 +472,7 @@ def divergence_helmholtz(
     -------
     ndarray, shape (H, W) — divergence at cell centers.
     """
-    H, W = g.H, g.W
+    H = g.H
 
     if H_ref_lat.shape != (H,):
         raise ValueError(
@@ -769,7 +767,7 @@ def helmholtz_sor(
     g: Grid,
     n_iters: int,
     sor_omega: float,
-    dh0: Optional[np.ndarray] = None,
+    dh0: np.ndarray | None = None,
 ) -> np.ndarray:
     """Fixed-count red/black SOR for L_sym dh = rhs.
 
@@ -1139,7 +1137,7 @@ def step_semi_implicit(
     picard_iters: int = 3,
     poisson_iters: int = 200,
     sor_omega: float = 1.7,
-    dh_warm: Optional[np.ndarray] = None,
+    dh_warm: np.ndarray | None = None,
 ) -> SwRefState:
     """One semi-implicit shallow-water step (textbook theta-scheme).
 
@@ -1452,7 +1450,8 @@ def _ppm_remap_1d_clamped(m, edges):
     aL, aR = _ppm_limit_parabola(m, aL, aR)
     def integral(s, x0, x1):
         d = aR[s] - aL[s]; c6 = 6.0 * (m[s] - 0.5 * (aL[s] + aR[s]))
-        F = lambda x: aL[s] * x + 0.5 * d * x * x + c6 * (0.5 * x * x - x ** 3 / 3.0)
+        def F(x):
+            return aL[s] * x + 0.5 * d * x * x + c6 * (0.5 * x * x - x ** 3 / 3.0)
         return F(x1) - F(x0)
     out = np.empty(n)
     for k in range(n):
@@ -1710,8 +1709,8 @@ class Sw2State:
     tau_drag: float = 0.0
     nu4: float = 0.0
     sponge_rate: float = 0.0
-    h_eq1: Optional[np.ndarray] = None
-    h_eq2: Optional[np.ndarray] = None
+    h_eq1: np.ndarray | None = None
+    h_eq2: np.ndarray | None = None
 
 
 def layer_mass(st):
@@ -1760,7 +1759,7 @@ def _smoothstep(x: np.ndarray) -> np.ndarray:
     return x * x * (3.0 - 2.0 * x)
 
 
-def _polar_sponge(phi: np.ndarray, lat0=np.radians(65.0), lat1=np.radians(85.0)) -> np.ndarray:
+def _polar_sponge(phi: np.ndarray, lat0=np.radians(65.0), lat1=np.radians(85.0)) -> np.ndarray:  # noqa: B008
     """Ramp 0->1 poleward of lat0; used to relax velocity->0 and h->h_eq near poles."""
     return _smoothstep((np.abs(phi) - lat0) / (lat1 - lat0))
 

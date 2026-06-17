@@ -10,7 +10,7 @@ Usage:
 
 from __future__ import annotations
 
-import dataclasses
+import contextlib
 import hashlib
 import subprocess
 import sys
@@ -22,8 +22,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gasgiant.gl import GpuContext  # noqa: E402
-from gasgiant.sim import sw_gpu  # noqa: E402
 from gasgiant.sim import shallow_water_ref as ref  # noqa: E402
+from gasgiant.sim import sw_gpu  # noqa: E402
 
 # --- Configuration ---
 W_W2, H_W2 = 64, 32          # Williamson-2 grid for SI tests (faster than 128x64)
@@ -70,18 +70,14 @@ def run_per_field_tests() -> tuple[bool, str]:
             parts = line.split()
             for i, p in enumerate(parts):
                 if p.rstrip(",") == "passed":
-                    try:
+                    with contextlib.suppress(ValueError, IndexError):
                         passed_count = int(parts[i - 1])
-                    except (ValueError, IndexError):
-                        pass
         if "failed" in line:
             parts = line.split()
             for i, p in enumerate(parts):
                 if p.rstrip(",") == "failed":
-                    try:
+                    with contextlib.suppress(ValueError, IndexError):
                         failed_count = int(parts[i - 1])
-                    except (ValueError, IndexError):
-                        pass
 
     ok = result.returncode == 0
     summary = (
@@ -314,7 +310,7 @@ def main() -> None:
         sys.exit(1)
     else:
         print("PASS — M2 semi-implicit validation complete")
-        print(f"       per-field M2 diff tests: all PASS")
+        print("       per-field M2 diff tests: all PASS")
         print(f"       gravity-wave N={int(gw_N)}x dt_gw stability: "
               f"energy_ratio={gw_ratio:.4f}")
         print(f"       W2 SI geostrophic: vel_l2={w2_vel:.2e}, "

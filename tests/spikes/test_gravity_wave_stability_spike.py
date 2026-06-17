@@ -51,14 +51,13 @@ def _emit(line: str = "") -> None:
     except OSError:
         pass
 
-import gasgiant.sim.shallow_water_ref as ref
-from gasgiant.sim.shallow_water_ref import (
+import gasgiant.sim.shallow_water_ref as ref  # noqa: E402
+from gasgiant.sim.shallow_water_ref import (  # noqa: E402
     Grid,
     SwRefState,
     step,
     step_semi_implicit,
 )
-
 
 # Match T4's documented solver parameters.  poisson_iters is reduced from T4's
 # 200 to 60 here purely for runtime: at this resting-layer config the Helmholtz

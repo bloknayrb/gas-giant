@@ -69,7 +69,7 @@ def main():
         gp1=0.05, gp2=0.3, xi_unstable=3.0, pert_amp_frac=1e-3,
         dt_safety=0.30, nu4=0.0,
     )
-    for n in range(TARGET_STEP):
+    for _n in range(TARGET_STEP):
         ref.step_2layer(st)
     z1 = ref.vorticity(st.u1, st.v1, st.g); z1 = z1 - z1.mean(axis=1, keepdims=True)
     z2 = ref.vorticity(st.u2, st.v2, st.g); z2 = z2 - z2.mean(axis=1, keepdims=True)

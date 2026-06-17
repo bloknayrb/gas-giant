@@ -20,7 +20,6 @@ Usage: py -3 scripts/sw_m3_taunudge.py [RES] [GAIN] [TAUS_CSV]
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import numpy as np
 

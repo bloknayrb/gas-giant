@@ -43,7 +43,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from measure_morphology import (  # noqa: E402
-    _belt_crop_from_rgb, _crop_deg, _fit_width, _lum, coher,
+    _belt_crop_from_rgb,
+    _crop_deg,
+    _fit_width,
+    _lum,
+    coher,
 )
 
 from gasgiant.engine.facade import Simulation  # noqa: E402
@@ -105,7 +109,7 @@ def _u8(rgb01: np.ndarray) -> np.ndarray:
     return cv2.cvtColor((np.clip(rgb01, 0, 1) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
 
-def _eddy_diag(sg: SwGpuSolver, g: "ref.Grid", f0: float) -> tuple[float, float, bool]:
+def _eddy_diag(sg: SwGpuSolver, g: ref.Grid, f0: float) -> tuple[float, float, bool]:
     """Return (eddy_vorticity_std, eddy_Rossby_number, finite).
 
     eddy_vorticity_std = std of the non-zonal TOP-layer relative vorticity.
@@ -120,7 +124,7 @@ def _eddy_diag(sg: SwGpuSolver, g: "ref.Grid", f0: float) -> tuple[float, float,
     return std, std / abs(f0), True
 
 
-def _eddy_vorticity_std(sg: SwGpuSolver, g: "ref.Grid") -> tuple[float, bool]:
+def _eddy_vorticity_std(sg: SwGpuSolver, g: ref.Grid) -> tuple[float, bool]:
     """Raw eddy_vorticity_std + finiteness (reported VERBATIM per Task 9)."""
     h1, u1, v1, _h2, _u2, _v2 = sg.download_state_2layer()
     if not np.all(np.isfinite(h1)):
@@ -133,7 +137,7 @@ def _eddy_vorticity_std(sg: SwGpuSolver, g: "ref.Grid") -> tuple[float, bool]:
 # --------------------------------------------------------------------------- #
 # IC builders
 # --------------------------------------------------------------------------- #
-def emergent_state(W: int, H: int) -> "ref.Sw2State":
+def emergent_state(W: int, H: int) -> ref.Sw2State:
     """Unstable baroclinic IC off an h_eq tilt, forcing on (emergent mode)."""
     st = ref.baroclinic_test_state(
         W=W, H=H, unstable=True, seed=0, nu4=0.06,
@@ -154,7 +158,7 @@ def seeded_banded_state(
     n_jets: int = 8, u_jet: float = 30.0, seed: int = 0,
     pert_frac: float = 2e-2, dt_safety: float = 0.2, h_floor: float = 1.0,
     nu4: float = 0.06,
-) -> "ref.Sw2State":
+) -> ref.Sw2State:
     """Seeded fallback: a balanced banded multi-jet top layer (the painted-jet
     analog) + eddy seed.  Alternating zonal jets u1 = u_jet*sin(n_jets*phi)*cos(phi)
     in geostrophic/Montgomery balance; quiescent balanced lower layer.  A small
@@ -210,7 +214,7 @@ def seeded_banded_state(
     return st
 
 
-def spin_up(sg: SwGpuSolver, g: "ref.Grid", f0: float, budget: int, label: str):
+def spin_up(sg: SwGpuSolver, g: ref.Grid, f0: float, budget: int, label: str):
     """Run the solver up to `budget` steps; stop on Rossby plateau or blowup.
 
     The non-vacuity TARGET is the a-aware eddy Rossby number Ro = evs/|f0| (see
@@ -388,8 +392,8 @@ def main() -> None:
         f"Blew up (CFL/floor)      : {res['blew_up']}",
         f"Final eddy_vorticity_std : {final_evs:.6e}   (VERBATIM; a-aware -> O(1e-5))",
         f"Final eddy Rossby number : {final_ro:.5f}   (non-vacuity gate >= {RO_TARGET})",
-        f"  NOTE: literal Task-9 `evs>=1.0` is the a=1 probe calibration; on the",
-        f"        a-aware grid the dimensionally-correct guard is Ro=evs/f0.",
+        "  NOTE: literal Task-9 `evs>=1.0` is the a=1 probe calibration; on the",
+        "        a-aware grid the dimensionally-correct guard is Ro=evs/f0.",
         "",
         f"v1.6 coher (morph-only)  : {coher_v16:.4f}",
         f"M3 coher                 : {coher_m3:.4f}",

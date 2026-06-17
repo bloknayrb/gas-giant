@@ -84,7 +84,6 @@ def build_coherent_source(grid_w: int, grid_h: int):
         pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0,
     )
     t0 = time.perf_counter()
-    last_good = ref.eddy_interface_var(st)
     steps_done = 0
     for s in range(SRC_STEPS):
         try:
@@ -99,7 +98,6 @@ def build_coherent_source(grid_w: int, grid_h: int):
             ro = ref.local_rossby_number(st)
             print(f"    step {steps_done:5d}  eddy h2 var={ev:.4e}  Ro={ro:.3f}  "
                   f"({time.perf_counter()-t0:.0f}s)")
-            last_good = ev
     print(f"  stepped {steps_done} steps; final eddy h2 var={ref.eddy_interface_var(st):.4e}")
 
     # --- Coherent source from eddy interface thickness ---

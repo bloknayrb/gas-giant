@@ -66,8 +66,11 @@ def _growth_rate(st, step_2layer, eddy_var, n_steps, sample=10):
 
 def test_baroclinic_growth_is_nonvacuous_and_matches_fplane_theory():
     from gasgiant.sim.shallow_water_ref import (
-        baroclinic_test_state, step_2layer, eddy_interface_var,
-        predicted_growth_rate_fplane, efold_steps_estimate)
+        baroclinic_test_state,
+        eddy_interface_var,
+        predicted_growth_rate_fplane,
+        step_2layer,
+    )
     # Resolution/g' tuned so the deformation radius is meridionally resolved
     # (L_D ~ 3 cells) and the run fits the step budget; gp1 lowered (0.05) to enlarge
     # the explicit dt (the baroclinic mode speed is set by gp2, not gp1); xi=3
@@ -120,8 +123,7 @@ def test_finite_amplitude_vortex_stays_coherent():
     """Gate (d): a GRS-scale balanced vortex (Rossby>0.1) stays bounded — no NaN,
     no blow-up — over a multi-hundred-step run. A finite-amplitude coherence check,
     distinct from the linear growth gate above."""
-    from gasgiant.sim.shallow_water_ref import (
-        vortex_test_state, step_2layer, local_rossby_number)
+    from gasgiant.sim.shallow_water_ref import local_rossby_number, step_2layer, vortex_test_state
     st = vortex_test_state(W=96, H=48, seed=0, gp1=0.5, ro_target=0.15)
     ro0 = local_rossby_number(st)
     assert ro0 > 0.1, f"vortex too weak to be a meaningful coherence test: Ro={ro0:.3f}"

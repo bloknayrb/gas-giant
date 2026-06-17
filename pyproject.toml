@@ -56,6 +56,18 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+# E702/E701 (compound statements via `;` or inline `:`) are the codebase's
+# deliberate dense numerical style (e.g. `a = np.zeros(...); a[1:] = ...`),
+# pervasive in the shallow-water reference -- enforcing them would mean rewriting
+# hundreds of intentional lines for no correctness gain.
+ignore = ["E702", "E701"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and one-off experiment/audit scripts favour dense inline numerical
+# expressions and verbose f-string diagnostics; the 100-col limit is enforced on
+# shipped `src/` but relaxed here (low-value churn, not shipped code).
+"tests/**" = ["E501"]
+"scripts/**" = ["E501"]
 
 [tool.importlinter]
 root_package = "gasgiant"

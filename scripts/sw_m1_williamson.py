@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import subprocess
@@ -26,8 +27,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gasgiant.gl import GpuContext  # noqa: E402
-from gasgiant.sim import sw_gpu  # noqa: E402
 from gasgiant.sim import shallow_water_ref as ref  # noqa: E402
+from gasgiant.sim import sw_gpu  # noqa: E402
 
 # --- Configuration (matching the test) ---
 W, H = 128, 64
@@ -67,10 +68,8 @@ def run_per_field_tests() -> tuple[bool, str]:
             parts = line.split()
             for i, p in enumerate(parts):
                 if p.rstrip(",") == "passed":
-                    try:
+                    with contextlib.suppress(ValueError, IndexError):
                         passed_count = int(parts[i - 1])
-                    except (ValueError, IndexError):
-                        pass
     ok = result.returncode == 0
     summary = f"  per-field matches_ref tests: {passed_count}/7 passed  {'PASS' if ok else 'FAIL'}"
     if not ok:

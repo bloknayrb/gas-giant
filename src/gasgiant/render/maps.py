@@ -217,11 +217,11 @@ class MapDeriver:
 
     def derive_from_tracer(
         self,
-        rgba: "np.ndarray",
+        rgba: np.ndarray,
         res: int,
         appearance: AppearanceParams,
         seed: int = 0,
-    ) -> "np.ndarray":
+    ) -> np.ndarray:
         """Render an (H, W, 4) float32 equirect RGBA tracer ndarray through the
         existing derive.comp shader and return an (res//2, res, 3) float32 RGB.
 

@@ -10,8 +10,9 @@ for reuse; no GPU kernels were built.
 """
 import numpy as np
 import pytest
-from gasgiant.sim.shallow_water_ref import (
-    fast_jet_state, step_slsi, step_semi_implicit, total_mass)
+
+from gasgiant.sim.shallow_water_ref import fast_jet_state, step_semi_implicit, step_slsi, total_mass
+
 
 def _run(step_fn, dt_mult, n_big):
     st = fast_jet_state(dt_mult=dt_mult)

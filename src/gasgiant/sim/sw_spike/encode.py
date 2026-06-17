@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import numpy as np
+
 from . import operators as ops
 from .solver import SwState
 

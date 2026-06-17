@@ -34,7 +34,7 @@ def to_tracer_fields(
     h1: np.ndarray,
     u1: np.ndarray,
     v1: np.ndarray,
-    g: "ref.Grid",
+    g: ref.Grid,
     h_eq1: np.ndarray | None = None,
 ) -> np.ndarray:
     """Pack the TOP-layer fields into the render's (H, W, 4) RGBA tracer.
@@ -45,10 +45,7 @@ def to_tracer_fields(
     anomaly is taken vs the zonal-by-latitude... simply the global mean.
     """
     H, W = h1.shape
-    if h_eq1 is not None:
-        h_anom = h1 - np.asarray(h_eq1, dtype=h1.dtype)
-    else:
-        h_anom = h1 - float(h1.mean())
+    h_anom = h1 - np.asarray(h_eq1, dtype=h1.dtype) if h_eq1 is not None else h1 - float(h1.mean())
 
     # Top-layer relative vorticity at corners -> cell centers.
     zeta_corner = ref.vorticity(u1, v1, g)               # (H+1, W)
@@ -62,6 +59,6 @@ def to_tracer_fields(
     return rgba
 
 
-def to_tracer(st: "ref.Sw2State") -> np.ndarray:
+def to_tracer(st: ref.Sw2State) -> np.ndarray:
     """Convenience wrapper: encode a production 2-layer ``Sw2State`` top layer."""
     return to_tracer_fields(st.h1, st.u1, st.v1, st.g, st.h_eq1)

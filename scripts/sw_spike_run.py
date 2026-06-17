@@ -1,7 +1,10 @@
 """Spin up the M0 shallow-water spike and report equilibration vs steps."""
 from __future__ import annotations
-import sys, time
+
+import sys
+import time
 from pathlib import Path
+
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))

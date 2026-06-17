@@ -33,7 +33,7 @@ def test_momentum_step_M_reduces_to_m1():
 def test_momentum_step_M_decoupled_matches_spike():
     """Validate the NON-reduction path (M != gp*h) against the validated M0 spike's
     _layer_momentum on the LOWER layer (spike a=1, f0 == 2*omega)."""
-    from gasgiant.sim.shallow_water_ref import Grid, montgomery_2layer, momentum_step_M
+    from gasgiant.sim.shallow_water_ref import Grid, momentum_step_M, montgomery_2layer
     from gasgiant.sim.sw_spike.grid import Grid as SGrid
     from gasgiant.sim.sw_spike.solver import _layer_momentum
     W, H = 32, 16; omega = 0.5; dt = 30.0
@@ -48,7 +48,7 @@ def test_momentum_step_M_decoupled_matches_spike():
 
 
 def test_step_2layer_resting_stable():
-    from gasgiant.sim.shallow_water_ref import Grid, Sw2State, step_2layer, layer_mass
+    from gasgiant.sim.shallow_water_ref import Grid, Sw2State, layer_mass, step_2layer
     g = Grid(W=32, H=16, a=6.4e6)
     st = Sw2State(g=g, omega=7.292e-5, gp1=9.8, gp2=0.3,
                   h1=np.full((16,32),1000.0), u1=np.zeros((16,32)), v1=np.zeros((17,32)),
@@ -107,7 +107,7 @@ def test_mass_conserved_per_layer_unforced():
     """Unforced (tau off, sponge off), per-layer mass conserves to round-off.
     Achievable because step_2layer uses continuity_step_conservative; the polar
     sponge injects mass (relaxes h->h_eq) so it must be off here."""
-    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer, layer_mass
+    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, layer_mass, step_2layer
     st = baroclinic_test_state(W=64, H=32, unstable=False, seed=1)
     st.tau_rad = 0.0; st.tau_drag = 0.0; st.nu4 = 0.0; st.sponge_rate = 0.0
     m0 = layer_mass(st)
@@ -119,6 +119,7 @@ def test_mass_conserved_per_layer_unforced():
 def test_determinism_2layer():
     """Two identical runs produce byte-identical state (SHA1)."""
     import hashlib
+
     from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer
     def run():
         st = baroclinic_test_state(W=48, H=24, unstable=True, seed=3)
@@ -134,8 +135,9 @@ def test_determinism_2layer():
 def test_forcing_params_change_output():
     """v1.6 no-op guard: each forcing param must actually change the evolved state
     (guard against a forcing term silently doing nothing)."""
-    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer
     import numpy as np
+
+    from gasgiant.sim.shallow_water_ref import baroclinic_test_state, step_2layer
     def evolve(field, **over):
         st = baroclinic_test_state(W=48, H=24, unstable=True, seed=4)
         st.sponge_rate = 0.0

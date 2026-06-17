@@ -198,8 +198,9 @@ def test_gpu_full_step_2layer_matches_cpu_1step(gpu):
 
 def test_gpu_full_step_2layer_matches_cpu_Nstep(gpu):
     """N full 2-layer GPU steps track CPU step_2layer within f32 tolerance."""
-    from gasgiant.sim import sw_gpu
     import copy
+
+    from gasgiant.sim import sw_gpu
 
     W, H, a = 48, 24, 6.4e6
     st = ref.balanced_2layer_state(W=W, H=H, a=a, omega=7.292e-5,
@@ -331,7 +332,7 @@ def test_gpu_2layer_checkpoint_roundtrip(gpu, tmp_path):
     sg2 = sw_gpu.SwGpuSolver.load_checkpoint(gpu, str(ckpt))
     assert sg2.n_layers == 2
     state_after = sg2.download_state_2layer()
-    for a_, b_ in zip(state_before, state_after):
+    for a_, b_ in zip(state_before, state_after, strict=False):
         assert np.array_equal(a_, b_), "checkpoint round-trip not bit-exact"
     # Forcing params + gp restored.
     assert sg2.gp1 == pytest.approx(0.5) and sg2.gp2 == pytest.approx(0.3)
@@ -339,5 +340,5 @@ def test_gpu_2layer_checkpoint_roundtrip(gpu, tmp_path):
 
     # Continuation matches: step both, compare.
     sg.step(); sg2.step()
-    for a_, b_ in zip(sg.download_state_2layer(), sg2.download_state_2layer()):
+    for a_, b_ in zip(sg.download_state_2layer(), sg2.download_state_2layer(), strict=False):
         assert np.array_equal(a_, b_), "post-checkpoint continuation diverged"

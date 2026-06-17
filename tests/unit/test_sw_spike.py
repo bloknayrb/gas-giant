@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from gasgiant.sim.sw_spike import grid
 
 
@@ -171,8 +172,9 @@ def test_balanced_zonal_state_stays_balanced():
 
 def test_checkerboard_pressure_perturbation_does_not_grow():
     # R1 gate: seed a 2dx checkerboard in h, confirm it does NOT amplify.
-    from gasgiant.sim.sw_spike import solver
     import numpy as np
+
+    from gasgiant.sim.sw_spike import solver
     st = solver.balanced_test_state(W=128, H=64, f0=4.0, gp=(1.0, 0.05))
     jj, ii = np.indices(st.h1.shape)
     cb = 0.001 * ((ii + jj) % 2)
@@ -227,7 +229,7 @@ def test_drag_reduces_bottom_layer_energy_without_forcing():
 
 
 def test_encode_tracer_channels_in_range():
-    from gasgiant.sim.sw_spike import init, solver, encode
+    from gasgiant.sim.sw_spike import encode, init, solver
     st = init.emergent_init(W=64, H=32, f0=4.0, gp=(1.0, 0.05),
                             n_bands=8, band_contrast=0.4)
     for _ in range(20):
