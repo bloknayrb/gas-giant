@@ -111,6 +111,7 @@ class Simulation:
         w, h = self.solver.equirect.size
         key = (w, h, bp.warmup_steps, self.params.seed)
         if self._baro_driver is not None and self._baro_key == key:
+            self._baro_driver.reset()  # deterministic: each dev run starts post-warmup
             return  # reuse cached driver (no re-warmup)
         from gasgiant.sim.baroclinic_driver import BaroclinicSourceDriver
         try:

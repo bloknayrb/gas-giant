@@ -209,6 +209,30 @@ def test_factory_preset_smoke(gpu):
     assert np.abs(coupled - base).max() > 0.05, "factory coupling must change render"
 
 
+def test_restart_reuse_independent_of_prior_ticks(gpu):
+    """A reused (cached) driver must reset to post-warmup on a RESTART-tier edit,
+    so the developed render is independent of how far a live preview was ticked
+    before the edit. Both runs apply the SAME unrelated edit (vort_hypervisc),
+    so only the baroclinic-stream position could differ -- the reset removes it."""
+    def run(pre_ticks: int) -> np.ndarray:
+        p = _baro_params(seed=5, dev_steps=48)
+        sim = Simulation(p, gpu)
+        try:
+            for _ in range(pre_ticks):
+                sim.tick(4)  # crosses several update_every=16 boundaries
+            new = p.model_copy(update={"solver": p.solver.model_copy(
+                update={"vort_hypervisc": 0.65})})  # unrelated Tier.RESTART edit
+            sim.update_params(new)
+            return sim.render_maps(512)["color"].astype(np.float64)
+        finally:
+            sim._release_sim()
+
+    a = run(0)
+    b = run(10)
+    maxdiff = np.abs(a - b).max()
+    assert maxdiff <= GPU_NOISE_ATOL, f"restart reuse must be tick-independent (maxdiff={maxdiff})"
+
+
 def test_mid_run_incoherence_degrades(gpu, monkeypatch):
     """If the source goes incoherent mid-run, tick must degrade to uncoupled and
     keep developing -- no exception escapes (the _update_baroclinic_source catch)."""

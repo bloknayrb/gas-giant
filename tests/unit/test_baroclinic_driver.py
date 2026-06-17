@@ -28,6 +28,17 @@ def test_driver_holds_on_outcrop():
     assert np.all(np.isfinite(src))
 
 
+def test_reset_restores_warm_state():
+    """reset() must return the driver to its post-warmup state so every dev run
+    starts identically (deterministic cache reuse)."""
+    d = BaroclinicSourceDriver(grid_w=64, grid_h=32, warmup_steps=600, seed=0)
+    s0 = d.current_source()
+    d.advance(300)
+    assert not np.allclose(s0, d.current_source()), "advance must change the source"
+    d.reset()
+    assert np.allclose(s0, d.current_source()), "reset must restore the post-warmup source"
+
+
 def test_residency_rule():
     cheap = CouplingStats(v16_seconds=10.0, baro_seconds=1.0, upload_seconds=0.5)
     assert residency_recommendation(cheap) == "option-a-sufficient"
