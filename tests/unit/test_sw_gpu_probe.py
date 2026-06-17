@@ -13,7 +13,7 @@ def test_swp_state_roundtrip(gpu):
 
 def test_swp_divergence_matches_ref(gpu):
     from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import operators, grid
+    from gasgiant.sim.sw_spike import grid, operators
 
     rng = np.random.default_rng(1)
     W, H = 64, 32
@@ -32,9 +32,10 @@ def test_swp_divergence_matches_ref(gpu):
 
 
 def test_swp_grad_montgomery_matches_ref(gpu):
-    from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import operators, grid
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid, operators
     rng = np.random.default_rng(5)
     W, H = 64, 32
     h1 = (5.0 + 0.3 * rng.standard_normal((H, W))).astype(np.float32)
@@ -57,9 +58,10 @@ def test_swp_grad_montgomery_matches_ref(gpu):
 
 
 def test_swp_vorticity_matches_ref(gpu):
-    from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import operators, grid
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid, operators
     rng = np.random.default_rng(7)
     W, H = 64, 32
     u = (0.2 * rng.standard_normal((H, W))).astype(np.float32)
@@ -74,9 +76,10 @@ def test_swp_vorticity_matches_ref(gpu):
 
 
 def test_swp_vorticity_rigid_rotation(gpu):
+    import numpy as np
+
     from gasgiant.sim.sw_gpu_probe import solver
     from gasgiant.sim.sw_spike import grid
-    import numpy as np
     W, H = 128, 64
     U = 0.5
     g = grid.Grid(W, H)
@@ -88,9 +91,10 @@ def test_swp_vorticity_rigid_rotation(gpu):
 
 
 def test_swp_continuity_matches_ref(gpu):
-    from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import operators, grid
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid, operators
     rng=np.random.default_rng(2); W,H=64,32
     h=np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
     u=(0.05*rng.standard_normal((H,W))).astype(np.float32)
@@ -102,9 +106,10 @@ def test_swp_continuity_matches_ref(gpu):
 
 
 def test_swp_continuity_conserves_mass(gpu):
+    import numpy as np
+
     from gasgiant.sim.sw_gpu_probe import solver
     from gasgiant.sim.sw_spike import grid
-    import numpy as np
     rng=np.random.default_rng(3); W,H=64,32
     h=np.clip(1.0+0.1*rng.standard_normal((H,W)),0.2,None).astype(np.float32)
     u=(0.03*rng.standard_normal((H,W))).astype(np.float32); v=np.zeros((H+1,W),np.float32)
@@ -117,9 +122,11 @@ def test_swp_continuity_conserves_mass(gpu):
 
 
 def test_swp_momentum_matches_ref(gpu):
-    from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import operators, solver as cpu, grid
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid, operators
+    from gasgiant.sim.sw_spike import solver as cpu
     rng=np.random.default_rng(9); W,H=64,32
     h1=(5.0+0.3*rng.standard_normal((H,W))).astype(np.float32)
     h2=(3.0+0.3*rng.standard_normal((H,W))).astype(np.float32)
@@ -135,9 +142,11 @@ def test_swp_momentum_matches_ref(gpu):
 
 
 def test_swp_forcing_matches_ref(gpu):
-    from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import solver as cpu, grid
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid
+    from gasgiant.sim.sw_spike import solver as cpu
     rng=np.random.default_rng(13); W,H=64,32; g=grid.Grid(W,H)
     fields={k:(0.5*rng.standard_normal((H,W))).astype(np.float32) for k in ["u1","u2","h1","h2","h_eq1","h_eq2"]}
     v1=np.zeros((H+1,W),np.float32); v1[1:H]=0.3*rng.standard_normal((H-1,W))
@@ -159,9 +168,11 @@ def test_swp_forcing_matches_ref(gpu):
 
 
 def test_swp_step_matches_ref_n_steps(gpu):
-    from gasgiant.sim.sw_gpu_probe import solver as gsolver
-    from gasgiant.sim.sw_spike import init, solver as cpu
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init
+    from gasgiant.sim.sw_spike import solver as cpu
     W, H = 96, 48
     st_cpu = init.emergent_init(W=W, H=H, f0=4.0, gp=(1.0, 0.05), n_bands=10, band_contrast=0.4)
     # Build the GPU solver from the SAME initial state (copy CPU init fields + params + dt)
@@ -178,9 +189,10 @@ def test_swp_continuity_conserves_mass_strong_gradient(gpu):
     """Under strong gradients the h_floor clamp is non-conservative (floor lifts cells),
     so GPU and CPU will both deviate from m0 at roughly the same rtol (~6e-4 for this seed).
     The key assertion is that GPU matches CPU cell-by-cell: same limiter, same conservation error."""
-    from gasgiant.sim.sw_gpu_probe import solver
-    from gasgiant.sim.sw_spike import operators, grid
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver
+    from gasgiant.sim.sw_spike import grid, operators
     rng=np.random.default_rng(11); W,H=64,32
     h=np.clip(0.3+2.0*rng.random((H,W)),0.1,None).astype(np.float32)   # large thickness contrast
     u=(0.4*rng.standard_normal((H,W))).astype(np.float32)
@@ -191,7 +203,6 @@ def test_swp_continuity_conserves_mass_strong_gradient(gpu):
     # GPU must match CPU cell-by-cell (corrected limiter matches reference)
     np.testing.assert_allclose(out, cpu, atol=2e-5)
     # Both have the same (floor-driven) mass error; verify GPU mass error is no worse than CPU's
-    m0=np.sum(h.astype(np.float64)*area)
     m_gpu=np.sum(out.astype(np.float64)*area)
     m_cpu=np.sum(cpu.astype(np.float64)*area)
     # GPU and CPU mass integrals should agree to f32 summation precision
@@ -206,9 +217,11 @@ def test_swp_forcing_dt_scale_unity_matches_existing(gpu):
     The physical-time rescale must be a no-op at dt=dt_ref (forcing_dt_scale=1.0),
     so existing 30-step accuracy is preserved.
     """
-    from gasgiant.sim.sw_gpu_probe import solver as gsolver
-    from gasgiant.sim.sw_spike import init, solver as cpu
     import numpy as np
+
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init
+    from gasgiant.sim.sw_spike import solver as cpu
     W, H = 96, 48
     st_cpu = init.emergent_init(W=W, H=H, f0=4.0, gp=(1.0, 0.05), n_bands=10, band_contrast=0.4)
     # Build GPU solver with forcing_dt_scale=1.0 (explicit; must be identical to default)
@@ -229,12 +242,13 @@ def test_swp_reproduces_m0_eddy_curve(gpu):
     """
     import pytest
     pytest.importorskip("moderngl")  # skip if no GPU
-    from gasgiant.sim.sw_gpu_probe import solver as gsolver
-    from gasgiant.sim.sw_spike import init, solver as cpu
     import numpy as np
 
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init
+    from gasgiant.sim.sw_spike import solver as cpu
+
     W, H = 192, 96
-    STEPS = 3000
     CHECK_AT = [1000, 2000, 3000]
 
     st_cpu = init.emergent_init(W=W, H=H, f0=4.0, gp=(1.0, 0.05), n_bands=10, band_contrast=0.4)
@@ -268,10 +282,11 @@ def test_swp_highres_smoke(gpu):
     """
     import pytest
     pytest.importorskip("moderngl")
+    import numpy as np
+
     from gasgiant.sim.sw_gpu_probe import solver as gsolver
     from gasgiant.sim.sw_spike import init
     from gasgiant.sim.sw_spike.grid import Grid
-    import numpy as np
 
     W_ref, H_ref = 192, 96
     W_hi,  H_hi  = 512, 256

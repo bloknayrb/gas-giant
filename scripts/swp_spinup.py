@@ -34,9 +34,10 @@ def _compute_dt(W: int, H: int, geff: float = 1.0, h_mean: float = 5.0) -> float
 
 def nu4_probe(gpu, W_hi: int, H_hi: int, dt_scale: float, steps: int = 1000) -> float:
     """Try nu4 in {0.05, 0.07, 0.10}.  Return best (highest finite + richest) value."""
-    from gasgiant.sim.sw_spike import init
-    from gasgiant.sim.sw_gpu_probe import solver as gsolver
     import dataclasses
+
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init
 
     candidates = [0.05, 0.07, 0.10]
     best_nu4 = candidates[0]
@@ -53,10 +54,7 @@ def nu4_probe(gpu, W_hi: int, H_hi: int, dt_scale: float, steps: int = 1000) -> 
             sg.step()
         h1 = sg.download("h1")
         finite = bool(np.all(np.isfinite(h1)))
-        if finite:
-            evs = sg.eddy_vorticity_std()
-        else:
-            evs = float("nan")
+        evs = sg.eddy_vorticity_std() if finite else float("nan")
         status = "STABLE" if finite else "BLEW UP"
         print(f"  nu4={nu4:.2f}: {status}  eddy_vort_std={evs:.4f}")
         if finite and evs > best_evs:
@@ -80,10 +78,11 @@ def main() -> None:
 
     print("=== M0.5 512x256 spin-up ============================================")
 
-    from gasgiant.gl.context import GpuContext
-    from gasgiant.sim.sw_spike import init
-    from gasgiant.sim.sw_gpu_probe import solver as gsolver
     import dataclasses
+
+    from gasgiant.gl.context import GpuContext
+    from gasgiant.sim.sw_gpu_probe import solver as gsolver
+    from gasgiant.sim.sw_spike import init
 
     W_ref, H_ref = 192, 96
     W_hi,  H_hi  = 512, 256

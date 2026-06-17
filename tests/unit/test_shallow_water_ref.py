@@ -12,10 +12,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import gasgiant.sim.shallow_water_ref as ref
 from gasgiant.sim.shallow_water_ref import (
     Grid,
-    coriolis_trapezoidal,
     coriolis_sandwich,
+    coriolis_trapezoidal,
     divergence_helmholtz,
     grad_faces,
     helmholtz_apply,
@@ -31,8 +32,6 @@ from gasgiant.sim.shallow_water_ref import (
     velocity_l2_drift,
     williamson2_state,
 )
-import gasgiant.sim.shallow_water_ref as ref
-
 
 # ---------------------------------------------------------------------------
 # Helpers

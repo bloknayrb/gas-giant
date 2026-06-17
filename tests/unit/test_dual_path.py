@@ -17,7 +17,6 @@ import hashlib
 import numpy as np
 import pytest
 
-
 _W, _H = 64, 32
 _IC = dict(W=_W, H=_H, a=1.0, omega=2.0, u0=0.2, gp=1.0, h0=5.0)
 _N_STEPS = 30

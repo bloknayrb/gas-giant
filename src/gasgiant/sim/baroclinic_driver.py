@@ -8,6 +8,8 @@ On lower-layer outcrop it holds the last good state.
 """
 from __future__ import annotations
 
+import copy
+
 from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
 
@@ -30,6 +32,10 @@ class BaroclinicSourceDriver:
                 f"steps -- the source never reached a finite-amplitude state. "
                 f"Reduce warmup_steps or xi_unstable."
             )
+        # Post-warmup snapshot: a reused driver (cache hit on a RESTART rebuild)
+        # restores this so every development run starts from the identical
+        # baroclinic state -- deterministic regardless of prior preview ticks.
+        self._warm_st = copy.deepcopy(self.st)
 
     def advance(self, n: int) -> None:
         """Advance the baroclinic solver n steps; on outcrop (ValueError) latch
@@ -42,6 +48,13 @@ class BaroclinicSourceDriver:
             except ValueError:
                 self.outcropped = True
                 return
+
+    def reset(self) -> None:
+        """Restore the post-warmup state. Called when a cached driver is reused
+        for a new development run so the result is independent of how far a live
+        preview was ticked before a RESTART-tier edit."""
+        self.st = copy.deepcopy(self._warm_st)
+        self.outcropped = False
 
     def current_source(self):
         """Coherent unit-std evolving source on the equirect grid (grid_h, grid_w).

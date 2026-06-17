@@ -40,7 +40,7 @@ alone.  M2-adv must adopt one of:
 """
 
 import numpy as np
-from numpy.fft import rfft, irfft
+from numpy.fft import irfft, rfft
 
 # ---------------------------------------------------------------------------
 # Parameters (fixed, deterministic — no RNG)

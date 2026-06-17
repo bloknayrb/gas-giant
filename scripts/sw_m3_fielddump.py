@@ -9,8 +9,10 @@ grayscale PNGs of the bare fields, upscaled NEAREST (honest pixels):
   raw_zeta2_nu.png lower-layer eddy vorticity WITH light nu4 (enstrophy sink test)
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
+
 import cv2
 import numpy as np
 

@@ -30,7 +30,9 @@ Usage:
     python scripts/sw_spike_explore.py
 """
 from __future__ import annotations
-import sys, time
+
+import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -38,8 +40,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from gasgiant.sim.sw_spike import init, solver, operators  # noqa: E402
-from gasgiant.sim.sw_spike.grid import Grid  # noqa: E402
+from gasgiant.sim.sw_spike import init, operators, solver  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Output directory
@@ -345,7 +346,7 @@ def _print_assessment(results: list[dict], best: dict):
         print("  Options: (a) reduce gp to increase dt, (b) add leapfrog/RK4+SIT filter,")
         print("           (c) accept zonal-only M0 as scope and defer eddies to M1.")
 
-    print(f"\n  Note: tau_rad/tau_drag are step-based (not seconds) — the explicit")
+    print("\n  Note: tau_rad/tau_drag are step-based (not seconds) — the explicit")
     print(f"  gravity-wave dt (~{best['state'].dt:.4f} nondim) means 1000 steps =")
     print(f"  {1000*best['state'].dt:.2f} nondim time units.")
 

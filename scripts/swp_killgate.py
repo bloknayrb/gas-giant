@@ -22,12 +22,12 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 import time
 from pathlib import Path
 
 import cv2
-import dataclasses
 import numpy as np
 
 # Make scripts/ importable for measure_morphology helpers.
@@ -38,10 +38,9 @@ from gasgiant.engine.facade import Simulation  # noqa: E402
 from gasgiant.gl import GpuContext  # noqa: E402
 from gasgiant.params.presets import load_factory_preset  # noqa: E402
 from gasgiant.render.maps import MapDeriver  # noqa: E402
-from gasgiant.sim.sw_spike import init  # noqa: E402
 from gasgiant.sim.sw_gpu_probe import solver as gsolver  # noqa: E402
+from gasgiant.sim.sw_spike import init  # noqa: E402
 from gasgiant.sim.sw_spike.solver import checkerboard_amplitude  # noqa: E402
-from gasgiant.sim.sw_spike import operators as ops  # noqa: E402
 
 OUT = Path("out/audit/m0p5")
 RES = 4096
@@ -353,7 +352,7 @@ def main() -> None:
     print("\n=== SUMMARY ===")
     print(f"  Resolution: {W_HI}x{H_HI} -> {RES}px render")
     print(f"  Final eddy_vort_std = {final_evs:.4f}  ({'REGIME REACHED' if evs_target_reached else 'INCONCLUSIVE — regime not reached'})")
-    print(f"  Pipeline match: morphology-only (detail/warp/lanes=0 on v1.6 side)")
+    print("  Pipeline match: morphology-only (detail/warp/lanes=0 on v1.6 side)")
     print(f"  v1.6 coher = {coher_v16:.4f}")
     print(f"  SW  coher  = {coher_sw:.4f}")
     print(f"  R1={'PASS' if r1_pass else 'FAIL'}  R3={'PASS' if r3_pass else 'FAIL'}")

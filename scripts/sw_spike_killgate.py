@@ -25,6 +25,7 @@ from measure_morphology import _belt_crop_from_rgb, _lum, coher  # noqa: E402
 from gasgiant.engine.facade import Simulation  # noqa: E402
 from gasgiant.gl import GpuContext  # noqa: E402
 from gasgiant.params.presets import load_factory_preset  # noqa: E402
+from gasgiant.sim.sw_spike.encode import to_tracer  # noqa: E402
 
 # SW spike imports.
 from gasgiant.sim.sw_spike.init import emergent_init  # noqa: E402
@@ -33,7 +34,6 @@ from gasgiant.sim.sw_spike.solver import (  # noqa: E402
     eddy_vorticity_std,
     step,
 )
-from gasgiant.sim.sw_spike.encode import to_tracer  # noqa: E402
 
 OUT = Path("out/audit/m0")
 RES = 4096          # GPU render resolution for both v1.6 and SW
@@ -118,14 +118,12 @@ def main():
     # 2. SW spike spin-up — validated eddy-developing config (192x96, nu4=0.05)
     # ------------------------------------------------------------------ #
     print("\n=== SW spike spin-up ===")
-    sw_nu4_used = SW_NU4
     try:
         sw_st, ms_per_step = _run_sw_spike(SW_W, SW_H, SW_NU4)
         sw_config = f"{SW_W}x{SW_H} nu4={SW_NU4}"
     except RuntimeError as e:
         print(f"  WARNING: {e}")
         print(f"  Retrying once with nu4={SW_NU4_FALLBACK}...")
-        sw_nu4_used = SW_NU4_FALLBACK
         sw_st, ms_per_step = _run_sw_spike(SW_W, SW_H, SW_NU4_FALLBACK)
         sw_config = f"{SW_W}x{SW_H} nu4={SW_NU4_FALLBACK}"
 
@@ -178,8 +176,8 @@ def main():
     # ------------------------------------------------------------------ #
     # 7. Belt crop on the SW render — use the SAME belt box as v1.6
     # ------------------------------------------------------------------ #
-    from measure_morphology import _crop_deg, _fit_width
     import cv2 as _cv2
+    from measure_morphology import _crop_deg, _fit_width
 
     # Match width to the reference image (as _belt_crop_from_rgb does).
     ref_w = _cv2.imread("refs/PIA07782.jpg").shape[1]
@@ -237,9 +235,9 @@ def main():
         f"GPU render res               : {RES}",
         "",
         "Artifacts written:",
-        f"  out/audit/m0/sw_vs_v16.png      — v1.6 belt crop | SW belt crop (labeled)",
-        f"  out/audit/m0/sw_render_full.png — raw SW equirect render (unlabeled, full)",
-        f"  out/audit/m0/report.txt         — this report",
+        "  out/audit/m0/sw_vs_v16.png      — v1.6 belt crop | SW belt crop (labeled)",
+        "  out/audit/m0/sw_render_full.png — raw SW equirect render (unlabeled, full)",
+        "  out/audit/m0/report.txt         — this report",
         "",
         "BINDING GATE: The BLIND VISUAL PANEL on sw_vs_v16.png is the kill-gate",
         "(MD-1). Look for folded-filament belt morphology in the SW row.",

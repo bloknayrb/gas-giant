@@ -50,6 +50,12 @@ def test_solver_params_all_fields_classified():
     doc = sp.model_dump()
     unclassified = []
     for name, info in SolverParams.model_fields.items():
+        ann = info.annotation
+        if isinstance(ann, type) and issubclass(ann, BaseModel):
+            # Nested model (e.g. baroclinic) -> _draw_model renders it as a
+            # collapsing section, not a leaf widget; its leaves are covered by
+            # test_every_leaf_renders_a_widget. Not a fall-through to disabled text.
+            continue
         kind = panels.leaf_kind(name, info, doc[name])
         if kind is None:
             unclassified.append(name)

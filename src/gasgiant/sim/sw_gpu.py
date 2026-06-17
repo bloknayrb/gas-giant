@@ -25,13 +25,14 @@ import numpy as np
 
 if TYPE_CHECKING:
     import moderngl
+
     from gasgiant.gl.context import GpuContext
 
 _KERNELS = "gasgiant.sim.kernels"
 _GROUP = 16
 
 
-def _set(prog: "moderngl.ComputeShader", name: str, value) -> None:
+def _set(prog: moderngl.ComputeShader, name: str, value) -> None:
     """Set a uniform if the compiler kept it."""
     with contextlib.suppress(KeyError):
         prog[name].value = value
@@ -101,7 +102,7 @@ class SwGpuState:
 
 
 def run_divergence(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -176,7 +177,7 @@ def run_divergence(
 
 
 def run_vorticity(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     u: np.ndarray,
     v: np.ndarray,
     a: float,
@@ -244,7 +245,7 @@ def run_vorticity(
 
 
 def run_continuity(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -345,7 +346,7 @@ def run_continuity(
 
 
 def run_grad(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     gp: float,
     a: float,
@@ -415,7 +416,7 @@ def run_grad(
     return result_gx, result_gy
 
 
-def _upload_href(gpu: "GpuContext", H_ref_lat: np.ndarray, H: int):
+def _upload_href(gpu: GpuContext, H_ref_lat: np.ndarray, H: int):
     """Upload H_ref_lat (H,) as a (1,H) R32F texture sampled by row index.
 
     Cast to float32 before upload: reference_depth returns float64.
@@ -429,7 +430,7 @@ def _upload_href(gpu: "GpuContext", H_ref_lat: np.ndarray, H: int):
 
 
 def run_helmholtz_apply(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     dh: np.ndarray,
     H_ref_lat: np.ndarray,
     gp: float,
@@ -473,7 +474,7 @@ def run_helmholtz_apply(
 
 
 def run_helmholtz_residual(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     dh: np.ndarray,
     rhs: np.ndarray,
     H_ref_lat: np.ndarray,
@@ -519,7 +520,7 @@ def run_helmholtz_residual(
 
 
 def run_helmholtz_sor(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     rhs: np.ndarray,
     H_ref_lat: np.ndarray,
     gp: float,
@@ -600,7 +601,7 @@ class SwGpuSolver:
 
     def __init__(
         self,
-        gpu: "GpuContext",
+        gpu: GpuContext,
         W: int,
         H: int,
         a: float,
@@ -707,7 +708,7 @@ class SwGpuSolver:
     @classmethod
     def from_williamson2(
         cls,
-        gpu: "GpuContext",
+        gpu: GpuContext,
         W: int,
         H: int,
         a: float,
@@ -724,7 +725,7 @@ class SwGpuSolver:
         picard_iters: int = 3,
         dt_multiplier: float = 1.0,
         n_layers: int = 1,
-    ) -> "SwGpuSolver":
+    ) -> SwGpuSolver:
         """Build a SwGpuSolver from the analytic Williamson-2 initial condition.
 
         Produces the same initial h, u, v and dt as
@@ -914,7 +915,7 @@ class SwGpuSolver:
         np.savez(path, **arrays)
 
     @classmethod
-    def load_checkpoint(cls, gpu: "GpuContext", path: str | os.PathLike) -> "SwGpuSolver":
+    def load_checkpoint(cls, gpu: GpuContext, path: str | os.PathLike) -> SwGpuSolver:
         """Reconstruct a :class:`SwGpuSolver` from a checkpoint.
 
         Accepts both **version 1** (M1 explicit solver — semi_implicit defaults
@@ -1235,7 +1236,7 @@ class SwGpuSolver:
             self._dispatch_log.append(name)
 
     @classmethod
-    def from_2layer_state(cls, gpu: "GpuContext", st) -> "SwGpuSolver":
+    def from_2layer_state(cls, gpu: GpuContext, st) -> SwGpuSolver:
         """Build a 2-layer (n_layers=2) GPU solver from a CPU Sw2State.
 
         Copies both layers' fields + h_eq + forcing params to the GPU.  The
@@ -1341,7 +1342,7 @@ class SwGpuSolver:
 
 
 def run_continuity_conservative(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -1431,7 +1432,7 @@ def run_continuity_conservative(
 
 
 def run_helmholtz_rhs(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h_n: np.ndarray,
     u_n: np.ndarray,
     v_n: np.ndarray,
@@ -1463,10 +1464,14 @@ def run_helmholtz_rhs(
     tex_vs  = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
     tex_un  = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_un.write(u_n.tobytes())
     tex_vn  = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vn.write(v_n.tobytes())
-    tex_gxn = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gxn.write(gxn.astype(np.float32).tobytes())
-    tex_gyn = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gyn.write(gyn.astype(np.float32).tobytes())
-    tex_gxd = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gxd.write(gxd.astype(np.float32).tobytes())
-    tex_gyd = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gyd.write(gyd.astype(np.float32).tobytes())
+    tex_gxn = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gxn.write(gxn.astype(np.float32).tobytes())
+    tex_gyn = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gyn.write(gyn.astype(np.float32).tobytes())
+    tex_gxd = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gxd.write(gxd.astype(np.float32).tobytes())
+    tex_gyd = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gyd.write(gyd.astype(np.float32).tobytes())
     tex_href = _upload_href(gpu, H_ref_lat, H)
     tex_out  = gpu.texture2d((W, H), components=1, dtype="f4")
 
@@ -1503,7 +1508,7 @@ def run_helmholtz_rhs(
 
 
 def run_velocity_backsub(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     u_star: np.ndarray,
     v_star: np.ndarray,
     h_impl: np.ndarray,
@@ -1527,8 +1532,10 @@ def run_velocity_backsub(
 
     tex_us = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_us.write(u_star.tobytes())
     tex_vs = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_vs.write(v_star.tobytes())
-    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4"); tex_gx.write(grad_x.astype(np.float32).tobytes())
-    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4"); tex_gy.write(grad_y.astype(np.float32).tobytes())
+    tex_gx = gpu.texture2d((W, H),     components=1, dtype="f4")
+    tex_gx.write(grad_x.astype(np.float32).tobytes())
+    tex_gy = gpu.texture2d((W, H + 1), components=1, dtype="f4")
+    tex_gy.write(grad_y.astype(np.float32).tobytes())
     tex_u  = gpu.texture2d((W, H),     components=1, dtype="f4")
     tex_v  = gpu.texture2d((W, H + 1), components=1, dtype="f4")
 
@@ -1558,7 +1565,7 @@ def run_velocity_backsub(
 
 
 def run_si_predictor(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -1640,7 +1647,7 @@ def run_si_predictor(
 
 
 def run_momentum(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -1763,7 +1770,7 @@ def run_momentum(
 # ===========================================================================
 
 def run_montgomery(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     h1: np.ndarray,
     h2: np.ndarray,
     gp1: float,
@@ -1806,7 +1813,7 @@ def run_montgomery(
 
 
 def run_bernoulli_M(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     M: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -1845,7 +1852,7 @@ def run_bernoulli_M(
 
 
 def run_momentum_M(
-    gpu: "GpuContext",
+    gpu: GpuContext,
     M: np.ndarray,
     u: np.ndarray,
     v: np.ndarray,
@@ -1907,7 +1914,7 @@ def run_momentum_M(
     return u_new, v_new
 
 
-def run_forcing_2layer(gpu: "GpuContext", st) -> dict[str, np.ndarray]:
+def run_forcing_2layer(gpu: GpuContext, st) -> dict[str, np.ndarray]:
     """GPU 2-layer forcing pass; ports shallow_water_ref.apply_forcing().
 
     Two passes of sw_forcing.comp (relax+drag -> hypervisc+sponge+floor).
