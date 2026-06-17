@@ -14,13 +14,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-GPU_NOISE_ATOL = 1e-2  # > measured ~0.004 session LSB noise, << ~0.69 coupling signal
-
 from gasgiant.engine.facade import Simulation
 from gasgiant.params.model import PlanetParams, SolverType
 from gasgiant.params.presets import load_factory_preset
 
 pytestmark = pytest.mark.gpu
+
+GPU_NOISE_ATOL = 1e-2  # > measured ~0.004 session LSB noise, << ~0.69 coupling signal
 
 
 def _baro_params(seed: int = 7, dev_steps: int = 40, warmup: int = 600,
