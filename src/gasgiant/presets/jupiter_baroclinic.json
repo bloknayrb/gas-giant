@@ -22,7 +22,7 @@
       "vort_drag": 0.0,
       "baroclinic": {
         "enabled": true,
-        "gain": 0.5
+        "gain": 2.0
       }
     },
     "bands": {

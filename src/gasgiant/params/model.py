@@ -492,9 +492,10 @@ class SolverType(StrEnum):
 class BaroclinicParams(_Params):
     """Opt-in 2-layer baroclinic vorticity source coupled into the vorticity
     solver's equirect pass (M3). OFF by default => byte-identical to plain v1.6.
-    Ships the validated visual operating point (gain=0.5: bands + physically-
-    grounded mid-latitude storms). The cadence fields are fixed (non-UI): they
-    keep the baroclinic CPU solver in its healthy pre-outcrop window."""
+    Default gain=2.0 (bounded mid-latitude belt-texture enrichment; the final
+    aesthetic gain is the user's full-res call). The cadence fields are fixed
+    (non-UI): they keep the baroclinic CPU solver in its healthy pre-outcrop
+    window."""
 
     enabled: bool = pfield(
         False, tier=Tier.RESTART, ui="Solver",
@@ -503,9 +504,14 @@ class BaroclinicParams(_Params):
                     "storms; requires solver type=vorticity). Off = plain v1.6. "
                     "No rand: randomize() must never silently enable it.")
     gain: float = pfield(
-        0.5, tier=Tier.RESTART, lo=0.0, hi=2.0, ui="Solver",
+        2.0, tier=Tier.RESTART, lo=0.0, hi=8.0, ui="Solver",
         description="Baroclinic source amplitude as a fraction of coriolis_f0 "
-                    "(~3). 0.5 = validated operating point. No rand.")
+                    "(~3). The source is injected into the Poisson RHS (NOT the "
+                    "vorticity state), so it is bounded (no accumulation) and "
+                    "coherent (never folded by advection -- it is read fresh from "
+                    "the source each step and never enters the advected q state), "
+                    "enriching mid-latitude belt texture. ~2 = subtle; high gain "
+                    "over-boils. No rand.")
     warmup_steps: int = pfield(
         8000, tier=Tier.RESTART, lo=500, hi=20000, ui="",
         description="Baroclinic spin-up before coupling (fixed cadence). No rand. "
