@@ -47,7 +47,7 @@ def run_config(gp2, H_each, xi, m_zonal, smooth, warmup, seed=0):
     for i in range(warmup):
         try:
             ref.step_2layer(st)
-        except ValueError:
+        except ref.PositivityViolation:  # real outcrop only; a stray bug stays loud
             outcrop_step = i
             break
     res = {

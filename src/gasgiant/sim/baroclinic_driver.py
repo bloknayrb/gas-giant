@@ -9,9 +9,12 @@ On lower-layer outcrop it holds the last good state.
 from __future__ import annotations
 
 import copy
+import logging
 
 from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
+
+log = logging.getLogger(__name__)
 
 
 class BaroclinicSourceDriver:
@@ -40,14 +43,20 @@ class BaroclinicSourceDriver:
         self._warm_st = copy.deepcopy(self.st)
 
     def advance(self, n: int) -> None:
-        """Advance the baroclinic solver n steps; on outcrop (ValueError) latch
-        `outcropped` and stop stepping (the last good state is retained)."""
+        """Advance the baroclinic solver n steps. On lower-layer outcrop
+        (PositivityViolation -- the ONLY ValueError reachable from step_2layer's
+        explicit call tree) latch `outcropped`, log it, and stop stepping; the
+        last good state is retained. Any OTHER exception (a genuine bug) is NOT
+        swallowed here -- it propagates so it cannot masquerade as a benign
+        outcrop (which, with the stable gp2=0.075 config, should never happen)."""
         for _ in range(n):
             if self.outcropped:
                 return
             try:
                 ref.step_2layer(self.st)
-            except ValueError:
+            except ref.PositivityViolation as exc:
+                log.warning("baroclinic lower-layer outcrop; holding last good "
+                            "state: %s", exc)
                 self.outcropped = True
                 return
 

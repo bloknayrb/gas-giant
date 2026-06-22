@@ -9,7 +9,8 @@ lives in the interface thickness.
 Eddy scale: the emergent dominant zonal wavenumber is set by the deformation
 radius L_d (k_d^2 = 4*f0^2/(gp2*H)). gp2=0.075 puts the most-unstable mode at
 m~14 (smaller, Jupiter-like mid-latitude storms). The earlier gp2=0.3 sat at
-m~8 but was actually near-outcropping (broad, incoherent blobs that blew up
+predicted m~7 (emergent ~m8) but was actually near-outcropping (broad,
+incoherent blobs that blew up
 ~step 12.3k); the lower gp2 is BOTH finer-scale AND more coherent + stable
 (single-mode share ~0.76 vs ~0.32, no outcrop through the coupled run). See
 scripts/baro_scale_sweep.py for the CPU crux sweep that selected it.
@@ -86,11 +87,19 @@ def geostrophic_vorticity_source(st, smooth_sigma: float = 2.5,
     return zeta * band[:, None]
 
 
+class IncoherentSourceError(ValueError):
+    """The derived source failed the coherence gate (its dominant zonal mode is
+    grid-scale / checkerboard, not a coherent eddy). Subclasses ValueError so
+    existing `except ValueError` / pytest.raises(ValueError) sites keep working,
+    while letting the coupling controller catch this *expected* degrade signal
+    distinctly from an unrelated ValueError raised by a genuine bug."""
+
+
 def assert_coherent(field2d: np.ndarray) -> int:
     """Reject a checkerboard source. Returns the dominant zonal m (<= M_GATE_MAX)."""
     m, _ = dominant_zonal_m(field2d)
     if m > M_GATE_MAX:
-        raise ValueError(
+        raise IncoherentSourceError(
             f"source dominant zonal m={m} exceeds coherence gate {M_GATE_MAX} "
             f"(checkerboard / grid-scale source, not a coherent eddy)"
         )

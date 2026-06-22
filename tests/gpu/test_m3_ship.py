@@ -242,6 +242,7 @@ def test_restart_reuse_independent_of_prior_ticks(gpu):
 def test_mid_run_incoherence_degrades(gpu, monkeypatch):
     """If the source goes incoherent mid-run, tick must degrade to uncoupled and
     keep developing -- no exception escapes (the _update_baroclinic_source catch)."""
+    from gasgiant.sim.baroclinic_source import IncoherentSourceError
     sim = Simulation(_baro_params(dev_steps=48), gpu)
     try:
         real = sim._baro_driver.current_source
@@ -250,7 +251,9 @@ def test_mid_run_incoherence_degrades(gpu, monkeypatch):
         def flaky():
             calls["n"] += 1
             if calls["n"] == 2:  # fail the second refresh (at step_index 16)
-                raise ValueError("coherence gate (injected)")
+                # the EXPECTED degrade signal the facade catches -- a plain
+                # ValueError would now (post-refactor) propagate, not degrade.
+                raise IncoherentSourceError("coherence gate (injected)")
             return real()
 
         monkeypatch.setattr(sim._baro_driver, "current_source", flaky)

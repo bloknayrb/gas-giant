@@ -49,6 +49,9 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
         t0 = time.perf_counter()
         driver.advance(baro_steps_per_update)
         t1 = time.perf_counter()
+        # Measurement harness: NOT wrapped in try/except on purpose -- a coherence
+        # gate / outcrop here SHOULD surface loudly (unlike the facade dev loop,
+        # which degrades to uncoupled). Keep the asymmetry deliberate.
         sim.set_external_vorticity_source(driver.current_source(), gain=gain)
         t2 = time.perf_counter()
 
