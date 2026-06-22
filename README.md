@@ -1,5 +1,7 @@
 # Gas Giant Studio
 
+<img width="3439" height="1394" alt="image" src="https://github.com/user-attachments/assets/df57fc9f-c6e8-44ac-8505-daea23e35201" />
+
 Procedural gas giant texture map generator. A GPU "sim-advected procedural"
 engine — a physically motivated velocity field (alternating zonal jets,
 injected storm vortices, shear-driven turbulence) through which cloud tracer
