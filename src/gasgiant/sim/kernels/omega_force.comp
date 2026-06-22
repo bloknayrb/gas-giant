@@ -53,14 +53,9 @@ uniform vec3  u_turb_offset;  // seeded noise offset (deterministic)
 uniform float u_turb_time;    // advances the injection noise between steps
 uniform float u_vort_drag;    // linear Rayleigh drag fraction on ω_rel per step
 
-// --- M3 SPIKE (opt-in, reversible) ----------------------------------------
-// External vorticity source: a static map (e.g. baroclinic-eddy ζ' resampled
-// onto the equirect grid) injected each step as q += u_external_gain * src.r.
-// STRICT NO-OP when u_external_gain == 0.0 (the production default): the gain
-// is 0 unless the solver explicitly binds a source, and the sampler is bound
-// to a safe texture in that case so the texture() call never reads garbage.
-uniform sampler2D u_external_omega;
-uniform float     u_external_gain;   // 0 disables (default)
+// NOTE: the M3 baroclinic source is NOT injected here. It is overlaid onto the
+// Poisson RHS in omega_recover.comp (ω_rel = q − f + gain·f0·src), so it never
+// enters the persistent q state -- bounded, coherent, decoupled from vort_relax_tau.
 
 // SSBO declared before vortex_omega.glsl (which uses vortex_data and u_vortex_count).
 layout(std430, binding = 2) readonly buffer Vortices {

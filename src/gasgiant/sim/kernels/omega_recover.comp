@@ -42,6 +42,8 @@ void main() {
     float f = u_coriolis_f0 * sin(ll.y);
 
     float orel = q - f;
+    // Exact-zero gate: correct because the solver always binds u_external_gain as
+    // a literal (float(gain) enabled / 0.0 disabled), never a computed value.
     if (u_external_gain != 0.0) {
         vec2 ext_uv = (vec2(px) + 0.5) / vec2(u_size);
         orel += u_external_gain * u_coriolis_f0 * texture(u_external_omega, ext_uv).r;

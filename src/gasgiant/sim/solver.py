@@ -300,6 +300,22 @@ class Solver:
         # P3b static uniforms.
         _set(state.k_recover, "u_size", size)
         _set(state.k_recover, "u_coriolis_f0", p.solver.coriolis_f0)
+        # B1 tripwire: the M3 baroclinic overlay's enable gate is the single
+        # u_external_gain uniform, bound per-step through the KeyError-suppressing
+        # _set. If a future edit drops/renames these uniforms the coupling would
+        # silently no-op while reporting success. They live in unconditional code
+        # in omega_recover.comp (so the compiler never optimizes them away); assert
+        # presence once at build so any such regression fails loud at startup.
+        if domain.kind == DOMAIN_EQUIRECT:
+            try:
+                state.k_recover["u_external_gain"]
+                state.k_recover["u_external_omega"]
+            except KeyError as e:
+                raise RuntimeError(
+                    "omega_recover.comp dropped the baroclinic coupling uniforms "
+                    "(u_external_gain / u_external_omega); the M3 source would "
+                    "silently no-op."
+                ) from e
         for k in (state.k_sor_red, state.k_sor_black):
             _set(k, "u_size", size)
             _set(k, "u_sor_omega", p.solver.sor_omega)
@@ -688,6 +704,11 @@ class Solver:
             kr = state.k_recover
             state.cur.use(location=0)
             _set(kr, "u_omega", 0)
+            # The shader gate is an exact `u_external_gain != 0.0` compare, which
+            # is correct ONLY because gain always reaches the GPU as a literal:
+            # float(self.external_gain) when enabled, 0.0 when disabled -- never a
+            # computed value. If gain ever becomes arithmetic, switch the shader to
+            # a threshold (abs(g) > 1e-6).
             if dom.kind == DOMAIN_EQUIRECT and self.external_omega_tex is not None:
                 self.external_omega_tex.use(location=3)
                 _set(kr, "u_external_omega", 3)

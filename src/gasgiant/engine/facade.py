@@ -142,7 +142,7 @@ class Simulation:
         """Equirect tracer state (tests and diagnostics)."""
         return self.solver.equirect.tracers
 
-    # -- M3 SPIKE (opt-in external vorticity source) --------------------------
+    # -- M3 baroclinic source (opt-in external vorticity source) --------------
 
     def set_external_vorticity_source(
         self, field: np.ndarray | None, gain: float = 0.0
@@ -150,9 +150,11 @@ class Simulation:
         """Bind an optional external vorticity source onto the equirect solver.
 
         `field` is an (H, W) or (H, W, 1) float32 array on the equirect grid
-        (W, W//2); injected each step as q += gain * field. Pass field=None to
-        disable. STRICT no-op on the default path (never called). Re-uploading a
-        same-size source writes into the existing texture (no per-call alloc)."""
+        (W, W//2); overlaid onto the Poisson RHS in omega_recover.comp each step
+        (ω_rel = q − f + gain·f0·field) -- NOT into the persistent q state, so it
+        is bounded and decoupled from vort_relax_tau. Pass field=None to disable.
+        STRICT no-op on the default path (never called). Re-uploading a same-size
+        source writes into the existing texture (no per-call alloc)."""
         if field is None:
             if self.solver.external_omega_tex is not None:
                 self.solver.external_omega_tex.release()

@@ -38,9 +38,10 @@ def _midband_mean_abs_omega(sim: Simulation, lat_cut_deg: float = 50.0) -> float
 
 
 def test_coupled_run_develops_and_changes_render(gpu):
-    # The bounded (folded-into-q_target) source builds over ~vort_relax_tau steps,
-    # so a few-step run barely shows it; develop ~100 steps at gain=2 for a clear
-    # render delta.
+    # The RHS-injected source is zero-lag (read fresh each step, decoupled from
+    # vort_relax_tau), but its render signature only reads clearly once the v1.6
+    # jet itself has developed over ~tau steps; develop ~100 steps at gain=2 for a
+    # clear render delta.
     base = Simulation(_params(steps=96), gpu)
     base.run_to_completion(chunk=64)
     base_rgb = np.clip(base.render_maps(512)["color"][..., :3], 0, 1)
@@ -68,7 +69,12 @@ def test_coupled_vorticity_bounded_over_long_horizon(gpu):
     accumulating to ~tau*gain*src and inflating the mid-band several-fold (the smear).
 
     Measured at 512px/400 steps: baseline mid-band mean ~2.62; the RHS-injection build
-    holds it at ~baseline; the original q-injection inflates it >5x (test fails)."""
+    holds it at ~baseline; the original q-injection inflates it >5x (test fails).
+
+    NB this metric reads the q state, and RHS injection deliberately never touches q,
+    so the bound is intentionally one-sided (upper only). The "source has effect"
+    direction is covered on the render by test_coupled_run_develops_and_changes_render
+    and by test_nonzero_gain_changes_output."""
     steps = 400
     base = Simulation(_params(steps=steps), gpu)
     base.run_to_completion(chunk=64)
@@ -91,9 +97,9 @@ def test_coupled_enriches_texture_keeping_bands(gpu):
     """The RHS-injected baroclinic source enriches mid-latitude belt texture while
     leaving the banded structure intact -- it is NOT the old q-accumulation that
     piled vorticity into the active band and smeared it across bands. At 512px/96
-    steps, gain=2: high-frequency energy is preserved-to-slightly-raised (measured
-    ratio ~1.02) and the latitude concentration is essentially unchanged (~0.97x),
-    i.e. bands are not smeared into uniform."""
+    steps, gain=2: high-frequency energy stays near unity (well within the 0.5-2.0
+    gate) and the latitude concentration stays near baseline (well within the 0.85x
+    floor), i.e. bands are not smeared into uniform."""
     from gasgiant.render.m3_metrics import highfreq_energy, latitude_concentration
 
     base = Simulation(_params(steps=96), gpu)

@@ -8,6 +8,7 @@ import pytest
 from gasgiant.engine.facade import Simulation
 from gasgiant.params.model import PlanetParams, SolverType
 from gasgiant.params.presets import load_factory_preset
+from gasgiant.sim.solver import DOMAIN_EQUIRECT, DOMAIN_NORTH
 
 pytestmark = pytest.mark.gpu
 
@@ -72,3 +73,36 @@ def test_nonzero_gain_changes_output(gpu):
     sim._release_sim()
 
     assert on_bytes != base_bytes, "nonzero gain must alter the render"
+
+
+def _omega_rel(sim: Simulation, domain: int) -> np.ndarray:
+    return np.asarray(sim.gpu.read_texture(sim.solver._omega_states[domain].omega_rel))
+
+
+def test_polar_domains_ignore_external_source(gpu):
+    """The injection gate is equirect-only (solver binds the source only when
+    dom.kind == DOMAIN_EQUIRECT; all other domains get u_external_gain=0.0). This
+    gate was rewritten in the RHS-injection fix (moved from the force pass to the
+    recover pass), so pin it: a bound source at nonzero gain must leave the polar
+    patches' Poisson RHS byte-identical to an uncoupled run, while the equirect
+    band's RHS changes."""
+    base = Simulation(_vort_params(), gpu)
+    base_rgb = _render_bytes(base)  # develop the sim (run_to_completion)
+    base_north = _omega_rel(base, DOMAIN_NORTH)
+    base_equi = _omega_rel(base, DOMAIN_EQUIRECT)
+    base._release_sim()
+
+    sim = Simulation(_vort_params(), gpu)
+    sim.set_external_vorticity_source(_equirect_source(sim, 1.0), gain=1.5)
+    _render_bytes(sim)
+    sim_north = _omega_rel(sim, DOMAIN_NORTH)
+    sim_equi = _omega_rel(sim, DOMAIN_EQUIRECT)
+    sim._release_sim()
+
+    # Polar patch RHS must be untouched by the equirect-only source.
+    assert np.array_equal(sim_north, base_north), (
+        "external source leaked into a polar domain -- the equirect-only gate regressed"
+    )
+    # Positive control: the equirect band's RHS does see the source.
+    assert not np.array_equal(sim_equi, base_equi)
+    assert base_rgb is not None
