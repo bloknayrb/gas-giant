@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from gasgiant.engine.baroclinic_coupling import CouplingStats, residency_recommendation
+from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim.baroclinic_driver import BaroclinicSourceDriver
 
 
@@ -18,11 +19,16 @@ def test_driver_source_evolves():
     assert float(np.abs(src_a - src_b).mean()) > 1e-3, "source must evolve in time"
 
 
-def test_driver_holds_on_outcrop():
+def test_driver_holds_on_outcrop(monkeypatch):
     """Advancing far past lower-layer outcrop must not raise; the driver holds
-    the last good state and still emits a finite, coherent source."""
+    the last good state and still emits a finite, coherent source.
+
+    The production config (gp2=0.075) is intentionally stable and does NOT outcrop
+    (survives 40k+ steps), so force the legacy unstable gp2=0.3 to exercise the
+    hold-on-outcrop path (it outcrops ~step 12.3k)."""
+    monkeypatch.setattr(bsrc, "GP2", 0.3)
     d = BaroclinicSourceDriver(grid_w=64, grid_h=32, warmup_steps=500, seed=0)
-    d.advance(20000)                       # well past outcrop (~step 12500)
+    d.advance(20000)                       # well past the gp2=0.3 outcrop (~12.3k)
     assert d.outcropped is True
     src = d.current_source()
     assert np.all(np.isfinite(src))

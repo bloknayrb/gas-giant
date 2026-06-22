@@ -117,9 +117,15 @@ def test_seed_determinism(gpu):
     assert np.abs(a - b).max() > 0.05, "different seed must change storm pattern"
 
 
-def test_graceful_warmup_outcrop(gpu):
-    """A warmup past the ~12500 outcrop must degrade to uncoupled (driver=None),
-    NOT crash construction, and render the same as the uncoupled run."""
+def test_graceful_warmup_outcrop(gpu, monkeypatch):
+    """A warmup past outcrop must degrade to uncoupled (driver=None), NOT crash
+    construction, and render the same as the uncoupled run.
+
+    The production config (gp2=0.075) is intentionally stable and never outcrops,
+    so force the legacy unstable gp2=0.3 (outcrops ~12.3k) to exercise the
+    graceful-degrade path with a warmup beyond it."""
+    from gasgiant.sim import baroclinic_source as bsrc
+    monkeypatch.setattr(bsrc, "GP2", 0.3)
     p = _baro_params()
     p.solver.baroclinic = p.solver.baroclinic.model_copy(update={"warmup_steps": 15000})
     sim = Simulation(p, gpu)  # must NOT raise

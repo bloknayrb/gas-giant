@@ -4,22 +4,37 @@ Productionizes the spike-validated recipe (scripts/sw_m3_spike_coupling2.py):
 derive a COHERENT geostrophic vorticity proxy from the eddy interface thickness
 h2e = h2 - zonal_mean(h2) -- NOT from the raw relative vorticity, which is the
 C-grid 2dx checkerboard (dominant zonal m~44-51). The coherent baroclinic signal
-(m~5) lives in the interface thickness.
+lives in the interface thickness.
+
+Eddy scale: the emergent dominant zonal wavenumber is set by the deformation
+radius L_d (k_d^2 = 4*f0^2/(gp2*H)). gp2=0.075 puts the most-unstable mode at
+m~14 (smaller, Jupiter-like mid-latitude storms). The earlier gp2=0.3 sat at
+m~8 but was actually near-outcropping (broad, incoherent blobs that blew up
+~step 12.3k); the lower gp2 is BOTH finer-scale AND more coherent + stable
+(single-mode share ~0.76 vs ~0.32, no outcrop through the coupled run). See
+scripts/baro_scale_sweep.py for the CPU crux sweep that selected it.
 """
 from __future__ import annotations
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, zoom
 
-# Validated unstable baroclinic config (the brief's crux config). These name the
-# grid + physics the source is BUILT from; they are consumed by the driver and
-# gate script that spin the baroclinic solver (baroclinic_driver, sw_m3_couple),
-# NOT by the functions below -- those read gp2 from the state object (st.gp2).
+# Validated unstable baroclinic config. These name the grid + physics the source
+# is BUILT from; they are consumed by the driver and gate script that spin the
+# baroclinic solver (baroclinic_driver, sw_m3_couple), NOT by the functions below
+# -- those read gp2 from the state object (st.gp2).
 SRC_W, SRC_H = 192, 96
-GP1, GP2, XI = 0.05, 0.3, 3.0
+GP1, GP2, XI = 0.05, 0.075, 3.0
+# Seed the instability at its predicted K_max (~m14 for this gp2) and smooth the
+# resampled source on the smaller feature size (~SRC_W/m ~ 14px) so the resample
+# does not blur the eddies away. Both consumed by baroclinic_driver.
+M_ZONAL = 14
+SMOOTH_SIGMA = 1.26
 
-# Coherence gate: a usable source's dominant zonal wavenumber must be low.
-M_GATE_MAX = 15
+# Coherence gate: a usable source's dominant zonal wavenumber must be low (reject
+# the C-grid checkerboard, m~44-51). Raised 15->20 to give the m~14 production
+# mode session/seed margin while still rejecting grid-scale sources.
+M_GATE_MAX = 20
 
 
 def dominant_zonal_m(field2d: np.ndarray,

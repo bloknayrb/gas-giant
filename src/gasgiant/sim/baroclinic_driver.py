@@ -16,13 +16,15 @@ from gasgiant.sim import shallow_water_ref as ref
 
 class BaroclinicSourceDriver:
     def __init__(self, grid_w: int, grid_h: int,
-                 warmup_steps: int = 9000, seed: int = 0) -> None:
+                 warmup_steps: int = 9000, seed: int = 0,
+                 m_zonal: int = bsrc.M_ZONAL) -> None:
         self.grid_w = grid_w
         self.grid_h = grid_h
         self.outcropped = False
         self.st = ref.baroclinic_test_state(
             W=bsrc.SRC_W, H=bsrc.SRC_H, unstable=True, seed=seed,
             gp1=bsrc.GP1, gp2=bsrc.GP2, xi_unstable=bsrc.XI,
+            m_zonal=m_zonal,
             pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0,
         )
         self.advance(warmup_steps)
@@ -59,7 +61,7 @@ class BaroclinicSourceDriver:
     def current_source(self):
         """Coherent unit-std evolving source on the equirect grid (grid_h, grid_w).
         Passes the coherence gate (raises if the source is a checkerboard)."""
-        zeta = bsrc.geostrophic_vorticity_source(self.st)
+        zeta = bsrc.geostrophic_vorticity_source(self.st, smooth_sigma=bsrc.SMOOTH_SIGMA)
         bsrc.assert_coherent(zeta)
         return bsrc.resample_to_equirect(zeta, self.grid_w, self.grid_h)
 
