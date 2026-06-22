@@ -11,7 +11,7 @@ from gasgiant.params.presets import load_factory_preset
 def test_baroclinic_defaults_off():
     p = PlanetParams()
     assert p.solver.baroclinic.enabled is False
-    assert p.solver.baroclinic.gain == 0.5
+    assert p.solver.baroclinic.gain == 2.0
 
 
 def test_enabled_requires_vorticity():
@@ -38,7 +38,7 @@ def test_jupiter_baroclinic_preset_enables_coupling():
     p = load_factory_preset("jupiter_baroclinic")
     assert p.solver.type == SolverType.VORTICITY
     assert p.solver.baroclinic.enabled is True
-    assert p.solver.baroclinic.gain == 0.5
+    assert p.solver.baroclinic.gain == 2.0
 
 
 def test_baroclinic_fields_have_no_rand():

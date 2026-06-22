@@ -100,16 +100,9 @@ void main() {
         q += (q_target - q) / u_relax_tau;
     }
 
-    // M3 SPIKE external vorticity source (opt-in; strict no-op when gain==0).
-    // Equirect domain only for the spike. Injected into the absolute vorticity
-    // q before the polar confine, so a mid-latitude source survives the gate
-    // while any poleward leakage is still confined.
-#if DOMAIN == 0
-    if (u_external_gain != 0.0) {
-        vec2 ext_uv = (vec2(px) + 0.5) / vec2(u_size);
-        q += u_external_gain * texture(u_external_omega, ext_uv).r;
-    }
-#endif
+    // M3 baroclinic coupling does NOT touch the persistent q state: it is injected
+    // into the Poisson RHS (omega_recover.comp) instead, so it is bounded and
+    // coherent without being folded by advection or accumulating here.
 
     // Hard polar damping: poleward of the confine band, pull the relative
     // vorticity ω_rel = q − f rapidly to 0 so no polar eddy can grow (the slow

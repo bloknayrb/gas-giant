@@ -503,9 +503,12 @@ class BaroclinicParams(_Params):
                     "storms; requires solver type=vorticity). Off = plain v1.6. "
                     "No rand: randomize() must never silently enable it.")
     gain: float = pfield(
-        0.5, tier=Tier.RESTART, lo=0.0, hi=2.0, ui="Solver",
+        2.0, tier=Tier.RESTART, lo=0.0, hi=8.0, ui="Solver",
         description="Baroclinic source amplitude as a fraction of coriolis_f0 "
-                    "(~3). 0.5 = validated operating point. No rand.")
+                    "(~3). The source is injected into the Poisson RHS (NOT the "
+                    "vorticity state), so it is bounded (no accumulation) and "
+                    "coherent (unfolded by advection), enriching mid-latitude belt "
+                    "texture. ~2 = subtle; high gain over-boils. No rand.")
     warmup_steps: int = pfield(
         8000, tier=Tier.RESTART, lo=500, hi=20000, ui="",
         description="Baroclinic spin-up before coupling (fixed cadence). No rand. "

@@ -18,7 +18,17 @@ uniform sampler2D u_omega;
 uniform ivec2 u_size;
 uniform float u_coriolis_f0;
 
-// Output: relative vorticity ω_rel = q − f.
+// M3 baroclinic overlay (opt-in; strict no-op when gain==0): a coherent vorticity
+// source injected into the Poisson RHS only -- NOT into the persistent absolute
+// vorticity q. This makes the baroclinic field BOUNDED (it never accumulates into
+// the q state) and COHERENT (it is read fresh from the source each step, so the
+// jet "shredder" never folds it), and it tracks the evolving source with zero lag
+// (independent of the slow vort_relax_tau jet-nudge timescale). Amplitude =
+// gain * f0 * src. The source is already mid-latitude lat-masked.
+uniform sampler2D u_external_omega;
+uniform float     u_external_gain;   // 0 disables (default)
+
+// Output: relative vorticity ω_rel = q − f (+ baroclinic overlay).
 layout(r32f, binding = 0) writeonly uniform image2D out_omega_rel;
 
 void main() {
@@ -31,5 +41,10 @@ void main() {
     vec2 ll = lonlatAt(px, u_size);
     float f = u_coriolis_f0 * sin(ll.y);
 
-    imageStore(out_omega_rel, px, vec4(q - f, 0.0, 0.0, 0.0));
+    float orel = q - f;
+    if (u_external_gain != 0.0) {
+        vec2 ext_uv = (vec2(px) + 0.5) / vec2(u_size);
+        orel += u_external_gain * u_coriolis_f0 * texture(u_external_omega, ext_uv).r;
+    }
+    imageStore(out_omega_rel, px, vec4(orel, 0.0, 0.0, 0.0));
 }

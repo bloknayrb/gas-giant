@@ -398,13 +398,8 @@ class Solver:
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
         _set(kf0, "u_vort_drag", p.solver.vort_drag)
-        # M3 SPIKE external source (equirect only; strict no-op when unset).
-        if domain.kind == DOMAIN_EQUIRECT and self.external_omega_tex is not None:
-            self.external_omega_tex.use(location=3)
-            _set(kf0, "u_external_omega", 3)
-            _set(kf0, "u_external_gain", float(self.external_gain))
-        else:
-            _set(kf0, "u_external_gain", 0.0)
+        # M3 baroclinic source is injected into the Poisson RHS (omega_recover.comp),
+        # NOT the q state -- it is not bound here.
         state.out.bind_to_image(0, read=False, write=True)
         kf0.run(gx, gy, 1)
         ctx.memory_barrier()
@@ -687,10 +682,18 @@ class Solver:
             # a. Advance absolute vorticity q one step.
             self._omega_step(state, dom, turb_time)
 
-            # b. Recover ω_rel = q − f into state.omega_rel.
+            # b. Recover ω_rel = q − f into state.omega_rel. The baroclinic source
+            #    (M3) is injected here, into the Poisson RHS only -- NOT the q state
+            #    -- so it is bounded, coherent, and decoupled from vort_relax_tau.
             kr = state.k_recover
             state.cur.use(location=0)
             _set(kr, "u_omega", 0)
+            if dom.kind == DOMAIN_EQUIRECT and self.external_omega_tex is not None:
+                self.external_omega_tex.use(location=3)
+                _set(kr, "u_external_omega", 3)
+                _set(kr, "u_external_gain", float(self.external_gain))
+            else:
+                _set(kr, "u_external_gain", 0.0)
             state.omega_rel.bind_to_image(0, read=False, write=True)
             kr.run(gx, gy, 1)
             ctx.memory_barrier()
