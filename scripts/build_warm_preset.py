@@ -17,14 +17,16 @@ from gasgiant.params.presets import load_factory_preset, save_preset
 
 OUT = Path("src/gasgiant/presets/gas_giant_warm.json")
 
-# High-contrast warm palette across the T0 axis (the frost fix).
+# High-contrast RUST palette across the T0 axis (the frost fix). Real dark->bright
+# value range is what defeats the frosted-glass look; the rust hue is the chosen
+# identity (redder, saturated belts; warm-cream cloud tops).
 CONTRAST_STOPS = [
-    (0.00, (0.16, 0.09, 0.06)),  # near-black brown (deep belt gaps)
-    (0.22, (0.40, 0.22, 0.14)),  # rust
-    (0.45, (0.62, 0.42, 0.28)),  # tan
-    (0.68, (0.82, 0.66, 0.47)),  # warm sand
-    (0.85, (0.92, 0.82, 0.64)),  # cream
-    (1.00, (0.98, 0.93, 0.82)),  # bright cloud top
+    (0.00, (0.14, 0.06, 0.04)),  # near-black brown (deep belt gaps)
+    (0.22, (0.46, 0.17, 0.10)),  # saturated rust
+    (0.45, (0.68, 0.36, 0.20)),  # rust-tan
+    (0.68, (0.86, 0.62, 0.40)),  # warm sand
+    (0.85, (0.94, 0.82, 0.62)),  # cream
+    (1.00, (0.99, 0.94, 0.83)),  # bright cloud top
 ]
 
 
