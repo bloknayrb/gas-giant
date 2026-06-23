@@ -3,6 +3,30 @@
 Forward-looking work items. Append-only-ish; move items to "Done" with a date
 rather than deleting, so the reasoning survives.
 
+## FALSIFIED (2026-06-23): Tier-3 emergent color regresses the look — V0 is the ship
+
+The "Tier 3 — Emergent color via a designed curl field" plan below was executed
+through its front-loaded **Phase-1 prototype** (throwaway, ungated kernel edits,
+since reverted). The cheap render-and-judge gate did its job: it killed the
+approach before any productionization.
+
+- **Part B (passive non-banded color)** washes the bands to a uniform orange field
+  in BOTH kinematic and vorticity modes — a divergence-free flow can't sustain the
+  per-band DC contrast from a uniform-mean source (only storm cores survive). This
+  is the plan's own #1 risk, confirmed.
+- **The kinematic base** renders as laminar horizontal stripes; Part A's zone eddy
+  adds only marginal mottle. It is strictly *worse* than what's shipped.
+- **The shipped vorticity `gas_giant_warm` (V0)** already produces flowing swirls,
+  billows, KH waves, and coherent vortices — it beats every Tier-3 variant.
+- **Mode fact:** `psi.comp` is the streamfunction only in KINEMATIC mode; in
+  VORTICITY mode it only feeds a poleward/apron feather blend (`solver.py:~722`), so
+  the plan's "KEY" Part-A eddy is INERT on the vorticity preset regardless.
+
+Decision (user, 2026-06-23): accept V0, close Tier-3. Real zone *brightness* would
+require a true divergent upwelling field (a deep solver change), not justified —
+the frost/blur complaints were already resolved by the palette + replenish fixes.
+The "Tier 3" sections below are retained as the (now-falsified) reasoning trail.
+
 ## RESOLVED (2026-06-22): the "frosted glass" was the PALETTE, not the architecture
 
 The frosted-glass look was chased for a whole session through the simulation and

@@ -201,8 +201,15 @@ class Simulation:
             self._post_dirty = True
         elif tiers:  # POST
             self.solver.params = new_params
-            self.deriver.update_palettes(new_params.appearance)
             self._post_dirty = True
+        # The palette LUT depends only on appearance, but a load (or seed change)
+        # edits many tiers at once. The branches above are mutually exclusive, so a
+        # RESTART/VELOCITY edit that ALSO changed appearance used to skip the palette
+        # refresh and leave a stale LUT -- e.g. loading the rust gas_giant_warm over a
+        # paler preset kept the old colors, and toggling the solver never recolored.
+        # Refresh whenever anything changed so the palette always tracks appearance.
+        if tiers:
+            self.deriver.update_palettes(new_params.appearance)
         return tiers
 
     # -- stepping --------------------------------------------------------------------
