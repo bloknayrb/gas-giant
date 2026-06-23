@@ -46,6 +46,25 @@ def test_assert_coherent_rejects_checkerboard():
         bsrc.assert_coherent(zeta)
 
 
+def test_coherence_gate_boundary():
+    """The gate was widened 15->20 for the m~14 production mode. Enforce the new
+    band: a coherent m=18 source (REJECTED at the old gate of 15) is now ACCEPTED
+    and stays in band, while m=25 is still rejected. Guards an accidental revert
+    of M_GATE_MAX in either direction."""
+    accepted = bsrc.geostrophic_vorticity_source(_synthetic_state(m_zonal=18))
+    m = bsrc.assert_coherent(accepted)            # must not raise
+    assert 16 <= m <= bsrc.M_GATE_MAX             # in the newly-opened [16,20] band
+    rejected = bsrc.geostrophic_vorticity_source(_synthetic_state(m_zonal=25))
+    with pytest.raises(bsrc.IncoherentSourceError, match="coherence gate"):
+        bsrc.assert_coherent(rejected)
+
+
+def test_gate_error_is_valueerror_subclass():
+    """IncoherentSourceError must subclass ValueError so every existing
+    `except ValueError` / pytest.raises(ValueError) caller keeps working."""
+    assert issubclass(bsrc.IncoherentSourceError, ValueError)
+
+
 def test_band_mask_zeros_poles():
     st = _synthetic_state(m_zonal=5)
     zeta = bsrc.geostrophic_vorticity_source(st)

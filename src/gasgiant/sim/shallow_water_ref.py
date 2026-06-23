@@ -1110,6 +1110,15 @@ def _semi_implicit_predictor(
     return u_star, v_star
 
 
+class PositivityViolation(ValueError):
+    """A layer thickness dropped below the floor (semi-implicit positivity
+    failure / 2-layer lower-layer outcrop). Subclasses ValueError so every
+    existing `except ValueError` catcher keeps working; raised as a distinct
+    type so callers that want to handle a *physical* breakdown (e.g. the
+    baroclinic driver holding its last good state on outcrop) can do so WITHOUT
+    also swallowing an unrelated ValueError from a real bug."""
+
+
 def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:
     """Loud positivity guard shared by the CPU and GPU semi-implicit steps.
 
@@ -1123,7 +1132,7 @@ def assert_positivity(h_raw: np.ndarray, h_floor: float) -> None:
     """
     h_min = float(h_raw.min())
     if h_min < h_floor - 1e-9:
-        raise ValueError(
+        raise PositivityViolation(
             f"semi-implicit positivity violation: min(h)={h_min:.3e} < "
             f"h_floor={h_floor:.3e}. The velocity field drove a floor cell below "
             f"the floor (meridional Courant too large); the conservative limiter "

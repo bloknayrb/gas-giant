@@ -279,8 +279,10 @@ class TurbulenceParams(_Params):
         description="Relaxation time (steps) pulling band color/height back toward the stamp",
     )
     replenish_rate: float = pfield(
-        0.015, tier=Tier.RESTART, lo=0.0, hi=0.1, ui="Turbulence",
-        description="Fresh detail-noise blended into the detail tracer per step",
+        0.015, tier=Tier.RESTART, lo=0.0, hi=0.5, ui="Turbulence",
+        description="Fresh detail-noise blended into the detail tracer per step. "
+                    "High values (~0.3) keep quiescent zone bands detailed where the "
+                    "zonal jets would otherwise smear the detail away to ~half the belts'",
     )
     kh_amplitude: float = pfield(
         0.35, tier=Tier.VELOCITY, lo=0.0, hi=2.0, rand=(0.1, 0.8), ui="Turbulence",

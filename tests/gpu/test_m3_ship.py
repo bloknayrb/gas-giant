@@ -117,9 +117,15 @@ def test_seed_determinism(gpu):
     assert np.abs(a - b).max() > 0.05, "different seed must change storm pattern"
 
 
-def test_graceful_warmup_outcrop(gpu):
-    """A warmup past the ~12500 outcrop must degrade to uncoupled (driver=None),
-    NOT crash construction, and render the same as the uncoupled run."""
+def test_graceful_warmup_outcrop(gpu, monkeypatch):
+    """A warmup past outcrop must degrade to uncoupled (driver=None), NOT crash
+    construction, and render the same as the uncoupled run.
+
+    The production config (gp2=0.075) is intentionally stable and never outcrops,
+    so force the legacy unstable gp2=0.3 (outcrops ~12.3k) to exercise the
+    graceful-degrade path with a warmup beyond it."""
+    from gasgiant.sim import baroclinic_source as bsrc
+    monkeypatch.setattr(bsrc, "GP2", 0.3)
     p = _baro_params()
     p.solver.baroclinic = p.solver.baroclinic.model_copy(update={"warmup_steps": 15000})
     sim = Simulation(p, gpu)  # must NOT raise
@@ -236,6 +242,7 @@ def test_restart_reuse_independent_of_prior_ticks(gpu):
 def test_mid_run_incoherence_degrades(gpu, monkeypatch):
     """If the source goes incoherent mid-run, tick must degrade to uncoupled and
     keep developing -- no exception escapes (the _update_baroclinic_source catch)."""
+    from gasgiant.sim.baroclinic_source import IncoherentSourceError
     sim = Simulation(_baro_params(dev_steps=48), gpu)
     try:
         real = sim._baro_driver.current_source
@@ -244,7 +251,9 @@ def test_mid_run_incoherence_degrades(gpu, monkeypatch):
         def flaky():
             calls["n"] += 1
             if calls["n"] == 2:  # fail the second refresh (at step_index 16)
-                raise ValueError("coherence gate (injected)")
+                # the EXPECTED degrade signal the facade catches -- a plain
+                # ValueError would now (post-refactor) propagate, not degrade.
+                raise IncoherentSourceError("coherence gate (injected)")
             return real()
 
         monkeypatch.setattr(sim._baro_driver, "current_source", flaky)

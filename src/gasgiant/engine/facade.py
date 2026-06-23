@@ -126,11 +126,15 @@ class Simulation:
 
     def _update_baroclinic_source(self) -> None:
         """Advance the baroclinic solver and re-upload the coherent source. On
-        mid-run incoherence/outcrop, degrade to uncoupled and continue."""
+        an EXPECTED degrade (lower-layer outcrop or an incoherent/checkerboard
+        source) drop to uncoupled and continue; a genuine unexpected error
+        propagates loudly rather than being silently swallowed as a degrade."""
+        from gasgiant.sim import baroclinic_source as bsrc
+        from gasgiant.sim import shallow_water_ref as ref
         try:
             self._baro_driver.advance(self._baro_steps_per_update)
             src = self._baro_driver.current_source()
-        except (ValueError, RuntimeError) as exc:
+        except (ref.PositivityViolation, bsrc.IncoherentSourceError, RuntimeError) as exc:
             log.warning("baroclinic source disabled mid-run: %s", exc)
             self.set_external_vorticity_source(None)
             self._baro_driver = None
