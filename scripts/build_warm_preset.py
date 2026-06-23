@@ -1,0 +1,60 @@
+"""Build the gas_giant_warm factory preset (the frost-fix deliverable).
+
+Pure appearance + preset-level sim params; NO kernel changes. The frost fix is
+the high-contrast warm palette (real dark->bright value range across the T0
+axis), applied uniformly across latitude rows so band color is T0-structure-
+driven rather than latitude-stamped. Flow config is the loosened-leash warm
+setup from the art pass.
+
+Run: ./.venv/Scripts/python.exe scripts/build_warm_preset.py
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from gasgiant.params.model import GradientStop, PaletteRow
+from gasgiant.params.presets import load_factory_preset, save_preset
+
+OUT = Path("src/gasgiant/presets/gas_giant_warm.json")
+
+# High-contrast warm palette across the T0 axis (the frost fix).
+CONTRAST_STOPS = [
+    (0.00, (0.16, 0.09, 0.06)),  # near-black brown (deep belt gaps)
+    (0.22, (0.40, 0.22, 0.14)),  # rust
+    (0.45, (0.62, 0.42, 0.28)),  # tan
+    (0.68, (0.82, 0.66, 0.47)),  # warm sand
+    (0.85, (0.92, 0.82, 0.64)),  # cream
+    (1.00, (0.98, 0.93, 0.82)),  # bright cloud top
+]
+
+
+def main():
+    p = load_factory_preset("jupiter_vorticity")
+
+    # Loosened-leash warm flow (the de-imposed, frost-free develop).
+    p.turbulence = p.turbulence.model_copy(update={
+        "relax_tau": 2000.0,
+        "belt_boost": 1.0,
+        "shear_coupling": 0.7,
+        "intensity": 1.3,
+        "belt_replenish": 0.0,
+    })
+    p.storms = p.storms.model_copy(update={"hero_radius": 0.05})
+
+    # The frost fix: high-contrast warm palette, uniform across latitude rows
+    # (color follows T0 structure, not a per-latitude stamp). chroma_scale 1.0 —
+    # the palette already carries the hue, no Oklab re-cast.
+    stops = [GradientStop(pos=pp, color=c) for pp, c in CONTRAST_STOPS]
+    rows = [PaletteRow(latitude=r.latitude, stops=stops) for r in p.appearance.palette_rows]
+    p.appearance = p.appearance.model_copy(update={
+        "palette_rows": rows,
+        "chroma_scale": 1.0,
+    })
+
+    p.name = "gas_giant_warm"
+    save_preset(p, OUT, name="gas_giant_warm")
+    print("wrote", OUT, flush=True)
+
+
+if __name__ == "__main__":
+    main()
