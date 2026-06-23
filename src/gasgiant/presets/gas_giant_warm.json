@@ -103,7 +103,7 @@
       "scale": 6.0,
       "evolution_rate": 0.012,
       "relax_tau": 2000.0,
-      "replenish_rate": 0.02,
+      "replenish_rate": 0.35,
       "kh_amplitude": 0.6,
       "kh_wavenumber": 24,
       "belt_replenish": 0.0,

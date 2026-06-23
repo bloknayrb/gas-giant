@@ -47,6 +47,19 @@ def test_gas_giant_warm_palette_has_value_contrast():
         )
 
 
+def test_gas_giant_warm_keeps_zones_detailed():
+    """The quiescent zone bands sit between fast jets that smear the detail
+    tracer into smooth streaks, starving those latitudes of detail (~half the
+    belts'). A high replenish_rate re-feeds detail faster than the jets smear it,
+    keeping zones textured instead of reading as smooth 'blurry bands'. Pin it so
+    a future tweak can't quietly drop it back to the starved default."""
+    p = load_factory_preset("gas_giant_warm")
+    assert p.turbulence.replenish_rate >= 0.25, (
+        f"replenish_rate={p.turbulence.replenish_rate} is too low; the zone bands "
+        f"will starve of detail and read as smooth blur"
+    )
+
+
 def test_save_load_round_trip(tmp_path):
     p = PlanetParams(seed=77, name="roundtrip")
     p.appearance.haze_amount = 0.33

@@ -33,13 +33,17 @@ CONTRAST_STOPS = [
 def main():
     p = load_factory_preset("jupiter_vorticity")
 
-    # Loosened-leash warm flow (the de-imposed, frost-free develop).
+    # Loosened-leash warm flow (the de-imposed, frost-free develop). The high
+    # replenish_rate feeds fresh detail faster than the zonal jets smear it away,
+    # so the quiescent zone bands (which the jets otherwise starve of detail to
+    # ~half the belts') fill with fine filaments instead of reading smooth.
     p.turbulence = p.turbulence.model_copy(update={
         "relax_tau": 2000.0,
         "belt_boost": 1.0,
         "shear_coupling": 0.7,
         "intensity": 1.3,
         "belt_replenish": 0.0,
+        "replenish_rate": 0.35,
     })
     p.storms = p.storms.model_copy(update={"hero_radius": 0.05})
 
