@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from gasgiant.engine import Simulation
-from gasgiant.params.model import GradientStop, PaletteRow, PlanetParams
+from gasgiant.params.model import GradientStop, PaletteRow, PlanetParams, SolverType
 
 pytestmark = pytest.mark.gpu
 
@@ -57,3 +57,28 @@ def test_single_row_equals_duplicated_rows(gpu):
     color_a = Simulation(single, gpu).render_maps(256)["color"]
     color_b = Simulation(doubled, gpu).render_maps(256)["color"]
     np.testing.assert_array_equal(color_a, color_b)
+
+
+def test_palette_refreshes_on_restart_tier_update(gpu):
+    """Regression: update_params must refresh the palette LUT even when a
+    RESTART/VELOCITY tier ALSO changed. A preset load edits many tiers at once;
+    the mutually-exclusive branches used to refresh the palette only on the pure
+    POST path, so loading the rust gas_giant_warm over a paler preset (which also
+    flips solver.type = RESTART) kept the stale colors and toggling the solver
+    never recolored."""
+    red = _quick_params(
+        palette_rows=[PaletteRow(latitude=0.0, stops=_flat_stops((0.85, 0.15, 0.10)))]
+    )
+    red.solver.type = SolverType.KINEMATIC
+    sim = Simulation(red, gpu)
+    c_red = sim.render_maps(256)["color"].reshape(-1, 4)
+    assert c_red[:, 0].mean() > c_red[:, 2].mean()  # starts red
+
+    # Flip the palette to blue AND the solver (RESTART) in a single update.
+    blue = _quick_params(
+        palette_rows=[PaletteRow(latitude=0.0, stops=_flat_stops((0.10, 0.15, 0.85)))]
+    )
+    blue.solver.type = SolverType.VORTICITY
+    sim.update_params(blue)
+    c_blue = sim.render_maps(256)["color"].reshape(-1, 4)
+    assert c_blue[:, 2].mean() > c_blue[:, 0].mean()  # blue now -- palette refreshed
