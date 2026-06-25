@@ -34,7 +34,7 @@ Development steps: how long structures evolve before the snapshot
 _High example capped below the slider maximum so it renders in reasonable time; the column label shows the value used._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 150</sub></td><td align="center"><sub>high &middot; 1000<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/sim__dev_steps__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 150</sub></td><td align="center"><img src="img/sliders/sim__dev_steps__hi.jpg" width="320"><br><sub>high &middot; 1000</sub></td>
 </tr></table>
 
 ### dt scale
@@ -44,7 +44,7 @@ _High example capped below the slider maximum so it renders in reasonable time; 
 Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.2<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/sim__dt_scale__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/sim__dt_scale__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### resolution
@@ -202,7 +202,7 @@ Banding contrast collapse poleward of ~45 deg toward mottle (the real latitude-c
 Number of zones+belts pole to pole
 
 <table><tr>
-<td align="center"><sub>low &middot; 2<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 16</sub></td><td align="center"><sub>high &middot; 40<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__count__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 16</sub></td><td align="center"><img src="img/sliders/bands__count__hi.jpg" width="320"><br><sub>high &middot; 40</sub></td>
 </tr></table>
 
 ### detail amount
@@ -212,7 +212,7 @@ Number of zones+belts pole to pole
 Small-scale color-index noise amplitude
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><sub>high &middot; 0.5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__detail_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/bands__detail_amount__hi.jpg" width="320"><br><sub>high &middot; 0.5</sub></td>
 </tr></table>
 
 ### detail freq
@@ -222,7 +222,7 @@ Small-scale color-index noise amplitude
 Small-scale noise spatial frequency
 
 <table><tr>
-<td align="center"><sub>low &middot; 2<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><sub>high &middot; 64<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__detail_freq__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><img src="img/sliders/bands__detail_freq__hi.jpg" width="320"><br><sub>high &middot; 64</sub></td>
 </tr></table>
 
 ### edge diversity
@@ -232,7 +232,7 @@ Small-scale noise spatial frequency
 Per-edge softness variation: some band edges diffuse, some sharp (uniform edges are a procedural tell)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__edge_diversity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/bands__edge_diversity__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### edge softness
@@ -242,7 +242,7 @@ Per-edge softness variation: some band edges diffuse, some sharp (uniform edges 
 Half-width of band-edge transitions, radians of latitude
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.001<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><sub>high &middot; 0.1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__edge_softness__lo.jpg" width="320"><br><sub>low &middot; 0.001</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><img src="img/sliders/bands__edge_softness__hi.jpg" width="320"><br><sub>high &middot; 0.1</sub></td>
 </tr></table>
 
 ### faded sector
@@ -252,7 +252,7 @@ Half-width of band-edge transitions, radians of latitude
 SEB-fade: one belt gets a pale desaturated sector spanning ~100 degrees of longitude
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__faded_sector__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/bands__faded_sector__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### hue jitter
@@ -262,7 +262,7 @@ SEB-fade: one belt gets a pale desaturated sector spanning ~100 degrees of longi
 Per-band color-index offset along the palette (NEB-orange vs SEB-brown variation); seeded independently of the band layout
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><sub>high &middot; 0.15<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__hue_jitter__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><img src="img/sliders/bands__hue_jitter__hi.jpg" width="320"><br><sub>high &middot; 0.15</sub></td>
 </tr></table>
 
 ### lane density
@@ -272,7 +272,7 @@ Per-band color-index offset along the palette (NEB-orange vs SEB-brown variation
 Thin dark lane lines at jet cores, drawn analytically at derive time (a 1-3 px line cannot survive the sim grid)
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/bands__lane_density__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### value contrast
@@ -282,7 +282,7 @@ Thin dark lane lines at jet cores, drawn analytically at derive time (a 1-3 px l
 Zone/belt brightness separation multiplier
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__value_contrast__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.1</sub></td><td align="center"><img src="img/sliders/bands__value_contrast__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### variance amount
@@ -292,7 +292,7 @@ Zone/belt brightness separation multiplier
 Within-band longitudinal color drift (real belts hold several hues at once, varying slowly with longitude)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.18</sub></td><td align="center"><sub>high &middot; 0.3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__variance_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.18</sub></td><td align="center"><img src="img/sliders/bands__variance_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
 </tr></table>
 
 ### warp amount
@@ -302,7 +302,7 @@ Within-band longitudinal color drift (real belts hold several hues at once, vary
 Band-boundary meander amplitude, radians of latitude
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><sub>high &middot; 0.3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__warp_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><img src="img/sliders/bands__warp_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
 </tr></table>
 
 ### warp freq
@@ -312,7 +312,7 @@ Band-boundary meander amplitude, radians of latitude
 Band-boundary meander spatial frequency
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.5<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3.5</sub></td><td align="center"><sub>high &middot; 16<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__warp_freq__lo.jpg" width="320"><br><sub>low &middot; 0.5</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3.5</sub></td><td align="center"><img src="img/sliders/bands__warp_freq__hi.jpg" width="320"><br><sub>high &middot; 16</sub></td>
 </tr></table>
 
 ### width jitter
@@ -322,7 +322,7 @@ Band-boundary meander spatial frequency
 Randomness of band width distribution
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.4</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__width_jitter__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.4</sub></td><td align="center"><img src="img/sliders/bands__width_jitter__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### width tail
@@ -332,7 +332,7 @@ Randomness of band width distribution
 Heavier-tailed band width distribution (real maps mix very broad zones with thin strips)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.35</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/bands__width_tail__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.35</sub></td><td align="center"><img src="img/sliders/bands__width_tail__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 
@@ -345,7 +345,7 @@ Heavier-tailed band width distribution (real maps mix very broad zones with thin
 Equatorial superrotation jet peak speed (negative = retrograde)
 
 <table><tr>
-<td align="center"><sub>low &middot; -3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/jets__equatorial_speed__lo.jpg" width="320"><br><sub>low &middot; -3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><img src="img/sliders/jets__equatorial_speed__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
 ### equatorial width
@@ -355,7 +355,7 @@ Equatorial superrotation jet peak speed (negative = retrograde)
 Equatorial jet half-width, radians of latitude
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.03<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><sub>high &middot; 0.4<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/jets__equatorial_width__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/jets__equatorial_width__hi.jpg" width="320"><br><sub>high &middot; 0.4</sub></td>
 </tr></table>
 
 ### polar decay
@@ -365,7 +365,7 @@ Equatorial jet half-width, radians of latitude
 How strongly jet amplitudes decay toward the poles
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.5</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/jets__polar_decay__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.5</sub></td><td align="center"><img src="img/sliders/jets__polar_decay__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### strength
@@ -375,7 +375,7 @@ How strongly jet amplitudes decay toward the poles
 Global zonal jet speed multiplier
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/jets__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/jets__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 
@@ -501,7 +501,7 @@ Extra turbulence where jet shear is strong
 Brown-barge cyclone population multiplier (belts)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.2</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__barge_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.2</sub></td><td align="center"><img src="img/sliders/storms__barge_density__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### hero aspect
@@ -511,7 +511,7 @@ Brown-barge cyclone population multiplier (belts)
 Hero storm lon:lat elongation (real GRS ~2:1); 1.0 = round. Stretches the stamp, perimeter ring, collar, spiral lanes and detail mask along longitude. Wake across-width and merge capture stay isotropic (recorded LIMITs)
 
 <table><tr>
-<td align="center"><sub>low &middot; 1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__hero_aspect__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/storms__hero_aspect__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### hero count
@@ -521,7 +521,7 @@ Hero storm lon:lat elongation (real GRS ~2:1); 1.0 = round. Stretches the stamp,
 GRS-class giant anticyclones
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__hero_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### hero radius
@@ -531,7 +531,7 @@ GRS-class giant anticyclones
 Hero vortex core radius, radians of arc
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.03<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><sub>high &middot; 0.25<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__hero_radius__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><sub>high &middot; 0.25<br>(not rendered)</sub></td>
 </tr></table>
 
 ### hero strength
@@ -701,7 +701,7 @@ Saturn-style ribbon wave on one mid-latitude jet (0 = off)
 Ring cyclones around the central one (cyclone_cluster style)
 
 <table><tr>
-<td align="center"><sub>low &middot; 3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 8</sub></td><td align="center"><sub>high &middot; 9<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__north__cyclone_count__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 8</sub></td><td align="center"><img src="img/sliders/poles__north__cyclone_count__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
 </tr></table>
 
 ### field density
@@ -711,7 +711,7 @@ Ring cyclones around the central one (cyclone_cluster style)
 Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's dense cyclone hierarchy; 0 = off)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__north__field_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/poles__north__field_density__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### polygon sides
@@ -721,7 +721,7 @@ Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's de
 Polygon wavenumber of the polar jet (polygon_jet style)
 
 <table><tr>
-<td align="center"><sub>low &middot; 3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><sub>high &middot; 9<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__north__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__north__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
 </tr></table>
 
 ### strength
@@ -729,7 +729,7 @@ Polygon wavenumber of the polar jet (polygon_jet style)
 `poles.north.strength` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__north__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__north__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### cyclone count
@@ -739,7 +739,7 @@ Polygon wavenumber of the polar jet (polygon_jet style)
 Ring cyclones around the central one (cyclone_cluster style)
 
 <table><tr>
-<td align="center"><sub>low &middot; 3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 5</sub></td><td align="center"><sub>high &middot; 9<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__south__cyclone_count__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 5</sub></td><td align="center"><img src="img/sliders/poles__south__cyclone_count__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
 </tr></table>
 
 ### field density
@@ -749,7 +749,7 @@ Ring cyclones around the central one (cyclone_cluster style)
 Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's dense cyclone hierarchy; 0 = off)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__south__field_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/poles__south__field_density__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### polygon sides
@@ -759,7 +759,7 @@ Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's de
 Polygon wavenumber of the polar jet (polygon_jet style)
 
 <table><tr>
-<td align="center"><sub>low &middot; 3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><sub>high &middot; 9<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__south__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__south__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
 </tr></table>
 
 ### strength
@@ -767,7 +767,7 @@ Polygon wavenumber of the polar jet (polygon_jet style)
 `poles.south.strength` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/poles__south__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__south__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 
