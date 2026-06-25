@@ -334,6 +334,22 @@ class StormsParams(_Params):
                     "and detail mask along longitude. Wake across-width and "
                     "merge capture stay isotropic (recorded LIMITs)",
     )
+    hero_mottle: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Turbulent interior churn inside hero storms: a flow-scale "
+                    "fbm breaks up the smooth Gaussian core so the spot reads as "
+                    "churning cloud, not an airbrushed blob. Windowed to the "
+                    "interior so the perimeter ring/collar stay clean; stamped "
+                    "into the relaxation target so the solver folds it into "
+                    "filaments. 0 = smooth v1 core (byte-identical)",
+    )
+    hero_tint_var: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Interior color variation inside hero storms: a flow-scale "
+                    "fbm modulates the warm-red tint tracer (T3) toward "
+                    "salmon/white in the troughs, so the spot reads festooned "
+                    "rather than flat red. 0 = uniform v1 tint (byte-identical)",
+    )
     oval_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
         description="White-oval anticyclone population multiplier",
@@ -463,6 +479,14 @@ class DetailParams(_Params):
                     "(the Juno-close-up GRS look) plus collar streamlines; "
                     "winds in the hero's actual rotation sense. Stationary in "
                     "the hero frame — fine for stills",
+    )
+    hero_collar_wrap: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail",
+        description="Tightly-pitched wound-lane filaments wrapping the hero "
+                    "collar (the GRS 'hollow' look in stills): a log-spiral on "
+                    "the rim window, wound in the storm's rotation sense. "
+                    "Independent of hero_spiral (interior lanes); stationary in "
+                    "the hero frame. 0 = off",
     )
     belt_texture: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
