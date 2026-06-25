@@ -75,7 +75,7 @@ Baroclinic source amplitude as a fraction of coriolis_f0 (~3). The source is inj
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><sub>high &middot; 8<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__gain__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__gain__hi.jpg" width="320"><br><sub>high &middot; 8</sub></td>
 </tr></table>
 
 ### update every
@@ -103,7 +103,7 @@ Planetary vorticity magnitude f0 in f=f0*sin(lat); sets the Rhines/band scale (v
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 20<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__coriolis_f0__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><img src="img/sliders/solver__coriolis_f0__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
 </tr></table>
 
 ### poisson iters
@@ -131,7 +131,7 @@ Linear (Rayleigh) drag fraction on relative vorticity per step; absorbs the 2D i
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 0.3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
 </tr></table>
 
 ### vort hypervisc
@@ -143,7 +143,7 @@ Scale-selective biharmonic hyperviscosity rate (vorticity mode)
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><sub>high &middot; 10<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__vort_hypervisc__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/solver__vort_hypervisc__hi.jpg" width="320"><br><sub>high &middot; 10</sub></td>
 </tr></table>
 
 ### vort inject
@@ -155,7 +155,7 @@ Broadband eddy-vorticity injection amplitude per step; the jet shear folds it in
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_inject__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
 ### vort inject scale
@@ -167,7 +167,7 @@ Eddy-injection frequency as a multiple of bands.detail_freq (vorticity mode)
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.5</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__vort_inject_scale__lo.jpg" width="320"><br><sub>low &middot; 0.1</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.5</sub></td><td align="center"><img src="img/sliders/solver__vort_inject_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
 ### vort relax tau
@@ -179,7 +179,7 @@ Vorticity nudging timescale toward jets+vortices (vorticity mode)
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 20<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 600</sub></td><td align="center"><sub>high &middot; 2000<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__vort_relax_tau__lo.jpg" width="320"><br><sub>low &middot; 20</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 600</sub></td><td align="center"><img src="img/sliders/solver__vort_relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
 </tr></table>
 
 
@@ -388,7 +388,7 @@ Global zonal jet speed multiplier
 Turbulence multiplier inside dark belts (cyclonic bands)
 
 <table><tr>
-<td align="center"><sub>low &middot; 1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__belt_boost__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><img src="img/sliders/turbulence__belt_boost__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
 ### belt replenish
@@ -398,7 +398,7 @@ Turbulence multiplier inside dark belts (cyclonic bands)
 Extra fine detail-noise replenished per step inside belts (emergent filaments)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.07</sub></td><td align="center"><sub>high &middot; 0.08<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__belt_replenish__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.07</sub></td><td align="center"><img src="img/sliders/turbulence__belt_replenish__hi.jpg" width="320"><br><sub>high &middot; 0.08</sub></td>
 </tr></table>
 
 ### belt replenish scale
@@ -408,7 +408,7 @@ Extra fine detail-noise replenished per step inside belts (emergent filaments)
 Belt replenishment frequency multiplier relative to the base detail frequency
 
 <table><tr>
-<td align="center"><sub>low &middot; 1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__belt_replenish_scale__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/turbulence__belt_replenish_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
 ### evolution rate
@@ -418,7 +418,7 @@ Belt replenishment frequency multiplier relative to the base detail frequency
 How fast the turbulence pattern decorrelates per step
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><sub>high &middot; 0.1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__evolution_rate__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><img src="img/sliders/turbulence__evolution_rate__hi.jpg" width="320"><br><sub>high &middot; 0.1</sub></td>
 </tr></table>
 
 ### intensity
@@ -428,7 +428,7 @@ How fast the turbulence pattern decorrelates per step
 Global turbulence (curl-noise) amplitude
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__intensity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__intensity__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### kh amplitude
@@ -438,7 +438,7 @@ Global turbulence (curl-noise) amplitude
 Kelvin-Helmholtz wave amplitude along high-shear band boundaries
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__kh_amplitude__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/turbulence__kh_amplitude__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### kh wavenumber
@@ -448,7 +448,7 @@ Kelvin-Helmholtz wave amplitude along high-shear band boundaries
 KH billow longitudinal wavenumber
 
 <table><tr>
-<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 24</sub></td><td align="center"><sub>high &middot; 80<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__kh_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 24</sub></td><td align="center"><img src="img/sliders/turbulence__kh_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 80</sub></td>
 </tr></table>
 
 ### relax tau
@@ -458,7 +458,7 @@ KH billow longitudinal wavenumber
 Relaxation time (steps) pulling band color/height back toward the stamp
 
 <table><tr>
-<td align="center"><sub>low &middot; 50<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 350</sub></td><td align="center"><sub>high &middot; 2000<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__relax_tau__lo.jpg" width="320"><br><sub>low &middot; 50</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 350</sub></td><td align="center"><img src="img/sliders/turbulence__relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
 </tr></table>
 
 ### replenish rate
@@ -468,7 +468,7 @@ Relaxation time (steps) pulling band color/height back toward the stamp
 Fresh detail-noise blended into the detail tracer per step. High values (~0.3) keep quiescent zone bands detailed where the zonal jets would otherwise smear the detail away to ~half the belts'
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.015</sub></td><td align="center"><sub>high &middot; 0.5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__replenish_rate__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.015</sub></td><td align="center"><img src="img/sliders/turbulence__replenish_rate__hi.jpg" width="320"><br><sub>high &middot; 0.5</sub></td>
 </tr></table>
 
 ### scale
@@ -478,7 +478,7 @@ Fresh detail-noise blended into the detail tracer per step. High values (~0.3) k
 Base spatial frequency of the turbulence noise
 
 <table><tr>
-<td align="center"><sub>low &middot; 1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><sub>high &middot; 32<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__scale__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/turbulence__scale__hi.jpg" width="320"><br><sub>high &middot; 32</sub></td>
 </tr></table>
 
 ### shear coupling
@@ -488,7 +488,7 @@ Base spatial frequency of the turbulence noise
 Extra turbulence where jet shear is strong
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/turbulence__shear_coupling__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__shear_coupling__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 
@@ -531,7 +531,7 @@ GRS-class giant anticyclones
 Hero vortex core radius, radians of arc
 
 <table><tr>
-<td align="center"><img src="img/sliders/storms__hero_radius__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><sub>high &middot; 0.25<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__hero_radius__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><img src="img/sliders/storms__hero_radius__hi.jpg" width="320"><br><sub>high &middot; 0.25</sub></td>
 </tr></table>
 
 ### hero strength
@@ -539,7 +539,7 @@ Hero vortex core radius, radians of arc
 `storms.hero_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.2<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__hero_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### merge debris
@@ -549,7 +549,7 @@ Hero vortex core radius, radians of arc
 Brightness of the transient turbulent collar a fresh merger leaves behind (inert while merge_rate is 0)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__merge_debris__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__merge_debris__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### merge rate
@@ -559,7 +559,7 @@ Brightness of the transient turbulent collar a fresh merger leaves behind (inert
 Anticyclone merger aggressiveness: converging same-sign ovals coalesce when their gap falls under ~1.5*rate*(r1+r2), and generation seeds convergent pairs so mergers actually occur during the dev run (0 = off, the v1.1 behavior)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.7</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__merge_rate__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.7</sub></td><td align="center"><img src="img/sliders/storms__merge_rate__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### outbreak count
@@ -569,7 +569,7 @@ Anticyclone merger aggressiveness: converging same-sign ovals coalesce when thei
 Convective outbreaks (Great-White-Spot events) during the development run
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__outbreak_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__outbreak_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### outbreak strength
@@ -577,7 +577,7 @@ Convective outbreaks (Great-White-Spot events) during the development run
 `storms.outbreak_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.2<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__outbreak_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__outbreak_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### oval density
@@ -587,7 +587,7 @@ Convective outbreaks (Great-White-Spot events) during the development run
 White-oval anticyclone population multiplier
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__oval_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><img src="img/sliders/storms__oval_density__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### pearls count
@@ -597,7 +597,7 @@ White-oval anticyclone population multiplier
 String-of-pearls ovals on one seeded latitude (0 = off)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 7</sub></td><td align="center"><sub>high &middot; 14<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__pearls_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 7</sub></td><td align="center"><img src="img/sliders/storms__pearls_count__hi.jpg" width="320"><br><sub>high &middot; 14</sub></td>
 </tr></table>
 
 ### rim contrast
@@ -607,7 +607,7 @@ String-of-pearls ovals on one seeded latitude (0 = off)
 Scales the hero storm's dark perimeter ring + bright collar (the Red Spot Hollow) amplitude; 1.0 = default, >1 deepens the rim contrast, 0 removes the ring/collar
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.5</sub></td><td align="center"><sub>high &middot; 2.5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__rim_contrast__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.5</sub></td><td align="center"><img src="img/sliders/storms__rim_contrast__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
 </tr></table>
 
 ### small density
@@ -617,7 +617,7 @@ Scales the hero storm's dark perimeter ring + bright collar (the Red Spot Hollow
 Small-storm field: sub-oval white spots and dark spots scattered in loose latitude rows (0 = off, the pre-v1.1 look)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.2</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__small_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.2</sub></td><td align="center"><img src="img/sliders/storms__small_density__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### stamp contrast
@@ -627,7 +627,7 @@ Small-storm field: sub-oval white spots and dark spots scattered in loose latitu
 Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.5</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__stamp_contrast__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.5</sub></td><td align="center"><img src="img/sliders/storms__stamp_contrast__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### wake turbulence
@@ -637,7 +637,7 @@ Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)
 Turbulence boost in the wake wedge downstream of hero storms
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><sub>high &middot; 5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/storms__wake_turbulence__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/storms__wake_turbulence__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
 
@@ -650,7 +650,7 @@ Turbulence boost in the wake wedge downstream of hero storms
 Festoon plumes + hot spots on the equatorial belt edge (0 = off)
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.7</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/waves__festoon_strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.7</sub></td><td align="center"><img src="img/sliders/waves__festoon_strength__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### festoon wavenumber
@@ -660,7 +660,7 @@ Festoon plumes + hot spots on the equatorial belt edge (0 = off)
 Rossby wavenumber of the festoon/hot-spot train
 
 <table><tr>
-<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><sub>high &middot; 24<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/waves__festoon_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><img src="img/sliders/waves__festoon_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 24</sub></td>
 </tr></table>
 
 ### hotspot depth
@@ -670,7 +670,7 @@ Rossby wavenumber of the festoon/hot-spot train
 Depth of the cloud-free hot spots at the wave troughs
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.7</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/waves__hotspot_depth__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.7</sub></td><td align="center"><img src="img/sliders/waves__hotspot_depth__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### ribbon strength
@@ -680,7 +680,7 @@ Depth of the cloud-free hot spots at the wave troughs
 Saturn-style ribbon wave on one mid-latitude jet (0 = off)
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/waves__ribbon_strength__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### ribbon wavenumber
@@ -688,7 +688,7 @@ Saturn-style ribbon wave on one mid-latitude jet (0 = off)
 `waves.ribbon_wavenumber` &mdash; range **4 to 30**, default **12**, tier `restart`.
 
 <table><tr>
-<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><sub>high &middot; 30<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/waves__ribbon_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><img src="img/sliders/waves__ribbon_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 30</sub></td>
 </tr></table>
 
 
