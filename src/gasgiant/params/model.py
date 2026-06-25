@@ -491,6 +491,22 @@ class SolverType(StrEnum):
     VORTICITY = "vorticity"   # v1.6 prognostic vorticity-streamfunction (opt-in)
 
 
+class InjectMask(StrEnum):
+    """Spatial localization of eddy-vorticity injection."""
+    GLOBAL = "global"   # churn everywhere (legacy uniform behavior)
+    BELTS = "belts"     # cyclonic dark bands only; anticyclonic zones stay smooth
+    SHEAR = "shear"     # jet-shear flanks only; filaments where shear is high
+
+
+# Shader code (u_inject_mask int) for each InjectMask. Kept beside the enum so
+# the GLSL contract can't drift from the Python names.
+INJECT_MASK_CODE: dict[InjectMask, int] = {
+    InjectMask.GLOBAL: 0,
+    InjectMask.BELTS: 1,
+    InjectMask.SHEAR: 2,
+}
+
+
 class BaroclinicParams(_Params):
     """Opt-in 2-layer baroclinic vorticity source coupled into the vorticity
     solver's equirect pass (M3). OFF by default => byte-identical to plain v1.6.
@@ -551,6 +567,11 @@ class SolverParams(_Params):
     vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, ui="Solver",
         description="Eddy-injection frequency as a multiple of bands.detail_freq "
                     "(vorticity mode)")
+    vort_inject_mask: InjectMask = pfield(InjectMask.GLOBAL, tier=Tier.RESTART, ui="Solver",
+        description="Spatial localization of eddy injection: global = churn "
+                    "everywhere; belts = cyclonic dark bands only (anticyclonic "
+                    "zones stay smooth); shear = jet-shear flanks only (filaments "
+                    "where shear is high). Vorticity mode.")
     vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, ui="Solver",
         description="Linear (Rayleigh) drag fraction on relative vorticity per "
                     "step; absorbs the 2D inverse-cascade energy that piles up at "

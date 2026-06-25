@@ -39,6 +39,11 @@ uniform sampler2D u_omega;
 // Profile LUT: r = ω_jet.
 uniform sampler2D u_profile_omega;
 
+// Dynamics profile LUT: r=u, g=psi, b=shear_norm, a=belt_mask. Used to
+// spatially localize eddy injection (u_inject_mask).
+uniform sampler2D u_profile_dyn;
+uniform int       u_inject_mask;  // 0=global, 1=belts, 2=jet-shear flanks
+
 // Intermediate ∇²ω_rel texture (SUBPASS 1 only).
 uniform sampler2D u_lap_omega_rel;
 
@@ -116,8 +121,19 @@ void main() {
     // zonally-symmetric jets never fold (no eddy source). Applied after the
     // nudge so the nudge (1/τ_ω) only slowly re-smooths the injected eddies.
     if (u_vort_inject > 0.0) {
-        vec3 np = p * u_inject_freq + u_turb_offset + vec3(0.0, u_turb_time, 0.0);
-        q += u_vort_inject * fbm(np, 4, 2.0, 0.5);
+        // Spatial localization: scale the injection by a latitude-profile mask so
+        // the churn is confined to belts (1) or jet-shear flanks (2) instead of
+        // the whole map (0). Reuses the same dyn profile the detail path uses.
+        float mask = 1.0;
+        if (u_inject_mask == 1) {
+            mask = texture(u_profile_dyn, latProfileUV(ll.y)).a;       // belt_mask
+        } else if (u_inject_mask == 2) {
+            mask = texture(u_profile_dyn, latProfileUV(ll.y)).b;       // shear_norm
+        }
+        if (mask > 0.0) {
+            vec3 np = p * u_inject_freq + u_turb_offset + vec3(0.0, u_turb_time, 0.0);
+            q += u_vort_inject * mask * fbm(np, 4, 2.0, 0.5);
+        }
     }
 
     // Linear (Rayleigh) drag on the relative vorticity ω_rel = q − f: a uniform
