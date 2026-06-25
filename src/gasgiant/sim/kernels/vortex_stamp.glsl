@@ -10,6 +10,13 @@ layout(std430, binding = 2) readonly buffer Vortices {
 };
 uniform int u_vortex_count;
 uniform float u_rim_contrast;
+uniform float u_hero_mottle;       // interior brightness churn (T0); 0 disables
+uniform float u_hero_tint_var;     // interior tint festoon (T3); 0 disables
+// Seeded noise offset for the hero interior fbm. Declared here (not reusing the
+// includer's u_detail_offset) because this file is #included BEFORE that uniform
+// is declared in init.comp/advect.comp, so it is not yet in scope. Set from the
+// same seeded self._detail_offset, so determinism is identical.
+uniform vec3 u_hero_noise_offset;
 
 const float VKIND_HERO = 1.0;
 const float VKIND_BARGE = 2.0;
@@ -72,6 +79,31 @@ vec3 vortexStamp(vec3 p) {
                 dT0 += b.w * core
                      - 0.16 * u_rim_contrast * exp(-(q - 1.0) * (q - 1.0) * 16.0)
                      + 0.22 * u_rim_contrast * exp(-(q - 1.55) * (q - 1.55) * 5.0);
+                // Interior turbulent churn: a flow-scale fbm breaks up the
+                // smooth Gaussian core so the spot reads as churning cloud, not
+                // an airbrushed blob. Windowed to the interior (q<1) so it never
+                // fights the perimeter ring/collar. Stamped into the relaxation
+                // target => advect.comp folds it into filaments (motion-safe).
+                // Guarded => byte-identical when off (fbm never evaluated).
+                if (u_hero_mottle > 0.0) {
+                    float win = core * (1.0 - smoothstep(0.6, 1.0, q));
+                    float fscale = a.w > 0.0 ? 9.0 / a.w : 9.0;
+                    // Fixed amplitude in the rim/collar league (~0.16/0.22), NOT
+                    // scaled by the dim hero core brightness (b.w~0.05) which
+                    // would render the churn invisible. The interior window keeps
+                    // it off the perimeter ring.
+                    dT0 += 0.15 * u_hero_mottle * win
+                         * fbm(p * fscale + u_hero_noise_offset.yzx, 4, 2.0, 0.5);
+                }
+                // Interior color festoon: modulate the warm-red tint with a
+                // decorrelated fbm so the spot carries salmon/white mottle
+                // instead of flat red. Signed => spot mean tint ~preserved.
+                if (u_hero_tint_var > 0.0) {
+                    float winT = core * (1.0 - smoothstep(0.55, 1.0, q));
+                    float fscaleT = a.w > 0.0 ? 7.0 / a.w : 7.0;
+                    dT3 += b.z * u_hero_tint_var * winT
+                         * fbm(p * fscaleT + u_hero_noise_offset.zxy + 13.0, 3, 2.0, 0.5);
+                }
             } else if (b.y == VKIND_POLAR) {
                 // Dark eye, dark body, and a bright pearly wisp annulus —
                 // neighboring annuli overlap into the chaotic bright
@@ -98,8 +130,9 @@ vec3 vortexStamp(vec3 p) {
             float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;
             float across = (plat - vlat) / max(rc * 1.6, 1e-4);
-            if (along > rc * 0.5 * asp && along < rc * 6.0) {
-                float w = exp(-across * across) * (1.0 - along / (rc * 6.0));
+            if (along > 0.0 && along < rc * 6.0) {
+                float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
+                float w = exp(-across * across) * (1.0 - along / (rc * 6.0)) * ramp;
                 dT0 += 0.16 * w;   // bright churned clouds
                 dT3 -= 0.20 * w;   // cool gray-white, not belt-colored
             }

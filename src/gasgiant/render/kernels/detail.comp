@@ -70,6 +70,7 @@ uniform float u_polar_stipple;
 uniform float u_intermittency;
 uniform vec3 u_offset_gate;       // subseed("detail-intermittency")
 uniform float u_hero_spiral;
+uniform float u_hero_collar_wrap; // wound-lane filaments wrapping the collar; 0 disables
 uniform vec3 u_offset_spiral;     // subseed("detail-hero-spiral")
 // Rotation sense per hero, sign(strength) — deliberately NOT packed into
 // u_heroes.w so heroMask and the default program text stay untouched.
@@ -345,8 +346,9 @@ void main() {
     // collar streamlines between the perimeter ring and the q~1.55 bright
     // collar. Stationary in the hero frame — fine for stills; a +omega*t
     // phase term is the one-line fix if animation ever needs it.
-    if (u_hero_spiral > 0.0) {
+    if (u_hero_spiral > 0.0 || u_hero_collar_wrap > 0.0) {
         float sp = 0.0;
+        float spw = 0.0;   // collar-wrap accumulator (decoupled from u_hero_spiral)
         for (int i = 0; i < u_hero_count; ++i) {
             vec3 c = u_heroes[i].xyz;
             float rc = max(u_heroes[i].w, 1e-4);
@@ -384,8 +386,24 @@ void main() {
             // downsampled azimuthal mean is exactly 0. Integer m keeps
             // cos branch-cut continuous at theta=±π (5θ jumps by 10π).
             sp += 0.55 * wino * cos(q * 28.0 + 5.0 * theta + 4.0 * rj);
+            // Hollow wound-lane wrap (the GRS "hollow" in stills): a tightly-
+            // pitched log-spiral on the same collar window, wound in the hero's
+            // rotation sense so the lanes read as filaments spiralling INTO the
+            // collar rather than concentric rings. m=2 integer keeps cos
+            // branch-cut continuous at theta=±π; tighter pitch (-34) than the
+            // interior spiral (-20) so the lanes wrap the rim more. Separate
+            // accumulator => amplitude decoupled from u_hero_spiral. Guarded =>
+            // byte-identical when off.
+            if (u_hero_collar_wrap > 0.0) {
+                float kc = -34.0 * u_hero_spin[i];
+                spw += wino * cos(2.0 * theta + kc * log(max(q, 0.5)) + 3.0 * rj)
+                            * (0.5 + 0.5 * rj);
+            }
         }
         d += 0.22 * u_hero_spiral * clamp(sp, -1.5, 1.5);
+        if (u_hero_collar_wrap > 0.0) {
+            d += 0.22 * u_hero_collar_wrap * clamp(spw, -1.5, 1.5);
+        }
     }
 #endif
 

@@ -28,12 +28,12 @@ _PKG = "gasgiant.sim.kernels"
 #       print(f, hashlib.sha1(t.encode()).hexdigest())
 # "
 _PINNED: dict[str, str] = {
-    "psi.comp":          "54b450d57505c02b33ade84ec587a2b0fce2c98d",
+    "psi.comp":          "c2e7dcf5422aad158d47189c4e95baca48c0450e",
     "velocity.comp":     "a5edeb117303788431b9d1ab686f0dddae402fd6",
     "advect.comp":       "a44a0061d19ac2769c45b308500e6405f8663fd1",
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
     "common.glsl":       "48c13b438e4e893b32b594234ef965bdfeac1cad",
-    "vortex_stamp.glsl": "64c5a116cb19a5ca9e1dca1d10db1d58a3492974",
+    "vortex_stamp.glsl": "29e6f4240d1e12d277beeed0efeb7b6ae580cc1f",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }

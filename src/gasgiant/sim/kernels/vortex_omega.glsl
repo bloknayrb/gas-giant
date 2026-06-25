@@ -45,6 +45,12 @@ float d_over_tand(float d) {
     return d / tan(d);
 }
 
+// Hero kind sentinel (matches vortex_stamp.glsl, which shares this SSBO) and the
+// solid-body blend amount. Declared here so both includers (omega_init.comp,
+// omega_force.comp) see them; default 0.0 keeps the Gaussian path byte-identical.
+const float VKIND_HERO = 1.0;
+uniform float u_hero_solid_core;
+
 // ---------------------------------------------------------------------------
 // Accumulated ω for all vortices at sphere point p.
 //
@@ -99,6 +105,19 @@ float vortexOmegaAccum(vec3 p) {
         float term2 = -2.0 * scale * d_over_tand(d) * exp_q2;
 
         float contrib = term1 + term2;
+
+        // Solid-body hero core (vorticity mode): the Gaussian-Laplacian vorticity
+        // is center-peaked, giving DIFFERENTIAL rotation that winds the passive
+        // tracer into a center-draining whirlpool. A near-uniform vorticity patch
+        // (flat disk, smooth edge) instead gives RIGID solid-body interior
+        // rotation -> the hero reads as a coherent GRS-like oval (spiral arms
+        // only OUTSIDE it). Blended so u_hero_solid_core=0 is byte-identical to
+        // the Gaussian; =1 is the full patch.
+        if (b.y == VKIND_HERO && u_hero_solid_core > 0.0) {
+            // ('patch' is a reserved GLSL keyword — use 'disk'.)
+            float disk = -2.5 * scale * (1.0 - smoothstep(0.80, 1.15, q));
+            contrib = mix(contrib, disk, u_hero_solid_core);
+        }
 
         // Magnitude-based cull (safe for large r_core / GRS)
         if (abs(contrib) < EPS * abs(scale)) {

@@ -77,6 +77,7 @@ class DetailSynth:
             params.intermittency > 0.0 or params.hero_spiral > 0.0
             or params.belt_texture > 0.0 or params.mottle > 0.0
             or params.belt_texture_fine > 0.0
+            or params.hero_collar_wrap > 0.0
         )
         prog = self._program(fx=fx_on)
         size = out_tex.size
@@ -85,6 +86,7 @@ class DetailSynth:
             rng_gate = subseed(seed, "detail-intermittency")
             _set(prog, "u_offset_gate", tuple(rng_gate.uniform(-100.0, 100.0, 3)))
             _set(prog, "u_hero_spiral", params.hero_spiral)
+            _set(prog, "u_hero_collar_wrap", params.hero_collar_wrap)
             rng_spiral = subseed(seed, "detail-hero-spiral")
             _set(prog, "u_offset_spiral", tuple(rng_spiral.uniform(-100.0, 100.0, 3)))
             _set(prog, "u_belt_texture", params.belt_texture)

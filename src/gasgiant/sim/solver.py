@@ -301,6 +301,10 @@ class Solver:
                 _set(k, "u_rho_max", RHO_MAX)
         for k in [state.k_init, state.k_force0, state.k_lap, state.k_force1]:
             _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
+        # Solid-body hero core: only k_init and k_force0 run vortexOmegaAccum,
+        # but _set is KeyError-guarded so setting it on all four is harmless.
+        for k in [state.k_init, state.k_force0]:
+            _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # P3b static uniforms.
@@ -540,6 +544,9 @@ class Solver:
                     _set(prog, "u_relax_k", relax_k)
                     _set(prog, "u_replenish", p.turbulence.replenish_rate)
                     _set(prog, "u_rim_contrast", p.storms.rim_contrast)
+                    _set(prog, "u_hero_mottle", p.storms.hero_mottle)
+                    _set(prog, "u_hero_tint_var", p.storms.hero_tint_var)
+                    _set(prog, "u_hero_noise_offset", self._detail_offset)
                     _set(prog, "u_warp_offset", self._warp_offset)
                     _set(prog, "u_warp_amount", p.bands.warp_amount)
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
@@ -572,6 +579,9 @@ class Solver:
             _set(k, "u_size", dom.size)
             _set(k, "u_rho_max", RHO_MAX)
             _set(k, "u_rim_contrast", p.storms.rim_contrast)
+            _set(k, "u_hero_mottle", p.storms.hero_mottle)
+            _set(k, "u_hero_tint_var", p.storms.hero_tint_var)
+            _set(k, "u_hero_noise_offset", self._detail_offset)
             _set(k, "u_warp_offset", self._warp_offset)
             _set(k, "u_warp_amount", p.bands.warp_amount)
             _set(k, "u_warp_freq", p.bands.warp_freq)
