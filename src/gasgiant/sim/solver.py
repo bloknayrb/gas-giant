@@ -19,7 +19,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from gasgiant.gl import GpuContext
-from gasgiant.params.model import PlanetParams, PoleParams, PoleStyle, SolverType
+from gasgiant.params.model import (
+    INJECT_MASK_CODE,
+    PlanetParams,
+    PoleParams,
+    PoleStyle,
+    SolverType,
+)
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
 from gasgiant.sim.profiles import LatProfiles
@@ -411,6 +417,10 @@ class Solver:
         _set(kf0, "u_hypervisc", p.solver.vort_hypervisc)
         _set(kf0, "u_vort_inject", p.solver.vort_inject)
         _set(kf0, "u_inject_freq", p.bands.detail_freq * p.solver.vort_inject_scale)
+        # Spatial localization mask for eddy injection (0=global,1=belt,2=shear).
+        self.profile_dyn.use(location=3)
+        _set(kf0, "u_profile_dyn", 3)
+        _set(kf0, "u_inject_mask", INJECT_MASK_CODE[p.solver.vort_inject_mask])
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
         _set(kf0, "u_vort_drag", p.solver.vort_drag)
