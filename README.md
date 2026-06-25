@@ -34,6 +34,7 @@ uv sync --all-extras
 
 # Live-preview GUI: watch the simulation evolve, tweak, export.
 uv run gasgiant-studio
+# What each slider does, shown on the planet: docs/sliders.md
 
 # Headless: render a map set (factory presets: jupiter_like, saturn_pale, ice_giant)
 uv run gasgiant export --preset jupiter_like --res 4096 --out out/jove
