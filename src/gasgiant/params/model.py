@@ -350,6 +350,17 @@ class StormsParams(_Params):
                     "salmon/white in the troughs, so the spot reads festooned "
                     "rather than flat red. 0 = uniform v1 tint (byte-identical)",
     )
+    hero_solid_core: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Solid-body hero rotation (vorticity mode): blends the hero's "
+                    "vorticity from the Gaussian profile (center-peaked -> "
+                    "differential rotation -> the interior winds into a "
+                    "center-draining whirlpool) toward a near-uniform vorticity "
+                    "patch (rigid solid-body interior rotation -> a coherent "
+                    "GRS-like oval with spiral arms only OUTSIDE it). 0 = Gaussian "
+                    "(byte-identical); 1 = full patch. Pairs with a larger "
+                    "hero_radius and lower hero_strength.",
+    )
     oval_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
         description="White-oval anticyclone population multiplier",

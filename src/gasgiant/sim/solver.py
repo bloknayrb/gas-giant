@@ -301,6 +301,10 @@ class Solver:
                 _set(k, "u_rho_max", RHO_MAX)
         for k in [state.k_init, state.k_force0, state.k_lap, state.k_force1]:
             _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
+        # Solid-body hero core: only k_init and k_force0 run vortexOmegaAccum,
+        # but _set is KeyError-guarded so setting it on all four is harmless.
+        for k in [state.k_init, state.k_force0]:
+            _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # P3b static uniforms.
