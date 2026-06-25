@@ -406,18 +406,28 @@ def render_batch(sliders: list[Slider], only_group: str | None) -> None:
             bp = base_params[s.baseline]
             variant = bp.model_dump()
             _set_path(variant, s.path, int(round(value)) if s.is_int else value)
-            params = PlanetParams.model_validate(variant)
-            print(f"({done}/{total}) render {out.name}  [{s.tier}/{s.baseline}]", flush=True)
-            if s.tier == Tier.POST.value:
-                sim = dev_sims[s.baseline]
-                sim.update_params(params)
-                maps = sim.render_maps(OUT_WIDTH)
-                _encode(s.channel, maps, out)
-                sim.update_params(bp.model_copy(deep=True))  # restore baseline
-            else:
-                sim = Simulation(params, gpu=gpu)
-                maps = sim.render_maps(OUT_WIDTH)
-                _encode(s.channel, maps, out)
+            # A large hero_radius tightens the hero_latitude validator cap below
+            # the preset's pinned latitude; unpin it so the geometry slider can
+            # reach its max (the storm just takes seeded placement).
+            if s.path == "storms.hero_radius":
+                variant["storms"]["hero_latitude"] = None
+            # One bad (slider, value) combo must never kill the whole batch.
+            try:
+                params = PlanetParams.model_validate(variant)
+                print(f"({done}/{total}) render {out.name}  [{s.tier}/{s.baseline}]", flush=True)
+                if s.tier == Tier.POST.value:
+                    sim = dev_sims[s.baseline]
+                    sim.update_params(params)
+                    maps = sim.render_maps(OUT_WIDTH)
+                    _encode(s.channel, maps, out)
+                    sim.update_params(bp.model_copy(deep=True))  # restore baseline
+                else:
+                    sim = Simulation(params, gpu=gpu)
+                    maps = sim.render_maps(OUT_WIDTH)
+                    _encode(s.channel, maps, out)
+            except Exception as exc:  # noqa: BLE001 -- log and continue
+                print(f"({done}/{total}) SKIP {out.name}: {type(exc).__name__}: {exc}",
+                      flush=True)
 
 
 # ---------------------------------------------------------------------------
