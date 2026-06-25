@@ -1,4 +1,4 @@
-"""Generate the visual slider reference: docs/sliders.md + docs/img/sliders/*.png.
+"""Generate the visual slider reference: docs/sliders.md + docs/img/sliders/*.jpg.
 
 Renders an equirectangular Jupiter-like map for the low / preset / high value of
 every numeric slider in the GUI, so the visual effect of each knob is obvious.
@@ -10,7 +10,7 @@ and it shows up here on the next run.
 Rendering is tier-aware: POST-tier sliders (color/detail/emission/physical) reuse
 one developed simulation and only re-derive (seconds each); VELOCITY/RESTART
 sliders need a fresh simulation per value (~2 min each under software GL). The
-batch is resumable -- existing PNGs are skipped.
+batch is resumable -- existing images are skipped.
 
 Usage::
 
@@ -23,7 +23,7 @@ Usage::
     # full batch (multi-hour under software GL), then write the markdown
     xvfb-run -a uv run python scripts/render_slider_examples.py
 
-    # regenerate markdown only, from PNGs already on disk
+    # regenerate markdown only, from images already on disk
     uv run python scripts/render_slider_examples.py --no-render
 """
 
@@ -106,7 +106,7 @@ SEED = 4201            # jupiter_like seed; fixed across all variants
 SIM_RES = 768          # sim grid width (2:1)
 DEV_STEPS = 150        # development steps before snapshot
 OUT_WIDTH = 768        # equirect image width (height = 384)
-IMG_EXT = "jpg"        # JPEG keeps ~230 example images to ~15 MB in-repo
+IMG_EXT = "jpg"        # JPEG keeps the ~190 example images to ~20 MB in-repo
 JPEG_QUALITY = 92      # high enough that cloud banding shows no visible artifacts
 
 # Emission-map demo levels: the emission baseline turns all three glows on so
