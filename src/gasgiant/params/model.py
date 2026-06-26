@@ -403,7 +403,7 @@ class StormsParams(_Params):
                     "in loose latitude rows (0 = off, the pre-v1.1 look)",
     )
     stamp_contrast: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.8, 1.3), ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.8, 1.3), ui="Storms",
         description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
     )
     merge_rate: float = pfield(
@@ -435,7 +435,7 @@ class StormsParams(_Params):
 
 class WavesParams(_Params):
     festoon_strength: float = pfield(
-        0.8, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.0, 1.4), ui="Waves",
+        0.8, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.0, 1.4), ui="Waves",
         description="Festoon plumes + hot spots on the equatorial belt edge (0 = off)",
     )
     festoon_wavenumber: int = pfield(
@@ -447,7 +447,7 @@ class WavesParams(_Params):
         description="Depth of the cloud-free hot spots at the wave troughs",
     )
     ribbon_strength: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.0, 1.0), ui="Waves",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.0, 1.0), ui="Waves",
         description="Saturn-style ribbon wave on one mid-latitude jet (0 = off)",
     )
     ribbon_wavenumber: int = pfield(
@@ -513,14 +513,14 @@ class DetailParams(_Params):
                     "the hero frame. 0 = off",
     )
     belt_texture: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",
         description="Storm-scale folded luminance structure inside belts "
                     "(0.5-3 deg, flow-backtraced so patches fold with the "
                     "flow) + a belt floor for the fine filaments; the v1.4 "
                     "audit's dominant texture gap on broad-band layouts",
     )
     belt_texture_fine: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",
         description="Finer sub-grid belt fold octave: a second flow-aligned "
                     "backtrace hop folds mid-frequency noise below the sim "
                     "grid scale, densifying belt texture at matched scale",
@@ -645,6 +645,25 @@ class SolverParams(_Params):
         description="Linear (Rayleigh) drag fraction on relative vorticity per "
                     "step; absorbs the 2D inverse-cascade energy that piles up at "
                     "large scales (0 = off). Vorticity mode.")
+    vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, ui="Solver",
+        description="Linear drag fraction on the EDDY vorticity q - <q>_x (the "
+                    "deviation from the per-latitude zonal mean) per step. Leaves "
+                    "the zonal-mean jets intact, but is FLAT in wavenumber, so it "
+                    "damps medium eddies (festoons, band-edge waves) as hard as the "
+                    "gravest-mode swirl -> over-flattens the field. Prefer "
+                    "vort_psi_drag (scale-selective). Equirect only. 0 = off "
+                    "(byte-identical). Vorticity mode.")
+    vort_psi_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=20.0, ui="Solver",
+        description="Scale-SELECTIVE large-scale (hypofriction) drag: a vorticity "
+                    "sink proportional to the EDDY STREAMFUNCTION psi - <psi>_x. "
+                    "Because psi ~ omega/(k^2 + 1/L_d^2), the effective drag rate "
+                    "is ~1/(k^2+1/L_d^2) -- it hits the gravest-mode inverse-cascade "
+                    "swirl far harder than medium eddies, removing the oversized "
+                    "swirl while PRESERVING festoons/band-edge waves/mid vortices "
+                    "(unlike the flat vort_eddy_drag). Reuses the screened-Poisson "
+                    "psi the solver already computes (one step stale). Coefficient "
+                    "is numerically larger than vort_eddy_drag since psi << omega. "
+                    "Equirect only. 0 = off (byte-identical). Vorticity mode.")
     baroclinic: BaroclinicParams = Field(default_factory=BaroclinicParams)
 
     @model_validator(mode="after")
