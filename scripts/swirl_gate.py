@@ -417,10 +417,7 @@ def main():
             rec = dict(drag=drag, m1=m1, m2=m2, m3=m3, m4=m4, m5=m5, m6=m6)
             rows.append(rec)
 
-            if args.calibrate:
-                verdict = "—"
-            else:
-                verdict = "PASS" if _passes(rec) else "FAIL"
+            verdict = "—" if args.calibrate else ("PASS" if _passes(rec) else "FAIL")
             tiles.append(label_img(field.rgb[:, :, ::-1], [
                 f"drag {drag}  {verdict}",
                 f"m1 blob {m1:.2f}  m2 mean {m2:.2f}  m3 cont {m3:.2f}",

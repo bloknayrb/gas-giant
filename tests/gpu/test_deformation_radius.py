@@ -140,6 +140,7 @@ def test_deformation_radius_rejects_degenerate_band():
     """0 < L_d < floor is a degenerate (frozen) solve and must be rejected;
     0.0 (off) and a well-resolved value must both be accepted."""
     import pytest as _pytest
+
     from gasgiant.params.model import SolverParams
 
     SolverParams(deformation_radius=0.0)    # off — fine
