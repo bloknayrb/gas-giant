@@ -1,27 +1,29 @@
 """swirl_gate.py — the frozen acceptance gate for the "stable jets vs. the
 storm-driven oversized swirl" milestone (see plan compressed-spinning-bentley).
 
-Renders the canonical develop config and computes five co-gated metrics from the
+Renders the canonical develop config and computes six metrics from the
 absolute-vorticity field q (read back from the equirect omega state) plus the
-color map.  ALL five must hold for a config to PASS:
+color map.  Five are CO-GATED (all must hold to PASS); m2 is reported only.
 
-  1. max_blob_ratio   <= M1_MAX    largest NON-hero single-signed coherent
-                                   vorticity blob / hero blob area.  Guards the
-                                   "one oversized swirl eats a band" failure.
-  2. meander           <= M2_MAX    jet-core meridional wander / band width.
-                                   Guards a jet rolling into a meander.
-  3. continuity        >= M3_MIN    fraction of longitude where the jet-core
-                                   vorticity sign is unbroken.  Guards a torn
-                                   transport barrier.
-  4. texture_ratio   in M4_RANGE    belt high-frequency energy / no-drag
-                                   baseline.  Bidirectional — guards laminar
-                                   WASHOUT (the failure that gamed the old
-                                   one-sided coherent-fraction metric).
-  5. hero_ratio      in M5_RANGE    hero blob area / no-drag baseline.  Guards
-                                   over-damping that erases the pinned hero.
+  1. m1 swirl     <= M1_MAX    largest eddy-blob meridional extent, in band
+                               widths.  Guards the "one oversized swirl eats a
+                               band" failure.
+  2. m2 meander   (reported)   jet-core meridional wander / band width.  Bad and
+                               clean ranges OVERLAP across seeds, so no threshold
+                               separates it — printed for forensics, NOT gated.
+  3. m3 continuity >= M3_MIN   fraction of longitude where the jet-core vorticity
+                               sign is unbroken.  Guards a torn transport barrier.
+  4. m4 texture  in M4_RANGE   belt high-frequency energy / first-panel baseline.
+                               Bidirectional — guards laminar WASHOUT.
+  5. m5 hero      >= M5_MIN    hero color contrast (core vs annulus luminance).
+                               Guards over-damping that erases the pinned hero.
+  6. m6 medium   in M6_RANGE   medium-wavenumber eddy energy / first-panel
+                               baseline.  The FLOOR is the only metric that fails
+                               an over-flattened/sterile result (the others reward
+                               laminarity or see only stamped speckle).
 
-Metrics 4 and 5 are referenced to the FIRST swept config (expected drag=0), so
-the sweep must include a no-drag panel as the texture/hero baseline.
+m4 and m6 are referenced to the FIRST swept config (expected drag=0), so the
+sweep must include a no-drag panel as the texture/medium baseline.
 
 Usage:
     python scripts/swirl_gate.py                      # default drag sweep
@@ -69,8 +71,8 @@ M5_MIN = 0.22           # hero color contrast (bold hero ~0.30+, lost hero ~0.16
 # are blind to, because m3 rewards laminarity and m4 only sees stamped speckle);
 # the ceiling guards injection-spam. Calibrated below once measured.
 M6_RANGE = (0.45, 1.20)
-# m2 reported only (not separable across seeds); informational threshold:
-M2_REPORT = 0.33
+# m2 is reported only (its bad/clean ranges overlap across seeds, so no threshold
+# separates it) — see metric_meander / the printed table; it is never gated.
 
 OUT = "C:/Users/blokn/Documents/Github/gas-giant/_diag"
 
@@ -351,7 +353,7 @@ def metric_texture(field: Field):
 # Driver                                                                       #
 # --------------------------------------------------------------------------- #
 def _passes(r) -> bool:
-    """Co-gated acceptance: m1/m3/m4/m5 must all hold (m2 is informational)."""
+    """Co-gated acceptance: m1/m3/m4/m5/m6 must all hold (m2 is informational)."""
     return (r["m1"] <= M1_MAX and r["m3"] >= M3_MIN
             and M4_RANGE[0] <= r["m4"] <= M4_RANGE[1]
             and r["m5"] >= M5_MIN
