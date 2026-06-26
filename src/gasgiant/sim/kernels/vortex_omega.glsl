@@ -49,7 +49,15 @@ float d_over_tand(float d) {
 // solid-body blend amount. Declared here so both includers (omega_init.comp,
 // omega_force.comp) see them; default 0.0 keeps the Gaussian path byte-identical.
 const float VKIND_HERO = 1.0;
+const float VKIND_OVAL = 0.0;
+// KIND_OVAL entries below this core radius (radians) don't visibly bullseye and
+// stay Gaussian regardless of u_oval_solid_core. This excludes the small-storm-
+// scale KIND_OVAL spots; large white ovals plus any merge-product / KH-debris
+// ovals at/above the threshold get the patch. (Pearls are KIND_PEARL, not OVAL,
+// so they never reach this gate.) Matches test_oval_solid_core.py.
+const float OVAL_SOLID_MIN_R = 0.035;
 uniform float u_hero_solid_core;
+uniform float u_oval_solid_core;
 
 // ---------------------------------------------------------------------------
 // Accumulated ω for all vortices at sphere point p.
@@ -117,6 +125,13 @@ float vortexOmegaAccum(vec3 p) {
             // ('patch' is a reserved GLSL keyword — use 'disk'.)
             float disk = -2.5 * scale * (1.0 - smoothstep(0.80, 1.15, q));
             contrib = mix(contrib, disk, u_hero_solid_core);
+        } else if (b.y == VKIND_OVAL && u_oval_solid_core > 0.0
+                   && r_core >= OVAL_SOLID_MIN_R) {
+            // Same patch for large ovals: kills the per-oval mini-bullseye that
+            // otherwise accumulates over a long dev run. Small ovals (below the
+            // threshold) and every other kind keep the byte-identical Gaussian.
+            float disk = -2.5 * scale * (1.0 - smoothstep(0.80, 1.15, q));
+            contrib = mix(contrib, disk, u_oval_solid_core);
         }
 
         // Magnitude-based cull (safe for large r_core / GRS)

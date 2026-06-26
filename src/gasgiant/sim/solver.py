@@ -124,6 +124,13 @@ class _OmegaState:
     k_sor_red: moderngl.ComputeShader       # poisson_sor.comp COLOR=0
     k_sor_black: moderngl.ComputeShader     # poisson_sor.comp COLOR=1
     k_feather: moderngl.ComputeShader       # psi_feather.comp
+    # Eddy-only drag (vort_eddy_drag): zonal-mean reduction kernel + its output
+    # buffer ⟨q⟩_x(row).  Equirect domain only (None on the AE polar patches).
+    k_zonal_mean: moderngl.ComputeShader | None = None  # zonal_mean.comp (q -> binding 3)
+    mean_buf: moderngl.Buffer | None = None             # (H,) float32, binding 3
+    # Scale-selective psi-drag (vort_psi_drag): reduce psi -> binding 4.
+    k_zonal_mean_psi: moderngl.ComputeShader | None = None
+    mean_buf_psi: moderngl.Buffer | None = None         # (H,) float32, binding 4
 
     def commit(self) -> None:
         self.cur, self.out = self.out, self.cur
@@ -134,6 +141,10 @@ class _OmegaState:
             self.omega_rel, self.psi_analytic, self.psi_work,
         ):
             tex.release()
+        if self.mean_buf is not None:
+            self.mean_buf.release()
+        if self.mean_buf_psi is not None:
+            self.mean_buf_psi.release()
 
 
 class Solver:
@@ -271,6 +282,22 @@ class Solver:
                                   defines={**dom_defines, "COLOR": "1"})
         k_feather   = gpu.compute(_KERNELS, "psi_feather.comp", defines=dom_defines)
 
+        # Eddy-only drag infrastructure — equirect only (a zonal mean over
+        # longitude is undefined on the AE polar patches).  Built unconditionally
+        # so toggling vort_eddy_drag is a RESTART, not a rebuild; the per-step
+        # dispatch is skipped when the param is 0 (byte-identical).
+        if domain.kind == DOMAIN_EQUIRECT:
+            k_zonal_mean = gpu.compute(_KERNELS, "zonal_mean.comp", defines=dom_defines)
+            mean_buf = gpu.ssbo(np.zeros(size[1], np.float32), binding=3)
+            k_zonal_mean_psi = gpu.compute(
+                _KERNELS, "zonal_mean.comp", defines={**dom_defines, "OUT_BINDING": "4"})
+            mean_buf_psi = gpu.ssbo(np.zeros(size[1], np.float32), binding=4)
+        else:
+            k_zonal_mean = None
+            mean_buf = None
+            k_zonal_mean_psi = None
+            mean_buf_psi = None
+
         state = _OmegaState(
             cur=cur, fwd=fwd, back=back, out=out, lap_scratch=lap_scratch,
             omega_rel=omega_rel, psi_analytic=psi_analytic, psi_work=psi_work,
@@ -278,6 +305,8 @@ class Solver:
             k_force0=k_force0, k_lap=k_lap, k_force1=k_force1,
             k_recover=k_recover, k_sor_red=k_sor_red, k_sor_black=k_sor_black,
             k_feather=k_feather,
+            k_zonal_mean=k_zonal_mean, mean_buf=mean_buf,
+            k_zonal_mean_psi=k_zonal_mean_psi, mean_buf_psi=mean_buf_psi,
         )
         # Set size / f0 / etc. uniforms on every ω kernel — WITHOUT this the
         # advect/force/lap/SOR kernels have u_size=(0,0) and return immediately
@@ -301,12 +330,23 @@ class Solver:
                 _set(k, "u_rho_max", RHO_MAX)
         for k in [state.k_init, state.k_force0, state.k_lap, state.k_force1]:
             _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
-        # Solid-body hero core: only k_init and k_force0 run vortexOmegaAccum,
-        # but _set is KeyError-guarded so setting it on all four is harmless.
+        # Solid-body cores (hero + large ovals): only k_init and k_force0 run
+        # vortexOmegaAccum, but _set is KeyError-guarded so setting it on all
+        # four is harmless.
         for k in [state.k_init, state.k_force0]:
             _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
+            _set(k, "u_oval_solid_core", p.storms.oval_solid_core)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
+        # Eddy-only drag (equirect only): the reduction kernel's grid size and the
+        # drag fraction on the force0 pass. _set is KeyError-guarded, so binding
+        # u_vort_eddy_drag on patch kernels (where it is compiled out) is a no-op.
+        if state.k_zonal_mean is not None:
+            _set(state.k_zonal_mean, "u_size", size)
+        if state.k_zonal_mean_psi is not None:
+            _set(state.k_zonal_mean_psi, "u_size", size)
+        _set(state.k_force0, "u_vort_eddy_drag", p.solver.vort_eddy_drag)
+        _set(state.k_force0, "u_vort_psi_drag", p.solver.vort_psi_drag)
         # P3b static uniforms.
         _set(state.k_recover, "u_size", size)
         _set(state.k_recover, "u_coriolis_f0", p.solver.coriolis_f0)
@@ -326,9 +366,16 @@ class Solver:
                     "(u_external_gain / u_external_omega); the M3 source would "
                     "silently no-op."
                 ) from e
+        # Screened-Poisson (finite Rossby deformation radius): center coeff gains
+        # a -1/L_d^2 diagonal term. L_d=0 => inv_ld2=0 => plain 2D Poisson
+        # (byte-identical). Computed here as an exact 0.0 when off so the kernel's
+        # subtraction is a true no-op.
+        ld = p.solver.deformation_radius
+        inv_ld2 = (1.0 / (ld * ld)) if ld > 0.0 else 0.0
         for k in (state.k_sor_red, state.k_sor_black):
             _set(k, "u_size", size)
             _set(k, "u_sor_omega", p.solver.sor_omega)
+            _set(k, "u_inv_ld2", inv_ld2)
         _set(state.k_feather, "u_size", size)
 
     def _omega_init(self, state: _OmegaState, domain: Domain) -> None:
@@ -405,6 +452,38 @@ class Solver:
         ctx.memory_barrier()
         state.commit()  # cur <- out (out becomes scratch)
 
+        # Eddy-only drag prep (equirect only): reduce the post-advection q to its
+        # per-row zonal mean ⟨q⟩_x into mean_buf, which SUBPASS 0 reads. Skipped
+        # entirely when vort_eddy_drag == 0, so the off path is byte-identical.
+        eddy_drag_on = (
+            domain.kind == DOMAIN_EQUIRECT
+            and state.k_zonal_mean is not None
+            and p.solver.vort_eddy_drag > 0.0
+        )
+        if eddy_drag_on:
+            kz = state.k_zonal_mean
+            state.cur.use(location=0)
+            _set(kz, "u_omega", 0)
+            state.mean_buf.bind_to_storage_buffer(3)
+            kz.run((domain.size[1] + 63) // 64, 1, 1)
+            ctx.memory_barrier()
+
+        # Scale-selective psi-drag prep: reduce THIS step's streamfunction
+        # dom.psi_tex to its per-row zonal mean ⟨ψ⟩_x into mean_buf_psi (binding 4),
+        # read by SUBPASS 0. Equirect only; skipped when vort_psi_drag == 0.
+        psi_drag_on = (
+            domain.kind == DOMAIN_EQUIRECT
+            and state.k_zonal_mean_psi is not None
+            and p.solver.vort_psi_drag > 0.0
+        )
+        if psi_drag_on:
+            kzp = state.k_zonal_mean_psi
+            domain.psi_tex.use(location=0)
+            _set(kzp, "u_omega", 0)
+            state.mean_buf_psi.bind_to_storage_buffer(4)
+            kzp.run((domain.size[1] + 63) // 64, 1, 1)
+            ctx.memory_barrier()
+
         # Forcing / nudging (SUBPASS 0): q += (q_target − q) / τ_ω.
         kf0 = state.k_force0
         state.cur.use(location=0)
@@ -428,6 +507,14 @@ class Solver:
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
         _set(kf0, "u_vort_drag", p.solver.vort_drag)
+        _set(kf0, "u_vort_eddy_drag", p.solver.vort_eddy_drag)
+        _set(kf0, "u_vort_psi_drag", p.solver.vort_psi_drag)
+        if eddy_drag_on:
+            state.mean_buf.bind_to_storage_buffer(3)  # keep ⟨q⟩_x bound for SUBPASS 0
+        if psi_drag_on:
+            state.mean_buf_psi.bind_to_storage_buffer(4)  # ⟨ψ⟩_x for SUBPASS 0
+            domain.psi_tex.use(location=5)
+            _set(kf0, "u_psi", 5)
         # M3 baroclinic source is injected into the Poisson RHS (omega_recover.comp),
         # NOT the q state -- it is not bound here.
         state.out.bind_to_image(0, read=False, write=True)

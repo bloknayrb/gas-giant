@@ -57,6 +57,9 @@ uniform float u_inject_freq;  // injection fbm frequency (noise units)
 uniform vec3  u_turb_offset;  // seeded noise offset (deterministic)
 uniform float u_turb_time;    // advances the injection noise between steps
 uniform float u_vort_drag;    // linear Rayleigh drag fraction on ω_rel per step
+uniform float u_vort_eddy_drag; // linear drag on the eddy q − ⟨q⟩_x (equirect only)
+uniform float u_vort_psi_drag;  // scale-selective drag ∝ eddy ψ − ⟨ψ⟩_x (equirect)
+uniform sampler2D u_psi;        // this step's streamfunction ψ (for the psi-drag)
 
 // NOTE: the M3 baroclinic source is NOT injected here. It is overlaid onto the
 // Poisson RHS in omega_recover.comp (ω_rel = q − f + gain·f0·src), so it never
@@ -66,6 +69,18 @@ uniform float u_vort_drag;    // linear Rayleigh drag fraction on ω_rel per ste
 layout(std430, binding = 2) readonly buffer Vortices {
     vec4 vortex_data[];
 };
+
+// Per-row zonal mean ⟨q⟩_x written by zonal_mean.comp; read by the eddy-only
+// drag.  Equirect SUBPASS 0 only — undefined/unbound elsewhere.
+#if DOMAIN == 0 && SUBPASS == 0
+layout(std430, binding = 3) readonly buffer ZonalMean {
+    float u_zmean[];
+};
+// Per-row zonal mean ⟨ψ⟩_x for the scale-selective psi-drag (binding 4).
+layout(std430, binding = 4) readonly buffer ZonalMeanPsi {
+    float u_psi_zmean[];
+};
+#endif
 
 // Include after declarations they depend on.
 #include "vortex_omega.glsl"
@@ -142,6 +157,27 @@ void main() {
     if (u_vort_drag > 0.0) {
         q = f + (q - f) * (1.0 - u_vort_drag);
     }
+
+    // Eddy-only drag: damp the deviation from the zonal mean, q − ⟨q⟩_x.  The
+    // per-row mean is left EXACTLY unchanged (the mean of the deviation is 0),
+    // so the zonal jets/bands survive and the hero keeps its contrast, while the
+    // gravest-mode inverse-cascade swirl (a large eddy with no nudge source) is
+    // bled away.  Equirect only; ⟨q⟩_x is from the pre-force q (one step stale
+    // by the small nudge/inject mean increment — acceptable).
+#if DOMAIN == 0
+    if (u_vort_eddy_drag > 0.0) {
+        q -= u_vort_eddy_drag * (q - u_zmean[px.y]);
+    }
+    // Scale-selective (hypofriction) drag: a vorticity sink proportional to the
+    // eddy streamfunction ψ' = ψ − ⟨ψ⟩_x.  Since ψ̂ = −ω̂/(k²+1/L_d²), adding
+    // +r·ψ' to q decays each eddy mode at rate r/(k²+1/L_d²) — the gravest-mode
+    // swirl is bled far harder than medium eddies, so festoons/band waves survive
+    // (unlike the flat eddy-drag above).  ψ is one step stale.
+    if (u_vort_psi_drag > 0.0) {
+        float psi_eddy = texelFetch(u_psi, px, 0).r - u_psi_zmean[px.y];
+        q += u_vort_psi_drag * psi_eddy;
+    }
+#endif
     imageStore(out_omega, px, vec4(q, 0.0, 0.0, 0.0));
 
 #elif SUBPASS == 1

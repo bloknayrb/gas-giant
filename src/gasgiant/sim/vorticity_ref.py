@@ -150,6 +150,17 @@ def laplacian_patch(
     return c_ss * pss + c_tt * ptt + c_st * pst + c_g * psi_rho
 
 
+def zonal_mean(q: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Per-row zonal mean ⟨q⟩_x of a 2-D field over longitude (axis 1).
+
+    Mirrors ``zonal_mean.comp`` (one mean per latitude row), used by the
+    eddy-only drag.  The GPU kernel sums columns in a fixed sequential order;
+    numpy's ``mean`` uses pairwise summation, so parity holds only to float
+    tolerance, not bit-for-bit.
+    """
+    return np.asarray(q, dtype=float).mean(axis=1)
+
+
 # ---------------------------------------------------------------------------
 # 2. Zonal-wind vorticity
 # ---------------------------------------------------------------------------

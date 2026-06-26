@@ -112,8 +112,9 @@ void main() {
             float dlon = mod(ll.x - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;  // positive = downstream
             float across = (ll.y - vlat) / max(rc * 1.6, 1e-4);
-            if (along > rc * 0.5 * asp && along < rc * 7.0) {
-                wake += exp(-across * across) * (1.0 - along / (rc * 7.0));
+            if (along > 0.0 && along < rc * 7.0) {
+                float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
+                wake += exp(-across * across) * (1.0 - along / (rc * 7.0)) * ramp;
             }
         }
     }

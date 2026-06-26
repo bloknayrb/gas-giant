@@ -1,0 +1,37 @@
+#version 430
+// zonal_mean.comp — per-latitude-row zonal mean <q>_x of the absolute vorticity
+// q over longitude.  Feeds the eddy-only drag (vort_eddy_drag) in
+// omega_force.comp SUBPASS 0.
+//
+// EQUIRECT ONLY: a row of pixels is a line of constant latitude only on the
+// equirect grid.  On the AE polar patches a row is a radial spoke, so a "zonal
+// mean" there is undefined; the solver never dispatches this kernel for patches.
+//
+// One invocation per latitude row; the column sum runs in a FIXED sequential
+// order (c = 0 .. W-1) so the result is reproducible across drivers (float add
+// is non-associative).  This is mirrored by the numpy reference in
+// vorticity_ref.zonal_mean for parity.
+
+layout(local_size_x = 64, local_size_y = 1) in;
+
+uniform sampler2D u_omega;   // the field to reduce (q, or psi for the psi-drag)
+uniform ivec2 u_size;        // (W, H)
+
+// Output SSBO binding is configurable so the same kernel reduces q (binding 3,
+// for vort_eddy_drag) or psi (binding 4, for vort_psi_drag) into distinct buffers.
+#ifndef OUT_BINDING
+#define OUT_BINDING 3
+#endif
+layout(std430, binding = OUT_BINDING) writeonly buffer ZonalMean {
+    float zmean[];
+};
+
+void main() {
+    int row = int(gl_GlobalInvocationID.x);
+    if (row >= u_size.y) return;
+    float acc = 0.0;
+    for (int c = 0; c < u_size.x; ++c) {
+        acc += texelFetch(u_omega, ivec2(c, row), 0).r;
+    }
+    zmean[row] = acc / float(u_size.x);
+}

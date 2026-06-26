@@ -21,6 +21,9 @@ layout(r32f, binding = 0) uniform image2D psi_work;
 
 uniform ivec2 u_size;
 uniform float u_sor_omega;   // over-relaxation factor ∈ (1, 2)
+// Screened-Poisson term 1/L_d² (Rossby deformation radius). 0 = plain ∇²ψ=ω
+// (byte-identical); >0 solves (∇² − 1/L_d²)ψ = ω so vortex influence is local.
+uniform float u_inv_ld2;
 
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -50,7 +53,8 @@ void main() {
     float w_phi      = 1.0 / (dphi * dphi);
     float w_tan_half = tanl / (2.0 * dphi);
 
-    float center_coeff = -2.0 * w_lam - 2.0 * w_phi;
+    // -1/L_d² screening on the diagonal (0 = plain Poisson).
+    float center_coeff = -2.0 * w_lam - 2.0 * w_phi - u_inv_ld2;
 
     float xp1 = imageLoad(psi_work, ivec2(wrapX(px.x + 1, W), clampY(px.y,     H))).r;
     float xm1 = imageLoad(psi_work, ivec2(wrapX(px.x - 1, W), clampY(px.y,     H))).r;
@@ -80,7 +84,8 @@ void main() {
     float c_g  = cos(rho)/sinr - rho/sin2;
 
     // Center coefficient: only c_ss and c_tt contribute (cross+radial → RHS).
-    float center_coeff = -2.0*(c_ss + c_tt)/(dstep*dstep);
+    // -1/L_d² screening on the diagonal (0 = plain Poisson).
+    float center_coeff = -2.0*(c_ss + c_tt)/(dstep*dstep) - u_inv_ld2;
 
     // 5-point neighbors.
     float xp1 = imageLoad(psi_work, ivec2(wrapX(px.x + 1, W), clampY(px.y,     H))).r;
