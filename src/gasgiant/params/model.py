@@ -365,6 +365,19 @@ class StormsParams(_Params):
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
         description="White-oval anticyclone population multiplier",
     )
+    oval_solid_core: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Solid-body rotation for LARGE white ovals (vorticity mode): "
+                    "the same anti-whirlpool patch as hero_solid_core, applied to "
+                    "ovals with core radius >= 0.035 rad. A Gaussian oval is "
+                    "center-peaked -> differential rotation -> at long dev_steps it "
+                    "winds the tracer into a mini-bullseye; this blends its "
+                    "vorticity toward a near-uniform disk (rigid interior rotation) "
+                    "so it stays a coherent spot. 0 = Gaussian (byte-identical); "
+                    "1 = full patch. Ovals/small storms below the radius threshold "
+                    "are unaffected. Pairs with hero_solid_core to de-bullseye the "
+                    "whole field without lowering dev_steps or oval_density.",
+    )
     barge_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.3, 1.5), ui="Storms",
         description="Brown-barge cyclone population multiplier (belts)",
@@ -578,6 +591,12 @@ class BaroclinicParams(_Params):
         description="v1.6 steps between source refreshes (fixed cadence). No rand.")
 
 
+# Practical floor for a screened-Poisson deformation radius: below ~a few grid
+# cells (dphi at typical resolutions ~0.005 rad) 1/L_d^2 swamps the Laplacian and
+# the solve degenerates. 0.0 (off) is always allowed; the (0, floor) band is not.
+_DEFORMATION_RADIUS_FLOOR = 0.05
+
+
 class SolverParams(_Params):
     type: SolverType = pfield(SolverType.KINEMATIC, tier=Tier.RESTART, ui="Solver",
         description="Streamfunction solver: kinematic (analytic, v1.5) or "
@@ -587,6 +606,21 @@ class SolverParams(_Params):
     sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, ui="Solver",
         description="SOR over-relaxation factor, must be in (1,2) exclusive "
                     "(vorticity mode)")
+    deformation_radius: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, ui="Solver",
+        description="Rossby deformation radius L_d in RADIANS (vorticity mode). "
+                    "Screens the streamfunction inversion to (nabla^2 - 1/L_d^2)psi "
+                    "= omega instead of nabla^2 psi = omega (equivalent-barotropic "
+                    "/ 1.5-layer reduced gravity). A vortex's induced velocity then "
+                    "decays ~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail, so "
+                    "storms become LOCAL: a dominant hero perturbs its own band "
+                    "without destabilizing the rest of the map (real Jupiter "
+                    "L_d << the GRS). 0 = off (infinite L_d = plain 2D Poisson, "
+                    "byte-identical). Smaller = more screening/locality; values "
+                    "below ~0.05 rad are rejected (degenerate solve). Note: with "
+                    "screening on, the advected q is equivalent-barotropic QGPV, so "
+                    "vortex/inject/relax strengths tuned for the plain 2D path read "
+                    "weaker and more localized -- expect to re-tune. No rand.")
     vort_relax_tau: float = pfield(
         120.0, tier=Tier.RESTART, lo=20.0, hi=2000.0, log=True, ui="Solver",
         description="Vorticity nudging timescale toward jets+vortices (vorticity mode)")
@@ -627,6 +661,21 @@ class SolverParams(_Params):
             raise ValueError(
                 f"baroclinic.enabled requires solver type=vorticity "
                 f"(got {self.type})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_deformation_radius(self) -> SolverParams:
+        # 0 = off. A finite L_d below a few grid cells makes 1/L_d^2 swamp the
+        # Laplacian metric -> degenerate (frozen, ~dead-velocity) solve. Reject
+        # the degenerate band so it can't be set by accident; the floor is well
+        # below any useful screening length.
+        if 0.0 < self.deformation_radius < _DEFORMATION_RADIUS_FLOOR:
+            raise ValueError(
+                f"deformation_radius={self.deformation_radius} is in the "
+                f"degenerate band (0, {_DEFORMATION_RADIUS_FLOOR}); use 0.0 to "
+                f"disable screening or a value >= {_DEFORMATION_RADIUS_FLOOR} rad "
+                f"(a few grid cells) for a well-resolved screened solve."
             )
         return self
 

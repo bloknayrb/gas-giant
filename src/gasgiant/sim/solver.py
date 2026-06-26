@@ -301,10 +301,12 @@ class Solver:
                 _set(k, "u_rho_max", RHO_MAX)
         for k in [state.k_init, state.k_force0, state.k_lap, state.k_force1]:
             _set(k, "u_coriolis_f0", p.solver.coriolis_f0)
-        # Solid-body hero core: only k_init and k_force0 run vortexOmegaAccum,
-        # but _set is KeyError-guarded so setting it on all four is harmless.
+        # Solid-body cores (hero + large ovals): only k_init and k_force0 run
+        # vortexOmegaAccum, but _set is KeyError-guarded so setting it on all
+        # four is harmless.
         for k in [state.k_init, state.k_force0]:
             _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
+            _set(k, "u_oval_solid_core", p.storms.oval_solid_core)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # P3b static uniforms.
@@ -326,9 +328,16 @@ class Solver:
                     "(u_external_gain / u_external_omega); the M3 source would "
                     "silently no-op."
                 ) from e
+        # Screened-Poisson (finite Rossby deformation radius): center coeff gains
+        # a -1/L_d^2 diagonal term. L_d=0 => inv_ld2=0 => plain 2D Poisson
+        # (byte-identical). Computed here as an exact 0.0 when off so the kernel's
+        # subtraction is a true no-op.
+        ld = p.solver.deformation_radius
+        inv_ld2 = (1.0 / (ld * ld)) if ld > 0.0 else 0.0
         for k in (state.k_sor_red, state.k_sor_black):
             _set(k, "u_size", size)
             _set(k, "u_sor_omega", p.solver.sor_omega)
+            _set(k, "u_inv_ld2", inv_ld2)
         _set(state.k_feather, "u_size", size)
 
     def _omega_init(self, state: _OmegaState, domain: Domain) -> None:
