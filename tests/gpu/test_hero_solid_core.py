@@ -34,6 +34,15 @@ def _params(solid: float, steps: int = 60):
     p.storms.hero_count = 1
     p.storms.hero_latitude = HERO_LAT
     p.storms.hero_solid_core = solid
+    # jupiter_vorticity is now a LIVE preset (shear injection + finite L_d + hero
+    # mottle/tint interior noise). Neutralize those so these tests isolate
+    # hero_solid_core; without it the injection noise + screened SOR amplify the
+    # known cross-context GPU LSB noise and the byte-identity check flakes in a
+    # full-suite run (see swirl-scale-selective-drag / test_psi_drag_off_is_noop).
+    p.solver.vort_inject = 0.0
+    p.solver.deformation_radius = 0.0
+    p.storms.hero_mottle = 0.0
+    p.storms.hero_tint_var = 0.0
     return p
 
 
@@ -45,11 +54,19 @@ def _render(p, gpu) -> np.ndarray:
         sim._release_sim()
 
 
-def test_solid_core_byte_identical_when_off(gpu):
-    """solid_core=0 explicit must equal the default (Gaussian) path."""
+def test_solid_core_off_is_a_noop(gpu):
+    """solid_core=0 explicit must match the default (Gaussian) path. The vorticity
+    SOR Poisson solve carries ~1e-3 cross-instance LSB noise (the kinematic path is
+    exactly reproducible; vorticity is not), and the bold live hero (hero_strength
+    1.7) amplifies it past 8-bit quantization -- so this asserts agreement within the
+    GPU noise floor, not bit-exactness. A real solid_core effect is >> the floor (see
+    test_solid_core_changes_hero_region); bit-exact determinism of the DEFAULT path is
+    covered by the kinematic P0.5 gate."""
     base = _render(_params(0.0), gpu)
     same = _render(_params(0.0), gpu)
-    np.testing.assert_array_equal(base, same)
+    assert np.abs(base - same).max() < GPU_NOISE_ATOL, (
+        "solid_core=0 perturbed the render beyond the GPU LSB noise floor"
+    )
 
 
 def test_solid_core_changes_hero_region(gpu):

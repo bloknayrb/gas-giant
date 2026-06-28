@@ -5,40 +5,113 @@
   "params": {
     "seed": 9120,
     "name": "saturn_pale",
+    "sim": {
+      "resolution": 2048,
+      "dev_steps": 500,
+      "dt_scale": 1.0
+    },
+    "solver": {
+      "type": "kinematic",
+      "poisson_iters": 48,
+      "sor_omega": 1.7,
+      "deformation_radius": 0.0,
+      "vort_relax_tau": 120.0,
+      "vort_hypervisc": 1.0,
+      "coriolis_f0": 2.0,
+      "vort_inject": 0.0,
+      "vort_inject_scale": 0.5,
+      "vort_inject_mask": "global",
+      "vort_drag": 0.0,
+      "vort_eddy_drag": 0.0,
+      "vort_psi_drag": 0.0,
+      "baroclinic": {
+        "enabled": false,
+        "gain": 2.0,
+        "warmup_steps": 8000,
+        "baro_steps_per_update": 150,
+        "update_every": 32
+      }
+    },
     "bands": {
       "count": 10,
       "width_jitter": 0.25,
+      "edge_softness": 0.028,
       "value_contrast": 0.42,
       "warp_amount": 0.012,
       "warp_freq": 2.5,
       "detail_amount": 0.02,
-      "detail_freq": 10.0,
-      "edge_softness": 0.028,
+      "hue_jitter": 0.0,
       "variance_amount": 0.03,
+      "faded_sector": 0.0,
       "contrast_envelope": 0.4,
       "lane_density": 0.7,
+      "edge_diversity": 0.4,
       "width_tail": 0.5,
-      "edge_diversity": 0.4
+      "detail_freq": 10.0,
+      "template": null
     },
-    "waves": {
-      "festoon_strength": 0.0,
-      "ribbon_strength": 1.0,
-      "ribbon_wavenumber": 14
+    "jets": {
+      "strength": 1.0,
+      "equatorial_speed": 1.6,
+      "equatorial_width": 0.12,
+      "polar_decay": 0.5
+    },
+    "turbulence": {
+      "intensity": 1.0,
+      "shear_coupling": 1.0,
+      "belt_boost": 1.6,
+      "scale": 6.0,
+      "evolution_rate": 0.012,
+      "relax_tau": 350.0,
+      "replenish_rate": 0.015,
+      "kh_amplitude": 0.35,
+      "kh_wavenumber": 24,
+      "belt_replenish": 0.0,
+      "belt_replenish_scale": 2.0
     },
     "storms": {
       "hero_count": 0,
+      "hero_radius": 0.1,
+      "hero_strength": 1.0,
+      "hero_latitude": null,
+      "rim_contrast": 1.0,
+      "hero_aspect": 1.0,
+      "hero_mottle": 0.0,
+      "hero_tint_var": 0.0,
+      "hero_solid_core": 0.0,
       "oval_density": 0.4,
+      "oval_solid_core": 0.0,
       "barge_density": 0.2,
       "pearls_count": 0,
-      "outbreak_count": 1
+      "wake_turbulence": 1.8,
+      "outbreak_count": 1,
+      "outbreak_strength": 1.0,
+      "small_density": 0.0,
+      "stamp_contrast": 1.0,
+      "merge_rate": 0.0,
+      "merge_debris": 1.0
+    },
+    "waves": {
+      "festoon_strength": 0.0,
+      "festoon_wavenumber": 12,
+      "hotspot_depth": 0.6,
+      "ribbon_strength": 1.0,
+      "ribbon_wavenumber": 14
     },
     "poles": {
       "north": {
         "style": "polygon_jet",
-        "polygon_sides": 6
+        "cyclone_count": 6,
+        "polygon_sides": 6,
+        "strength": 1.0,
+        "field_density": 0.0
       },
       "south": {
-        "style": "plain_vortex"
+        "style": "plain_vortex",
+        "cyclone_count": 6,
+        "polygon_sides": 6,
+        "strength": 1.0,
+        "field_density": 0.0
       }
     },
     "appearance": {
@@ -269,6 +342,32 @@
           ]
         }
       ],
+      "storm_tints": [
+        {
+          "pos": 0.0,
+          "color": [
+            0.55,
+            0.6,
+            0.66
+          ]
+        },
+        {
+          "pos": 0.5,
+          "color": [
+            0.72,
+            0.58,
+            0.45
+          ]
+        },
+        {
+          "pos": 1.0,
+          "color": [
+            0.78,
+            0.42,
+            0.3
+          ]
+        }
+      ],
       "haze_amount": 0.42,
       "haze_color": [
         0.87,
@@ -277,6 +376,10 @@
       ],
       "contrast": 0.9,
       "saturation": 0.85,
+      "gamma": 1.0,
+      "chroma_scale": 1.0,
+      "chroma_variance": 0.0,
+      "hue_variance": 0.0,
       "polar_tint_color": [
         0.46,
         0.52,
@@ -285,19 +388,56 @@
       "polar_tint_strength": 0.3,
       "polar_tint_start_lat": 68.0
     },
-    "physical": {
-      "radius_km": 58232.0
-    },
     "detail": {
-      "intensity": 0.15,
+      "intensity": 0.3,
+      "flow_phases": 3,
+      "flow_stretch": 1.0,
+      "frequency": 48.0,
       "cellular_amount": 0.15,
       "striation_amount": 0.35,
       "striation_frequency": 128.0,
-      "polar_stipple": 0.35
+      "polar_stipple": 0.35,
+      "intermittency": 0.0,
+      "hero_spiral": 0.0,
+      "hero_collar_wrap": 0.0,
+      "belt_texture": 0.5,
+      "belt_texture_fine": 0.0,
+      "mottle": 0.35
     },
     "emission": {
+      "thermal_strength": 0.0,
+      "thermal_color": [
+        1.0,
+        0.36,
+        0.08
+      ],
+      "thermal_threshold": 0.18,
+      "thermal_hdr": 16.0,
+      "lightning_strength": 0.0,
+      "lightning_color": [
+        0.72,
+        0.82,
+        1.0
+      ],
+      "lightning_density": 0.5,
       "aurora_strength": 0.3,
+      "aurora_color": [
+        0.85,
+        0.35,
+        0.6
+      ],
+      "aurora_radius": 14.0,
+      "aurora_width": 2.5,
       "aurora_pole_offset": 0.0
+    },
+    "physical": {
+      "radius_km": 58232.0,
+      "height_scale": 0.004,
+      "height_midlevel": 0.5
+    },
+    "export": {
+      "width": 2048,
+      "png_compression": 2
     }
   }
 }

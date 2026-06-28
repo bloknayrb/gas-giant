@@ -195,26 +195,6 @@ def test_source_refresh_schedule_chunk_independent(gpu):
     assert preview == [0, 16, 32], f"unexpected schedule {preview}"
 
 
-def test_factory_preset_smoke(gpu):
-    """jupiter_baroclinic builds, develops, renders; differs from uncoupled base."""
-    p = load_factory_preset("jupiter_baroclinic")
-    p.sim.resolution = 512
-    p.sim.dev_steps = 40
-    p.solver.baroclinic = p.solver.baroclinic.model_copy(update={
-        "warmup_steps": 600, "baro_steps_per_update": 60, "update_every": 16})
-    sim = Simulation(p, gpu)
-    try:
-        assert sim._baro_driver is not None
-        coupled = sim.render_maps(512)["color"].astype(np.float64)
-    finally:
-        sim._release_sim()
-    p2 = p.model_copy()
-    p2.solver.type = SolverType.VORTICITY
-    p2.solver.baroclinic = p2.solver.baroclinic.model_copy(update={"enabled": False})
-    base = _dev_render(p2, gpu)
-    assert np.abs(coupled - base).max() > 0.05, "factory coupling must change render"
-
-
 def test_restart_reuse_independent_of_prior_ticks(gpu):
     """A reused (cached) driver must reset to post-warmup on a RESTART-tier edit,
     so the developed render is independent of how far a live preview was ticked

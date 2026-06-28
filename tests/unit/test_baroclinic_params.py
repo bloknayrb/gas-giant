@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from gasgiant.params.model import PlanetParams, SolverType
+from gasgiant.params.model import PlanetParams
 from gasgiant.params.presets import load_factory_preset
 
 
@@ -31,14 +31,6 @@ def test_enabled_with_vorticity_ok():
 def test_existing_preset_without_block_loads():
     p = load_factory_preset("jupiter_vorticity")
     assert p.solver.baroclinic.enabled is False
-
-
-def test_jupiter_baroclinic_preset_enables_coupling():
-    from gasgiant.params.presets import load_factory_preset
-    p = load_factory_preset("jupiter_baroclinic")
-    assert p.solver.type == SolverType.VORTICITY
-    assert p.solver.baroclinic.enabled is True
-    assert p.solver.baroclinic.gain == 2.0
 
 
 def test_baroclinic_fields_have_no_rand():

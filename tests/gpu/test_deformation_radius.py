@@ -38,8 +38,16 @@ def _params(ld: float, steps: int = 60, *, isolate_hero: bool = False):
     p.storms.hero_count = 1
     p.storms.hero_latitude = -22.5
     if isolate_hero:
-        # Strip everything but the hero so the velocity field is its footprint.
+        # Strip everything but the hero so the velocity field is its footprint, and
+        # pin a CANONICAL hero geometry so this screening-physics test is decoupled
+        # from the preset's art direction (jupiter_vorticity now bakes a bold solid-
+        # body hero -- radius 0.18, solid_core 1.0, mottle/tint -- whose near/far
+        # velocity profile differs from the Gaussian this test is calibrated for).
         p.storms.hero_strength = 2.0
+        p.storms.hero_radius = 0.15
+        p.storms.hero_solid_core = 0.0
+        p.storms.hero_mottle = 0.0
+        p.storms.hero_tint_var = 0.0
         p.storms.oval_density = 0.0
         p.storms.barge_density = 0.0
         p.storms.small_density = 0.0
@@ -61,13 +69,15 @@ def _render(p, gpu) -> np.ndarray:
 
 
 def test_deformation_radius_off_is_noop(gpu):
-    """deformation_radius=0 must be a no-op. In the kernel the only changed line
+    """deformation_radius=0 is an exact no-op at the kernel: the only changed line
     is `center_coeff - u_inv_ld2` with u_inv_ld2 an exact 0.0, and x - 0.0 == x
-    bit-for-bit (IEEE754), so the off path is bit-identical to the plain path --
-    matching the sibling solid-core byte-identity tests."""
+    bit-for-bit (IEEE754). The empirical check uses the GPU noise floor rather than
+    assert_array_equal because the jupiter_vorticity base is now a LIVE preset whose
+    vorticity SOR Poisson solve carries ~1e-3 cross-instance LSB noise (the kinematic
+    path is exactly reproducible; vorticity is not) -- a real effect is >> the floor."""
     base = _render(_params(0.0), gpu)
     same = _render(_params(0.0), gpu)
-    np.testing.assert_array_equal(base, same)
+    assert np.abs(base - same).max() < GPU_NOISE_ATOL
 
 
 def test_deformation_radius_changes_render(gpu):

@@ -88,19 +88,29 @@ _MEANDER_WIN = 0.6
 # --------------------------------------------------------------------------- #
 def build_cfg(seed: int, drag: float, width: int, raw: bool = False,
               inject: float = 0.0, inject_mask: str = "belts", eddy_drag: float = 0.0,
-              psi_drag: float = 0.0):
-    """raw=True sweeps vort_drag on the UNMODIFIED shipped preset (its own
-    dev_steps / jets / storms / inject 1.8-shear / no L_d).  raw=False applies the
-    L_d develop config the _diag probes used (deformation_radius 0.18, inject 0,
-    dev_steps 1256).  The two are genuinely different dynamics — see plan.
+              psi_drag: float = 0.0, preset: str = "gas_giant_warm",
+              sweep_axis: str = "drag"):
+    """raw=True is SHIP-CONFIG MODE: sweep the chosen drag axis on the UNMODIFIED
+    `preset` (its own dev_steps / jets / storms / inject / L_d / hero), overriding
+    ONLY that one drag param so the preset's real shipping dynamics are what gets
+    gated.  `sweep_axis` selects which drag the swept value drives ("drag" =
+    vort_drag, "eddy" = vort_eddy_drag, "psi" = vort_psi_drag); the swept value is
+    set explicitly (incl. 0) so the baseline panel can force a baked drag OFF.
 
-    inject/inject_mask let the develop config carry broadband eddy injection (to
-    test whether injection replenishes fine texture under drag); eddy_drag sets
-    the new vort_eddy_drag param (Gate 1)."""
-    p = load_factory_preset("gas_giant_warm").model_copy(update={"seed": seed})
+    raw=False applies the L_d develop config the _diag probes used (deformation_
+    radius 0.18, inject 0, dev_steps 1256) on top of gas_giant_warm.  The two are
+    genuinely different dynamics — see plan.  inject/inject_mask let the develop
+    config carry broadband eddy injection; eddy_drag sets vort_eddy_drag (Gate 1)."""
+    p = load_factory_preset(preset).model_copy(update={"seed": seed})
     if raw:
         p.sim = p.sim.model_copy(update={"resolution": width, "dt_scale": 1.0})
-        p.solver = p.solver.model_copy(update={"vort_drag": drag})
+        if sweep_axis == "psi":
+            over = {"vort_psi_drag": psi_drag}
+        elif sweep_axis == "eddy":
+            over = {"vort_eddy_drag": eddy_drag}
+        else:
+            over = {"vort_drag": drag}
+        p.solver = p.solver.model_copy(update=over)
         return p
     p.sim = p.sim.model_copy(update={"resolution": width, "dev_steps": 1256, "dt_scale": 1.0})
     solver_over = {
@@ -378,7 +388,10 @@ def main():
     ap.add_argument("--calibrate", action="store_true",
                     help="print raw metrics only; do not apply pass/fail thresholds")
     ap.add_argument("--raw", action="store_true",
-                    help="sweep drag on the UNMODIFIED shipped preset (not the develop config)")
+                    help="ship-config mode: sweep the drag axis on the UNMODIFIED preset "
+                         "(its own solver/storms), not the develop config")
+    ap.add_argument("--preset", default="gas_giant_warm",
+                    help="factory preset to gate in ship-config (--raw) mode")
     ap.add_argument("--inject", type=float, default=0.0,
                     help="vort_inject on the develop config (test texture replenishment)")
     ap.add_argument("--inject-mask", default="belts")
@@ -400,11 +413,13 @@ def main():
             g_drag = 0.0 if (args.sweep_eddy or args.sweep_psi) else drag
             e_drag = drag if args.sweep_eddy else args.eddy_drag
             p_drag = drag if args.sweep_psi else 0.0
-            axis = "psi_drag" if args.sweep_psi else ("eddy_drag" if args.sweep_eddy else "drag")
+            sweep_axis = "psi" if args.sweep_psi else ("eddy" if args.sweep_eddy else "drag")
+            axis = f"{sweep_axis}_drag" if sweep_axis != "drag" else "drag"
             print(f"render {axis}={drag}", flush=True)
             field = render(gpu, build_cfg(args.seed, g_drag, args.width, raw=args.raw,
                                           inject=args.inject, inject_mask=args.inject_mask,
-                                          eddy_drag=e_drag, psi_drag=p_drag), args.width)
+                                          eddy_drag=e_drag, psi_drag=p_drag,
+                                          preset=args.preset, sweep_axis=sweep_axis), args.width)
             _, m1 = metric_blobs(field)        # max eddy-blob latitude extent
             m5 = metric_hero_color(field)      # hero readability (color contrast)
             m2 = metric_meander(field)
