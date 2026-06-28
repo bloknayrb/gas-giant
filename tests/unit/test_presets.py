@@ -24,27 +24,9 @@ def test_factory_presets_exist_and_load():
         assert isinstance(params, PlanetParams)
 
 
-def test_gas_giant_warm_palette_has_value_contrast():
-    """gas_giant_warm fixes the 'frosted glass' look by mapping the rich T0
-    color-index field through a HIGH-CONTRAST palette: a flat/pale palette
-    discards the structure and the zones read as frosted. Pin that the bright
-    and dark ends of each palette row keep a real luminance spread so a future
-    palette edit can't silently re-flatten it back to frost."""
-    p = load_factory_preset("gas_giant_warm")
-    rows = p.appearance.palette_rows
-    assert rows, "gas_giant_warm must define palette rows"
-
-    def _luma(rgb: tuple[float, float, float]) -> float:
-        r, g, b = rgb
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-    for row in rows:
-        lumas = [_luma(s.color) for s in row.stops]
-        # dark belt gaps -> bright cloud tops: a real value range, not a pale ramp.
-        assert max(lumas) - min(lumas) > 0.5, (
-            f"row at lat={row.latitude} palette is too flat "
-            f"(luma spread {max(lumas) - min(lumas):.3f}); would re-frost"
-        )
+def _luma(rgb: tuple[float, float, float]) -> float:
+    r, g, b = rgb
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 def test_gas_giant_warm_keeps_zones_detailed():
@@ -58,6 +40,51 @@ def test_gas_giant_warm_keeps_zones_detailed():
         f"replenish_rate={p.turbulence.replenish_rate} is too low; the zone bands "
         f"will starve of detail and read as smooth blur"
     )
+
+
+def test_vorticity_preset_is_live():
+    """jupiter_vorticity was modernized from laminar (vort_inject=0, Gaussian hero,
+    no L_d) to LIVE: shear-masked injection folds the bands into filaments, a finite
+    deformation radius + scale-selective vort_psi_drag keep the storm-driven
+    gravest-mode swirl from eating a band, and the hero is a solid-body coherent oval
+    (not a center-draining whirlpool). Pin those so a future preset edit can't
+    silently revert it to the dead look."""
+    p = load_factory_preset("jupiter_vorticity")
+    assert p.solver.type.value == "vorticity"
+    assert p.solver.vort_inject > 0.0, "lost the live shear-masked injection"
+    assert p.solver.vort_inject_mask.value == "shear"
+    assert p.solver.deformation_radius > 0.0, "lost the cascade-screening L_d"
+    # Gentle, texture-preserving drag (warm's hot 0.5 over-flattens this); >0 for
+    # gravest-mode insurance, well under the over-flatten regime.
+    assert 0.0 < p.solver.vort_psi_drag <= 0.3, p.solver.vort_psi_drag
+    assert p.storms.hero_solid_core == 1.0, "hero reverted to Gaussian whirlpool"
+
+
+@pytest.mark.parametrize("name", ["gas_giant_warm", "jupiter_vorticity", "jupiter_like"])
+def test_palette_has_value_contrast(name):
+    """The warm + Jupiter presets fix the 'frosted glass' look by mapping the rich T0
+    color-index field through a HIGH-CONTRAST palette: a flat/pale ramp (the stock
+    blue-grey Jupiter palette sat in a narrow mid-tone band, luma spread ~0.34, never
+    dark) collapses the structure to one pale color = frost. Pin that each palette row
+    keeps a real dark->bright luminance spread so a future edit can't silently re-frost."""
+    p = load_factory_preset(name)
+    rows = p.appearance.palette_rows
+    assert rows, f"{name} must define palette rows"
+    for row in rows:
+        lumas = [_luma(s.color) for s in row.stops]
+        assert max(lumas) - min(lumas) > 0.5, (
+            f"{name} row at lat={row.latitude} palette is too flat "
+            f"(luma spread {max(lumas) - min(lumas):.3f}); would re-frost"
+        )
+
+
+def test_jupiter_like_keeps_zones_detailed():
+    """jupiter_like (the startup default) got the same zone-detail fix as
+    gas_giant_warm: a high replenish_rate re-feeds detail faster than the fast
+    jets smear it, so the quiescent zones stay textured instead of reading as
+    smooth 'blurry bands'. Pin it against a silent revert to the starved default."""
+    p = load_factory_preset("jupiter_like")
+    assert p.turbulence.replenish_rate >= 0.25, p.turbulence.replenish_rate
 
 
 def test_save_load_round_trip(tmp_path):

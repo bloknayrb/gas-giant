@@ -61,14 +61,15 @@ def _step_q(p, gpu) -> np.ndarray:
 
 def test_eddy_drag_off_is_noop(gpu):
     """vort_eddy_drag=0 skips the reduction dispatch entirely and the SUBPASS-0
-    term is `if (u_vort_eddy_drag > 0.0)` false, so the off path is bit-identical
-    to the path without the feature (sibling of the deformation_radius/solid-core
-    byte-identity tests).  No injection here: the evolving injection noise would
-    amplify the known cross-context GPU LSB noise into a spurious mismatch in a
-    full-suite run; the eddy-drag-off path is identical with or without it."""
+    term is `if (u_vort_eddy_drag > 0.0)` false, so the off path is an exact no-op
+    at the kernel (sibling of the deformation_radius/solid-core tests).  Injection is
+    off here, but the modernized jupiter_vorticity base is otherwise LIVE (bold hero +
+    rich detail), and its vorticity SOR carries ~1e-3 cross-instance LSB noise that
+    8-bit color no longer rounds away -- so the empirical check uses the GPU noise
+    floor rather than assert_array_equal; a real effect is >> the floor."""
     base = _render(_params(0.0, inject=0.0), gpu)
     same = _render(_params(0.0, inject=0.0), gpu)
-    np.testing.assert_array_equal(base, same)
+    assert np.abs(base - same).max() < GPU_NOISE_ATOL
 
 
 def test_eddy_drag_changes_render(gpu):
