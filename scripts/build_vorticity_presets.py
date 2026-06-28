@@ -57,28 +57,27 @@ def jupiter_palette(p):
     rows = [PaletteRow(latitude=r.latitude, stops=stops) for r in p.appearance.palette_rows]
     return p.appearance.model_copy(update={"palette_rows": rows, "chroma_scale": 1.0})
 
-# The proven live-physics block from gas_giant_warm (passes swirl_gate): shear-
-# masked broadband injection folded by the jets, scale-selective psi-drag bleeding
-# the gravest-mode swirl, finite L_d screening the inverse cascade.
-#
-# vort_psi_drag is tuned PER PRESET (see PRESET_DELTA): warm's hot 0.5 over-flattens
-# these at their own dev_steps, where L_d already screens the cascade. The gate
-# psi-sweep put the texture-preserving knee (m6 >= 0.45 floor) at ~0.1 for
-# jupiter_vorticity; jupiter_baroclinic's source pumps a real swirl (m1 2.57 at
-# psi 0) so it carries a touch more drag.
+# The live-physics block (gas_giant_warm's proven recipe, passes swirl_gate): shear-
+# masked broadband injection folded by the jets, finite L_d screening the inverse
+# cascade, and scale-selective psi-drag bleeding the gravest-mode swirl. vort_psi_drag
+# is a GENTLE 0.06 here -- warm's hot 0.5 over-flattens at this preset's dev_steps,
+# where L_d already screens the cascade, so the gate psi-sweep knee (m6 >= 0.45 floor)
+# sits low; it is just gravest-mode insurance.
 SOLVER_LIVE = {
     "deformation_radius": 0.18,
     "vort_inject": 1.8,
     "vort_inject_scale": 2.5,
     "vort_inject_mask": InjectMask.SHEAR,
+    "vort_psi_drag": 0.06,
 }
 
 # Solid-body coherent-oval hero + bold stamp contrast (the whirlpool->oval fix).
-# hero_strength bumped to 1.9 and hero_radius set per-preset (below) so the GRS reads
-# as a bolder visual anchor (the visual review found it small/muddy at 1.7/0.15).
+# hero_strength 1.9 + hero_radius 0.18 make the GRS a bolder visual anchor (the visual
+# review found it small/muddy at the stock 1.7/0.15).
 STORMS_HERO = {
     "hero_solid_core": 1.0,
     "hero_strength": 1.9,
+    "hero_radius": 0.18,
     "rim_contrast": 2.0,
     "stamp_contrast": 2.4,
     "hero_mottle": 0.35,
@@ -145,46 +144,33 @@ WAVES_RICH = {
     "hotspot_depth": 1.0,
 }
 
-# Per-preset deltas on top of the shared blocks above.
-#   jupiter_vorticity = INJECTION-driven: full shear injection folds the bands into
-#     filaments; L_d already screens the cascade at dev 700 so only a gentle
-#     gravest-mode insurance psi-drag. Larger 0.18 hero.
+# jupiter_vorticity is INJECTION-driven: full shear injection folds the bands into
+# filaments; L_d screens the cascade so only a gentle gravest-mode insurance psi-drag.
 # (jupiter_baroclinic was dropped: a natural-looking baroclinic preset is just an
 #  injection-Jupiter clone -- the coupling's intrinsic regular festoon-comb is exactly
 #  the "mechanical" look the user rejected. The baroclinic FEATURE/engine stays; only
 #  the factory preset is gone. See tests/gpu/test_m3_ship.py for engine coverage.)
-PRESET_DELTA = {
-    "jupiter_vorticity": {
-        "solver": {"vort_psi_drag": 0.06},
-        "storms": {"hero_radius": 0.18},
-    },
-}
-
-
-def modernize(name: str) -> None:
-    p = load_factory_preset(name)
-    delta = PRESET_DELTA[name]
-
-    p.solver = p.solver.model_copy(update={**SOLVER_LIVE, **delta.get("solver", {})})
+def modernize() -> None:
+    p = load_factory_preset("jupiter_vorticity")
+    p.solver = p.solver.model_copy(update=SOLVER_LIVE)
     p.jets = p.jets.model_copy(update=JETS_WARM)
-    p.storms = p.storms.model_copy(
-        update={**STORMS_HERO, **STORMS_FIELD, **delta.get("storms", {})})
+    p.storms = p.storms.model_copy(update={**STORMS_HERO, **STORMS_FIELD})
     p.turbulence = p.turbulence.model_copy(update=TURBULENCE_RICH)
     p.detail = p.detail.model_copy(update=DETAIL_RICH)
     p.waves = p.waves.model_copy(update=WAVES_RICH)
     p.appearance = jupiter_palette(p)  # frost fix
 
-    out = PRESETS_DIR / f"{name}.json"
-    save_preset(p, out, name=name)
+    out = PRESETS_DIR / "jupiter_vorticity.json"
+    save_preset(p, out, name="jupiter_vorticity")
     # Prove it is in-bounds (save_preset does not re-validate; load_preset does).
     reloaded = load_preset(out)
-    assert reloaded.solver.vort_psi_drag == delta["solver"]["vort_psi_drag"]
+    assert reloaded.solver.vort_psi_drag == 0.06
     assert reloaded.storms.hero_solid_core == 1.0
     print(f"wrote + verified {out}", flush=True)
 
 
 def main() -> None:
-    modernize("jupiter_vorticity")
+    modernize()
 
 
 if __name__ == "__main__":

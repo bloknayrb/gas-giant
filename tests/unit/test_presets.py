@@ -24,27 +24,9 @@ def test_factory_presets_exist_and_load():
         assert isinstance(params, PlanetParams)
 
 
-def test_gas_giant_warm_palette_has_value_contrast():
-    """gas_giant_warm fixes the 'frosted glass' look by mapping the rich T0
-    color-index field through a HIGH-CONTRAST palette: a flat/pale palette
-    discards the structure and the zones read as frosted. Pin that the bright
-    and dark ends of each palette row keep a real luminance spread so a future
-    palette edit can't silently re-flatten it back to frost."""
-    p = load_factory_preset("gas_giant_warm")
-    rows = p.appearance.palette_rows
-    assert rows, "gas_giant_warm must define palette rows"
-
-    def _luma(rgb: tuple[float, float, float]) -> float:
-        r, g, b = rgb
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-    for row in rows:
-        lumas = [_luma(s.color) for s in row.stops]
-        # dark belt gaps -> bright cloud tops: a real value range, not a pale ramp.
-        assert max(lumas) - min(lumas) > 0.5, (
-            f"row at lat={row.latitude} palette is too flat "
-            f"(luma spread {max(lumas) - min(lumas):.3f}); would re-frost"
-        )
+def _luma(rgb: tuple[float, float, float]) -> float:
+    r, g, b = rgb
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 def test_gas_giant_warm_keeps_zones_detailed():
@@ -78,21 +60,16 @@ def test_vorticity_preset_is_live():
     assert p.storms.hero_solid_core == 1.0, "hero reverted to Gaussian whirlpool"
 
 
-@pytest.mark.parametrize("name", ["jupiter_vorticity", "jupiter_like"])
-def test_jupiter_presets_palette_has_value_contrast(name):
-    """The Jupiter presets shipped a frosted look: the stock blue-grey palette
-    sat in a narrow mid-tone band (luma spread ~0.34, never dark) so it discarded the
-    rich T0 structure. They were de-frosted with the same high-contrast ramp as
-    gas_giant_warm (deep belt shadows -> bright cloud tops). Pin the value spread so a
-    palette edit can't silently re-frost them."""
+@pytest.mark.parametrize("name", ["gas_giant_warm", "jupiter_vorticity", "jupiter_like"])
+def test_palette_has_value_contrast(name):
+    """The warm + Jupiter presets fix the 'frosted glass' look by mapping the rich T0
+    color-index field through a HIGH-CONTRAST palette: a flat/pale ramp (the stock
+    blue-grey Jupiter palette sat in a narrow mid-tone band, luma spread ~0.34, never
+    dark) collapses the structure to one pale color = frost. Pin that each palette row
+    keeps a real dark->bright luminance spread so a future edit can't silently re-frost."""
     p = load_factory_preset(name)
     rows = p.appearance.palette_rows
-    assert rows
-
-    def _luma(rgb: tuple[float, float, float]) -> float:
-        r, g, b = rgb
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
+    assert rows, f"{name} must define palette rows"
     for row in rows:
         lumas = [_luma(s.color) for s in row.stops]
         assert max(lumas) - min(lumas) > 0.5, (

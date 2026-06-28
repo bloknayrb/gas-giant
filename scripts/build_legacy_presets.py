@@ -61,13 +61,10 @@ PRESET_DELTA = {
     },
 }
 
-_SUBMODELS = ("detail", "turbulence", "storms", "waves", "appearance")
-
-
 def polish(name: str) -> None:
     p = load_factory_preset(name)
     for section, update in PRESET_DELTA[name].items():
-        assert section in _SUBMODELS, section
+        # A bad section name fails loudly at getattr below (AttributeError).
         setattr(p, section, getattr(p, section).model_copy(update=update))
 
     if name == "jupiter_like":
