@@ -221,6 +221,9 @@ DETAIL_RICH = {
     "intermittency": 0.65,      # longitudinal patchiness: violent folds abutting calm runs
     "cellular_amount": 0.9,
     "striation_amount": 1.0,
+    "polar_filaments": 1.3,     # Juno folded-filamentary cap lace (sparse flow-folded
+                                # ridge wisps poleward of 66 deg; DC-neutral by a clamped
+                                # bright side so it is drift-stable across dev_steps)
 }
 
 # Festoons + warm's deeper hotspots. festoon_strength is held DOWN at 1.6 (not warm's

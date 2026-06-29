@@ -89,6 +89,9 @@ uniform float u_belt_texture_fine;
 uniform float u_zone_texture;     // flow-folded fold inside zones (1-belt); 0 disables
 uniform float u_mottle;
 uniform vec3 u_offset_mottle;     // subseed("detail-mottle")
+// Polar folded-filamentary region: ridged, multi-octave, flow-folded lace at
+// the caps. Only meaningful with the polar route on (valid patch velocity).
+uniform float u_polar_filaments;
 #endif
 
 const float PI = 3.14159265358979;
@@ -441,6 +444,44 @@ void main() {
         if (u_hero_collar_wrap > 0.0) {
             d += 0.22 * u_hero_collar_wrap * clamp(spw, -1.5, 1.5);
         }
+    }
+
+    // Polar folded-filamentary region (FFR): the Juno cap mosaics show dense,
+    // chaotic, multi-scale RIDGED filaments tangling around and between the
+    // circumpolar cyclones -- lace, not the smooth mottle the mid-latitudes
+    // get. Backtraced through the polar PATCH velocity (the equirect velocity
+    // is faded/meaningless at the cap) so the lace winds with the cap vortices;
+    // 1-|fbm| across two octaves sharpens the noise zero-crossings into
+    // filament ridges rather than blobs. Gated by routeW > 0, which is non-zero
+    // ONLY when the polar route is on (u_polar_route != 0) AND we are poleward
+    // of ~66 deg, i.e. exactly where the patch samplers carry real cap
+    // velocity. Guarded => byte-identical when off.
+    if (u_polar_filaments > 0.0 && routeW > 0.0) {
+        // Shorter backtrace than the filament phases: at high dev_steps the
+        // cap flow is fine/busy and a long fold shreds the bold curls into
+        // grain, so keep the fold gentle to hold storm-scale lace.
+        vec2 srcF = (ll.y >= 0.0)
+            ? backtraceLL(u_vel_n, 1, ll, u_stretch * TAU_BASE * 1.15)
+            : backtraceLL(u_vel_s, 1, ll, u_stretch * TAU_BASE * 1.15);
+        vec3 pf = spherePt(srcF);
+        // Bold primary curls + a finer tangle, both ridged (1-|fbm| peaks at
+        // the noise zero-crossings). 1-|fbm| is otherwise BRIGHT across most of
+        // the domain, so a plain ridge brightens the whole cap (a glow). A high
+        // smoothstep THRESHOLD keeps only the sharpest ridges, leaving the cap
+        // mostly dark (at the tint floor) with DISCRETE bright wisps. Coarse
+        // base freq so the bold curls survive the late-step advective shred.
+        float a1 = 1.0 - abs(fbm(pf * (u_freq * 0.30) + u_offset_mottle.zyx + 17.0, 4, 2.0, 0.5));
+        float a2 = 1.0 - abs(fbm(pf * (u_freq * 0.82) + u_offset_mottle.xzy + 53.0, 3, 2.0, 0.5));
+        float ridge = smoothstep(0.80, 0.97, 0.70 * a1 + 0.30 * a2);
+        // Signed about the ridge field's mean (calibrated against the DC guard)
+        // so the sparse bright wisps ADD while the inter-wisp canvas (the bulk
+        // of the cap, where ridge~0) SUBTRACTS and darkens: net cap DC ~ 0,
+        // discrete wisps on a dark floor instead of a broad bright haze. The
+        // bright side is CLAMPED so wisp peaks cannot accumulate brighter as the
+        // cap flow evolves -- this caps the playout drift the reviewers flagged
+        // (gates were creeping up monotonically with dev_steps).
+        float lace = clamp(ridge - 0.13, -0.5, 0.42);
+        d += u_polar_filaments * routeW * 2.8 * lace;
     }
 #endif
 

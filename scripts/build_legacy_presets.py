@@ -46,7 +46,9 @@ PRESET_DELTA = {
         # belts (was 1.9/2.2); palette, muted storm-tint, hue_variance and contrast all
         # arrive via jupiter_palette() so jupiter_like tracks the Cassini match too.
         "detail": {"belt_texture": 1.2, "belt_texture_fine": 1.4, "mottle": 1.1,
-                   "cellular_amount": 0.9, "striation_amount": 1.0},
+                   "cellular_amount": 0.9, "striation_amount": 1.0,
+                   "polar_filaments": 1.3},   # Juno folded-filamentary cap lace
+
         "turbulence": {"replenish_rate": 0.35},          # zone-detail starvation fix
         "storms": {"stamp_contrast": 2.0, "rim_contrast": 2.0, "oval_density": 3.0,
                    "barge_density": 2.989, "pearls_count": 14, "small_density": 3.0},

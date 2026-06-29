@@ -774,7 +774,8 @@
       "zone_texture": 1.0,
       "belt_texture": 1.2,
       "belt_texture_fine": 1.4,
-      "mottle": 1.1
+      "mottle": 1.1,
+      "polar_filaments": 1.3
     },
     "emission": {
       "thermal_strength": 0.35,

@@ -584,6 +584,16 @@ class DetailParams(_Params):
                     "way -- the reference's mid-latitude storm-flecked "
                     "character",
     )
+    polar_filaments: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Detail",
+        description="Polar folded-filamentary region (the Juno cap look): "
+                    "dense, multi-scale, flow-folded RIDGED filaments tangling "
+                    "between the circumpolar cyclones poleward of ~65 deg. "
+                    "Backtraced through the polar patch velocity so the lace "
+                    "winds with the cap vortices; only active when the polar "
+                    "route is on (cyclone-cluster/plain poles). 0 = off "
+                    "(byte-identical)",
+    )
 
 
 class SolverType(StrEnum):
