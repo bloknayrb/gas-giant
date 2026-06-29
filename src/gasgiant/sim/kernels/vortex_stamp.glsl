@@ -14,6 +14,7 @@ uniform float u_hero_mottle;       // interior brightness churn (T0); 0 disables
 uniform float u_hero_tint_var;     // interior tint festoon (T3); 0 disables
 uniform float u_hero_rim_warp;     // lumpy-oval boundary warp; 0 disables (byte-identical)
 uniform float u_hero_rim_tint;     // dark reddish collar rim; 0 disables (byte-identical)
+uniform float u_hero_wake_detail;  // wake filament structure; 0 disables (byte-identical)
 // Seeded noise offset for the hero interior fbm. Declared here (not reusing the
 // includer's u_detail_offset) because this file is #included BEFORE that uniform
 // is declared in init.comp/advect.comp, so it is not yet in scope. Set from the
@@ -128,8 +129,28 @@ vec3 vortexStamp(vec3 p) {
                 // Guarded => byte-identical when off.
                 if (u_hero_rim_tint > 0.0) {
                     float rring = exp(-(qrim - 1.08) * (qrim - 1.08) * 11.0);
-                    dT3 += u_hero_rim_tint * 0.55 * rring;
-                    dT0 -= u_hero_rim_tint * 0.12 * rring;
+                    // Azimuthal break-up: the real Red Spot Hollow is a soft, broken,
+                    // asymmetric moat -- dark on some arcs, faint on others -- not a
+                    // uniform ring. Modulate the DARKENING (not the reddening) with a
+                    // few-lobe seeded function of the hero-frame azimuth so the collar
+                    // reads as a moat, not a drawn-on outline. Rides the warped qrim,
+                    // so radius AND darkness are both irregular (no new mechanical ring).
+                    float azw = 1.0;
+                    vec3 tc = a.xyz;
+                    vec3 tew = cross(vec3(0.0, 1.0, 0.0), tc);
+                    float tewl = length(tew);
+                    if (tewl > 1e-4) {
+                        vec3 t1 = tew / tewl;
+                        vec3 t2 = cross(tc, t1);
+                        float tth = atan(dot(p, t2), dot(p, t1));
+                        vec3 tph = u_hero_noise_offset * 6.2831853;
+                        float lobe = ( 0.6 * sin(tth + tph.x)
+                                     + 0.3 * sin(2.0 * tth + tph.y)
+                                     + 0.2 * sin(3.0 * tth + tph.z));
+                        azw = clamp(0.35 + 0.65 * (0.5 + 0.5 * lobe), 0.35, 1.0);
+                    }
+                    dT3 += u_hero_rim_tint * 0.55 * rring;            // redden -- unchanged
+                    dT0 -= u_hero_rim_tint * 0.16 * rring * azw;      // deeper (was 0.12) + broken
                 }
                 // Interior turbulent churn: a flow-scale fbm breaks up the
                 // smooth Gaussian core so the spot reads as churning cloud, not
@@ -182,9 +203,33 @@ vec3 vortexStamp(vec3 p) {
             float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;
             float across = (plat - vlat) / max(rc * 1.6, 1e-4);
+            // Wake filaments: fray the smooth wedge into ragged folded streaks so it
+            // reads as turbulence, not a blob. The wake is the relaxation TARGET, so a
+            // structured target makes a structured wake (advect.comp folds it; the
+            // velocity wake in psi.comp supplies the along-flow folding). All
+            // rc-normalized => scale-invariant. Guarded => byte-identical when off.
+            float wseed = u_hero_noise_offset.x * 6.3;
+            float an = along / max(rc, 1e-4);              // 0..6 downstream, rc-invariant
+            if (u_hero_wake_detail > 0.0) {
+                // (1) Ragged envelope: low-freq wobble of the wedge centreline/width,
+                // applied BEFORE w so the silhouette both widens and narrows.
+                across += u_hero_wake_detail * 0.30
+                        * fbm(vec3(an * 0.5, 0.0, wseed + 11.0), 2, 2.0, 0.5);
+            }
             if (along > 0.0 && along < rc * 6.0) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
                 float w = exp(-across * across) * (1.0 - along / (rc * 6.0)) * ramp;
+                if (u_hero_wake_detail > 0.0) {
+                    // (2) Intermittent flow-aligned filaments: anisotropic fbm (low
+                    // along-freq, higher across-freq => downstream streaks), sheared so
+                    // they fan along the curving flow, thresholded so there are clear
+                    // lanes between filaments (not uniform mottle). Clamped so the
+                    // factor stays in [0,1] (snoise can exceed +/-1 -> would sign-flip w).
+                    float sh  = across + 0.25 * an;
+                    float fil = fbm(vec3(an * 0.30, sh * 1.7, wseed), 4, 2.0, 0.5);
+                    float streak = clamp(smoothstep(-0.2, 0.6, fil), 0.0, 1.0);
+                    w *= mix(1.0, streak, u_hero_wake_detail);
+                }
                 dT0 += 0.16 * w;   // bright churned clouds
                 dT3 -= 0.20 * w;   // cool gray-white, not belt-colored
             }

@@ -370,6 +370,17 @@ class StormsParams(_Params):
                     "close-up; rim and collar warp independently. 0 = perfect "
                     "oval (byte-identical, the fbm is never evaluated)",
     )
+    hero_wake_detail: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Wake filament structure: the downstream wake is stamped as a "
+                    "smooth wedge into the relaxation target, so it reads as a "
+                    "blob even though the wake velocity is turbulent. This frays "
+                    "the wedge envelope and carves its interior with an "
+                    "anisotropic, intermittent, flow-aligned fbm so the wake reads "
+                    "as ragged folded filaments. Scale-invariant (rc-normalized); "
+                    "the velocity wake supplies the along-flow folding. 0 = smooth "
+                    "wedge (byte-identical, the fbm is never evaluated)",
+    )
     hero_solid_core: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
         description="Solid-body hero rotation (vorticity mode): blends the hero's "

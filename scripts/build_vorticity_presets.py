@@ -102,7 +102,10 @@ STORMS_HERO = {
     "hero_tint_var": 0.45,  # a touch more salmon/white interior festoon
     "hero_aspect": 2.2,
     "hero_rim_warp": 0.65,  # lumpy-oval boundary (break the perfect-ring look)
-    "hero_rim_tint": 0.70,  # dark reddish collar (Red Spot Hollow rim) => discrete vortex
+    "hero_rim_tint": 0.85,  # deeper, azimuthally-broken dark-red collar (Red Spot Hollow
+                            # moat, not a uniform ring) => discrete vortex
+    "hero_wake_detail": 0.80,  # fray the downstream wake into folded filaments instead
+                               # of a smooth wedge (reads as turbulence, not a blob)
 }
 
 # Warm's gentler jet profile (vs the stock 1.0/1.6/0.12/0.5): lower strength + WIDER
@@ -195,6 +198,8 @@ def modernize() -> None:
     reloaded = load_preset(out)
     assert reloaded.solver.vort_psi_drag == 0.06
     assert reloaded.storms.hero_solid_core == 1.0
+    assert reloaded.storms.hero_rim_tint == 0.85
+    assert reloaded.storms.hero_wake_detail == 0.80
     print(f"wrote + verified {out}", flush=True)
 
 
