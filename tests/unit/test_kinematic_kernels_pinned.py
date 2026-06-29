@@ -33,7 +33,7 @@ _PINNED: dict[str, str] = {
     "advect.comp":       "a44a0061d19ac2769c45b308500e6405f8663fd1",
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
     "common.glsl":       "48c13b438e4e893b32b594234ef965bdfeac1cad",
-    "vortex_stamp.glsl": "3aa81ad720796a07e04d726a0c9578d725545c00",
+    "vortex_stamp.glsl": "817cdafbd61bf96c86fc543cc0816e20d109a969",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }

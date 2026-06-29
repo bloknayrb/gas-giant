@@ -95,29 +95,38 @@ vec3 vortexStamp(vec3 p) {
                 // => the trig is never evaluated when off (byte-identical).
                 float qrim = q;
                 float qcol = q;
-                if (u_hero_rim_warp > 0.0) {
-                    // Local tangent azimuth around the vortex centre (same e1/e2
-                    // east-west frame the aspect path uses).
+                // Hero-frame azimuth, shared by the rim_warp lobes (lumpy edge) and the
+                // rim_tint collar break. Same e1/e2 east-west frame the aspect path uses.
+                // Computed ONCE when either lever is on (both feed off the identical
+                // frame, so there is no point building it twice); hth_ok guards the
+                // degenerate pole-aligned case. Guarded => byte-identical when both off.
+                float hth = 0.0;
+                bool hth_ok = false;
+                if (u_hero_rim_warp > 0.0 || u_hero_rim_tint > 0.0) {
                     vec3 hc = a.xyz;
                     vec3 hew = cross(vec3(0.0, 1.0, 0.0), hc);
                     float hewl = length(hew);
                     if (hewl > 1e-4) {
                         vec3 h1 = hew / hewl;
                         vec3 h2 = cross(hc, h1);
-                        float th = atan(dot(p, h2), dot(p, h1));
-                        // Seeded phases from the hero noise offset (deterministic).
-                        vec3 ph = u_hero_noise_offset * 6.2831853;
-                        // Incommensurate wavenumbers {2,3,5} => quasi-irregular,
-                        // few lobes around the oval. Normalised to ~[-1,1].
-                        float wr = ( 0.55 * sin(2.0 * th + ph.x)
-                                   + 0.30 * sin(3.0 * th + ph.y)
-                                   + 0.20 * sin(5.0 * th + ph.z));
-                        float wc = ( 0.55 * sin(2.0 * th + ph.y + 1.7)
-                                   + 0.30 * sin(3.0 * th + ph.z + 0.6)
-                                   + 0.20 * sin(5.0 * th + ph.x + 2.9));
-                        qrim += u_hero_rim_warp * 0.20 * wr;
-                        qcol += u_hero_rim_warp * 0.20 * wc;
+                        hth = atan(dot(p, h2), dot(p, h1));
+                        hth_ok = true;
                     }
+                }
+                if (u_hero_rim_warp > 0.0 && hth_ok) {
+                    // Seeded phases from the hero noise offset (deterministic).
+                    vec3 ph = u_hero_noise_offset * 6.2831853;
+                    // Incommensurate wavenumbers {2,3,5} => quasi-irregular, few lobes
+                    // around the oval. Normalised to ~[-1,1]. Decorrelated rim/collar
+                    // phases so they do not wobble in lockstep.
+                    float wr = ( 0.55 * sin(2.0 * hth + ph.x)
+                               + 0.30 * sin(3.0 * hth + ph.y)
+                               + 0.20 * sin(5.0 * hth + ph.z));
+                    float wc = ( 0.55 * sin(2.0 * hth + ph.y + 1.7)
+                               + 0.30 * sin(3.0 * hth + ph.z + 0.6)
+                               + 0.20 * sin(5.0 * hth + ph.x + 2.9));
+                    qrim += u_hero_rim_warp * 0.20 * wr;
+                    qcol += u_hero_rim_warp * 0.20 * wc;
                 }
                 dT0 += b.w * core
                      - 0.16 * u_rim_contrast * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
@@ -132,21 +141,15 @@ vec3 vortexStamp(vec3 p) {
                     // Azimuthal break-up: the real Red Spot Hollow is a soft, broken,
                     // asymmetric moat -- dark on some arcs, faint on others -- not a
                     // uniform ring. Modulate the DARKENING (not the reddening) with a
-                    // few-lobe seeded function of the hero-frame azimuth so the collar
-                    // reads as a moat, not a drawn-on outline. Rides the warped qrim,
-                    // so radius AND darkness are both irregular (no new mechanical ring).
+                    // few-lobe seeded function of the shared hero-frame azimuth so the
+                    // collar reads as a moat, not a drawn-on outline. Rides the warped
+                    // qrim, so radius AND darkness are both irregular (no new ring).
                     float azw = 1.0;
-                    vec3 tc = a.xyz;
-                    vec3 tew = cross(vec3(0.0, 1.0, 0.0), tc);
-                    float tewl = length(tew);
-                    if (tewl > 1e-4) {
-                        vec3 t1 = tew / tewl;
-                        vec3 t2 = cross(tc, t1);
-                        float tth = atan(dot(p, t2), dot(p, t1));
+                    if (hth_ok) {
                         vec3 tph = u_hero_noise_offset * 6.2831853;
-                        float lobe = ( 0.6 * sin(tth + tph.x)
-                                     + 0.3 * sin(2.0 * tth + tph.y)
-                                     + 0.2 * sin(3.0 * tth + tph.z));
+                        float lobe = ( 0.6 * sin(hth + tph.x)
+                                     + 0.3 * sin(2.0 * hth + tph.y)
+                                     + 0.2 * sin(3.0 * hth + tph.z));
                         azw = clamp(0.35 + 0.65 * (0.5 + 0.5 * lobe), 0.35, 1.0);
                     }
                     dT3 += u_hero_rim_tint * 0.55 * rring;            // redden -- unchanged
