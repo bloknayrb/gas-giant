@@ -61,6 +61,11 @@ uniform float u_hero_aspect[3];
 uniform float u_striation_amount;
 uniform float u_striation_freq;
 uniform float u_polar_stipple;
+// Calm the band-aligned grain (filament streak + striation + belt folds) inside
+// the hero interior, weighted by the hero mask. 0 => factor is exactly 1.0
+// everywhere => byte-identical. A BASE uniform (not DETAIL_FX) because the
+// streak/striation it tames live in the pre-FX path.
+uniform float u_hero_calm;
 
 #ifdef DETAIL_FX
 // Longitudinal intermittency gate + hero internal spiral lanes. The
@@ -81,6 +86,7 @@ uniform float u_hero_spin[3];
 // any jet; and nothing at all textures the 35-60 deg regime).
 uniform float u_belt_texture;
 uniform float u_belt_texture_fine;
+uniform float u_zone_texture;     // flow-folded fold inside zones (1-belt); 0 disables
 uniform float u_mottle;
 uniform vec3 u_offset_mottle;     // subseed("detail-mottle")
 #endif
@@ -116,7 +122,11 @@ float heroMask(vec3 p) {
             } else {
                 vec3 e1 = ew / ewl;
                 vec3 e2 = cross(c, e1);
-                q = length(vec2(dot(p, e1) / asp, dot(p, e2))) / rc;
+                // Near-hemisphere gate: the tangent projection collapses to q~0
+                // at the antipode, which would amplify detail on the far side.
+                q = (dot(p, c) > 0.0)
+                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / rc
+                  : 1e3;
             }
         }
         m += exp(-q * q);
@@ -196,6 +206,10 @@ void main() {
 
     vec3 pc = spherePt(ll);
     float hero = heroMask(pc);
+    // Band-grain calm factor: 1 in the far field, dipping toward (1-u_hero_calm)
+    // at the hero centre. u_hero_calm in [0,1], hero in [0,1] => calm in [0,1];
+    // u_hero_calm=0 => exactly 1.0 (w*1.0==w, byte-identical).
+    float calm = 1.0 - u_hero_calm * hero;
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the
     // feather both stacks are computed and the noise VALUES are mixed (never
@@ -271,6 +285,10 @@ void main() {
     w_streak += u_belt_texture * 0.45 * belt * gate * (1.0 - routeW);
 #endif
 
+    // Calm the band-aligned filament weight inside the hero (vortex-aligned
+    // hero_spiral + sim-side hero_mottle carry the interior instead).
+    w_streak *= calm;
+
     float d = 0.5 + 0.5 * streak * w_streak + 0.35 * (cells - 0.5) * w_cell;
 
     // Intra-band striation: HIGH-frequency noise backtraced 2-3x further than
@@ -286,6 +304,7 @@ void main() {
 #ifdef DETAIL_FX
         w_stria *= gate;
 #endif
+        w_stria *= calm;  // tame the straight band-grain crossing the hero
         d += 0.30 * stria * w_stria;
     }
 
@@ -304,7 +323,7 @@ void main() {
         // Gain note: derive applies the field at intensity*0.55, so a
         // ref-like +-20-30% belt luminance swing needs d driven hard; the
         // final [0,1] clamp bounds it and fbm rarely saturates.
-        d += 0.78 * u_belt_texture * fold * belt * gate * (1.0 - routeW);
+        d += 0.78 * u_belt_texture * fold * belt * gate * (1.0 - routeW) * calm;
     }
 
     // Finer sub-grid belt octave (v1.5): a SECOND flow-aligned backtrace hop
@@ -316,7 +335,21 @@ void main() {
         vec2 s2 = backtraceLL(u_vel, 0, s1, u_stretch * TAU_BASE * 1.2);
         float fold2 = fbm(spherePt(s2) * (u_freq * 0.85) + u_offset_gate.zxy,
                           3, 2.0, 0.5);
-        d += 0.62 * u_belt_texture_fine * fold2 * belt * gate * (1.0 - routeW);
+        d += 0.62 * u_belt_texture_fine * fold2 * belt * gate * (1.0 - routeW) * calm;
+    }
+
+    // Zone texture: the belt folds above are belt-gated and the filament weight
+    // is shear/speed-gated, so ZONES (low belt mask, low shear) get almost no
+    // structure and read as smooth reduced-detail lanes between the belts. A
+    // flow-folded fold gated by (1-belt) gives zones their own structure --
+    // calmer than the belts (lower gain) but not flat. Same backtrace-fold
+    // mechanism as belt_texture so it folds WITH the flow, not airbrushed-on.
+    // Guarded => byte-identical when off.
+    if (u_zone_texture > 0.0 && routeW < 1.0 && belt < 0.98) {
+        vec2 srcZ = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 1.4);
+        float foldZ = fbm(spherePt(srcZ) * (u_freq * 0.42) + u_offset_mottle.yxz + 41.0,
+                          4, 2.0, 0.5);
+        d += 0.55 * u_zone_texture * foldZ * (1.0 - belt) * gate * (1.0 - routeW);
     }
 
     // Temperate lace mottle (35-60 deg): the reference's mid-high latitudes
@@ -362,7 +395,11 @@ void main() {
             if (asp == 1.0) {
                 q = acos(clamp(dot(pc, c), -1.0, 1.0)) / rc;   // EXACT existing
             } else {
-                q = length(vec2(dot(pc, e1) / asp, dot(pc, e2))) / rc;
+                // Near-hemisphere gate: the tangent metric aliases to q~0 at the
+                // antipode -> phantom spiral lanes on the far side. Far -> large q.
+                q = (dot(pc, c) > 0.0)
+                  ? length(vec2(dot(pc, e1) / asp, dot(pc, e2))) / rc
+                  : 1e3;
             }
             if (q < 0.05 || q >= 1.9) continue;        // same window, now elliptical
             float theta = atan(dot(pc, e2), dot(pc, e1));
