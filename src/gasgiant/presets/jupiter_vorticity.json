@@ -101,7 +101,7 @@
       "polar_decay": 0.648
     },
     "turbulence": {
-      "intensity": 1.6,
+      "intensity": 1.2,
       "shear_coupling": 0.9,
       "belt_boost": 1.3,
       "scale": 6.0,
@@ -115,13 +115,13 @@
     },
     "storms": {
       "hero_count": 1,
-      "hero_radius": 0.18,
+      "hero_radius": 0.16,
       "hero_strength": 1.9,
       "hero_latitude": -22.5,
       "rim_contrast": 2.0,
       "hero_aspect": 2.2,
       "hero_mottle": 0.7,
-      "hero_tint_var": 0.45,
+      "hero_tint_var": 0.4,
       "hero_rim_tint": 0.85,
       "hero_rim_warp": 0.65,
       "hero_wake_detail": 0.8,
@@ -732,9 +732,9 @@
         {
           "pos": 1.0,
           "color": [
-            0.86,
-            0.42,
-            0.24
+            0.79,
+            0.45,
+            0.3
           ]
         }
       ],
@@ -749,7 +749,7 @@
       "gamma": 1.0,
       "chroma_scale": 1.0,
       "chroma_variance": 0.45,
-      "hue_variance": 0.18,
+      "hue_variance": 0.3,
       "polar_tint_color": [
         0.36,
         0.46,
@@ -772,8 +772,8 @@
       "hero_spiral": 0.55,
       "hero_collar_wrap": 0.5,
       "zone_texture": 1.0,
-      "belt_texture": 1.9,
-      "belt_texture_fine": 2.2,
+      "belt_texture": 1.2,
+      "belt_texture_fine": 1.4,
       "mottle": 1.1
     },
     "emission": {

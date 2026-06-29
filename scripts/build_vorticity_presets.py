@@ -61,6 +61,10 @@ _CALIB_ROWS = Path("scripts/jupiter_calib_rows.json")
 # washed the belts into the zones (visual reject).
 SOURCE_CONTRAST = 0.8
 
+# Phase C: a touch more longitudinal hue drift toward the reference's within-band hue
+# variety (was 0.18; the hue_spread metric is only mildly responsive so this stays modest).
+SOURCE_HUE_VARIANCE = 0.30
+
 # Rollback fallback (the prior warm "frost-fix" ramp). The frost is NOT just low value
 # range -- it is low CHROMA at the BRIGHT end: pale neutral/white zones read as frosted
 # glass no matter how dark the belts get. Bright zones carry real WARMTH; belts a browner
@@ -82,7 +86,9 @@ STORM_TINTS_JUPITER = [
     (0.00, (0.42, 0.50, 0.62)),  # cool blue-grey (deep cyclone / barge core)
     (0.50, (0.70, 0.58, 0.44)),  # neutral tan
     (0.72, (0.46, 0.30, 0.20)),  # brown notch, lifted so the hero anchor reads fuller
-    (1.00, (0.86, 0.42, 0.24)),  # warmer, more saturated salmon-red (hero anchor ~0.95)
+    (1.00, (0.79, 0.45, 0.30)),  # Phase C: muted brick-orange (was salmon-red .86/.42/.24)
+                                 # to match the 2000-epoch reference GRS -- a defined oval,
+                                 # not a vivid red spot, but still distinct from its surrounds
 ]
 
 
@@ -118,6 +124,7 @@ def jupiter_palette(p):
             "chroma_scale": 1.0,
             "storm_tints": storm_tints,
             "contrast": SOURCE_CONTRAST,
+            "hue_variance": SOURCE_HUE_VARIANCE,
         }
     )
 
@@ -135,19 +142,21 @@ SOLVER_LIVE = {
     "vort_psi_drag": 0.06,
 }
 
-# Solid-body coherent-oval hero + bold stamp contrast (the whirlpool->oval fix).
-# hero_strength 1.9 + hero_radius 0.18 make the GRS a bolder visual anchor (the visual
-# review found it small/muddy at the stock 1.7/0.15).
+# Solid-body coherent-oval hero. Phase C (source-fidelity) shrinks + mutes it toward the
+# faded 2000-epoch reference GRS: radius 0.18 -> 0.14 (the reference spot is small) and
+# less interior salmon. hero_solid_core stays 1.0 (coherent oval, not a whirlpool).
 STORMS_HERO = {
     "hero_solid_core": 1.0,
     "hero_strength": 1.9,
-    "hero_radius": 0.18,
+    "hero_radius": 0.16,    # Phase C: slightly smaller (was 0.18) but the reference GRS
+                            # is a LARGE defined oval -- 0.14 over-shrank it to a smudge
     "hero_latitude": -22.5,  # pinned to the real GRS latitude (~22 S)
     "rim_contrast": 2.0,
     "stamp_contrast": 2.4,
     "hero_mottle": 0.70,    # strong interior churn: kill the airbrushed-blob core
                             # (flow-folded fbm => follows the vortex, not band-grain)
-    "hero_tint_var": 0.45,  # a touch more salmon/white interior festoon
+    "hero_tint_var": 0.40,  # Phase C: a touch less salmon (was 0.45) but keep interior
+                            # definition -- 0.30 washed the oval out (m5 hero dropped)
     "hero_aspect": 2.2,
     "hero_rim_warp": 0.65,  # lumpy-oval boundary (break the perfect-ring look)
     "hero_rim_tint": 0.85,  # deeper, azimuthally-broken dark-red collar (Red Spot Hollow
@@ -173,7 +182,7 @@ JETS_WARM = {
 # review read it as a mechanical sine pattern in vorticity mode), so a touch more belt
 # chaos folds it back up while staying below the original grain.
 TURBULENCE_RICH = {
-    "intensity": 1.6,
+    "intensity": 1.2,  # Phase C: softer than 1.6 toward the reference's smoother belts
     "replenish_rate": 0.45,
     "relax_tau": 2000.0,
     "belt_boost": 1.3,
@@ -200,8 +209,8 @@ STORMS_FIELD = {
 # Storm-scale folded belt structure + temperate mottle + the wound-lane hero collar,
 # plus warm's higher cellular/striation for more believable fine cloud texture.
 DETAIL_RICH = {
-    "belt_texture": 1.9,
-    "belt_texture_fine": 2.2,
+    "belt_texture": 1.2,        # Phase C: softer folded belt structure (was 1.9) -- the
+    "belt_texture_fine": 1.4,   # reference belts are smoother; halved texture_energy gap
     "zone_texture": 1.0,        # fill the detail-starved zones (the smooth lanes
                                # between belts read as reduced-detail bands)
     "mottle": 1.1,

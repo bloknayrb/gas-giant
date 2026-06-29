@@ -732,9 +732,9 @@
         {
           "pos": 1.0,
           "color": [
-            0.86,
-            0.42,
-            0.24
+            0.74,
+            0.46,
+            0.33
           ]
         }
       ],
@@ -749,7 +749,7 @@
       "gamma": 1.0,
       "chroma_scale": 1.0,
       "chroma_variance": 0.35,
-      "hue_variance": 0.18,
+      "hue_variance": 0.3,
       "polar_tint_color": [
         0.36,
         0.46,
@@ -772,8 +772,8 @@
       "hero_spiral": 0.55,
       "hero_collar_wrap": 0.0,
       "zone_texture": 0.0,
-      "belt_texture": 1.9,
-      "belt_texture_fine": 2.2,
+      "belt_texture": 1.2,
+      "belt_texture_fine": 1.4,
       "mottle": 1.1
     },
     "emission": {
