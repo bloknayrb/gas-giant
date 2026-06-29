@@ -63,11 +63,18 @@ def test_elongated_hero_has_no_antipode_stamp(gpu):
 
     near = _box_t3(tr, hlat, hlon)                       # the real hero
     anti = _box_t3(tr, -hlat, hlon + 180.0)              # its antipode
+    bg = _box_t3(tr, -hlat, hlon + 90.0)                 # same latitude, no hero/wake
 
     assert near > 0.5, f"real hero stamp missing (near T3={near:.3f})"
-    assert anti < 0.3, (
-        f"phantom hero at antipode: T3={anti:.3f} (should be ~background, the "
-        f"elliptical q aliases at the antipode)"
+    # The antipode must sit at the ambient band level (a same-latitude control 90 deg
+    # away), not at the collar-tint level a phantom would stamp. bg controls for the
+    # band's own T3 at that latitude, so the bound is tight (was a magic <0.3).
+    assert anti <= bg + 0.03, (
+        f"phantom hero at antipode: T3={anti:.3f} vs same-latitude background "
+        f"{bg:.3f} (elliptical q aliases at the antipode)"
+    )
+    assert anti < 0.25 * near, (
+        f"antipode T3={anti:.3f} is near the real hero level {near:.3f} -- phantom"
     )
 
 
@@ -77,4 +84,6 @@ def test_round_hero_antipode_also_clean(gpu):
     tr = gpu.read_texture(sim.solver.equirect.tracers.cur)
     hero = sim.vortices.heroes()[0]
     hlat, hlon = np.degrees(hero.lat), np.degrees(hero.lon)
-    assert _box_t3(tr, -hlat, hlon + 180.0) < 0.3
+    anti = _box_t3(tr, -hlat, hlon + 180.0)
+    bg = _box_t3(tr, -hlat, hlon + 90.0)
+    assert anti <= bg + 0.03, f"round-hero antipode T3={anti:.3f} vs background {bg:.3f}"

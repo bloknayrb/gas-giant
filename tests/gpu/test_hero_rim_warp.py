@@ -51,6 +51,22 @@ def _hero_band_rows(h: int, half_deg: float = 15.0) -> np.ndarray:
     return (lats >= lo) & (lats <= hi)
 
 
+def _hero_q(shape: tuple[int, ...], hero) -> np.ndarray:
+    """Normalized radius q = great-circle distance / r_core at every pixel, relative
+    to the hero center. Valid for the default ROUND hero (aspect 1.0); same metric
+    the shader uses for the rim/collar Gaussians."""
+    h, w = shape[:2]
+    lat = np.pi / 2.0 - (np.arange(h) + 0.5) / h * np.pi
+    lon = -np.pi + (np.arange(w) + 0.5) / w * 2.0 * np.pi
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    px, py, pz = np.cos(la) * np.cos(lo), np.sin(la), np.cos(la) * np.sin(lo)
+    hx = np.cos(hero.lat) * np.cos(hero.lon)
+    hy = np.sin(hero.lat)
+    hz = np.cos(hero.lat) * np.sin(hero.lon)
+    d = np.arccos(np.clip(px * hx + py * hy + pz * hz, -1.0, 1.0))
+    return d / hero.r_core
+
+
 # ---------------------------------------------------------------- byte-identity
 
 def test_default_rim_warp_byte_identical(gpu):
@@ -72,7 +88,8 @@ def test_rim_warp_off_byte_identical_with_mottle_on(gpu):
 
 def test_rim_warp_changes_boundary_and_stays_local(gpu):
     off = _tracers(Simulation(_params(rim_warp=0.0), gpu))[..., 0]
-    on = _tracers(Simulation(_params(rim_warp=0.6), gpu))[..., 0]
+    on_sim = Simulation(_params(rim_warp=0.6), gpu)
+    on = _tracers(on_sim)[..., 0]
 
     # Effect exists.
     assert np.abs(on - off).max() > 1e-3, "hero_rim_warp produced no visible change"
@@ -89,3 +106,16 @@ def test_rim_warp_changes_boundary_and_stays_local(gpu):
     band = _hero_band_rows(h)
     diff_band = np.where(band[:, None], on - off, 0.0)
     assert diff_band.std() > 1e-4, "rim_warp added no spatial structure to the boundary"
+
+    # Concentrated at the rim/collar BOUNDARY annulus: the warp feeds qrim/qcol of the
+    # ring (q~1.0) + collar (q~1.55) Gaussians only; the core brightness b.w*exp(-q^2)
+    # uses the unwarped q, so the deep interior must stay essentially unchanged.
+    hero = on_sim.vortices.heroes()[0]
+    q = _hero_q(on.shape, hero)
+    annulus = (q >= 0.6) & (q <= 2.2)
+    core = q < 0.4
+    diff = np.abs(on - off)
+    assert diff[annulus].max() > 1e-3
+    assert diff[annulus].max() > 5.0 * np.abs(diff[core]).max(), (
+        "rim_warp changed the deep interior, not just the boundary"
+    )
