@@ -120,15 +120,17 @@
       "hero_latitude": -22.5,
       "rim_contrast": 2.0,
       "hero_aspect": 2.2,
-      "hero_mottle": 0.35,
-      "hero_tint_var": 0.35,
+      "hero_mottle": 0.7,
+      "hero_tint_var": 0.45,
+      "hero_rim_tint": 0.7,
+      "hero_rim_warp": 0.65,
       "hero_solid_core": 1.0,
       "oval_density": 3.0,
       "oval_solid_core": 0.0,
       "barge_density": 2.989,
       "pearls_count": 14,
       "wake_turbulence": 1.593,
-      "outbreak_count": 1,
+      "outbreak_count": 0,
       "outbreak_strength": 1.0,
       "small_density": 3.0,
       "stamp_contrast": 2.4,
@@ -817,17 +819,17 @@
         {
           "pos": 0.72,
           "color": [
-            0.4,
-            0.26,
-            0.17
+            0.46,
+            0.3,
+            0.2
           ]
         },
         {
           "pos": 1.0,
           "color": [
-            0.79,
-            0.44,
-            0.27
+            0.86,
+            0.42,
+            0.24
           ]
         }
       ],
@@ -861,8 +863,10 @@
       "striation_frequency": 160.0,
       "polar_stipple": 0.8,
       "intermittency": 0.65,
+      "hero_calm": 0.75,
       "hero_spiral": 0.55,
       "hero_collar_wrap": 0.5,
+      "zone_texture": 1.0,
       "belt_texture": 1.9,
       "belt_texture_fine": 2.2,
       "mottle": 1.1

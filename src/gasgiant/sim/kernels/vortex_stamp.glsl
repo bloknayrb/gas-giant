@@ -12,6 +12,8 @@ uniform int u_vortex_count;
 uniform float u_rim_contrast;
 uniform float u_hero_mottle;       // interior brightness churn (T0); 0 disables
 uniform float u_hero_tint_var;     // interior tint festoon (T3); 0 disables
+uniform float u_hero_rim_warp;     // lumpy-oval boundary warp; 0 disables (byte-identical)
+uniform float u_hero_rim_tint;     // dark reddish collar rim; 0 disables (byte-identical)
 // Seeded noise offset for the hero interior fbm. Declared here (not reusing the
 // includer's u_detail_offset) because this file is #included BEFORE that uniform
 // is declared in init.comp/advect.comp, so it is not yet in scope. Set from the
@@ -46,7 +48,14 @@ vec3 vortexStamp(vec3 p) {
             } else {
                 vec3 e1 = ew / ewl;
                 vec3 e2 = cross(c, e1);
-                q = length(vec2(dot(p, e1) / asp, dot(p, e2))) / a.w;
+                // The tangent-plane projection collapses to q~0 at the antipode
+                // (p perpendicular to e1,e2) -> the vortex would re-stamp a
+                // phantom on the far side. Gate to the near hemisphere; far
+                // points get a large q so nothing stamps. Byte-identical for the
+                // near field (the stamp is already ~0 by 90 deg at these radii).
+                q = (dot(p, c) > 0.0)
+                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / a.w
+                  : 1e3;
             }
         }
         if (q < 3.0) {
@@ -76,9 +85,52 @@ vec3 vortexStamp(vec3 p) {
             if (b.y == VKIND_HERO) {
                 // GRS anatomy: dark thin perimeter ring at the spot edge,
                 // bright collar (the Red Spot Hollow) outside it.
+                // Lumpy-oval boundary: warp the q feeding the ring/collar with a
+                // LOW-AZIMUTHAL-WAVENUMBER (few-lobe) perturbation so the edge is
+                // an irregular oval, not a flawless ring. Lobes are functions of
+                // the azimuth theta only => scale-invariant (no fixed pixel
+                // frequency that over-scallops in close-up). Rim and collar use
+                // decorrelated phases so they do not wobble in lockstep. Guarded
+                // => the trig is never evaluated when off (byte-identical).
+                float qrim = q;
+                float qcol = q;
+                if (u_hero_rim_warp > 0.0) {
+                    // Local tangent azimuth around the vortex centre (same e1/e2
+                    // east-west frame the aspect path uses).
+                    vec3 hc = a.xyz;
+                    vec3 hew = cross(vec3(0.0, 1.0, 0.0), hc);
+                    float hewl = length(hew);
+                    if (hewl > 1e-4) {
+                        vec3 h1 = hew / hewl;
+                        vec3 h2 = cross(hc, h1);
+                        float th = atan(dot(p, h2), dot(p, h1));
+                        // Seeded phases from the hero noise offset (deterministic).
+                        vec3 ph = u_hero_noise_offset * 6.2831853;
+                        // Incommensurate wavenumbers {2,3,5} => quasi-irregular,
+                        // few lobes around the oval. Normalised to ~[-1,1].
+                        float wr = ( 0.55 * sin(2.0 * th + ph.x)
+                                   + 0.30 * sin(3.0 * th + ph.y)
+                                   + 0.20 * sin(5.0 * th + ph.z));
+                        float wc = ( 0.55 * sin(2.0 * th + ph.y + 1.7)
+                                   + 0.30 * sin(3.0 * th + ph.z + 0.6)
+                                   + 0.20 * sin(5.0 * th + ph.x + 2.9));
+                        qrim += u_hero_rim_warp * 0.20 * wr;
+                        qcol += u_hero_rim_warp * 0.20 * wc;
+                    }
+                }
                 dT0 += b.w * core
-                     - 0.16 * u_rim_contrast * exp(-(q - 1.0) * (q - 1.0) * 16.0)
-                     + 0.22 * u_rim_contrast * exp(-(q - 1.55) * (q - 1.55) * 5.0);
+                     - 0.16 * u_rim_contrast * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
+                     + 0.22 * u_rim_contrast * exp(-(qcol - 1.55) * (qcol - 1.55) * 5.0);
+                // Dark reddish collar (the Red Spot Hollow rim): redden (T3 up,
+                // toward the salmon storm-tint LUT) and darken (T0 down) the
+                // perimeter annulus so the spot has a discrete dark-red rim.
+                // Rides on the warped qrim so the tint follows the lumpy edge.
+                // Guarded => byte-identical when off.
+                if (u_hero_rim_tint > 0.0) {
+                    float rring = exp(-(qrim - 1.08) * (qrim - 1.08) * 11.0);
+                    dT3 += u_hero_rim_tint * 0.55 * rring;
+                    dT0 -= u_hero_rim_tint * 0.12 * rring;
+                }
                 // Interior turbulent churn: a flow-scale fbm breaks up the
                 // smooth Gaussian core so the spot reads as churning cloud, not
                 // an airbrushed blob. Windowed to the interior (q<1) so it never
