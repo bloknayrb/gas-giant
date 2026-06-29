@@ -97,7 +97,12 @@ float vortexOmegaAccum(vec3 p) {
             } else {
                 vec3 e1 = ew / ewl;
                 vec3 e2 = cross(c, e1);
-                q = length(vec2(dot(p, e1) / asp, dot(p, e2))) / r_core;
+                // Gate the tangent-plane metric to the near hemisphere: at the
+                // antipode both components vanish -> q~0 would stamp a phantom
+                // vorticity patch on the far side. Far points get a large q.
+                q = (dot(p, c) > 0.0)
+                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / r_core
+                  : 1e3;
             }
         }
         // For elliptical vortices d is the round great-circle distance while

@@ -78,6 +78,7 @@ class DetailSynth:
             or params.belt_texture > 0.0 or params.mottle > 0.0
             or params.belt_texture_fine > 0.0
             or params.hero_collar_wrap > 0.0
+            or params.zone_texture > 0.0
         )
         prog = self._program(fx=fx_on)
         size = out_tex.size
@@ -91,6 +92,7 @@ class DetailSynth:
             _set(prog, "u_offset_spiral", tuple(rng_spiral.uniform(-100.0, 100.0, 3)))
             _set(prog, "u_belt_texture", params.belt_texture)
             _set(prog, "u_belt_texture_fine", params.belt_texture_fine)
+            _set(prog, "u_zone_texture", params.zone_texture)
             _set(prog, "u_mottle", params.mottle)
             rng_mottle = subseed(seed, "detail-mottle")
             _set(prog, "u_offset_mottle", tuple(rng_mottle.uniform(-100.0, 100.0, 3)))
@@ -148,6 +150,7 @@ class DetailSynth:
         prog["u_striation_amount"].value = params.striation_amount
         prog["u_striation_freq"].value = params.striation_frequency
         prog["u_polar_stipple"].value = params.polar_stipple
+        _set(prog, "u_hero_calm", params.hero_calm)
         prog["u_offset"].value = tuple(rng.uniform(-100.0, 100.0, 3))
         out_tex.bind_to_image(0, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP

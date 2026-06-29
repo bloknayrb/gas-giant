@@ -45,6 +45,10 @@ def _params(ld: float, steps: int = 60, *, isolate_hero: bool = False):
         # velocity profile differs from the Gaussian this test is calibrated for).
         p.storms.hero_strength = 2.0
         p.storms.hero_radius = 0.15
+        p.storms.hero_aspect = 1.0  # canonical ROUND hero: the screening physics is
+                                    # isotropic, and a round hero avoids the elliptical
+                                    # metric entirely (its near-hemisphere gate / former
+                                    # antipode footprint must not confound far-field)
         p.storms.hero_solid_core = 0.0
         p.storms.hero_mottle = 0.0
         p.storms.hero_tint_var = 0.0
@@ -99,7 +103,13 @@ def test_deformation_radius_bounded_over_long_horizon(gpu):
 def _hero_far_near_velocity(p, gpu):
     """Run a few steps and return (far_mean, near_mean) of |velocity| relative
     to the hero center. Velocity is read straight from the solver, so it is the
-    directly-screened quantity (no palette/advection confounds)."""
+    directly-screened quantity (no palette/advection confounds).
+
+    'far' is the hero's velocity TAIL just outside the core (0.15-0.30 rad), where
+    the screened Poisson visibly cuts the induced velocity. (d>0.60 is NOT the
+    hero's far field for a compact hero -- it sits at the ambient floor; it only
+    ever registered hero signal via the antipode-aliased phantom stamp, since
+    fixed, so screening can't be measured there.)"""
     sim = Simulation(p, gpu)
     try:
         sim.run_to_completion()
@@ -114,8 +124,8 @@ def _hero_far_near_velocity(p, gpu):
         d = np.arccos(np.clip(
             np.sin(lat) * np.sin(hero.lat)
             + np.cos(lat) * np.cos(hero.lat) * np.cos(lon - hero.lon), -1, 1))
-        near = speed[d < 0.20].mean()
-        far = speed[d > 0.60].mean()
+        near = speed[d < 0.12].mean()
+        far = speed[(d > 0.15) & (d < 0.30)].mean()
         return far, near
     finally:
         sim._release_sim()

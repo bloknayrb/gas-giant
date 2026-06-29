@@ -350,6 +350,26 @@ class StormsParams(_Params):
                     "salmon/white in the troughs, so the spot reads festooned "
                     "rather than flat red. 0 = uniform v1 tint (byte-identical)",
     )
+    hero_rim_tint: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Dark reddish collar (the GRS 'Red Spot Hollow' rim): the "
+                    "perimeter currently only darkens; this reddens (raises the "
+                    "warm-red tint) and darkens the perimeter annulus so the "
+                    "oval reads as a discrete vortex with a dark-red rim rather "
+                    "than a soft stain on the band. 0 = no rim tint "
+                    "(byte-identical)",
+    )
+    hero_rim_warp: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        description="Lumpy-oval boundary: warps the hero's dark perimeter ring + "
+                    "bright collar with a low-azimuthal-wavenumber (few-lobe) "
+                    "per-hero perturbation, so the spot edge reads as a naturally "
+                    "irregular oval instead of a flawless azimuthally-symmetric "
+                    "ring (the 'over-regular' look). Scale-invariant lobes (not "
+                    "pixel-frequency noise) so it holds up at full-disk and "
+                    "close-up; rim and collar warp independently. 0 = perfect "
+                    "oval (byte-identical, the fbm is never evaluated)",
+    )
     hero_solid_core: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
         description="Solid-body hero rotation (vorticity mode): blends the hero's "
@@ -497,6 +517,17 @@ class DetailParams(_Params):
                     "mosaic's chaos is intermittent, not uniform). No rand: a "
                     "draw here would reshuffle every later randomize draw",
     )
+    hero_calm: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail",
+        description="Calm the band-aligned grain inside hero storms: the "
+                    "detail filament streak + striation are flow/band-aligned "
+                    "and are amplified near heroes, so they cross the GRS as "
+                    "straight 'wood-grain' that ignores the vortex rotation. "
+                    "This attenuates those two terms inside the hero (weighted "
+                    "by the hero mask) so the vortex-aligned spiral lanes and "
+                    "the sim-side hero_mottle churn carry the interior instead. "
+                    "0 = full band grain (byte-identical)",
+    )
     hero_spiral: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
         description="Tightly wound internal spiral lanes inside hero storms "
@@ -511,6 +542,16 @@ class DetailParams(_Params):
                     "the rim window, wound in the storm's rotation sense. "
                     "Independent of hero_spiral (interior lanes); stationary in "
                     "the hero frame. 0 = off",
+    )
+    zone_texture: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",
+        description="Flow-folded luminance structure inside ZONES (the calm "
+                    "lanes between belts, gated by 1 - belt_mask). Belt "
+                    "interiors get belt_texture and shear-gated filaments; "
+                    "zones get neither and read as detail-starved smooth bands "
+                    "cutting across the disk. This gives zones their own "
+                    "flow-structured fold (calmer than belts, not flat). "
+                    "0 = starved zones (byte-identical)",
     )
     belt_texture: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",

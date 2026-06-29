@@ -49,13 +49,29 @@ CONTRAST_STOPS_JUPITER = [
     (1.00, (0.97, 0.92, 0.77)),  # warm cream cloud top
 ]
 
+# The storm-tint LUT (indexed by the storm's T3 tracer): the hero's warm salmon core
+# sits near the warm end (~0.95). Set EXPLICITLY here so the preset is reproducible from
+# the override dicts -- jupiter_palette() previously left storm_tints to implicit carry
+# from the prior JSON, which a regen from a pristine base would silently drop.
+STORM_TINTS_JUPITER = [
+    (0.00, (0.42, 0.50, 0.62)),  # cool blue-grey (deep cyclone / barge core)
+    (0.50, (0.70, 0.58, 0.44)),  # neutral tan
+    (0.72, (0.46, 0.30, 0.20)),  # brown notch, lifted so the hero anchor reads fuller
+    (1.00, (0.86, 0.42, 0.24)),  # warmer, more saturated salmon-red (hero anchor ~0.95)
+]
+
 
 def jupiter_palette(p):
     """Replace p.appearance.palette_rows with the high-contrast Jupiter ramp (frost
-    fix), keeping each row's latitude; chroma_scale 1.0 since the ramp carries the hue."""
+    fix), keeping each row's latitude; chroma_scale 1.0 since the ramp carries the hue.
+    Also set storm_tints explicitly (the warm hero/storm LUT) so the preset is fully
+    reproducible from the override dicts (no implicit carry)."""
     stops = [GradientStop(pos=pp, color=c) for pp, c in CONTRAST_STOPS_JUPITER]
     rows = [PaletteRow(latitude=r.latitude, stops=stops) for r in p.appearance.palette_rows]
-    return p.appearance.model_copy(update={"palette_rows": rows, "chroma_scale": 1.0})
+    storm_tints = [GradientStop(pos=pp, color=c) for pp, c in STORM_TINTS_JUPITER]
+    return p.appearance.model_copy(
+        update={"palette_rows": rows, "chroma_scale": 1.0, "storm_tints": storm_tints}
+    )
 
 # The live-physics block (gas_giant_warm's proven recipe, passes swirl_gate): shear-
 # masked broadband injection folded by the jets, finite L_d screening the inverse
@@ -78,11 +94,15 @@ STORMS_HERO = {
     "hero_solid_core": 1.0,
     "hero_strength": 1.9,
     "hero_radius": 0.18,
+    "hero_latitude": -22.5,  # pinned to the real GRS latitude (~22 S)
     "rim_contrast": 2.0,
     "stamp_contrast": 2.4,
-    "hero_mottle": 0.35,
-    "hero_tint_var": 0.35,
+    "hero_mottle": 0.70,    # strong interior churn: kill the airbrushed-blob core
+                            # (flow-folded fbm => follows the vortex, not band-grain)
+    "hero_tint_var": 0.45,  # a touch more salmon/white interior festoon
     "hero_aspect": 2.2,
+    "hero_rim_warp": 0.65,  # lumpy-oval boundary (break the perfect-ring look)
+    "hero_rim_tint": 0.70,  # dark reddish collar (Red Spot Hollow rim) => discrete vortex
 }
 
 # Warm's gentler jet profile (vs the stock 1.0/1.6/0.12/0.5): lower strength + WIDER
@@ -120,7 +140,10 @@ STORMS_FIELD = {
     "small_density": 3.0,
     "merge_rate": 0.219,
     "merge_debris": 2.0,
-    "wake_turbulence": 1.593,
+    "wake_turbulence": 1.593,  # left at the modernized value: bumping it read as a
+                               # brighter smooth blob, not more discrete filaments (visual review)
+    "outbreak_count": 0,  # no convective Great-White-Spot: it emerged as a SECOND
+                          # hero-sized storm competing with the GRS (visual review)
 }
 
 # Storm-scale folded belt structure + temperate mottle + the wound-lane hero collar,
@@ -128,8 +151,14 @@ STORMS_FIELD = {
 DETAIL_RICH = {
     "belt_texture": 1.9,
     "belt_texture_fine": 2.2,
+    "zone_texture": 1.0,        # fill the detail-starved zones (the smooth lanes
+                               # between belts read as reduced-detail bands)
     "mottle": 1.1,
-    "hero_collar_wrap": 0.5,
+    "hero_calm": 0.75,          # calm the straight band-grain crossing the GRS so the
+                                # vortex-aligned spiral lanes + mottle carry the interior
+    "hero_spiral": 0.55,        # interior wound lanes (Juno close-up)
+    "hero_collar_wrap": 0.5,    # wound-lane filaments wrapping the collar (GRS hollow)
+    "intermittency": 0.65,      # longitudinal patchiness: violent folds abutting calm runs
     "cellular_amount": 0.9,
     "striation_amount": 1.0,
 }
