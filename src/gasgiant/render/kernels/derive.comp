@@ -49,6 +49,7 @@ uniform float u_warp_freq;
 uniform vec3 u_polar_tint_color;
 uniform float u_polar_tint_strength;
 uniform float u_polar_tint_start;  // |lat| radians
+uniform float u_polar_canvas_value;  // darken the cap canvas (teal floor); 0 = off
 
 #ifdef CHROMA_FX
 // Oklab chroma scaling + longitudinal within-band chroma drift. The
@@ -145,6 +146,23 @@ void main() {
     if (u_detail_intensity > 0.0) {
         dsyn = texture(u_detail, (vec2(px) + 0.5) / vec2(u_size)).r;
         col *= 1.0 + u_detail_intensity * 0.55 * (dsyn - 0.5);
+    }
+
+    // Dark-teal polar canvas: deepen the cap AFTER the folded-filament lace is
+    // present so the DARK inter-wisp floor sinks toward a deep teal while the
+    // BRIGHT lace crests (and cyclone wisps) are left to pop. Keying on low local
+    // luminance (not cloud-top) is what isolates floor from crest -> it raises
+    // crest contrast instead of flattening the cap (a cloud-top gate cannot, the
+    // washed-light cap IS high cloud-top). canvas_value 0 -> mix weight 0 ->
+    // byte-identical. Gated to polar latitudes via the tint-start feather.
+    if (u_polar_canvas_value > 0.0) {
+        float cpw = smoothstep(u_polar_tint_start, u_polar_tint_start + 0.30, abs(lat));
+        float plum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        // The washed-light cap floor sits at ~0.49 luma and the lace crests ~0.79,
+        // so the mask band straddles that gap: floor darkens, crests (>~0.82) pop.
+        float lowmask = 1.0 - smoothstep(0.50, 0.82, plum);
+        vec3 teal = u_polar_tint_color * (0.10 + 0.50 * plum); // deep blue-teal, value-graded
+        col = mix(col, teal, u_polar_canvas_value * cpw * lowmask);
     }
 
     // Thin dark lanes (before the post chain so haze veils them too). Width

@@ -869,6 +869,14 @@ class AppearanceParams(_Params):
         55.0, tier=Tier.POST, lo=30.0, hi=80.0, ui="Appearance",
         description="Latitude (deg) where the polar tint begins",
     )
+    polar_canvas_value: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.5), ui="Appearance",
+        description="Deepens the polar cap canvas toward a dark blue-teal floor so "
+                    "the folded-filament lace and cyclones pop; 0 = off. Applied "
+                    "after the lace and keyed on low local luminance, so it darkens "
+                    "the dark inter-wisp floor while bright crests stay bright "
+                    "(raises contrast, does not flatten)",
+    )
 
 
 class EmissionParams(_Params):

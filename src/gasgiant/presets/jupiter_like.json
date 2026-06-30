@@ -757,7 +757,8 @@
         0.61
       ],
       "polar_tint_strength": 0.68,
-      "polar_tint_start_lat": 56.0
+      "polar_tint_start_lat": 56.0,
+      "polar_canvas_value": 0.85
     },
     "detail": {
       "intensity": 0.95,

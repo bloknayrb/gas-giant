@@ -30,6 +30,16 @@ OUTFLOW = 0.18       # peak outflow speed (gentle -- not a vortex-scale kick)
 TRAIN_N = 6          # plumes per eruption (a belt-girdling train, not one spot)
 TRAIN_LAT_SPREAD = 0.035  # radians, kept tight so the chain stays in the belt core
 TRAIN_LON_STEP = 0.06     # downstream longitude offset between successive knots
+LEAD_BRIGHT = 1.8   # lead-knot brightness boost. Two adversarial reviewers found
+                    # x1.3 imperceptible in the direct render (only in the 4x diff);
+                    # x1.8 makes the head read on the dark belt without doming.
+LEAD_RADIUS = 1.2   # lead-knot size boost (the head reads as the eruption source;
+                    # kept modest so it stays a turbulent patch, not a round storm)
+# NOTE: the knots' cool cast is set in the stamp (vortex_stamp.glsl KIND_OUTBREAK
+# dT3 push), NOT via Vortex.tint -- that branch `continue`s before the shared
+# `dT3 += b.z` line, so per-vortex tint is inert for outbreaks. The push had to be
+# cut there (0.15->0.07) because it scales with b.w: a brighter knot is bluer
+# unless the coefficient drops, which reviewers flagged would show at this amplitude.
 
 
 @dataclass
@@ -38,6 +48,7 @@ class Outbreak:
     lat: float
     lon: float
     radius: float = RADIUS    # per-knot (head knots larger, tail knots smaller)
+    bright_mul: float = 1.0   # per-knot brightness multiplier (lead knot boosted)
     vortex: Vortex | None = None
 
 
@@ -86,11 +97,17 @@ class EventSchedule:
                 lon = float((base_lon + k * TRAIN_LON_STEP + rng.normal(0.0, 0.02)
                              + np.pi) % (2.0 * np.pi) - np.pi)
                 radius = RADIUS * (1.0 - 0.45 * k / max(TRAIN_N - 1, 1))  # head big, tail small
+                # Lead knot (k==0) reads as the eruption source: boost it so the
+                # train is visible at disk scale, not only in the 4x diff.
+                bright_mul = LEAD_BRIGHT if k == 0 else 1.0
+                if k == 0:
+                    radius *= LEAD_RADIUS
                 # Stagger so the train unfurls in sequence, not all at once.
                 step = step0 + k * int(0.015 * params.sim.dev_steps) \
                     + int(rng.uniform(0.0, 0.04) * params.sim.dev_steps)
                 sched.outbreaks.append(
-                    Outbreak(step=step, lat=lat, lon=lon, radius=radius)
+                    Outbreak(step=step, lat=lat, lon=lon, radius=radius,
+                             bright_mul=bright_mul)
                 )
         return sched
 
@@ -114,11 +131,11 @@ class EventSchedule:
             if ob.vortex is None:
                 ob.vortex = Vortex(
                     ob.lat, ob.lon, ob.radius, 0.0, KIND_OUTBREAK,
-                    tint=0.0, brightness=BRIGHTNESS * self.strength,
+                    tint=0.0, brightness=BRIGHTNESS * self.strength * ob.bright_mul,
                 )
                 registry.vortices.append(ob.vortex)
             decay = 1.0 - age / LIFETIME
-            ob.vortex.brightness = BRIGHTNESS * self.strength * decay
+            ob.vortex.brightness = BRIGHTNESS * self.strength * ob.bright_mul * decay
             if len(impulses) < 2:
                 ramp = min(age / RAMP, 1.0) * decay
                 impulses.append(

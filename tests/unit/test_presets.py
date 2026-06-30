@@ -60,6 +60,18 @@ def test_vorticity_preset_is_live():
     assert p.storms.hero_solid_core == 1.0, "hero reverted to Gaussian whirlpool"
 
 
+def test_jupiter_vorticity_polar_values_persist():
+    """The polar look (Juno blue tint, dense circumpolar cyclone field, and the
+    dark blue-teal canvas that makes the folded-filament lace pop) lives in the
+    preset's appearance/poles. The build script preserves it via read-modify-write
+    (it never resets these), but pin it so a refactor that rebuilds appearance/poles
+    from defaults can't silently wash the cap light again."""
+    p = load_factory_preset("jupiter_vorticity")
+    assert p.appearance.polar_tint_strength > 0.5, "lost the Juno polar tint"
+    assert p.appearance.polar_canvas_value > 0.0, "lost the dark-teal polar canvas"
+    assert p.poles.south.field_density > 1.0, "lost the dense circumpolar cyclone field"
+
+
 @pytest.mark.parametrize("name", ["gas_giant_warm", "jupiter_vorticity", "jupiter_like"])
 def test_palette_has_value_contrast(name):
     """The warm + Jupiter presets fix the 'frosted glass' look by mapping the rich T0

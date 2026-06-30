@@ -34,9 +34,11 @@ _PINNED: dict[str, str] = {
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
     "common.glsl":       "48c13b438e4e893b32b594234ef965bdfeac1cad",
     # Updated 2026-06-29 for the convective white-plume outbreak stamp branch
-    # (KIND_OUTBREAK ring, default-off). Verified byte-identical kinematic GPU
-    # output for the no-outbreak case (max 0 LSB over jupiter_like 1024).
-    "vortex_stamp.glsl": "87d4947c4afb2127a09959b84250458238b1669d",
+    # (KIND_OUTBREAK ring, default-off). Re-updated 2026-06-29 cutting the
+    # KIND_OUTBREAK cool push 0.15->0.07 (lead-knot visibility pass). Both edits
+    # touch ONLY the KIND_OUTBREAK branch, which never fires without outbreak
+    # vortices -> byte-identical kinematic GPU output for the no-outbreak case.
+    "vortex_stamp.glsl": "2b4e75cfeb69a39ccf2c156d4445d5a65c1a4370",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }

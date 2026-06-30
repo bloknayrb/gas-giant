@@ -132,6 +132,9 @@ def jupiter_palette(p):
             "contrast": SOURCE_CONTRAST,
             "hue_variance": SOURCE_HUE_VARIANCE,
             "chroma_aging": SOURCE_CHROMA_AGING,
+            # Deepen the polar cap so the FFR lace + cyclones pop (gap #1, reviewed
+            # PASS at 0.85). Shared by both Jupiters via this palette.
+            "polar_canvas_value": 0.85,
         }
     )
 
