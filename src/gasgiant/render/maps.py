@@ -196,6 +196,7 @@ class MapDeriver:
         prog["u_polar_tint_color"].value = appearance.polar_tint_color
         prog["u_polar_tint_strength"].value = appearance.polar_tint_strength
         prog["u_polar_tint_start"].value = float(np.deg2rad(appearance.polar_tint_start_lat))
+        prog["u_polar_canvas_value"].value = appearance.polar_canvas_value
         prog["u_contrast"].value = appearance.contrast
         prog["u_saturation"].value = appearance.saturation
         prog["u_gamma"].value = appearance.gamma
