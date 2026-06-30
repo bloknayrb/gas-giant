@@ -24,6 +24,7 @@ uniform vec3 u_hero_noise_offset;
 const float VKIND_HERO = 1.0;
 const float VKIND_BARGE = 2.0;
 const float VKIND_POLAR = 5.0;
+const float VKIND_OUTBREAK = 6.0;
 const float VKIND_DEBRIS = 7.0;
 
 // Accumulates the vortex stamp deltas at sphere point p:
@@ -75,11 +76,24 @@ vec3 vortexStamp(vec3 p) {
                 dT1 += 0.04 * b.w * (core - 0.5 * ring);
                 continue;
             }
+            if (b.y == VKIND_OUTBREAK) {
+                // Convective white-plume train (Great-White-Spot / SEB-revival):
+                // a brilliant ammonia-white turbulent patch, NOT a coherent
+                // vortex. Like debris (zero psi -> the belt shear folds the train
+                // into a planet-girdling streak) but brighter and a tighter ring.
+                // Crucially NO DOME: the original outbreak fell through to the
+                // anticyclone dome+collar and read as a 2nd GRS; the plume is a
+                // high BRIGHT cloud that reads as churn, not a rotating storm. The
+                // shared dome/collar lines below are skipped.
+                float ring = exp(-(q - 1.0) * (q - 1.0) * 9.0);
+                dT0 += b.w * (1.0 * core + ring);    // bright solid plume + halo (high value)
+                dT3 -= 0.15 * b.w * (core + ring);   // only slightly cool -- ammonia WHITE, not blue
+                dT1 += 0.05 * b.w * core;            // a little high cloud, not a dome
+                continue;
+            }
             // Barges and polar cyclones are dips (cyclonic); the rest domes.
             // Polar dips matter doubly: the polar tint is gated by LOW cloud
             // tops, so cyclone interiors go structurally blue (PIA21641).
-            // (Outbreaks keep the dome: their bright plume rides on a real
-            // convective tower.)
             float dome = (b.y == VKIND_BARGE || b.y == VKIND_POLAR) ? -1.0 : 1.0;
             dT1 += dome * 0.15 * core;
             dT3 += b.z * core;

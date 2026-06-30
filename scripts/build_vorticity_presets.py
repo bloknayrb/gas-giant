@@ -209,8 +209,13 @@ STORMS_FIELD = {
     "merge_debris": 2.0,
     "wake_turbulence": 1.593,  # left at the modernized value: bumping it read as a
                                # brighter smooth blob, not more discrete filaments (visual review)
-    "outbreak_count": 0,  # no convective Great-White-Spot: it emerged as a SECOND
-                          # hero-sized storm competing with the GRS (visual review)
+    # Convective white-plume outbreaks (Great-White-Spot / SEB-revival): RE-ENABLED
+    # after the rebuild (events.py belt placement + vortex_stamp.glsl ring-no-dome
+    # stamp). The old version was disabled because it emerged as a SECOND hero-sized
+    # storm; the reshaped plume train reads as belt convective churn, not a rival GRS
+    # (adversarial review confirmed). 2 eruption sites, gentle strength.
+    "outbreak_count": 2,
+    "outbreak_strength": 1.1,
 }
 
 # Storm-scale folded belt structure + temperate mottle + the wound-lane hero collar,
