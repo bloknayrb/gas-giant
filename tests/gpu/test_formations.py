@@ -5,7 +5,7 @@ import pytest
 
 from gasgiant.engine import Simulation
 from gasgiant.params.model import PlanetParams
-from gasgiant.sim.events import LIFETIME, EventSchedule
+from gasgiant.sim.events import LIFETIME, TRAIN_N, EventSchedule
 
 pytestmark = pytest.mark.gpu
 
@@ -39,15 +39,20 @@ def test_outbreak_spawns_and_retires(gpu):
     p.storms.outbreak_count = 1
     sim = Simulation(p, gpu)
     schedule: EventSchedule = sim.solver.events
-    assert len(schedule.outbreaks) == 1
-    ob = schedule.outbreaks[0]
+    # One eruption_count spawns a TRAIN of knots (a belt-girdling chain), not a
+    # single spot — see events.py generate().
+    assert len(schedule.outbreaks) == TRAIN_N
     baseline = len(sim.vortices.vortices)
+    first = min(ob.step for ob in schedule.outbreaks)
+    last = max(ob.step for ob in schedule.outbreaks)
 
-    sim.solver.step(ob.step + 10 - sim.solver.step_index)
-    assert len(sim.vortices.vortices) == baseline + 1, "outbreak vortex not spawned"
+    # Step to just after the first knot erupts: at least one train vortex is live.
+    sim.solver.step(first + 10 - sim.solver.step_index)
+    assert len(sim.vortices.vortices) > baseline, "no outbreak vortex spawned"
 
-    sim.solver.step(LIFETIME + 10)
-    assert len(sim.vortices.vortices) == baseline, "outbreak vortex not retired"
+    # Step well past the last knot's lifetime: the whole train has retired.
+    sim.solver.step((last + LIFETIME + 10) - sim.solver.step_index)
+    assert len(sim.vortices.vortices) == baseline, "outbreak train not retired"
 
 
 def test_outbreak_brightens_the_region(gpu):

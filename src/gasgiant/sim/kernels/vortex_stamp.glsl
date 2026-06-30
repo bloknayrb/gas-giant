@@ -87,7 +87,10 @@ vec3 vortexStamp(vec3 p) {
                 // shared dome/collar lines below are skipped.
                 float ring = exp(-(q - 1.0) * (q - 1.0) * 9.0);
                 dT0 += b.w * (1.0 * core + ring);    // bright solid plume + halo (high value)
-                dT3 -= 0.15 * b.w * (core + ring);   // only slightly cool -- ammonia WHITE, not blue
+                dT3 -= 0.07 * b.w * (core + ring);   // barely cool -- ammonia WHITE, not blue
+                                                     // (was 0.15; cut so the brighter lead
+                                                     // knot reads neutral, not blue, since
+                                                     // this push scales with brightness b.w)
                 dT1 += 0.05 * b.w * core;            // a little high cloud, not a dome
                 continue;
             }
