@@ -15,6 +15,7 @@ import contextlib
 import logging
 import os
 import time
+from collections import deque
 from pathlib import Path
 
 from imgui_bundle import hello_imgui, imgui
@@ -41,6 +42,12 @@ from gasgiant.params.presets import (
 from gasgiant.params.randomize import randomize
 
 log = logging.getLogger(__name__)
+
+# A history record is the committed params snapshot plus two preset-identity
+# fields that Phase 6 will populate (active_preset name, pristine flag). Until
+# Phase 6 lands they are always None; the record shape is fixed now so Phase 6
+# can fill them in without touching Phase 2's push/pop code.
+UndoRecord = tuple["PlanetParams", "str | None", "bool | None"]
 
 PREVIEW_WIDTH = 2048
 SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
@@ -113,7 +120,11 @@ class StudioApp:
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
         self._recomputing = False  # a heavy commit reset the dev run; show progress
-        self._undo_params: PlanetParams | None = None
+        # Bounded undo/redo history (Phase 2). Each entry is an UndoRecord — a
+        # deep copy of a committed params snapshot plus Phase 6 preset-identity
+        # placeholders. maxlen=64 evicts the oldest entry automatically.
+        self._undo_stack: deque[UndoRecord] = deque(maxlen=64)
+        self._redo_stack: deque[UndoRecord] = deque(maxlen=64)
         self._dialog: tuple[str, object] | None = None
         self._export: tuple[object, Path] | None = None  # (job generator, out dir)
         self._export_progress: Progress | None = None
@@ -178,6 +189,20 @@ class StudioApp:
         if tiers - {Tier.POST}:  # velocity/restart reset the dev run
             self._recomputing = True
 
+    def _record(self, params: PlanetParams) -> UndoRecord:
+        """Snapshot params into a history record. Stores a deep copy (never a
+        shared reference) because in-place assignment on params is a supported
+        pattern (validate_assignment=True). active_preset/pristine are Phase 6
+        placeholders, None until that phase lands."""
+        return (params.model_copy(deep=True), None, None)
+
+    def _push_history(self, params: PlanetParams) -> None:
+        """Push the pre-edit/pre-action state onto the undo stack and clear the
+        redo stack (a new edit invalidates the redo future). Used by the gesture
+        path and every discrete action."""
+        self._undo_stack.append(self._record(params))
+        self._redo_stack.clear()
+
     def _reset_working_copy(self) -> None:
         """Drop any pending working-copy edit after a discrete action (preset /
         load / randomize / reroll / undo / redo). Without this a heavy edit left
@@ -212,6 +237,13 @@ class StudioApp:
             self._commit(self._live)
 
         if any_committed:
+            # Gesture released: coalesce the whole drag (incl. live POST
+            # per-frame commits) into one undo entry. Read _gesture_base BEFORE
+            # clearing it. Push only if the gesture actually changed the
+            # committed state (guards the same-value combo-reselect no-op, where
+            # _gesture_base is None or equals self.params).
+            if self._gesture_base is not None and self.params != self._gesture_base:
+                self._push_history(self._gesture_base)
             self._gesture_base = None  # gesture released; base consumed
 
     # -- dialogs --------------------------------------------------------------------
@@ -228,7 +260,7 @@ class StudioApp:
             return
         try:
             if kind == "load":
-                self._undo_params = self.params
+                self._push_history(self.params)
                 self._commit(load_preset(Path(result[0])))
                 self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"loaded {Path(result[0]).name}")
@@ -253,7 +285,7 @@ class StudioApp:
         clicked, idx = imgui.combo("##preset", -1, ["preset..."] + names)
         if clicked and idx > 0:
             try:
-                self._undo_params = self.params
+                self._push_history(self.params)
                 self._commit(load_factory_preset(names[idx - 1]))
                 self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"preset: {names[idx - 1]}")
@@ -267,21 +299,18 @@ class StudioApp:
             self._dialog = ("save", pfd.save_file("Save preset", "preset.json", ["JSON", "*.json"]))
 
         if imgui.button("Randomize"):
-            self._undo_params = self.params
+            self._push_history(self.params)
             seed = int(time.time_ns() % (2**31 - 1))
             self._commit(randomize(seed, base=self.params))
             self._reset_working_copy()  # discrete action wins over pending edit
             self.toasts.info(f"randomized (seed {seed})")
         imgui.same_line()
         if imgui.button("Reroll seed"):
-            self._undo_params = self.params
+            self._push_history(self.params)
             self._commit(randomize(self.params.seed + 1, base=self.params))
             self._reset_working_copy()  # discrete action wins over pending edit
         imgui.same_line()
-        if self._undo_params is not None and imgui.button("Undo"):
-            self._commit(self._undo_params)
-            self._reset_working_copy()  # discrete action wins over pending edit
-            self._undo_params = None
+        self._draw_history_buttons()
 
         if self._export is None:
             if imgui.button("Export...") and self._dialog is None:
@@ -301,6 +330,38 @@ class StudioApp:
         imgui.separator()
         draft, any_changed, any_committed = draw_params_panel(self._live)
         self._process_edit(draft, any_changed, any_committed)
+
+    def _undo(self) -> None:
+        """Pop the most recent pre-edit record, push the CURRENT state onto redo,
+        then commit the popped params. Goes through _commit + _reset_working_copy
+        so a pending working-copy edit can't resurrect. No-op if nothing to undo."""
+        if not self._undo_stack:
+            return
+        params, _active_preset, _pristine = self._undo_stack.pop()
+        self._redo_stack.append(self._record(self.params))
+        self._commit(params)
+        self._reset_working_copy()
+
+    def _redo(self) -> None:
+        """Mirror of _undo: pop from redo, push current onto undo, commit."""
+        if not self._redo_stack:
+            return
+        params, _active_preset, _pristine = self._redo_stack.pop()
+        self._undo_stack.append(self._record(self.params))
+        self._commit(params)
+        self._reset_working_copy()
+
+    def _draw_history_buttons(self) -> None:
+        """Undo/Redo buttons, greyed out when their stack is empty."""
+        imgui.begin_disabled(not self._undo_stack)
+        if imgui.button("Undo"):
+            self._undo()
+        imgui.end_disabled()
+        imgui.same_line()
+        imgui.begin_disabled(not self._redo_stack)
+        if imgui.button("Redo"):
+            self._redo()
+        imgui.end_disabled()
 
     def _draw_export_resolution(self) -> None:
         """Resolution combo next to Export, writing export.width (POST tier).

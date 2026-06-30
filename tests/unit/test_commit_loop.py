@@ -12,6 +12,7 @@ whole decision table is asserted.
 
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,10 @@ def _make_app(params: PlanetParams | None = None) -> StudioApp:
     app._live = params
     app._gesture_base = None
     app._recomputing = False
+    # Phase 2 history stacks: the real __init__ creates these, so the hand-rolled
+    # mock must too (the gesture/discrete push paths append to them).
+    app._undo_stack = deque(maxlen=64)
+    app._redo_stack = deque(maxlen=64)
     app.sim = FakeSim(params)
     app.viewport = FakeViewport()
     return app
