@@ -584,6 +584,16 @@ class DetailParams(_Params):
                     "way -- the reference's mid-latitude storm-flecked "
                     "character",
     )
+    polar_filaments: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Detail",
+        description="Polar folded-filamentary region (the Juno cap look): "
+                    "dense, multi-scale, flow-folded RIDGED filaments tangling "
+                    "between the circumpolar cyclones poleward of ~65 deg. "
+                    "Backtraced through the polar patch velocity so the lace "
+                    "winds with the cap vortices; only active when the polar "
+                    "route is on (cyclone-cluster/plain poles). 0 = off "
+                    "(byte-identical)",
+    )
 
 
 class SolverType(StrEnum):
@@ -834,6 +844,17 @@ class AppearanceParams(_Params):
                     "differently-hued material at the same lightness, which a "
                     "luminance-keyed palette gradient cannot express -- the "
                     "hue-diversity lever the realism metrics name",
+    )
+    chroma_aging: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=0.6, ui="Appearance",
+        description="Chromophore aging: ties color saturation to the dynamical "
+                    "freshness tracer (T2). Aged/stagnant air holds more "
+                    "reddish-brown chromophore (more saturated); fresh upwelling "
+                    "air is whiter (less saturated). Chroma-only -- the latitude "
+                    "palette's HUE is untouched, so the band browns/creams just "
+                    "deepen where air is old and pale where it is fresh, tying "
+                    "color to the flow instead of latitude alone. 0 = off "
+                    "(byte-identical)",
     )
     polar_tint_color: tuple[float, float, float] = pfield(
         (0.42, 0.50, 0.58), tier=Tier.POST, ui="Appearance",

@@ -79,6 +79,7 @@ class DetailSynth:
             or params.belt_texture_fine > 0.0
             or params.hero_collar_wrap > 0.0
             or params.zone_texture > 0.0
+            or params.polar_filaments > 0.0
         )
         prog = self._program(fx=fx_on)
         size = out_tex.size
@@ -96,6 +97,7 @@ class DetailSynth:
             _set(prog, "u_mottle", params.mottle)
             rng_mottle = subseed(seed, "detail-mottle")
             _set(prog, "u_offset_mottle", tuple(rng_mottle.uniform(-100.0, 100.0, 3)))
+            _set(prog, "u_polar_filaments", params.polar_filaments)
             spins = np.zeros(3, dtype=np.float32)
             for i, h in enumerate((heroes or [])[:3]):
                 spins[i] = h[4] if len(h) > 4 else 1.0

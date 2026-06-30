@@ -65,6 +65,12 @@ SOURCE_CONTRAST = 0.8
 # variety (was 0.18; the hue_spread metric is only mildly responsive so this stays modest).
 SOURCE_HUE_VARIANCE = 0.30
 
+# Chromophore aging (dynamics-driven color): reddish-brown chromophore concentrates in
+# the dark downwelling belts (and the GRS) and tracks the freshness tracer T2 within them,
+# while bright zones stay pale and the poles keep their blue-gray. VIVID amplitude chosen
+# by the user (rust belts, ~+33% tropical saturation) over the muted-only calibration.
+SOURCE_CHROMA_AGING = 0.35
+
 # Rollback fallback (the prior warm "frost-fix" ramp). The frost is NOT just low value
 # range -- it is low CHROMA at the BRIGHT end: pale neutral/white zones read as frosted
 # glass no matter how dark the belts get. Bright zones carry real WARMTH; belts a browner
@@ -125,6 +131,7 @@ def jupiter_palette(p):
             "storm_tints": storm_tints,
             "contrast": SOURCE_CONTRAST,
             "hue_variance": SOURCE_HUE_VARIANCE,
+            "chroma_aging": SOURCE_CHROMA_AGING,
         }
     )
 
@@ -202,8 +209,13 @@ STORMS_FIELD = {
     "merge_debris": 2.0,
     "wake_turbulence": 1.593,  # left at the modernized value: bumping it read as a
                                # brighter smooth blob, not more discrete filaments (visual review)
-    "outbreak_count": 0,  # no convective Great-White-Spot: it emerged as a SECOND
-                          # hero-sized storm competing with the GRS (visual review)
+    # Convective white-plume outbreaks (Great-White-Spot / SEB-revival): RE-ENABLED
+    # after the rebuild (events.py belt placement + vortex_stamp.glsl ring-no-dome
+    # stamp). The old version was disabled because it emerged as a SECOND hero-sized
+    # storm; the reshaped plume train reads as belt convective churn, not a rival GRS
+    # (adversarial review confirmed). 2 eruption sites, gentle strength.
+    "outbreak_count": 2,
+    "outbreak_strength": 1.1,
 }
 
 # Storm-scale folded belt structure + temperate mottle + the wound-lane hero collar,
@@ -221,6 +233,9 @@ DETAIL_RICH = {
     "intermittency": 0.65,      # longitudinal patchiness: violent folds abutting calm runs
     "cellular_amount": 0.9,
     "striation_amount": 1.0,
+    "polar_filaments": 1.3,     # Juno folded-filamentary cap lace (sparse flow-folded
+                                # ridge wisps poleward of 66 deg; DC-neutral by a clamped
+                                # bright side so it is drift-stable across dev_steps)
 }
 
 # Festoons + warm's deeper hotspots. festoon_strength is held DOWN at 1.6 (not warm's

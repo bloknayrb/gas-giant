@@ -45,6 +45,7 @@ def chroma_uniforms(seed: int, appearance: AppearanceParams) -> dict[str, object
         "u_chroma_offset": offset,
         "u_hue_variance": appearance.hue_variance,
         "u_hue_offset": hue_offset,
+        "u_chroma_aging": appearance.chroma_aging,
     }
 
 
@@ -156,6 +157,7 @@ class MapDeriver:
             appearance.chroma_scale != 1.0
             or appearance.chroma_variance > 0.0
             or appearance.hue_variance > 0.0  # silent-no-op trap: must be here
+            or appearance.chroma_aging > 0.0
         )
         prog = self._program(emission=emission_on, chroma_fx=chroma_on)
         size = color_out.size

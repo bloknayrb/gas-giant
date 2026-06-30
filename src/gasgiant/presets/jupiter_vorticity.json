@@ -131,8 +131,8 @@
       "barge_density": 2.989,
       "pearls_count": 14,
       "wake_turbulence": 1.593,
-      "outbreak_count": 0,
-      "outbreak_strength": 1.0,
+      "outbreak_count": 2,
+      "outbreak_strength": 1.1,
       "small_density": 3.0,
       "stamp_contrast": 2.4,
       "merge_rate": 0.219,
@@ -750,6 +750,7 @@
       "chroma_scale": 1.0,
       "chroma_variance": 0.45,
       "hue_variance": 0.3,
+      "chroma_aging": 0.35,
       "polar_tint_color": [
         0.36,
         0.46,
@@ -774,7 +775,8 @@
       "zone_texture": 1.0,
       "belt_texture": 1.2,
       "belt_texture_fine": 1.4,
-      "mottle": 1.1
+      "mottle": 1.1,
+      "polar_filaments": 1.3
     },
     "emission": {
       "thermal_strength": 0.35,

@@ -732,9 +732,9 @@
         {
           "pos": 1.0,
           "color": [
-            0.74,
-            0.46,
-            0.33
+            0.79,
+            0.45,
+            0.3
           ]
         }
       ],
@@ -750,6 +750,7 @@
       "chroma_scale": 1.0,
       "chroma_variance": 0.35,
       "hue_variance": 0.3,
+      "chroma_aging": 0.35,
       "polar_tint_color": [
         0.36,
         0.46,
@@ -774,7 +775,8 @@
       "zone_texture": 0.0,
       "belt_texture": 1.2,
       "belt_texture_fine": 1.4,
-      "mottle": 1.1
+      "mottle": 1.1,
+      "polar_filaments": 1.3
     },
     "emission": {
       "thermal_strength": 0.35,
