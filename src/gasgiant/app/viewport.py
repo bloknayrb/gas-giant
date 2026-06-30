@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 _SHADER_PACKAGE = "gasgiant.app.shaders"
 
-CHANNELS = ("color", "height")
+CHANNELS = ("Color", "Height (cloud-top)")
 
 
 class EquirectViewport:

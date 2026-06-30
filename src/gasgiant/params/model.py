@@ -313,6 +313,7 @@ class StormsParams(_Params):
     )
     hero_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Storms",
+        description="GRS-class hero storm vorticity amplitude",
     )
     hero_latitude: float | None = pfield(
         None, tier=Tier.RESTART, lo=-55.0, hi=55.0, ui="Storms",
@@ -427,6 +428,7 @@ class StormsParams(_Params):
     )
     outbreak_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Storms",
+        description="Convective outbreak vorticity amplitude",
     )
     small_density: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
@@ -483,6 +485,7 @@ class WavesParams(_Params):
     )
     ribbon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
+        description="Wavenumber of the Saturn-style ribbon wave",
     )
 
 
@@ -783,6 +786,7 @@ class PoleParams(_Params):
     )
     strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.6, 1.5), ui="Poles",
+        description="Polar feature vorticity amplitude (central cyclone / polygon jet)",
     )
     field_density: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.4, 1.4), ui="Poles",
@@ -814,12 +818,16 @@ class AppearanceParams(_Params):
     )
     haze_color: tuple[float, float, float] = pfield(
         (0.85, 0.78, 0.62), tier=Tier.POST, ui="Appearance",
+        description="Tint of the global haze blend (see haze_amount)",
     )
     contrast: float = pfield(
         1.0, tier=Tier.POST, lo=0.2, hi=2.0, rand=(0.8, 1.2), ui="Appearance",
+        description="Color contrast multiplier about mid-gray",
     )
     saturation: float = pfield(
         1.0, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.7, 1.2), ui="Appearance",
+        description="sRGB saturation multiplier (luma-preserving mix toward gray); "
+                    "prefer chroma_scale for perceptual (Oklab) saturation",
     )
     gamma: float = pfield(
         1.0, tier=Tier.POST, lo=0.4, hi=2.5, ui="Appearance",
@@ -916,9 +924,11 @@ class EmissionParams(_Params):
     )
     lightning_color: tuple[float, float, float] = pfield(
         (0.72, 0.82, 1.0), tier=Tier.POST, ui="Emission",
+        description="Lightning flash hue; linear radiance",
     )
     lightning_density: float = pfield(
         0.5, tier=Tier.POST, lo=0.0, hi=1.0, ui="Emission",
+        description="Lightning-flash cluster population density",
     )
     aurora_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
@@ -937,6 +947,7 @@ class EmissionParams(_Params):
     )
     aurora_width: float = pfield(
         2.5, tier=Tier.POST, lo=0.5, hi=8.0, ui="Emission",
+        description="Auroral oval ring thickness, degrees",
     )
     aurora_pole_offset: float = pfield(
         8.0, tier=Tier.POST, lo=0.0, hi=20.0, ui="Emission",
@@ -956,12 +967,20 @@ class EmissionParams(_Params):
 class PhysicalParams(_Params):
     """Real-world scale hints passed through to the Blender importer."""
 
-    radius_km: float = pfield(69911.0, tier=Tier.POST, lo=1000.0, hi=200000.0, ui="Physical")
+    radius_km: float = pfield(
+        69911.0, tier=Tier.POST, lo=1000.0, hi=200000.0, ui="Physical",
+        description="Planet equatorial radius in kilometers, passed through to the "
+                    "Blender importer for scale",
+    )
     height_scale: float = pfield(
         0.004, tier=Tier.POST, lo=0.0, hi=0.05, ui="Physical",
         description="Cloud-deck relief as a fraction of planet radius (full height-map range)",
     )
-    height_midlevel: float = pfield(0.5, tier=Tier.POST, lo=0.0, hi=1.0, ui="Physical")
+    height_midlevel: float = pfield(
+        0.5, tier=Tier.POST, lo=0.0, hi=1.0, ui="Physical",
+        description="Height-map value mapped to the mid cloud deck (Blender importer "
+                    "reference level)",
+    )
 
 
 class ExportParams(_Params):
@@ -976,8 +995,14 @@ class ExportParams(_Params):
 
 
 class PlanetParams(_Params):
-    seed: int = pfield(0, tier=Tier.RESTART, lo=0, hi=2**31 - 1, ui="Global")
-    name: str = pfield("unnamed", tier=Tier.POST, ui="Global")
+    seed: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=2**31 - 1, ui="Global",
+        description="Master RNG seed; the development run is deterministic from this",
+    )
+    name: str = pfield(
+        "unnamed", tier=Tier.POST, ui="Global",
+        description="Display/preset name",
+    )
     sim: SimParams = Field(default_factory=SimParams)
     solver: SolverParams = Field(default_factory=SolverParams)
     bands: BandsParams = Field(default_factory=BandsParams)

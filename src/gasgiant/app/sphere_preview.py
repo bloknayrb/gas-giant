@@ -28,6 +28,12 @@ class SpherePreview:
         self._display: moderngl.Texture = gpu.texture2d(_SIZE, components=4, dtype="f1")
         self._fbo: moderngl.Framebuffer = gpu.framebuffer(self._display)
 
+    def reset(self) -> None:
+        """Restore the orbit/zoom controls to their __init__ defaults."""
+        self.yaw = 0.6
+        self.pitch = 0.25
+        self.zoom = 1.0
+
     def draw(self, color_tex: moderngl.Texture, agx: bool) -> None:
         # Re-rendered every frame: a 640^2 single-bounce ray trace is trivial.
         prog = self.pass_.prog
@@ -48,7 +54,7 @@ class SpherePreview:
         side = min(max(imgui.get_content_region_avail().x, 64.0), float(_SIZE[0]))
         imgui.image(imgui.ImTextureRef(self._display.glo), imgui.ImVec2(side, side))
 
-        # Drag to orbit, wheel to zoom, while hovering the image.
+        # Drag to orbit, wheel to zoom, double-click to reset, while hovering the image.
         if imgui.is_item_hovered():
             io = imgui.get_io()
             if imgui.is_mouse_dragging(0):
@@ -56,3 +62,7 @@ class SpherePreview:
                 self.pitch = max(-1.5, min(1.5, self.pitch + io.mouse_delta.y * 0.01))
             if io.mouse_wheel:
                 self.zoom = max(0.2, min(8.0, self.zoom * (1.0 + 0.12 * io.mouse_wheel)))
+            if imgui.is_mouse_double_clicked(0):
+                self.reset()
+
+        imgui.text_disabled("drag: orbit · wheel: zoom · double-click: reset")

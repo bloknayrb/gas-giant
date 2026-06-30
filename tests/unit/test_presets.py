@@ -91,9 +91,9 @@ def test_palette_has_value_contrast(name):
 
 
 def test_jupiter_like_keeps_zones_detailed():
-    """jupiter_like (the startup default) got the same zone-detail fix as
-    gas_giant_warm: a high replenish_rate re-feeds detail faster than the fast
-    jets smear it, so the quiescent zones stay textured instead of reading as
+    """jupiter_like got the same zone-detail fix as gas_giant_warm (the startup
+    default): a high replenish_rate re-feeds detail faster than the fast jets
+    smear it, so the quiescent zones stay textured instead of reading as
     smooth 'blurry bands'. Pin it against a silent revert to the starved default."""
     p = load_factory_preset("jupiter_like")
     assert p.turbulence.replenish_rate >= 0.25, p.turbulence.replenish_rate

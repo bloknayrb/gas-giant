@@ -124,7 +124,7 @@ class StudioApp:
                 return load_preset(SESSION_PATH)
             except (PresetError, OSError) as exc:
                 log.warning("session restore failed (%s); using default preset", exc)
-        return load_factory_preset("jupiter_like")
+        return load_factory_preset("gas_giant_warm")
 
     def _backup_old_format_session(self) -> None:
         """Before the first load that would migrate (and later overwrite) an
@@ -233,6 +233,10 @@ class StudioApp:
                 self._dialog = ("export", pfd.select_folder("Export map set to folder"))
             imgui.same_line()
             imgui.text_disabled(f"{self.params.export.width}x{self.params.export.width // 2}")
+            imgui.text_disabled(
+                f"Sim grid {self.params.sim.resolution} px "
+                f"· Export map {self.params.export.width} px (independent)"
+            )
         else:
             prog = self._export_progress
             frac = prog.fraction if prog else 0.0
@@ -319,6 +323,9 @@ def main() -> int:
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = "Gas Giant Studio"
     params.app_window_params.window_geometry.size = (1700, 980)
+    # Remember window position/size across sessions; (1700, 980) above is only
+    # the first-run default, used until a prior session's geometry exists.
+    params.app_window_params.restore_previous_geometry = True
     gl_options = hello_imgui.OpenGlOptions()
     gl_options.major_version = 4
     gl_options.minor_version = 3
