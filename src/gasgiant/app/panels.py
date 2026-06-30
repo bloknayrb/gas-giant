@@ -40,16 +40,28 @@ def _is_color_field(name: str, value: Any) -> bool:
     )
 
 
-def draw_params_panel(params: PlanetParams) -> dict[str, Any] | None:
-    """Draw all parameter widgets. Returns the edited draft dict if anything
-    changed this frame, else None."""
+def draw_params_panel(params: PlanetParams) -> tuple[dict[str, Any], bool, bool]:
+    """Draw all parameter widgets against a fresh draft of ``params``.
+
+    Returns ``(draft, any_changed, any_committed)``:
+
+    - ``any_changed``  — a value changed this frame (mid-drag included).
+    - ``any_committed`` — a widget *finished* editing this frame (slider
+      release, combo/checkbox/color pick, ``input_int`` Enter/focus-loss, or a
+      structural palette mutation). The caller defers heavy (velocity/restart)
+      rebuilds to ``any_committed`` frames so a drag commits once on release
+      instead of every frame.
+    """
     draft = params.model_dump()
-    changed = _draw_model(type(params), draft, top_level=True)
-    return draft if changed else None
+    changed, committed = _draw_model(type(params), draft, top_level=True)
+    return draft, changed, committed
 
 
-def _draw_model(model: type[BaseModel], doc: dict[str, Any], top_level: bool = False) -> bool:
+def _draw_model(
+    model: type[BaseModel], doc: dict[str, Any], top_level: bool = False
+) -> tuple[bool, bool]:
     changed = False
+    committed = False
     for name, info in model.model_fields.items():
         ann = info.annotation
         if isinstance(ann, type) and issubclass(ann, BaseModel):
@@ -57,12 +69,16 @@ def _draw_model(model: type[BaseModel], doc: dict[str, Any], top_level: bool = F
             if imgui.collapsing_header(name.capitalize(), flags):
                 imgui.push_id(name)
                 imgui.indent(8.0)
-                changed |= _draw_model(ann, doc[name])
+                c, cm = _draw_model(ann, doc[name])
+                changed |= c
+                committed |= cm
                 imgui.unindent(8.0)
                 imgui.pop_id()
             continue
-        changed |= _draw_leaf(name, info, doc)
-    return changed
+        c, cm = _draw_leaf(name, info, doc)
+        changed |= c
+        committed |= cm
+    return changed, committed
 
 
 def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
@@ -101,12 +117,19 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
     return None
 
 
-def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
+# Widget kinds that draw a single imgui item whose end-of-edit is reported by
+# is_item_deactivated_after_edit(). The composite editors (stops/palette_rows)
+# track their own per-sub-widget commit signal instead.
+_SINGLE_ITEM_KINDS = frozenset({"enum", "bool", "int", "float", "color", "str"})
+
+
+def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> tuple[bool, bool]:
     value = doc[name]
     label = name.replace("_", " ")
     extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
     lo, hi = _bounds(info)
     changed = False
+    committed = False
     imgui.push_id(name)
 
     kind = leaf_kind(name, info, value)
@@ -140,9 +163,9 @@ def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
     elif kind == "str":
         changed, doc[name] = imgui.input_text(label, value)
     elif kind == "stops":
-        changed = _draw_stops(label, value)
+        changed, committed = _draw_stops(label, value)
     elif kind == "palette_rows":
-        changed = _draw_palette_rows(label, value)
+        changed, committed = _draw_palette_rows(label, value)
     elif kind == "optional_float":
         imgui.text_disabled(f"{label}: {value if value is not None else 'none (auto)'}")
     elif kind == "optional_model":
@@ -150,16 +173,29 @@ def _draw_leaf(name: str, info: FieldInfo, doc: dict[str, Any]) -> bool:
     else:
         imgui.text_disabled(f"{label}: {value!r}")
 
+    # For a single-item widget, "finished editing" is reported by imgui for the
+    # item just drawn (slider release, Enter/focus-loss, combo/checkbox/color
+    # pick). Composite kinds set `committed` themselves above.
+    if kind in _SINGLE_ITEM_KINDS:
+        committed = imgui.is_item_deactivated_after_edit()
+
     if info.description and imgui.is_item_hovered():
         imgui.set_tooltip(info.description)
     imgui.pop_id()
-    return changed
+    return changed, committed
 
 
-def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> bool:
+def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]:
     """Latitude-anchored palette rows: a latitude slider plus the shared
-    stops editor per row."""
+    stops editor per row.
+
+    Returns ``(changed, committed)``. ``committed`` is the OR of every
+    sub-widget's end-of-edit signal plus a synthetic commit on any structural
+    mutation (add/remove row) — plain buttons never raise the imgui signal, so
+    without this an add/remove would dangle the caller's gesture base.
+    """
     changed = False
+    committed = False
     imgui.text(label)
     remove_index = None
     for i, row in enumerate(rows):
@@ -170,15 +206,19 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> bool:
         if c:
             row["latitude"] = lat
             changed = True
+        committed |= imgui.is_item_deactivated_after_edit()
         if len(rows) > 1:
             imgui.same_line()
             if imgui.small_button("remove row"):
                 remove_index = i
-        changed |= _draw_stops("stops", row["stops"])
+        sc, scommitted = _draw_stops("stops", row["stops"])
+        changed |= sc
+        committed |= scommitted
         imgui.pop_id()
     if remove_index is not None:
         rows.pop(remove_index)
         changed = True
+        committed = True
     if imgui.small_button(f"add row##{label}"):
         last = rows[-1]
         rows.append(
@@ -188,12 +228,18 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> bool:
             }
         )
         changed = True
-    return changed
+        committed = True
+    return changed, committed
 
 
-def _draw_stops(label: str, stops: list[dict[str, Any]]) -> bool:
-    """Minimal gradient-stop editor (the full palette editor lands in Phase 3c)."""
+def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
+    """Minimal gradient-stop editor (the full palette editor lands in Phase 3c).
+
+    Returns ``(changed, committed)`` — see ``_draw_palette_rows`` for the commit
+    semantics (per-sub-widget release OR a synthetic commit on add/remove stop).
+    """
     changed = False
+    committed = False
     imgui.text(label)
     remove_index = None
     for i, stop in enumerate(stops):
@@ -203,12 +249,14 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> bool:
         if c:
             stop["color"] = tuple(rgb)
             changed = True
+        committed |= imgui.is_item_deactivated_after_edit()
         imgui.same_line()
         imgui.set_next_item_width(120.0)
         c, pos = imgui.slider_float("##p", float(stop["pos"]), 0.0, 1.0)
         if c:
             stop["pos"] = pos
             changed = True
+        committed |= imgui.is_item_deactivated_after_edit()
         if len(stops) > 1:
             imgui.same_line()
             if imgui.small_button("x"):
@@ -217,8 +265,10 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> bool:
     if remove_index is not None:
         stops.pop(remove_index)
         changed = True
+        committed = True
     if imgui.small_button(f"add stop##{label}"):
         last = stops[-1]
         stops.append({"pos": min(1.0, last["pos"] + 0.1), "color": last["color"]})
         changed = True
-    return changed
+        committed = True
+    return changed, committed

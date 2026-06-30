@@ -11,6 +11,7 @@ frame-budgeted job slices in this loop.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -25,10 +26,11 @@ from gasgiant.app.sphere_preview import SpherePreview
 from gasgiant.app.viewport import EquirectViewport
 from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
+from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.export.exporter import export_job
 from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
-from gasgiant.params.model import PlanetParams
+from gasgiant.params.model import PlanetParams, Tier
 from gasgiant.params.presets import (
     PresetError,
     factory_preset_names,
@@ -42,6 +44,16 @@ log = logging.getLogger(__name__)
 
 PREVIEW_WIDTH = 2048
 SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
+
+# Export-resolution presets for the combo next to the Export button. Widths are
+# within ExportParams.width's (512, 16384) bounds; height is always width // 2.
+EXPORT_RESOLUTIONS: list[tuple[int, str]] = [
+    (1024, "1K"),
+    (2048, "2K"),
+    (4096, "4K"),
+    (8192, "8K"),
+    (16384, "16K"),
+]
 
 
 class Toasts:
@@ -90,9 +102,17 @@ class StudioApp:
         self.viewport: EquirectViewport | None = None
         self.sphere: SpherePreview | None = None
         self.params = self._load_session_or_default()
+        # Working copy the panel edits each frame. Distinct from self.params
+        # (the committed/engine state): a heavy (velocity/restart) edit lives in
+        # _live until the gesture is released, so a drag rebuilds once instead of
+        # once per frame. _gesture_base is the committed snapshot captured at the
+        # start of a gesture (consumed by Phase 2 undo coalescing).
+        self._live: PlanetParams = self.params
+        self._gesture_base: PlanetParams | None = None
         self.toasts = Toasts()
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
+        self._recomputing = False  # a heavy commit reset the dev run; show progress
         self._undo_params: PlanetParams | None = None
         self._dialog: tuple[str, object] | None = None
         self._export: tuple[object, Path] | None = None  # (job generator, out dir)
@@ -155,14 +175,44 @@ class StudioApp:
         self.params = new_params
         if tiers:
             self.viewport.mark_stale()
+        if tiers - {Tier.POST}:  # velocity/restart reset the dev run
+            self._recomputing = True
 
-    def _try_commit_draft(self, draft: dict) -> None:
-        try:
-            new_params = PlanetParams.model_validate(draft)
-        except ValidationError as exc:
-            self.toasts.error(f"invalid value: {exc.errors()[0]['msg']}")
-            return
-        self._commit(new_params)
+    def _reset_working_copy(self) -> None:
+        """Drop any pending working-copy edit after a discrete action (preset /
+        load / randomize / reroll / undo / redo). Without this a heavy edit left
+        pending before the action could resurrect itself the next frame, because
+        diff_tiers(self.params, self._live) would still report the abandoned
+        change. Phase 2's redo path must call this too."""
+        self._live = self.params
+        self._gesture_base = None
+
+    def _process_edit(self, draft: dict, any_changed: bool, any_committed: bool) -> None:
+        """One frame of panel editing → at most one engine commit.
+
+        POST-tier edits commit every changed frame (cheap derive, stays
+        frame-live). Velocity/restart edits commit only on release
+        (``any_committed``), so a slider drag rebuilds once. The commit goes
+        straight through ``_commit`` — never ``_try_commit_draft`` — because
+        ``_live`` is already validated, and re-validating would re-toast."""
+        if any_changed:
+            # transient mid-drag invalid states are silent: keep last-valid _live
+            # (no toast — the active widget just freezes at its last valid value).
+            with contextlib.suppress(ValidationError):
+                self._live = PlanetParams.model_validate(draft)
+            if self._gesture_base is None:
+                self._gesture_base = self.params  # pre-edit committed state (Phase 2)
+
+        tiers = diff_tiers(self.params, self._live)
+        heavy = bool(tiers - {Tier.POST})
+        if tiers and (not heavy or any_committed):
+            # POST-only → commit live; heavy → only on the release frame. Either
+            # way a commit fires only when the diff is non-empty, so a combo
+            # re-select of the same value (any_committed, empty diff) is a no-op.
+            self._commit(self._live)
+
+        if any_committed:
+            self._gesture_base = None  # gesture released; base consumed
 
     # -- dialogs --------------------------------------------------------------------
 
@@ -180,6 +230,7 @@ class StudioApp:
             if kind == "load":
                 self._undo_params = self.params
                 self._commit(load_preset(Path(result[0])))
+                self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"loaded {Path(result[0]).name}")
             elif kind == "save":
                 path = Path(result if isinstance(result, str) else result[0])
@@ -204,6 +255,7 @@ class StudioApp:
             try:
                 self._undo_params = self.params
                 self._commit(load_factory_preset(names[idx - 1]))
+                self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"preset: {names[idx - 1]}")
             except PresetError as exc:
                 self.toasts.error(str(exc))
@@ -218,25 +270,24 @@ class StudioApp:
             self._undo_params = self.params
             seed = int(time.time_ns() % (2**31 - 1))
             self._commit(randomize(seed, base=self.params))
+            self._reset_working_copy()  # discrete action wins over pending edit
             self.toasts.info(f"randomized (seed {seed})")
         imgui.same_line()
         if imgui.button("Reroll seed"):
             self._undo_params = self.params
             self._commit(randomize(self.params.seed + 1, base=self.params))
+            self._reset_working_copy()  # discrete action wins over pending edit
         imgui.same_line()
         if self._undo_params is not None and imgui.button("Undo"):
             self._commit(self._undo_params)
+            self._reset_working_copy()  # discrete action wins over pending edit
             self._undo_params = None
 
         if self._export is None:
             if imgui.button("Export...") and self._dialog is None:
                 self._dialog = ("export", pfd.select_folder("Export map set to folder"))
             imgui.same_line()
-            imgui.text_disabled(f"{self.params.export.width}x{self.params.export.width // 2}")
-            imgui.text_disabled(
-                f"Sim grid {self.params.sim.resolution} px "
-                f"· Export map {self.params.export.width} px (independent)"
-            )
+            self._draw_export_resolution()
         else:
             prog = self._export_progress
             frac = prog.fraction if prog else 0.0
@@ -246,10 +297,42 @@ class StudioApp:
             if imgui.button("Cancel"):
                 self._cancel_export()
 
+        self._draw_pending_hint()
         imgui.separator()
-        draft = draw_params_panel(self.params)
-        if draft is not None:
-            self._try_commit_draft(draft)
+        draft, any_changed, any_committed = draw_params_panel(self._live)
+        self._process_edit(draft, any_changed, any_committed)
+
+    def _draw_export_resolution(self) -> None:
+        """Resolution combo next to Export, writing export.width (POST tier).
+        Kept in sync with the working copy so a pending panel edit can't revert
+        it on the next frame."""
+        widths = [w for w, _ in EXPORT_RESOLUTIONS]
+        labels = [lbl for _, lbl in EXPORT_RESOLUTIONS]
+        current = self.params.export.width
+        cur_idx = widths.index(current) if current in widths else -1
+        imgui.set_next_item_width(70.0)
+        clicked, idx = imgui.combo("##exportres", cur_idx, labels)
+        if clicked and 0 <= idx < len(widths) and widths[idx] != current:
+            new_params = self.params.model_copy(deep=True)
+            new_params.export.width = widths[idx]
+            self._commit(new_params)
+            self._reset_working_copy()  # keep _live's export.width in lockstep
+        imgui.same_line()
+        # Clarify that the export map size is independent of the sim grid (the
+        # two were easy to confuse when export.width sat among the sliders).
+        imgui.text_disabled(
+            f"Export map {current}x{current // 2} px "
+            f"· Sim grid {self.params.sim.resolution} px (independent)"
+        )
+
+    def _draw_pending_hint(self) -> None:
+        """While a heavy (velocity/restart) edit waits for release, tell the user
+        the rebuild is deferred so the absence of a live update isn't confusing."""
+        heavy_pending = bool(diff_tiers(self.params, self._live) - {Tier.POST})
+        if heavy_pending:
+            imgui.text_colored(
+                imgui.ImVec4(1.0, 0.8, 0.3, 1.0), "release to apply (restart/velocity)"
+            )
 
     def draw_equirect(self) -> None:
         self.render_perf.begin()
@@ -270,8 +353,14 @@ class StudioApp:
         imgui.text(f"preview {PREVIEW_WIDTH}x{PREVIEW_WIDTH // 2}")
         done, target = self.sim.steps_done, self.sim.steps_target
         if done < target:
-            imgui.progress_bar(done / max(target, 1), imgui.ImVec2(-1.0, 0.0), f"{done}/{target}")
+            if self._recomputing:
+                spinner = "|/-\\"[int(time.monotonic() * 8) % 4]
+                label = f"{spinner} recomputing... {done}/{target}"
+            else:
+                label = f"{done}/{target}"
+            imgui.progress_bar(done / max(target, 1), imgui.ImVec2(-1.0, 0.0), label)
         else:
+            self._recomputing = False  # dev run caught up; back to the plain state
             imgui.text(f"developed ({done} steps)")
 
     # -- frame -----------------------------------------------------------------------------
