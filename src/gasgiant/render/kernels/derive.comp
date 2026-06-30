@@ -65,6 +65,7 @@ uniform vec3 u_chroma_offset;      // subseed("chroma-variance")
 // fitting already exists and cannot move the within-bin statistic).
 uniform float u_hue_variance;      // radians of max hue rotation
 uniform vec3 u_hue_offset;         // subseed("hue-variance")
+uniform float u_chroma_aging;      // chromophore aging: T2-freshness-keyed chroma
 #endif
 
 #ifdef EMISSION
@@ -187,6 +188,39 @@ void main() {
         }
         vec3 lab = srgb_to_oklab(col);
         lab.yz *= cscale;
+        if (u_chroma_aging > 0.0) {
+            // Chromophore aging: the freshness tracer T2 is ~zero-mean (0.5), so
+            // this adds dynamical color VARIETY without shifting the band's mean
+            // color -- it protects the calibrated palette while tying color to
+            // the flow. Aged/stagnant air (low T2) accumulates reddish-brown
+            // chromophore: push along the warm Oklab axis (+a,+b) AND saturate.
+            // Fresh upwelling air (high T2) is whiter: DESATURATE toward neutral
+            // (not pushed to cyan -- a negative hue push would read unphysical).
+            // A pure chroma scale is invisible on the muted palette (low base
+            // chroma), hence the directional hue push.
+            // Chromophore concentrates in DARK downwelling belts (and the GRS),
+            // NOT bright zones -- so gate primarily by low Oklab L. This makes
+            // the latitudinal targeting match Jupiter (brown belts, white zones)
+            // and flips the brightness-correlation negative. The freshness tracer
+            // T2 then modulates WITHIN that belt mask, so the pigment tracks the
+            // flow (it decorrelates across playout) instead of a static recolor,
+            // and bright zones (dark~0) stay pale -- no muddying.
+            float L = clamp(lab.x, 0.0, 1.0);
+            float dark = smoothstep(0.28, 0.70, 1.0 - L);
+            float age = clamp(0.5 - t.b, -0.5, 0.5);   // >0 aged, <0 fresh
+            // Roll the chromophore OFF toward the poles: the dark gate also
+            // catches the dusky high-latitude caps, which should stay the Juno
+            // blue-gray/tan -- reddening them reads wrong. Full equatorward of
+            // ~50 deg, gone by ~69 deg (the banded tropics/mid-lats own it).
+            float pole_taper = 1.0 - smoothstep(0.87, 1.20, abs(lat));
+            float chromo = dark * pole_taper
+                         * (0.65 + 0.7 * smoothstep(-0.25, 0.30, age));
+            // Warm reddish-brown push + chroma deepening, both belt-gated so the
+            // net rise lands in the belts/GRS (matching the reference) while the
+            // bright zones are untouched.
+            lab.yz += u_chroma_aging * chromo * 0.28 * normalize(vec2(0.6, 0.8));
+            lab.yz *= clamp(1.0 + u_chroma_aging * chromo * 0.55, 0.5, 1.8);
+        }
         if (u_hue_variance > 0.0) {
             // Band-confined drift field (same anisotropy as the chroma
             // drift, own offset); rotation in (a, b) is luminance-neutral

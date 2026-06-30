@@ -750,6 +750,7 @@
       "chroma_scale": 1.0,
       "chroma_variance": 0.45,
       "hue_variance": 0.3,
+      "chroma_aging": 0.35,
       "polar_tint_color": [
         0.36,
         0.46,

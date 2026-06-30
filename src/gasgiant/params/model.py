@@ -845,6 +845,17 @@ class AppearanceParams(_Params):
                     "luminance-keyed palette gradient cannot express -- the "
                     "hue-diversity lever the realism metrics name",
     )
+    chroma_aging: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=0.6, ui="Appearance",
+        description="Chromophore aging: ties color saturation to the dynamical "
+                    "freshness tracer (T2). Aged/stagnant air holds more "
+                    "reddish-brown chromophore (more saturated); fresh upwelling "
+                    "air is whiter (less saturated). Chroma-only -- the latitude "
+                    "palette's HUE is untouched, so the band browns/creams just "
+                    "deepen where air is old and pale where it is fresh, tying "
+                    "color to the flow instead of latitude alone. 0 = off "
+                    "(byte-identical)",
+    )
     polar_tint_color: tuple[float, float, float] = pfield(
         (0.42, 0.50, 0.58), tier=Tier.POST, ui="Appearance",
         description="Polar cap tint (Juno blue-gray); applied where cloud tops "
