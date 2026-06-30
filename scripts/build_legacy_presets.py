@@ -42,7 +42,10 @@ PRESET_DELTA = {
     # replenish fix, a denser Jupiter storm field, bolder stamp. Flow is left alone (it
     # already reads clean -- the visual review liked jupiter_like's coherent bands).
     "jupiter_like": {
-        "detail": {"belt_texture": 1.9, "belt_texture_fine": 2.2, "mottle": 1.1,
+        # Phase C source-fidelity: softer belt texture toward the reference's smoother
+        # belts (was 1.9/2.2); palette, muted storm-tint, hue_variance and contrast all
+        # arrive via jupiter_palette() so jupiter_like tracks the Cassini match too.
+        "detail": {"belt_texture": 1.2, "belt_texture_fine": 1.4, "mottle": 1.1,
                    "cellular_amount": 0.9, "striation_amount": 1.0},
         "turbulence": {"replenish_rate": 0.35},          # zone-detail starvation fix
         "storms": {"stamp_contrast": 2.0, "rim_contrast": 2.0, "oval_density": 3.0,

@@ -26,6 +26,7 @@ Run: ./.venv/Scripts/python.exe scripts/build_vorticity_presets.py
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from gasgiant.params.model import GradientStop, InjectMask, PaletteRow
@@ -33,13 +34,41 @@ from gasgiant.params.presets import load_factory_preset, load_preset, save_prese
 
 PRESETS_DIR = Path("src/gasgiant/presets")
 
-# The frost fix (same lesson as gas_giant_warm). The frost is NOT just low value range
-# -- it is low CHROMA at the BRIGHT end: pale neutral/white zones read as frosted glass
-# no matter how dark the belts get (an early ramp that gave the belts deep value but kept
-# the zones pale grey-white still read frosted next to warm's chromatic cream zones).
-# So the bright zones must carry real WARMTH/chroma (cream, like real Jupiter zones), not
-# white. Belts are a browner, less-saturated rust than gas_giant_warm so the presets stay
-# distinct. Applied uniformly across rows so band colour follows T0 structure.
+# -- SOURCE-FIDELITY PASS (2026-06-29, branch feat/jupiter-source-fidelity) -------------
+# User target = FULL Cassini match: the prior warm "frost-fix" ramp (kept below as the
+# rollback fallback) is deliberately far warmer / more saturated / higher-contrast than
+# the Cassini true-color reference (refs/PIA07782.jpg). compare_reference.py proved our
+# chroma was a SURPLUS, not a deficit; the real gaps were RGB level, contrast, and
+# within-band hue spread. So the band palette is now fitted PER-LATITUDE directly from the
+# reference (muted, cooler poles, pale zones, reddish-brown tropical belts), and the
+# display contrast is pulled down to the reference's gentle envelope.
+#
+# Flip this to False to restore the warm CONTRAST_STOPS_JUPITER ramp (one-line rollback).
+USE_PER_LATITUDE_PALETTE = True
+
+# Reproducible build input: per-latitude rows fit from the Cassini map. Regenerate with
+#   uv run python scripts/calibrate_palette.py --reference refs/PIA07782.jpg \
+#     --fit-mode median --stops 5 --min-l-span 0.58 \
+#     --anchors -78.5 -57.5 -45.7 -40.1 -28.1 -13.4 -0.7 12 20.1 23.5 33.3 66 \
+#     --out scripts/jupiter_calib_rows.json   (then keep only the palette_rows key)
+# median (not chroma-restore) faithfully reproduces the reference's muted chroma; the
+# --min-l-span floor only lifts each row's value spread clear of the >0.5 anti-frost guard
+# (every fitted row lands at >=0.647 Rec.709 luma spread).
+_CALIB_ROWS = Path("scripts/jupiter_calib_rows.json")
+
+# Display contrast pulled toward the reference's gentle envelope (was 1.05). 0.8 cut the
+# compare_reference `contrast` distance 0.14 -> 0.08 while keeping band definition; 0.7
+# washed the belts into the zones (visual reject).
+SOURCE_CONTRAST = 0.8
+
+# Phase C: a touch more longitudinal hue drift toward the reference's within-band hue
+# variety (was 0.18; the hue_spread metric is only mildly responsive so this stays modest).
+SOURCE_HUE_VARIANCE = 0.30
+
+# Rollback fallback (the prior warm "frost-fix" ramp). The frost is NOT just low value
+# range -- it is low CHROMA at the BRIGHT end: pale neutral/white zones read as frosted
+# glass no matter how dark the belts get. Bright zones carry real WARMTH; belts a browner
+# rust than gas_giant_warm. Broadcast uniformly across rows so band colour follows T0.
 CONTRAST_STOPS_JUPITER = [
     (0.00, (0.10, 0.07, 0.05)),  # near-black warm brown (deep belt gaps)
     (0.22, (0.40, 0.26, 0.16)),  # dark brown belt
@@ -57,20 +86,46 @@ STORM_TINTS_JUPITER = [
     (0.00, (0.42, 0.50, 0.62)),  # cool blue-grey (deep cyclone / barge core)
     (0.50, (0.70, 0.58, 0.44)),  # neutral tan
     (0.72, (0.46, 0.30, 0.20)),  # brown notch, lifted so the hero anchor reads fuller
-    (1.00, (0.86, 0.42, 0.24)),  # warmer, more saturated salmon-red (hero anchor ~0.95)
+    (1.00, (0.79, 0.45, 0.30)),  # Phase C: muted brick-orange (was salmon-red .86/.42/.24)
+                                 # to match the 2000-epoch reference GRS -- a defined oval,
+                                 # not a vivid red spot, but still distinct from its surrounds
 ]
 
 
+def _per_latitude_rows() -> list[PaletteRow]:
+    """The Cassini-fitted per-latitude band rows (source-fidelity pass)."""
+    doc = json.loads(_CALIB_ROWS.read_text())
+    return [
+        PaletteRow(
+            latitude=r["latitude"],
+            stops=[GradientStop(pos=s["pos"], color=s["color"]) for s in r["stops"]],
+        )
+        for r in doc["palette_rows"]
+    ]
+
+
 def jupiter_palette(p):
-    """Replace p.appearance.palette_rows with the high-contrast Jupiter ramp (frost
-    fix), keeping each row's latitude; chroma_scale 1.0 since the ramp carries the hue.
-    Also set storm_tints explicitly (the warm hero/storm LUT) so the preset is fully
-    reproducible from the override dicts (no implicit carry)."""
-    stops = [GradientStop(pos=pp, color=c) for pp, c in CONTRAST_STOPS_JUPITER]
-    rows = [PaletteRow(latitude=r.latitude, stops=stops) for r in p.appearance.palette_rows]
+    """Set the Jupiter band palette + storm-tint LUT and the source-match display contrast.
+
+    With USE_PER_LATITUDE_PALETTE (the source-fidelity default) the rows come straight from
+    the Cassini fit; otherwise the warm CONTRAST_STOPS_JUPITER ramp is broadcast to every
+    row (rollback). storm_tints + contrast are set explicitly so the preset is fully
+    reproducible from these inputs (no implicit carry). Shared by jupiter_vorticity and
+    jupiter_like (build_legacy_presets imports this), so both Jupiters track the reference."""
+    if USE_PER_LATITUDE_PALETTE:
+        rows = _per_latitude_rows()
+    else:
+        stops = [GradientStop(pos=pp, color=c) for pp, c in CONTRAST_STOPS_JUPITER]
+        rows = [PaletteRow(latitude=r.latitude, stops=stops) for r in p.appearance.palette_rows]
     storm_tints = [GradientStop(pos=pp, color=c) for pp, c in STORM_TINTS_JUPITER]
     return p.appearance.model_copy(
-        update={"palette_rows": rows, "chroma_scale": 1.0, "storm_tints": storm_tints}
+        update={
+            "palette_rows": rows,
+            "chroma_scale": 1.0,
+            "storm_tints": storm_tints,
+            "contrast": SOURCE_CONTRAST,
+            "hue_variance": SOURCE_HUE_VARIANCE,
+        }
     )
 
 # The live-physics block (gas_giant_warm's proven recipe, passes swirl_gate): shear-
@@ -87,19 +142,21 @@ SOLVER_LIVE = {
     "vort_psi_drag": 0.06,
 }
 
-# Solid-body coherent-oval hero + bold stamp contrast (the whirlpool->oval fix).
-# hero_strength 1.9 + hero_radius 0.18 make the GRS a bolder visual anchor (the visual
-# review found it small/muddy at the stock 1.7/0.15).
+# Solid-body coherent-oval hero. Phase C (source-fidelity) shrinks + mutes it toward the
+# faded 2000-epoch reference GRS: radius 0.18 -> 0.14 (the reference spot is small) and
+# less interior salmon. hero_solid_core stays 1.0 (coherent oval, not a whirlpool).
 STORMS_HERO = {
     "hero_solid_core": 1.0,
     "hero_strength": 1.9,
-    "hero_radius": 0.18,
+    "hero_radius": 0.16,    # Phase C: slightly smaller (was 0.18) but the reference GRS
+                            # is a LARGE defined oval -- 0.14 over-shrank it to a smudge
     "hero_latitude": -22.5,  # pinned to the real GRS latitude (~22 S)
     "rim_contrast": 2.0,
     "stamp_contrast": 2.4,
     "hero_mottle": 0.70,    # strong interior churn: kill the airbrushed-blob core
                             # (flow-folded fbm => follows the vortex, not band-grain)
-    "hero_tint_var": 0.45,  # a touch more salmon/white interior festoon
+    "hero_tint_var": 0.40,  # Phase C: a touch less salmon (was 0.45) but keep interior
+                            # definition -- 0.30 washed the oval out (m5 hero dropped)
     "hero_aspect": 2.2,
     "hero_rim_warp": 0.65,  # lumpy-oval boundary (break the perfect-ring look)
     "hero_rim_tint": 0.85,  # deeper, azimuthally-broken dark-red collar (Red Spot Hollow
@@ -125,7 +182,7 @@ JETS_WARM = {
 # review read it as a mechanical sine pattern in vorticity mode), so a touch more belt
 # chaos folds it back up while staying below the original grain.
 TURBULENCE_RICH = {
-    "intensity": 1.6,
+    "intensity": 1.2,  # Phase C: softer than 1.6 toward the reference's smoother belts
     "replenish_rate": 0.45,
     "relax_tau": 2000.0,
     "belt_boost": 1.3,
@@ -152,8 +209,8 @@ STORMS_FIELD = {
 # Storm-scale folded belt structure + temperate mottle + the wound-lane hero collar,
 # plus warm's higher cellular/striation for more believable fine cloud texture.
 DETAIL_RICH = {
-    "belt_texture": 1.9,
-    "belt_texture_fine": 2.2,
+    "belt_texture": 1.2,        # Phase C: softer folded belt structure (was 1.9) -- the
+    "belt_texture_fine": 1.4,   # reference belts are smoother; halved texture_energy gap
     "zone_texture": 1.0,        # fill the detail-starved zones (the smooth lanes
                                # between belts read as reduced-detail bands)
     "mottle": 1.1,
