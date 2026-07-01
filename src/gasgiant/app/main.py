@@ -22,7 +22,7 @@ from imgui_bundle import hello_imgui, imgui
 from imgui_bundle import portable_file_dialogs as pfd
 from pydantic import ValidationError
 
-from gasgiant.app.panels import PanelState, draw_params_panel
+from gasgiant.app.panels import _TIER_GLYPHS, PanelState, draw_params_panel
 from gasgiant.app.sphere_preview import SpherePreview
 from gasgiant.app.viewport import EquirectViewport
 from gasgiant.diagnostics import PerfCounter, configure_logging
@@ -83,6 +83,19 @@ SPEED_OPTIONS: list[tuple[int, str]] = [
     (16, "16"),
     (MAX_STEPS_PER_FRAME, "Max"),
 ]
+
+
+def _shortcuts_enabled() -> bool:
+    """Global keyboard shortcuts (Phase 7) fire only when no text-input
+    widget currently holds focus -- typing "r" while searching for a field
+    like "rim_contrast", or editing the seed field, must not trigger
+    Randomize. ``io.want_text_input`` is exactly this signal, already
+    maintained by imgui for every text-entry widget (search box, seed
+    ``input_int``, any ``input_text``/``input_float`` in the panel).
+    Extracted as a standalone predicate (rather than inlined into
+    ``StudioApp._handle_shortcuts``) so it can be exercised against a
+    headless imgui context without driving a full app frame."""
+    return not imgui.get_io().want_text_input
 
 
 class Toasts:
@@ -177,6 +190,10 @@ class StudioApp:
         self._frame_count = 0
         self._smoke_frames = int(os.environ.get("GASGIANT_SMOKE_FRAMES", "0"))
         self._smoke_shot = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
+        # Phase 7 help window -- a plain floating imgui window (the same
+        # idiom Toasts.draw already uses in this file), toggled by F1 or the
+        # "Help (F1)" button, drawn from gui_overlays each frame while visible.
+        self._show_help = False
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -384,6 +401,66 @@ class StudioApp:
             result.seed = self.params.seed
         return result
 
+    def _do_randomize(self) -> None:
+        """The Randomize action: push history, roll a fresh time-seeded
+        snapshot (honoring locks via ``_randomize``), commit, and drop any
+        pending working-copy edit. Shared verbatim by the Randomize button
+        and the ``R`` keyboard shortcut (Phase 7) so the two can't drift.
+        Time-seeded randomize is captured as a concrete params snapshot
+        immediately -- never re-rolled on redo (the module's determinism
+        contract)."""
+        self._push_history(self.params)
+        seed = int(time.time_ns() % (2**31 - 1))
+        self._commit(self._randomize(seed))
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"randomized (seed {seed})")
+
+    def _open_save_dialog(self) -> None:
+        """Open the preset-save file dialog -- the exact path both the
+        "Save..." button and the Ctrl+S shortcut trigger. Ctrl+S always opens
+        the dialog, identical to the button; it does not silently re-save to
+        the active preset's path. No-op if a dialog is already open (mirrors
+        the button's ``self._dialog is None`` guard)."""
+        if self._dialog is not None:
+            return
+        # Default the save dialog into USER_PRESET_DIR so saved presets land
+        # where user_preset_names() enumerates them (created if absent).
+        USER_PRESET_DIR.mkdir(parents=True, exist_ok=True)
+        default = str(USER_PRESET_DIR / "preset.json")
+        self._dialog = ("save", pfd.save_file("Save preset", default, ["JSON", "*.json"]))
+
+    def _handle_shortcuts(self) -> None:
+        """Global keyboard shortcuts (Phase 7), registered as hello_imgui's
+        ``post_new_frame`` callback -- it runs right after ImGui::NewFrame(),
+        so ``io.want_text_input`` already reflects whether a text-input
+        widget is currently focused, and BEFORE any window is drawn this
+        frame, so a flag set here (the search-focus request) is consumed
+        later this same frame by ``_draw_search_box``.
+
+        Undo/Redo/Randomize/Save additionally check ``self._export is
+        None``: ``draw_controls`` disables their buttons outright while an
+        export is in flight (M5 / Round 2 LOW-5), and a shortcut must honor
+        that same gate rather than bypass it."""
+        if not _shortcuts_enabled():
+            return
+        io = imgui.get_io()
+        ctrl = io.key_ctrl
+        exporting = self._export is not None
+        if imgui.is_key_pressed(imgui.Key.f1):
+            self._show_help = not self._show_help
+        if not ctrl and imgui.is_key_pressed(imgui.Key.slash):
+            self.panel_state.focus_search_requested = True
+        if not ctrl and imgui.is_key_pressed(imgui.Key.a):
+            self.panel_state.show_advanced = not self.panel_state.show_advanced
+        if not ctrl and imgui.is_key_pressed(imgui.Key.r) and not exporting:
+            self._do_randomize()
+        if ctrl and imgui.is_key_pressed(imgui.Key.z) and not exporting:
+            self._undo()
+        if ctrl and imgui.is_key_pressed(imgui.Key.y) and not exporting:
+            self._redo()
+        if ctrl and imgui.is_key_pressed(imgui.Key.s) and not exporting:
+            self._open_save_dialog()
+
     # -- dialogs --------------------------------------------------------------------
 
     def _poll_dialog(self) -> None:
@@ -441,6 +518,10 @@ class StudioApp:
         # a bogus before==after undo entry). `_poll_dialog` additionally holds
         # a "load" dialog's result if it resolves mid-export via the narrow
         # race where the dialog was opened just before Export was clicked.
+        if imgui.button("? Help (F1)"):
+            self._show_help = not self._show_help
+        imgui.separator()
+
         exporting = self._export is not None
         imgui.begin_disabled(exporting)
         # Merged factory+user dropdown. Preview shows the active preset + dirty
@@ -461,12 +542,8 @@ class StudioApp:
         if imgui.button("Load...") and self._dialog is None:
             self._dialog = ("load", pfd.open_file("Load preset", "", ["JSON", "*.json"]))
         imgui.same_line()
-        if imgui.button("Save...") and self._dialog is None:
-            # Default the save dialog into USER_PRESET_DIR so saved presets land
-            # where user_preset_names() enumerates them (created if absent).
-            USER_PRESET_DIR.mkdir(parents=True, exist_ok=True)
-            default = str(USER_PRESET_DIR / "preset.json")
-            self._dialog = ("save", pfd.save_file("Save preset", default, ["JSON", "*.json"]))
+        if imgui.button("Save..."):
+            self._open_save_dialog()
         imgui.same_line()
         if imgui.button("Reset to gas_giant_warm"):
             self._load_preset_entry("gas_giant_warm", "factory")
@@ -474,11 +551,7 @@ class StudioApp:
         self._draw_seed_header_control()
 
         if imgui.button("Randomize"):
-            self._push_history(self.params)
-            seed = int(time.time_ns() % (2**31 - 1))
-            self._commit(self._randomize(seed))
-            self._reset_working_copy()  # discrete action wins over pending edit
-            self.toasts.info(f"randomized (seed {seed})")
+            self._do_randomize()
         imgui.same_line()
         if imgui.button("Reroll seed"):
             self._push_history(self.params)
@@ -724,6 +797,58 @@ class StudioApp:
 
     def gui_overlays(self) -> None:
         self.toasts.draw()
+        self.draw_help()
+
+    def draw_help(self) -> None:
+        """Phase 7 help window: a plain floating imgui window (the same
+        idiom ``Toasts.draw`` already uses in this file), toggled by F1 or
+        the "Help (F1)" button in ``draw_controls``, drawn from
+        ``gui_overlays`` each frame while ``self._show_help`` is set. Not a
+        permanent ``DockableWindow`` tab -- Help is occasional reference
+        material, not something that should occupy dock space every
+        session."""
+        if not self._show_help:
+            return
+        imgui.set_next_window_size(imgui.ImVec2(520.0, 480.0), imgui.Cond_.first_use_ever)
+        opened, self._show_help = imgui.begin("Help", self._show_help)
+        if opened:
+            imgui.text_wrapped(
+                "Type in the search box to filter fields by name, label, or "
+                "description. Toggle Advanced to see the full field set -- a "
+                "search always overrides the Advanced filter, so a searched-for "
+                "advanced field is still findable with Advanced off."
+            )
+            imgui.separator()
+            imgui.text("Tier badges (change cost, shown left of every field):")
+            for _key, (glyph, color, full) in _TIER_GLYPHS.items():
+                imgui.text_colored(imgui.ImVec4(*color), glyph)
+                imgui.same_line()
+                imgui.text(full)
+            imgui.separator()
+            imgui.bullet_text("Lock (right-click a field): exclude it from Randomize/Reroll.")
+            imgui.bullet_text("Randomize / Reroll seed: re-roll unlocked fields from a fresh seed.")
+            imgui.bullet_text("Undo / Redo: step back/forward through committed edits.")
+            imgui.bullet_text("Export...: render the current look to a map set on disk.")
+            imgui.bullet_text(
+                "Ctrl-click any slider to type an exact value (built-in imgui "
+                "behavior -- already works everywhere, nothing to enable)."
+            )
+            imgui.separator()
+            imgui.text("Keyboard shortcuts:")
+            imgui.bullet_text("/         focus the search box")
+            imgui.bullet_text("A         toggle Advanced")
+            imgui.bullet_text("R         Randomize")
+            imgui.bullet_text("F1        toggle this Help window")
+            imgui.bullet_text("Ctrl+Z    Undo")
+            imgui.bullet_text("Ctrl+Y    Redo")
+            imgui.bullet_text("Ctrl+S    Save preset...")
+            imgui.separator()
+            imgui.text_wrapped(
+                "Hover the (?) marker next to a section header for a one-line "
+                "summary of that section. See docs/sliders.md for the full "
+                "field reference."
+            )
+        imgui.end()
 
 
 def main() -> int:
@@ -743,6 +868,10 @@ def main() -> int:
     params.renderer_backend_options.open_gl_options = gl_options
     params.callbacks.post_init = app.init_gl
     params.callbacks.pre_new_frame = app.pre_frame
+    # Runs right after ImGui::NewFrame() -- io.want_text_input/is_key_pressed
+    # are current for this frame, and it fires before any window is drawn, so
+    # a shortcut-set flag (search-focus) is consumed later this same frame.
+    params.callbacks.post_new_frame = app._handle_shortcuts
     params.callbacks.show_gui = app.gui_overlays
     params.callbacks.before_exit = app.shutdown
     params.fps_idling.enable_idling = False

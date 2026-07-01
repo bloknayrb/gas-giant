@@ -69,11 +69,17 @@ class PanelState:
     - ``locked`` -- dotted field paths excluded from ``randomize()`` (the
       panel's right-click "Lock for randomize" toggle and the header seed
       lock both write here).
+    - ``focus_search_requested`` -- Phase 7's ``/`` shortcut sets this
+      (``StudioApp._handle_shortcuts``); ``_draw_search_box`` consumes it the
+      next time it draws the search box, via ``imgui.set_keyboard_focus_here()``
+      called immediately before the input widget, then clears the flag so the
+      focus request fires exactly once.
     """
 
     search: str = ""
     show_advanced: bool = False
     locked: set[str] = dataclasses.field(default_factory=set)
+    focus_search_requested: bool = False
 
 
 _DEFAULTS_BASELINE: dict[str, Any] | None = None
@@ -141,6 +147,12 @@ def draw_params_panel(
 
 def _draw_search_box(state: PanelState) -> None:
     imgui.set_next_item_width(-140.0)
+    if state.focus_search_requested:
+        # Must be called immediately before the widget it targets -- ordering
+        # matters here (imgui associates the focus request with the very next
+        # item). Cleared right away so the request fires once, not every frame.
+        imgui.set_keyboard_focus_here()
+        state.focus_search_requested = False
     changed, text = imgui.input_text_with_hint("##panel_search", "search fields...", state.search)
     if changed:
         state.search = text
