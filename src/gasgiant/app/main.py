@@ -15,7 +15,10 @@ import logging
 import os
 import time
 from collections import deque
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+from typing import NamedTuple
 
 from imgui_bundle import hello_imgui, imgui
 from imgui_bundle import portable_file_dialogs as pfd
@@ -34,6 +37,7 @@ from gasgiant.params.model import PlanetParams, Tier
 from gasgiant.params.presets import (
     USER_PRESET_DIR,
     PresetError,
+    PresetSource,
     available_presets,
     load_factory_preset,
     load_preset,
@@ -44,16 +48,42 @@ from gasgiant.params.randomize import randomize
 
 log = logging.getLogger(__name__)
 
-# A history record is the committed params snapshot plus the preset identity in
-# effect when it was captured: the active-preset (name, source) pair and the
-# pristine baseline (the params as last loaded/saved) that ``dirty`` is measured
-# against. Both are None when no named preset is active (e.g. a restored
-# session). Phase 6 populates these; Phase 2 shipped the record shape (then with
-# str/bool placeholders). The pristine baseline is a full PlanetParams rather
-# than a bool because undoing back across a preset load must restore the actual
-# baseline so later edits recompute dirty correctly -- a bool "was dirty at
-# capture" can't reconstruct that baseline (see _undo / the task report).
-UndoRecord = tuple["PlanetParams", "tuple[str, str] | None", "PlanetParams | None"]
+class DialogKind(StrEnum):
+    """Which native file dialog ``self._dialog`` is currently awaiting. A
+    ``StrEnum`` so it stays ``==``-comparable with the bare strings it replaced."""
+
+    LOAD = "load"
+    SAVE = "save"
+    EXPORT = "export"
+
+
+@dataclass
+class ExportJob:
+    """One export in flight: the running job generator, its output directory, and
+    the latest ``Progress`` (None until the first slice runs). Bundling these into
+    one object means the 'an export is running' predicate (``self._export is not
+    None``) and its progress can never disagree the way two separate Optionals
+    could."""
+
+    job: object
+    out_dir: Path
+    progress: Progress | None = None
+
+
+class UndoRecord(NamedTuple):
+    """A history entry: the committed params snapshot plus the preset identity in
+    effect when it was captured -- the active-preset ``(name, source)`` pair and
+    the pristine baseline (the params as last loaded/saved) that ``dirty`` is
+    measured against. ``identity``/``pristine`` are None when no named preset is
+    active (e.g. a restored session). The pristine baseline is a full
+    PlanetParams rather than a bool because undoing back across a preset load must
+    restore the actual baseline so later edits recompute dirty correctly -- a bool
+    "was dirty at capture" can't reconstruct that baseline (see _undo). Named
+    fields, but still tuple-compatible (index + unpack) for existing call sites."""
+
+    params: PlanetParams
+    identity: tuple[str, PresetSource] | None
+    pristine: PlanetParams | None
 
 PREVIEW_WIDTH = 2048
 SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
@@ -178,10 +208,10 @@ class StudioApp:
         # as last loaded/saved; dirty = self.params != self._pristine. Both are
         # stored into every undo record so undo across a load restores them.
         if self._session_restored:
-            self._active_preset: tuple[str, str] | None = None
+            self._active_preset: tuple[str, PresetSource] | None = None
             self.toasts.info("restored previous session")
         else:
-            self._active_preset = ("gas_giant_warm", "factory")
+            self._active_preset = ("gas_giant_warm", PresetSource.FACTORY)
             self.toasts.info("started from gas_giant_warm")
         self._pristine: PlanetParams | None = self.params.model_copy(deep=True)
         # Cached merged (factory + user) dropdown list; refreshed on save/load and
@@ -201,9 +231,8 @@ class StudioApp:
         # placeholders. maxlen=64 evicts the oldest entry automatically.
         self._undo_stack: deque[UndoRecord] = deque(maxlen=64)
         self._redo_stack: deque[UndoRecord] = deque(maxlen=64)
-        self._dialog: tuple[str, object] | None = None
-        self._export: tuple[object, Path] | None = None  # (job generator, out dir)
-        self._export_progress: Progress | None = None
+        self._dialog: tuple[DialogKind, object] | None = None
+        self._export: ExportJob | None = None
         self._frame_count = 0
         self._smoke_frames = int(os.environ.get("GASGIANT_SMOKE_FRAMES", "0"))
         self._smoke_shot = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
@@ -291,9 +320,9 @@ class StudioApp:
         (_active_preset / _pristine) in effect right now. _pristine is shared by
         reference -- it is replaced wholesale on identity changes, never mutated
         in place -- so it is safe (and cheaper) not to deep-copy it here."""
-        return (params.model_copy(deep=True), self._active_preset, self._pristine)
+        return UndoRecord(params.model_copy(deep=True), self._active_preset, self._pristine)
 
-    def _set_identity(self, active: tuple[str, str] | None, params: PlanetParams) -> None:
+    def _set_identity(self, active: tuple[str, PresetSource] | None, params: PlanetParams) -> None:
         """Adopt ``active`` as the current preset identity and ``params`` as the
         new pristine baseline (deep-copied so later in-place edits to self.params
         can't leak into it). Called on every authoritative path: preset combo,
@@ -312,20 +341,22 @@ class StudioApp:
             name = "unsaved"
         else:
             pname, source = self._active_preset
-            name = f"user/{pname}" if source == "user" else pname
+            name = f"user/{pname}" if source == PresetSource.USER else pname
         return f"{name}{' *' if self._is_dirty() else ''}"
 
     def _refresh_presets(self) -> None:
         self._preset_cache = available_presets()
 
-    def _load_preset_entry(self, name: str, source: str) -> None:
+    def _load_preset_entry(self, name: str, source: PresetSource) -> None:
         """Load a factory/user preset by (name, source) through the shared
         push-history -> commit -> set-identity -> reset-working-copy path. Load
         failures toast and leave state untouched (no stray undo entry)."""
         if self._export is not None:
             return  # defense-in-depth: never commit mid-export (see draw_controls)
         try:
-            params = load_user_preset(name) if source == "user" else load_factory_preset(name)
+            params = (
+                load_user_preset(name) if source == PresetSource.USER else load_factory_preset(name)
+            )
         except (PresetError, OSError) as exc:
             self.toasts.error(str(exc))
             return
@@ -334,7 +365,7 @@ class StudioApp:
         self._commit(params)
         self._set_identity((name, source), params)
         self._reset_working_copy()  # discrete action wins over pending edit
-        label = f"user/{name}" if source == "user" else name
+        label = f"user/{name}" if source == PresetSource.USER else name
         self.toasts.info(f"preset: {label}")
 
     def _push_history(self, params: PlanetParams) -> None:
@@ -487,7 +518,7 @@ class StudioApp:
         # where user_preset_names() enumerates them (created if absent).
         USER_PRESET_DIR.mkdir(parents=True, exist_ok=True)
         default = str(USER_PRESET_DIR / "preset.json")
-        self._dialog = ("save", pfd.save_file("Save preset", default, ["JSON", "*.json"]))
+        self._dialog = (DialogKind.SAVE, pfd.save_file("Save preset", default, ["JSON", "*.json"]))
 
     def _handle_shortcuts(self) -> None:
         """Global keyboard shortcuts (Phase 7), registered as hello_imgui's
@@ -534,7 +565,7 @@ class StudioApp:
         kind, dlg = self._dialog
         if not dlg.ready():
             return
-        if kind == "load" and self._export is not None:
+        if kind == DialogKind.LOAD and self._export is not None:
             # A file was already picked (dialog opened before the export
             # started, or a race with the disabled-button gate below) but
             # applying it now would commit mid-export. Hold the dialog --
@@ -545,7 +576,7 @@ class StudioApp:
         if not result:
             return
         try:
-            if kind == "load":
+            if kind == DialogKind.LOAD:
                 path = Path(result[0])
                 loaded = load_preset(path)  # push only AFTER a successful load
                 if self.params != loaded:  # reloading the current file is a no-op undo
@@ -555,21 +586,20 @@ class StudioApp:
                 self._set_identity((path.stem, "file"), loaded)
                 self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"loaded {path.name}")
-            elif kind == "save":
+            elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
                     path = path.with_suffix(".json")
                 save_preset(self.params, path)
                 # The just-saved preset is the new active/pristine baseline (so
                 # dirty resets); refresh so a save into USER_PRESET_DIR appears.
-                source = "user" if path.parent == USER_PRESET_DIR else "file"
+                source = PresetSource.USER if path.parent == USER_PRESET_DIR else PresetSource.FILE
                 self._set_identity((path.stem, source), self.params)
                 self._refresh_presets()
                 self.toasts.info(f"saved {path.name}")
-            elif kind == "export":
+            elif kind == DialogKind.EXPORT:
                 out = Path(result)
-                self._export = (export_job(self.sim, out), out)
-                self._export_progress = None
+                self._export = ExportJob(export_job(self.sim, out), out)
         except (PresetError, OSError, ValueError) as exc:
             self.toasts.error(str(exc))
 
@@ -596,7 +626,7 @@ class StudioApp:
         imgui.set_next_item_width(160.0)
         if imgui.begin_combo("##preset", self._active_label()):
             for name, source in self._preset_cache:
-                label = f"user/{name}" if source == "user" else name
+                label = f"user/{name}" if source == PresetSource.USER else name
                 if imgui.selectable(label, False)[0]:
                     self._load_preset_entry(name, source)
             imgui.end_combo()
@@ -606,13 +636,13 @@ class StudioApp:
             self.toasts.info("preset list refreshed")
         imgui.same_line()
         if imgui.button("Load...") and self._dialog is None:
-            self._dialog = ("load", pfd.open_file("Load preset", "", ["JSON", "*.json"]))
+            self._dialog = (DialogKind.LOAD, pfd.open_file("Load preset", "", ["JSON", "*.json"]))
         imgui.same_line()
         if imgui.button("Save..."):
             self._open_save_dialog()
         imgui.same_line()
         if imgui.button("Reset to gas_giant_warm"):
-            self._load_preset_entry("gas_giant_warm", "factory")
+            self._load_preset_entry("gas_giant_warm", PresetSource.FACTORY)
 
         self._draw_seed_header_control()
 
@@ -630,7 +660,7 @@ class StudioApp:
                 imgui.open_popup("Export map set")
             self._draw_export_modal()
         else:
-            prog = self._export_progress
+            prog = self._export.progress
             frac = prog.fraction if prog else 0.0
             label = prog.message if prog else "starting"
             imgui.progress_bar(frac, imgui.ImVec2(180.0, 0.0), label)
@@ -767,7 +797,7 @@ class StudioApp:
             imgui.text("Emission: disabled")
         imgui.separator()
         if imgui.button("Export...") and self._dialog is None:
-            self._dialog = ("export", pfd.select_folder("Export map set to folder"))
+            self._dialog = (DialogKind.EXPORT, pfd.select_folder("Export map set to folder"))
             imgui.close_current_popup()
         imgui.same_line()
         if imgui.button("Cancel"):
@@ -860,12 +890,11 @@ class StudioApp:
     def _run_export_slice(self) -> None:
         if self._export is None:
             return
-        job, out = self._export
+        job, out = self._export.job, self._export.out_dir
         try:
-            self._export_progress = next(job)
+            self._export.progress = next(job)
         except StopIteration:
             self._export = None
-            self._export_progress = None
             self.toasts.info(f"exported to {out}")
         except Exception as exc:  # noqa: BLE001 - surface any export failure
             # Record the full traceback (this catch is broad -- a GL error mid
@@ -874,7 +903,6 @@ class StudioApp:
             # KeyError etc.) so the toast is never "export failed: " (#7).
             log.exception("export failed")
             self._export = None
-            self._export_progress = None
             detail = str(exc) or type(exc).__name__
             self.toasts.error(f"export failed: {detail}")
         if self._export is None:
@@ -883,10 +911,8 @@ class StudioApp:
     def _cancel_export(self) -> None:
         if self._export is None:
             return
-        job, _ = self._export
-        job.close()  # finally-block removes partial output
+        self._export.job.close()  # finally-block removes partial output
         self._export = None
-        self._export_progress = None
         self.toasts.info("export cancelled")
         self._flush_pending_edit()  # apply anything the export gate held back
 

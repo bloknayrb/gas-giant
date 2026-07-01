@@ -9,6 +9,7 @@ tolerant policy.)
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 
@@ -104,13 +105,24 @@ def load_user_preset(name: str) -> PlanetParams:
         raise PresetError(f"{path}: {exc}") from exc
 
 
-def available_presets() -> list[tuple[str, str]]:
+class PresetSource(StrEnum):
+    """Which namespace an active preset identity came from. A ``StrEnum`` so it
+    stays ``==``-comparable with the bare strings it replaced (and renders as the
+    plain value in f-strings), but gives callers a typed, misspell-proof vocab
+    instead of scattering ``"factory"``/``"user"``/``"file"`` literals."""
+
+    FACTORY = "factory"
+    USER = "user"
+    FILE = "file"
+
+
+def available_presets() -> list[tuple[str, PresetSource]]:
     """(name, source) pairs for the merged dropdown: factory presets first
-    (source ``"factory"``), then user presets (source ``"user"``). The source
+    (source ``FACTORY``), then user presets (source ``USER``). The source
     discriminates the two namespaces so the GUI can show ``user/<name>`` and so
     a user preset can't collide with a same-named factory preset."""
-    factory = [(name, "factory") for name in factory_preset_names()]
-    user = [(name, "user") for name in user_preset_names()]
+    factory = [(name, PresetSource.FACTORY) for name in factory_preset_names()]
+    user = [(name, PresetSource.USER) for name in user_preset_names()]
     return factory + user
 
 

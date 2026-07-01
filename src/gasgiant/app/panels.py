@@ -31,7 +31,7 @@ from imgui_bundle import imgui
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from gasgiant.params.model import PlanetParams
+from gasgiant.params.model import FieldMeta, PlanetParams
 
 
 def _bounds(info: FieldInfo) -> tuple[float | None, float | None]:
@@ -169,8 +169,7 @@ def _advanced_visible(info: FieldInfo, state: PanelState) -> bool:
     ``adv=True`` is always visible; an ``adv=True`` leaf is visible only
     while ``state.show_advanced`` is on. Search overrides this entirely --
     see ``_leaf_visible``, the only caller."""
-    extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
-    if not extra.get("adv"):
+    if not FieldMeta.of(info).adv:
         return True
     return state.show_advanced
 
@@ -399,8 +398,7 @@ def _draw_model(
             # renders zero separators, byte-for-byte unchanged. Falsy ui
             # (Baroclinic's fixed-cadence fields use ui="") is transparent to
             # grouping: it neither triggers nor absorbs a boundary.
-            extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
-            ui = extra.get("ui") or None
+            ui = FieldMeta.of(info).ui or None
             if ui and prev_ui is not None and ui != prev_ui:
                 imgui.separator_text(ui)
             if ui:
@@ -518,13 +516,13 @@ def _draw_leaf(
 
     value = doc[name]
     label = name.replace("_", " ")
-    extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+    meta = FieldMeta.of(info)
     lo, hi = _bounds(info)
     changed = False
     committed = False
     imgui.push_id(name)
 
-    _draw_tier_badge(extra.get("tier"))
+    _draw_tier_badge(meta.tier)
     imgui.same_line()
     if path in state.locked:
         imgui.text_colored(imgui.ImVec4(*_LOCK_COLOR), "L")
@@ -555,7 +553,7 @@ def _draw_leaf(
     elif kind == "float":
         flo = lo if lo is not None else 0.0
         fhi = hi if hi is not None else 1.0
-        flags = imgui.SliderFlags_.logarithmic if extra.get("log") else 0
+        flags = imgui.SliderFlags_.logarithmic if meta.log else 0
         changed, doc[name] = imgui.slider_float(label, value, flo, fhi, flags=flags)
     elif kind == "color":
         changed, rgb = imgui.color_edit3(label, list(value))

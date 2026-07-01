@@ -320,7 +320,7 @@ def test_export_resolutions_within_bounds() -> None:
 
 def test_post_edit_blocked_while_exporting() -> None:
     app = _make_app()
-    app._export = (object(), Path("out"))  # export in flight
+    app._export = main.ExportJob(object(), Path("out"))  # export in flight
     draft = _draft_with(app.params, "appearance.gamma", 1.4)
     app._process_edit(draft, any_changed=True, any_committed=False)
 
@@ -335,7 +335,7 @@ def test_heavy_edit_release_blocked_while_exporting() -> None:
     """A drag that fully completes (changed then released) during an export
     must not commit and must not push a bogus undo entry."""
     app = _make_app()
-    app._export = (object(), Path("out"))
+    app._export = main.ExportJob(object(), Path("out"))
     draft = _draft_with(app.params, "bands.count", 30)
     app._process_edit(draft, any_changed=True, any_committed=False)  # mid-drag
     app._process_edit(draft, any_changed=False, any_committed=True)  # released
@@ -352,7 +352,7 @@ def test_flush_pending_edit_applies_once_export_clears() -> None:
     clears, not be silently dropped forever."""
     app = _make_app()
     pre_export_params = app.params
-    app._export = (object(), Path("out"))
+    app._export = main.ExportJob(object(), Path("out"))
     draft = _draft_with(app.params, "bands.count", 30)
     app._process_edit(draft, any_changed=True, any_committed=False)  # mid-drag
     app._process_edit(draft, any_changed=False, any_committed=True)  # released
@@ -383,7 +383,7 @@ def test_same_edit_committed_once_export_gate_lifts_via_new_interaction() -> Non
     ordinary commit path (not just the explicit flush) applies the same held
     draft exactly as it would have without the gate."""
     app = _make_app()
-    app._export = (object(), Path("out"))
+    app._export = main.ExportJob(object(), Path("out"))
     draft = _draft_with(app.params, "appearance.gamma", 1.4)
     app._process_edit(draft, any_changed=True, any_committed=False)
     assert app.sim.calls == []
@@ -401,7 +401,7 @@ def _make_app_exporting():
     app = _make_app()
     app.toasts = main.Toasts()
     app.panel_state = panels.PanelState()
-    app._export = (object(), Path("out"))
+    app._export = main.ExportJob(object(), Path("out"))
     return app
 
 
@@ -442,14 +442,14 @@ def test_export_failure_with_empty_message_still_reports() -> None:
         raise KeyError()  # str(KeyError()) == "" -> the empty-message case
         yield  # unreachable, but makes this function a generator
 
-    app._export = (boom_job(), Path("out"))
+    app._export = main.ExportJob(boom_job(), Path("out"))
     app._run_export_slice()
 
     errors = [m for (m, is_err, _) in app.toasts._items if is_err]
     assert errors, "an export failure must toast"
     assert errors[0].strip() != "export failed:", "toast must include a cause, not an empty message"
     assert "KeyError" in errors[0], "empty-message exception falls back to its type name"
-    assert app._export is None and app._export_progress is None, "export state must reset"
+    assert app._export is None, "export state must reset"
 
 
 def test_poll_dialog_defers_load_result_during_export(tmp_path: Path) -> None:
@@ -470,7 +470,7 @@ def test_poll_dialog_defers_load_result_during_export(tmp_path: Path) -> None:
 
     app = _make_app()
     app.toasts = main.Toasts()
-    app._export = (object(), Path("out"))
+    app._export = main.ExportJob(object(), Path("out"))
     app._dialog = ("load", FakeDialog())
 
     app._poll_dialog()

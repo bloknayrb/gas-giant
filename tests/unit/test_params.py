@@ -58,8 +58,8 @@ def test_every_tunable_field_declares_a_tier():
 
 def test_field_meta_helper():
     meta = field_meta(BandsParams, "count")
-    assert meta["tier"] == Tier.RESTART.value
-    assert meta["rand"] == [6, 24]
+    assert meta.tier == Tier.RESTART.value
+    assert meta.rand == [6, 24]
 
 
 def test_every_pfield_has_a_description():
@@ -156,9 +156,9 @@ def test_adv_does_not_perturb_field_meta_or_serialization():
     import json
 
     meta = field_meta(BandsParams, "count")
-    assert meta["tier"] == Tier.RESTART.value
-    assert meta["rand"] == [6, 24]
-    assert meta["adv"] is False  # count is a Basic headline knob
+    assert meta.tier == Tier.RESTART.value
+    assert meta.rand == [6, 24]
+    assert meta.adv is False  # count is a Basic headline knob
 
     p = PlanetParams(seed=99)
     p.bands.template = None  # no-op assignment; keep default

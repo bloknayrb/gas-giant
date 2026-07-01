@@ -173,7 +173,7 @@ def test_r_shortcut_suppressed_during_export(imgui_ctx):
     """Randomize's button is disabled outright while an export is in
     flight (M5 / Round 2 LOW-5); the R shortcut must honor the same gate."""
     app = _make_app()
-    app._export = (object(), object())
+    app._export = main.ExportJob(object(), object())
     calls: list[bool] = []
     app._do_randomize = lambda: calls.append(True)  # type: ignore[method-assign]
 
@@ -269,7 +269,7 @@ def test_ctrl_s_shortcut_opens_save_dialog(imgui_ctx):
 
 def test_undo_redo_save_suppressed_during_export(imgui_ctx):
     app = _make_app()
-    app._export = (object(), object())
+    app._export = main.ExportJob(object(), object())
     undo_calls: list[bool] = []
     save_calls: list[bool] = []
     app._undo = lambda: undo_calls.append(True)  # type: ignore[method-assign]

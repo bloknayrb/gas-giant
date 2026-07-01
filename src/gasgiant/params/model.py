@@ -22,6 +22,7 @@ stays GUI-agnostic in fact, not just in name.
 from __future__ import annotations
 
 import statistics
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -36,8 +37,11 @@ class Tier(StrEnum):
     RESTART = "restart"
 
 
+_UNSET = object()
+
+
 def pfield(
-    default: Any,
+    default: Any = _UNSET,
     *,
     tier: Tier,
     lo: float | None = None,
@@ -47,10 +51,22 @@ def pfield(
     ui: str = "",
     adv: bool = False,
     description: str = "",
+    factory: Any = None,
 ) -> Any:
+    """A pydantic ``Field`` carrying the panel/randomize metadata (tier, ui, log,
+    adv, rand). Pass ``factory`` (a zero-arg callable) instead of ``default`` for
+    a MUTABLE default so every model instance gets its own fresh value rather than
+    sharing a module-level list -- pydantic already deep-copies a plain default per
+    instance, but a ``default_factory`` is the explicit, no-shared-singleton form
+    (and matches the ``Field(default_factory=...)`` idiom the rest of the tree
+    uses for its nested models)."""
     extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
     if rand is not None:
         extra["rand"] = list(rand)
+    if factory is not None:
+        return Field(
+            default_factory=factory, ge=lo, le=hi, description=description, json_schema_extra=extra
+        )
     return Field(
         default,
         ge=lo,
@@ -842,12 +858,13 @@ class PolesParams(_Params):
 
 class AppearanceParams(_Params):
     palette_rows: list[PaletteRow] = pfield(
-        default_palette_rows(), tier=Tier.POST, ui="Appearance",
+        factory=default_palette_rows, tier=Tier.POST, ui="Appearance",
         description="Latitude-anchored color gradients indexed by the color tracer "
                     "(belt dark -> zone bright), blended across signed latitude",
     )
     storm_tints: list[GradientStop] = pfield(
-        DEFAULT_STORM_TINTS, tier=Tier.POST, adv=True, ui="Appearance",
+        factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_STORM_TINTS],
+        tier=Tier.POST, adv=True, ui="Appearance",
         description="Secondary tint axis for storms/festoons/hot spots",
     )
     haze_amount: float = pfield(
@@ -1063,8 +1080,34 @@ class PlanetParams(_Params):
         return cls.model_validate_json(text)
 
 
-def field_meta(model: type[BaseModel], field_name: str) -> dict[str, Any]:
-    """The json_schema_extra metadata dict for a field ({} if none)."""
-    info = model.model_fields[field_name]
-    extra = info.json_schema_extra
-    return dict(extra) if isinstance(extra, dict) else {}
+@dataclass(frozen=True)
+class FieldMeta:
+    """Typed view over a ``pfield``'s ``json_schema_extra`` metadata, so panel
+    code reads ``meta.adv``/``meta.tier`` instead of an untyped ``.get("adv")``
+    on a bare dict. Values are the JSON-plain forms ``pfield`` stores (``tier`` as
+    the ``Tier`` value, ``rand`` as a list); defaults match a non-``pfield`` leaf
+    (no tier, not advanced), so the fields that drive visibility/badges behave
+    exactly as the old ``extra.get(...)`` reads did."""
+
+    tier: Any = None
+    ui: str = ""
+    log: bool = False
+    adv: bool = False
+    rand: list[Any] | None = None
+
+    @classmethod
+    def of(cls, info: Any) -> FieldMeta:
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        return cls(
+            tier=extra.get("tier"),
+            ui=extra.get("ui", ""),
+            log=bool(extra.get("log", False)),
+            adv=bool(extra.get("adv", False)),
+            rand=extra.get("rand"),
+        )
+
+
+def field_meta(model: type[BaseModel], field_name: str) -> FieldMeta:
+    """The typed ``FieldMeta`` for a field (an all-default ``FieldMeta`` if the
+    field carries no ``pfield`` metadata)."""
+    return FieldMeta.of(model.model_fields[field_name])
