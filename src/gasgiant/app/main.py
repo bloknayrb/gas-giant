@@ -22,7 +22,7 @@ from imgui_bundle import hello_imgui, imgui
 from imgui_bundle import portable_file_dialogs as pfd
 from pydantic import ValidationError
 
-from gasgiant.app.panels import draw_params_panel
+from gasgiant.app.panels import PanelState, draw_params_panel
 from gasgiant.app.sphere_preview import SpherePreview
 from gasgiant.app.viewport import EquirectViewport
 from gasgiant.diagnostics import PerfCounter, configure_logging
@@ -116,6 +116,9 @@ class StudioApp:
         # start of a gesture (consumed by Phase 2 undo coalescing).
         self._live: PlanetParams = self.params
         self._gesture_base: PlanetParams | None = None
+        # Phase 3 panel-navigation state (search/locked/show_advanced),
+        # threaded into draw_params_panel and the header seed control.
+        self.panel_state = PanelState()
         self.toasts = Toasts()
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
@@ -246,6 +249,20 @@ class StudioApp:
                 self._push_history(self._gesture_base)
             self._gesture_base = None  # gesture released; base consumed
 
+    def _randomize(self, seed: int) -> PlanetParams:
+        """``randomize()`` honoring the panel's lock set (UX G1). The walk over
+        ``rand``-bearing fields already skips locked dotted paths; the
+        top-level ``seed`` field is special-cased because ``randomize()``
+        always overwrites it with the new master seed regardless of locks (it
+        isn't reached by the per-field ``rand`` walk at all) -- locking
+        "seed" here keeps the stored seed pinned across Randomize/Reroll while
+        every other unlocked field still re-rolls from the fresh seed's RNG
+        stream."""
+        result = randomize(seed, base=self.params, locked=self.panel_state.locked)
+        if "seed" in self.panel_state.locked:
+            result.seed = self.params.seed
+        return result
+
     # -- dialogs --------------------------------------------------------------------
 
     def _poll_dialog(self) -> None:
@@ -298,16 +315,18 @@ class StudioApp:
         if imgui.button("Save...") and self._dialog is None:
             self._dialog = ("save", pfd.save_file("Save preset", "preset.json", ["JSON", "*.json"]))
 
+        self._draw_seed_header_control()
+
         if imgui.button("Randomize"):
             self._push_history(self.params)
             seed = int(time.time_ns() % (2**31 - 1))
-            self._commit(randomize(seed, base=self.params))
+            self._commit(self._randomize(seed))
             self._reset_working_copy()  # discrete action wins over pending edit
             self.toasts.info(f"randomized (seed {seed})")
         imgui.same_line()
         if imgui.button("Reroll seed"):
             self._push_history(self.params)
-            self._commit(randomize(self.params.seed + 1, base=self.params))
+            self._commit(self._randomize(self.params.seed + 1))
             self._reset_working_copy()  # discrete action wins over pending edit
         imgui.same_line()
         self._draw_history_buttons()
@@ -328,8 +347,38 @@ class StudioApp:
 
         self._draw_pending_hint()
         imgui.separator()
-        draft, any_changed, any_committed = draw_params_panel(self._live)
+        draft, any_changed, any_committed = draw_params_panel(self._live, self.panel_state)
         self._process_edit(draft, any_changed, any_committed)
+
+    def _draw_seed_header_control(self) -> None:
+        """Seed editor in the controls header, next to Randomize/Reroll (UX
+        G5). Goes through the same draft -> _process_edit commit/gesture
+        pipeline as every panel field (not a direct self.params mutation), so
+        a seed edit here coalesces into undo exactly like dragging any other
+        field. Also lockable via the same ``state.locked`` mechanism the
+        per-field right-click menu uses (dotted path "seed")."""
+        draft = self._live.model_dump()
+        imgui.text("seed")
+        imgui.same_line()
+        imgui.set_next_item_width(110.0)
+        changed, value = imgui.input_int("##header_seed", draft["seed"])
+        committed = imgui.is_item_deactivated_after_edit()
+        if changed:
+            draft["seed"] = max(0, min(2**31 - 1, value))
+        if imgui.begin_popup_context_item():
+            locked = "seed" in self.panel_state.locked
+            clicked, now_locked = imgui.menu_item("Lock for randomize", "", locked)
+            if clicked:
+                if now_locked:
+                    self.panel_state.locked.add("seed")
+                else:
+                    self.panel_state.locked.discard("seed")
+            imgui.end_popup()
+        imgui.same_line()
+        if "seed" in self.panel_state.locked:
+            imgui.text_disabled("(locked)")
+        if changed or committed:
+            self._process_edit(draft, changed, committed)
 
     def _undo(self) -> None:
         """Pop the most recent pre-edit record, push the CURRENT state onto redo,
