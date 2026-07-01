@@ -33,21 +33,28 @@ from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
 from gasgiant.params.model import PlanetParams, Tier
 from gasgiant.params.presets import (
+    USER_PRESET_DIR,
     PresetError,
-    factory_preset_names,
+    available_presets,
     load_factory_preset,
     load_preset,
+    load_user_preset,
     save_preset,
 )
 from gasgiant.params.randomize import randomize
 
 log = logging.getLogger(__name__)
 
-# A history record is the committed params snapshot plus two preset-identity
-# fields that Phase 6 will populate (active_preset name, pristine flag). Until
-# Phase 6 lands they are always None; the record shape is fixed now so Phase 6
-# can fill them in without touching Phase 2's push/pop code.
-UndoRecord = tuple["PlanetParams", "str | None", "bool | None"]
+# A history record is the committed params snapshot plus the preset identity in
+# effect when it was captured: the active-preset (name, source) pair and the
+# pristine baseline (the params as last loaded/saved) that ``dirty`` is measured
+# against. Both are None when no named preset is active (e.g. a restored
+# session). Phase 6 populates these; Phase 2 shipped the record shape (then with
+# str/bool placeholders). The pristine baseline is a full PlanetParams rather
+# than a bool because undoing back across a preset load must restore the actual
+# baseline so later edits recompute dirty correctly -- a bool "was dirty at
+# capture" can't reconstruct that baseline (see _undo / the task report).
+UndoRecord = tuple["PlanetParams", "tuple[str, str] | None", "PlanetParams | None"]
 
 PREVIEW_WIDTH = 2048
 SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
@@ -135,6 +142,21 @@ class StudioApp:
         # threaded into draw_params_panel and the header seed control.
         self.panel_state = PanelState()
         self.toasts = Toasts()
+        # Phase 6 preset identity. _active_preset is the (name, source) pair of
+        # the currently-loaded preset (source in {"factory","user","file"}), or
+        # None for an unnamed state (a restored session). _pristine is the params
+        # as last loaded/saved; dirty = self.params != self._pristine. Both are
+        # stored into every undo record so undo across a load restores them.
+        if self._session_restored:
+            self._active_preset: tuple[str, str] | None = None
+            self.toasts.info("restored previous session")
+        else:
+            self._active_preset = ("gas_giant_warm", "factory")
+            self.toasts.info("started from gas_giant_warm")
+        self._pristine: PlanetParams | None = self.params.model_copy(deep=True)
+        # Cached merged (factory + user) dropdown list; refreshed on save/load and
+        # by the explicit "Refresh presets" button, never re-enumerated per frame.
+        self._preset_cache: list[tuple[str, str]] = available_presets()
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
         self._recomputing = False  # a heavy commit reset the dev run; show progress
@@ -173,10 +195,16 @@ class StudioApp:
         self._save_session()
 
     def _load_session_or_default(self) -> PlanetParams:
+        """Restore the last session if present, else the default preset. Sets
+        ``self._session_restored`` so ``__init__`` can toast which happened and
+        seed the right preset identity (Phase 6)."""
+        self._session_restored = False
         if SESSION_PATH.is_file():
             self._backup_old_format_session()
             try:
-                return load_preset(SESSION_PATH)
+                params = load_preset(SESSION_PATH)
+                self._session_restored = True
+                return params
             except (PresetError, OSError) as exc:
                 log.warning("session restore failed (%s); using default preset", exc)
         return load_factory_preset("gas_giant_warm")
@@ -214,11 +242,54 @@ class StudioApp:
             self._recomputing = True
 
     def _record(self, params: PlanetParams) -> UndoRecord:
-        """Snapshot params into a history record. Stores a deep copy (never a
-        shared reference) because in-place assignment on params is a supported
-        pattern (validate_assignment=True). active_preset/pristine are Phase 6
-        placeholders, None until that phase lands."""
-        return (params.model_copy(deep=True), None, None)
+        """Snapshot params into a history record. Stores a deep copy of params
+        (never a shared reference) because in-place assignment on params is a
+        supported pattern (validate_assignment=True), plus the preset identity
+        (_active_preset / _pristine) in effect right now. _pristine is shared by
+        reference -- it is replaced wholesale on identity changes, never mutated
+        in place -- so it is safe (and cheaper) not to deep-copy it here."""
+        return (params.model_copy(deep=True), self._active_preset, self._pristine)
+
+    def _set_identity(self, active: tuple[str, str] | None, params: PlanetParams) -> None:
+        """Adopt ``active`` as the current preset identity and ``params`` as the
+        new pristine baseline (deep-copied so later in-place edits to self.params
+        can't leak into it). Called on every authoritative path: preset combo,
+        Save, Load file-dialog, Reset-to-default."""
+        self._active_preset = active
+        self._pristine = params.model_copy(deep=True)
+
+    def _is_dirty(self) -> bool:
+        return self._pristine is not None and self.params != self._pristine
+
+    def _active_label(self) -> str:
+        """Preview label for the preset combo: the active name (``user/`` prefixed
+        for user presets), or ``unsaved`` when no preset is active, plus a ``*``
+        when the working params differ from the pristine baseline."""
+        if self._active_preset is None:
+            name = "unsaved"
+        else:
+            pname, source = self._active_preset
+            name = f"user/{pname}" if source == "user" else pname
+        return f"{name}{' *' if self._is_dirty() else ''}"
+
+    def _refresh_presets(self) -> None:
+        self._preset_cache = available_presets()
+
+    def _load_preset_entry(self, name: str, source: str) -> None:
+        """Load a factory/user preset by (name, source) through the shared
+        push-history -> commit -> set-identity -> reset-working-copy path. Load
+        failures toast and leave state untouched (no stray undo entry)."""
+        try:
+            params = load_user_preset(name) if source == "user" else load_factory_preset(name)
+        except (PresetError, OSError) as exc:
+            self.toasts.error(str(exc))
+            return
+        self._push_history(self.params)
+        self._commit(params)
+        self._set_identity((name, source), params)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        label = f"user/{name}" if source == "user" else name
+        self.toasts.info(f"preset: {label}")
 
     def _push_history(self, params: PlanetParams) -> None:
         """Push the pre-edit/pre-action state onto the undo stack and clear the
@@ -333,15 +404,24 @@ class StudioApp:
             return
         try:
             if kind == "load":
+                path = Path(result[0])
                 self._push_history(self.params)
-                self._commit(load_preset(Path(result[0])))
+                loaded = load_preset(path)
+                self._commit(loaded)
+                # Loaded-from-file becomes the active identity + dirty baseline.
+                self._set_identity((path.stem, "file"), loaded)
                 self._reset_working_copy()  # discrete action wins over pending edit
-                self.toasts.info(f"loaded {Path(result[0]).name}")
+                self.toasts.info(f"loaded {path.name}")
             elif kind == "save":
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
                     path = path.with_suffix(".json")
                 save_preset(self.params, path)
+                # The just-saved preset is the new active/pristine baseline (so
+                # dirty resets); refresh so a save into USER_PRESET_DIR appears.
+                source = "user" if path.parent == USER_PRESET_DIR else "file"
+                self._set_identity((path.stem, source), self.params)
+                self._refresh_presets()
                 self.toasts.info(f"saved {path.name}")
             elif kind == "export":
                 out = Path(result)
@@ -363,23 +443,33 @@ class StudioApp:
         # race where the dialog was opened just before Export was clicked.
         exporting = self._export is not None
         imgui.begin_disabled(exporting)
-        names = factory_preset_names()
+        # Merged factory+user dropdown. Preview shows the active preset + dirty
+        # marker; entries render from the cached list (self._preset_cache), never
+        # re-enumerating the filesystem per frame.
         imgui.set_next_item_width(160.0)
-        clicked, idx = imgui.combo("##preset", -1, ["preset..."] + names)
-        if clicked and idx > 0:
-            try:
-                self._push_history(self.params)
-                self._commit(load_factory_preset(names[idx - 1]))
-                self._reset_working_copy()  # discrete action wins over pending edit
-                self.toasts.info(f"preset: {names[idx - 1]}")
-            except PresetError as exc:
-                self.toasts.error(str(exc))
+        if imgui.begin_combo("##preset", self._active_label()):
+            for name, source in self._preset_cache:
+                label = f"user/{name}" if source == "user" else name
+                if imgui.selectable(label, False)[0]:
+                    self._load_preset_entry(name, source)
+            imgui.end_combo()
+        imgui.same_line()
+        if imgui.button("Refresh presets"):
+            self._refresh_presets()
+            self.toasts.info("preset list refreshed")
         imgui.same_line()
         if imgui.button("Load...") and self._dialog is None:
             self._dialog = ("load", pfd.open_file("Load preset", "", ["JSON", "*.json"]))
         imgui.same_line()
         if imgui.button("Save...") and self._dialog is None:
-            self._dialog = ("save", pfd.save_file("Save preset", "preset.json", ["JSON", "*.json"]))
+            # Default the save dialog into USER_PRESET_DIR so saved presets land
+            # where user_preset_names() enumerates them (created if absent).
+            USER_PRESET_DIR.mkdir(parents=True, exist_ok=True)
+            default = str(USER_PRESET_DIR / "preset.json")
+            self._dialog = ("save", pfd.save_file("Save preset", default, ["JSON", "*.json"]))
+        imgui.same_line()
+        if imgui.button("Reset to gas_giant_warm"):
+            self._load_preset_entry("gas_giant_warm", "factory")
 
         self._draw_seed_header_control()
 
@@ -453,18 +543,23 @@ class StudioApp:
         so a pending working-copy edit can't resurrect. No-op if nothing to undo."""
         if not self._undo_stack:
             return
-        params, _active_preset, _pristine = self._undo_stack.pop()
+        params, active_preset, pristine = self._undo_stack.pop()
+        # _record reads the CURRENT identity, so capture redo BEFORE overwriting.
         self._redo_stack.append(self._record(self.params))
         self._commit(params)
+        self._active_preset = active_preset
+        self._pristine = pristine
         self._reset_working_copy()
 
     def _redo(self) -> None:
         """Mirror of _undo: pop from redo, push current onto undo, commit."""
         if not self._redo_stack:
             return
-        params, _active_preset, _pristine = self._redo_stack.pop()
+        params, active_preset, pristine = self._redo_stack.pop()
         self._undo_stack.append(self._record(self.params))
         self._commit(params)
+        self._active_preset = active_preset
+        self._pristine = pristine
         self._reset_working_copy()
 
     def _draw_history_buttons(self) -> None:

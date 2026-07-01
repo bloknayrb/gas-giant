@@ -61,6 +61,11 @@ def _make_app(params: PlanetParams | None = None) -> StudioApp:
     # mock must too (the gesture/discrete push paths append to them).
     app._undo_stack = deque(maxlen=64)
     app._redo_stack = deque(maxlen=64)
+    # Phase 6 preset identity: the real __init__ creates these; _record reads
+    # them and the load branch sets them. No named preset here -> both None
+    # (additive-only sync, matching the __init__ shape).
+    app._active_preset = None
+    app._pristine = None
     app.sim = FakeSim(params)
     app.viewport = FakeViewport()
     # Phase 5 export gate: no export in flight unless a test sets it.

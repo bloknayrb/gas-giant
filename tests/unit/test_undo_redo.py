@@ -53,6 +53,11 @@ def _make_app(params: PlanetParams | None = None) -> StudioApp:
     app._recomputing = False
     app._undo_stack = deque(maxlen=64)
     app._redo_stack = deque(maxlen=64)
+    # Phase 6 preset identity: this fixture loads no named preset, so both are
+    # None (records capture None/None, keeping the Phase 2 placeholder assertions
+    # valid). Additive-only sync -- no existing assertion changes.
+    app._active_preset = None
+    app._pristine = None
     app.sim = FakeSim(params)
     app.viewport = FakeViewport()
     # Phase 5 export gate: no export in flight unless a test sets it.
