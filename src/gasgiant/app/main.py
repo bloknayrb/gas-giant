@@ -594,7 +594,12 @@ class StudioApp:
         committed = imgui.is_item_deactivated_after_edit()
         if changed:
             draft["seed"] = max(0, min(2**31 - 1, value))
-        if imgui.begin_popup_context_item():
+        # Explicit str_id: input_int's +/- stepper wraps the widget in a
+        # BeginGroup/EndGroup, and EndGroup's closing ItemAdd registers id=0
+        # as the last item -- begin_popup_context_item() with no str_id falls
+        # back to that last-item id and hits imgui's IM_ASSERT(id != 0) every
+        # frame. An explicit id sidesteps the last-item lookup entirely.
+        if imgui.begin_popup_context_item("seed_header_context"):
             locked = "seed" in self.panel_state.locked
             clicked, now_locked = imgui.menu_item("Lock for randomize", "", locked)
             if clicked:

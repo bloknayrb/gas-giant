@@ -444,3 +444,33 @@ def test_open_save_dialog_noop_if_already_open(monkeypatch, tmp_path):
 
     assert app._dialog is sentinel, "an already-open dialog must not be clobbered"
     assert calls == [], "save_file must not be invoked while a dialog is already open"
+
+
+# -- Regression: input_int seed widgets + begin_popup_context_item() ------------
+#
+# imgui.input_int()'s default +/- stepper buttons wrap the widget in a
+# BeginGroup()/EndGroup() pair. EndGroup() finishes with ItemAdd(bb, id=0), so
+# g.LastItemData.ID is 0 immediately after an input_int() call.
+# begin_popup_context_item() called with no explicit str_id falls back to
+# that last-item id and hits imgui's IM_ASSERT(id != 0) -- which fired every
+# frame, unconditionally, the instant the Controls panel drew (frame 1 of the
+# real app). Both call sites (the header seed control in main.py and the
+# panel's seed leaf in panels.py) now pass an explicit str_id. These tests
+# drive a REAL headless imgui frame (not a mock) through both, the exact
+# thing no test did before this bug shipped.
+
+
+def test_seed_header_control_survives_real_frame(imgui_ctx):
+    app = _make_app()
+    _frame(draw_fn=app._draw_seed_header_control)
+    _frame(draw_fn=app._draw_seed_header_control)  # a second frame: no stale-id carryover
+
+
+def test_panel_seed_leaf_survives_real_frame(imgui_ctx):
+    """Drives the full reflected panel tree (draw_params_panel), which
+    reaches the ``seed`` field -- the only ``input_int`` leaf in the tree
+    (panels._draw_leaf, kind == "int" with a >1e6 range) -- via the same code
+    path the live Controls panel uses."""
+    state = PanelState()
+    _frame(draw_fn=lambda: panels.draw_params_panel(PlanetParams(), state))
+    _frame(draw_fn=lambda: panels.draw_params_panel(PlanetParams(), state))

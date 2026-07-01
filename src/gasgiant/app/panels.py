@@ -573,7 +573,16 @@ def _draw_leaf(
         imgui.set_tooltip(info.description)
 
     # Right-click affordances, tied to the leaf's last-drawn item.
-    if imgui.begin_popup_context_item():
+    #
+    # Explicit str_id ("context"): for int leaves rendered via input_int
+    # (seeds etc.), the +/- stepper wraps the widget in BeginGroup/EndGroup,
+    # and EndGroup's closing ItemAdd registers id=0 as the last item --
+    # begin_popup_context_item() with no str_id falls back to that last-item
+    # id and hits imgui's IM_ASSERT(id != 0) every frame. The literal
+    # "context" here is fine (not the field's dotted path) because we're
+    # already inside this leaf's push_id(name) scope (see above), so the
+    # resulting popup id is unique per field via the id stack.
+    if imgui.begin_popup_context_item("context"):
         if imgui.menu_item_simple("Reset to default") and name in baseline:
             doc[name] = _default_value(name, baseline)
             changed = True
