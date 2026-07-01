@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 _SHADER_PACKAGE = "gasgiant.app.shaders"
 
-CHANNELS = ("Color", "Height (cloud-top)")
+CHANNELS = ("Color", "Height (cloud-top)", "Emission")
 
 
 class EquirectViewport:
@@ -57,13 +57,26 @@ class EquirectViewport:
         if changed:
             self._stale = True
 
+        # Emission derives via its own preview path (separate scratch textures +
+        # dirty flag) only when its channel is selected -- don't force the extra
+        # ~33.5 MB derive every frame on the Color/Height channels. Aurora is in
+        # the alpha channel and is NOT visible in this RGB preview (a LIMIT).
+        em_src = None
+        if self.channel == 2:
+            em_src, em_rerendered = sim.ensure_preview_emission(preview_width)
+            if em_rerendered:
+                self._stale = True
+            if not sim.params.emission.enabled:
+                imgui.text_disabled("emission disabled")
+                return
+
         self._ensure_display(src.size)
         if self._stale:
-            source = src if self.channel == 0 else sim.preview_height_texture
+            source = {0: src, 1: sim.preview_height_texture, 2: em_src}[self.channel]
             source.use(location=0)
             self.pass_.prog["u_image"].value = 0
             self.pass_.prog["u_mode"].value = 1 if self.agx else 0
-            self.pass_.prog["u_grayscale"].value = 0 if self.channel == 0 else 1
+            self.pass_.prog["u_grayscale"].value = 1 if self.channel == 1 else 0
             self.pass_.render(self._fbo)
             self._stale = False
             # Rebind the default framebuffer: imgui's native backend renders

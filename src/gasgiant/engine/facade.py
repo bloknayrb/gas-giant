@@ -45,6 +45,13 @@ class Simulation:
         self.detail_synth = DetailSynth(self.gpu)
         self._preview_color: moderngl.Texture | None = None
         self._preview_height: moderngl.Texture | None = None
+        # Emission preview owns its OWN scratch color/height + emission textures
+        # and its OWN dirty flag, so displaying emission never perturbs the
+        # Color channel's byte-identity and a POST edit can't leave stale glow.
+        self._preview_emission: moderngl.Texture | None = None
+        self._preview_em_color: moderngl.Texture | None = None
+        self._preview_em_height: moderngl.Texture | None = None
+        self._emission_preview_dirty = True
         self._detail_tex: moderngl.Texture | None = None
         self._post_dirty = True
         self._tracers_changed = True
@@ -84,6 +91,7 @@ class Simulation:
         self._init_baroclinic()
         self._tracers_changed = True
         self._post_dirty = True
+        self._emission_preview_dirty = True
         self._extra_steps = 0
 
     def rebuild(self) -> None:
@@ -207,9 +215,11 @@ class Simulation:
             self.solver.apply_velocity_params()
             self._extra_steps = _ADAPT_STEPS if self.is_developed else 0
             self._post_dirty = True
+            self._emission_preview_dirty = True
         elif tiers:  # POST
             self.solver.params = new_params
             self._post_dirty = True
+            self._emission_preview_dirty = True
         # The palette LUT depends only on appearance, but a load (or seed change)
         # edits many tiers at once. The branches above are mutually exclusive, so a
         # RESTART/VELOCITY edit that ALSO changed appearance used to skip the palette
@@ -253,6 +263,7 @@ class Simulation:
             n = min(max_steps, remaining)
         self.solver.step(n)
         self._tracers_changed = True
+        self._emission_preview_dirty = True
         return True
 
     def run_to_completion(self, chunk: int = 64) -> None:
@@ -341,6 +352,40 @@ class Simulation:
             self._tracers_changed = False
             return self._preview_color, True
         return self._preview_color, False
+
+    def ensure_preview_emission(self, width: int) -> tuple[moderngl.Texture, bool]:
+        """GUI preview-path emission derive, mirroring ``ensure_preview`` but
+        with its OWN scratch color/height textures and its OWN dirty flag.
+
+        The scratch color/height are throwaway (the Color channel the user
+        sees still comes from ``ensure_preview``'s non-emission variant, so its
+        byte-identity is preserved); only the emission texture is returned. The
+        rgba32f is lazily allocated on first call (~33.5 MB @2048, then persists
+        until a resize or app close -- a recorded LIMIT), so nothing is spent if
+        the emission channel is never viewed.
+
+        Always derives when dirty, regardless of ``params.emission.enabled``:
+        with emission disabled the EMISSION program variant preprocesses its
+        terms OUT to an all-zero map, and the GUI shows an "emission disabled"
+        note off ``params.emission.enabled`` rather than relying on texture
+        contents. Aurora lives in the alpha channel and is not visible in the
+        RGB preview (a recorded LIMIT). Returns ``(texture, rerendered)``."""
+        height = width // 2
+        recreated = False
+        if self._preview_emission is None or self._preview_emission.size != (width, height):
+            if self._preview_emission is not None:
+                self._preview_emission.release()
+                self._preview_em_color.release()
+                self._preview_em_height.release()
+            self._preview_emission = self.gpu.texture2d((width, height), 4, "f4")
+            self._preview_em_color = self.gpu.texture2d((width, height), 4, "f4")
+            self._preview_em_height = self.gpu.texture2d((width, height), 1, "f4")
+            recreated = True
+        if recreated or self._emission_preview_dirty:
+            self._derive(self._preview_em_color, self._preview_em_height, self._preview_emission)
+            self._emission_preview_dirty = False
+            return self._preview_emission, True
+        return self._preview_emission, False
 
     @property
     def preview_height_texture(self) -> moderngl.Texture | None:

@@ -562,10 +562,9 @@ class StudioApp:
         imgui.end_disabled()
 
         if self._export is None:
-            if imgui.button("Export...") and self._dialog is None:
-                self._dialog = ("export", pfd.select_folder("Export map set to folder"))
-            imgui.same_line()
-            self._draw_export_resolution()
+            if imgui.button("Export..."):
+                imgui.open_popup("Export map set")
+            self._draw_export_modal()
         else:
             prog = self._export_progress
             frac = prog.fraction if prog else 0.0
@@ -669,6 +668,44 @@ class StudioApp:
             f"Export map {current}x{current // 2} px "
             f"· Sim grid {self.params.sim.resolution} px (independent)"
         )
+
+    def _draw_export_modal(self) -> None:
+        """Confirm-step modal in front of the folder picker: resolution +
+        PNG-compression + an emission indicator + the sim-vs-export clarifier.
+        Both resolution and compression commit POST-tier (cheap re-derive) the
+        same way the old inline combo did. The final "Export..." opens the SAME
+        folder dialog the bare button used to open directly, then closes the
+        modal; "Cancel" closes it with no side effect. Nothing fires on the
+        first click that merely opened the modal (an explicit confirm step)."""
+        center = imgui.get_main_viewport().get_center()
+        imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+        if not imgui.begin_popup_modal(
+            "Export map set", None, imgui.WindowFlags_.always_auto_resize
+        )[0]:
+            return
+        # Resolution combo + the "map size is independent of the sim grid"
+        # clarifier text, reused verbatim from the old inline placement.
+        self._draw_export_resolution()
+        # PNG compression (0-9), committed POST-tier like the resolution combo.
+        current = self.params.export.png_compression
+        changed, value = imgui.slider_int("PNG compression", current, 0, 9)
+        if changed and value != current:
+            new_params = self.params.model_copy(deep=True)
+            new_params.export.png_compression = value
+            self._commit(new_params)
+            self._reset_working_copy()  # keep _live's export.png_compression in lockstep
+        if self.params.emission.enabled:
+            imgui.text("Emission: enabled (will export emission.exr)")
+        else:
+            imgui.text("Emission: disabled")
+        imgui.separator()
+        if imgui.button("Export...") and self._dialog is None:
+            self._dialog = ("export", pfd.select_folder("Export map set to folder"))
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Cancel"):
+            imgui.close_current_popup()
+        imgui.end_popup()
 
     def _draw_pending_hint(self) -> None:
         """While a heavy (velocity/restart) edit waits for release, tell the user
