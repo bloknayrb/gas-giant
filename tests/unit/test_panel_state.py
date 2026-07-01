@@ -196,6 +196,257 @@ def test_leaf_kind_signature_unchanged():
     assert panels.leaf_kind("gamma", info, 1.0) == "float"
 
 
+# -- Phase 4: Basic/Advanced gating -----------------------------------------------
+
+
+def _hero_solid_core_info():
+    """An adv=True leaf (a byte-identical-off-by-default hero cosmetic lever)."""
+    return PlanetParams.model_fields["storms"].annotation.model_fields["hero_solid_core"]
+
+
+def test_advanced_visible_true_for_non_adv_field_regardless_of_toggle():
+    info = _gamma_info()  # adv=False (a Basic headline knob)
+    assert panels._advanced_visible(info, PanelState(show_advanced=False)) is True
+    assert panels._advanced_visible(info, PanelState(show_advanced=True)) is True
+
+
+def test_advanced_visible_gated_by_toggle_for_adv_field():
+    info = _hero_solid_core_info()
+    assert panels._advanced_visible(info, PanelState(show_advanced=False)) is False
+    assert panels._advanced_visible(info, PanelState(show_advanced=True)) is True
+
+
+def test_leaf_visible_hides_adv_field_when_basic_and_not_searching():
+    info = _hero_solid_core_info()
+    state = PanelState(search="", show_advanced=False)
+    assert panels._leaf_visible("hero_solid_core", info, {}, state) is False
+
+
+def test_leaf_visible_shows_adv_field_when_advanced_on():
+    info = _hero_solid_core_info()
+    state = PanelState(search="", show_advanced=True)
+    assert panels._leaf_visible("hero_solid_core", info, {}, state) is True
+
+
+def test_leaf_visible_search_overrides_advanced_gate():
+    """A search match on an adv=True field's name must find it even with
+    Advanced off -- the gate is bypassed entirely while searching."""
+    info = _hero_solid_core_info()
+    state = PanelState(search="solid core", show_advanced=False)
+    assert panels._leaf_visible("hero_solid_core", info, {}, state) is True
+
+
+def test_leaf_visible_search_still_respects_no_match_for_adv_field():
+    info = _hero_solid_core_info()
+    state = PanelState(search="zzz_no_such_thing", show_advanced=False)
+    assert panels._leaf_visible("hero_solid_core", info, {}, state) is False
+
+
+def test_default_panel_state_is_basic_mode():
+    """Phase 4 flips the Phase-3-plumbed-but-inert default: the app now
+    actually gates on show_advanced, so it should land newcomers in Basic."""
+    assert PanelState().show_advanced is False
+
+
+# -- Phase 4: hidden-advanced-settings-differ hint count -------------------------
+
+
+def test_count_differs_from_default_zero_at_defaults():
+    baseline = panels._defaults_baseline()
+    params = PlanetParams()
+    doc = params.model_dump()
+    solver_model = type(params).model_fields["solver"].annotation
+    assert panels._count_differs_from_default(solver_model, doc["solver"], baseline["solver"]) == 0
+
+
+def test_count_differs_from_default_counts_changed_leaves():
+    baseline = panels._defaults_baseline()
+    params = PlanetParams()
+    params.solver.vort_inject = 1.5  # 1 leaf differs
+    params.solver.baroclinic.enabled = False  # baroclinic.enabled is already False by
+    # default -- flip a DIFFERENT nested leaf instead so the count is deterministic.
+    params.solver.baroclinic.gain = 5.0  # nested leaf differs too
+    doc = params.model_dump()
+    solver_model = type(params).model_fields["solver"].annotation
+    n = panels._count_differs_from_default(solver_model, doc["solver"], baseline["solver"])
+    assert n == 2, "expected exactly the two changed leaves (one nested)"
+
+
+def test_hidden_advanced_hint_only_fires_when_section_fully_hidden(imgui_ctx, monkeypatch):
+    """Solver is fully adv=True: in Basic mode with a non-default solver
+    field, the hint text must be drawn (H4 + MED-3)."""
+    params = PlanetParams()
+    params.solver.vort_inject = 2.0
+    doc = params.model_dump()
+    baseline = panels._defaults_baseline()
+    state = PanelState(show_advanced=False)
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        imgui, "text_colored", lambda color, text: seen.append(text)
+    )
+
+    imgui.new_frame()
+    imgui.begin("hint_test", None, 0)
+    solver_model = type(params).model_fields["solver"].annotation
+    has_match = panels._subtree_has_match(solver_model, doc["solver"], state)
+    assert has_match is False, "Basic mode + fully-advanced section = zero visible leaves"
+    panels._draw_hidden_advanced_hint(solver_model, doc["solver"], baseline["solver"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert any("1 advanced setting" in s for s in seen)
+
+
+def test_hidden_advanced_hint_silent_when_at_defaults(imgui_ctx, monkeypatch):
+    params = PlanetParams()
+    doc = params.model_dump()
+    baseline = panels._defaults_baseline()
+
+    calls = []
+    monkeypatch.setattr(imgui, "text_colored", lambda color, text: calls.append(text))
+
+    imgui.new_frame()
+    imgui.begin("hint_test2", None, 0)
+    solver_model = type(params).model_fields["solver"].annotation
+    panels._draw_hidden_advanced_hint(solver_model, doc["solver"], baseline["solver"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert calls == [], "no hint text when the section is untouched from defaults"
+
+
+# -- Phase 4: bands.template / hero_latitude Basic-visible escape hatches --------
+
+
+def test_bands_template_escape_noop_when_unset(imgui_ctx):
+    params = PlanetParams()
+    doc = params.model_dump()
+    imgui.new_frame()
+    imgui.begin("escape_test", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+    assert (changed, committed) == (False, False)
+
+
+def test_bands_template_escape_draws_banner_when_set(imgui_ctx, monkeypatch):
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    seen = []
+    monkeypatch.setattr(imgui, "text_colored", lambda color, text: seen.append(text))
+
+    imgui.new_frame()
+    imgui.begin("escape_test2", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False), "drawing the banner alone is not a click"
+    assert any("template is set" in s for s in seen)
+
+
+def test_hero_latitude_escape_noop_when_unpinned(imgui_ctx):
+    params = PlanetParams()
+    doc = params.model_dump()
+    imgui.new_frame()
+    imgui.begin("escape_test3", None, 0)
+    changed, committed = panels._draw_hero_latitude_escape(doc["storms"])
+    imgui.end()
+    imgui.end_frame()
+    assert (changed, committed) == (False, False)
+
+
+def test_hero_latitude_escape_draws_when_pinned(imgui_ctx, monkeypatch):
+    params = PlanetParams()
+    params.storms.hero_latitude = 12.0
+    doc = params.model_dump()
+
+    seen = []
+    monkeypatch.setattr(imgui, "text_colored", lambda color, text: seen.append(text))
+
+    imgui.new_frame()
+    imgui.begin("escape_test4", None, 0)
+    changed, committed = panels._draw_hero_latitude_escape(doc["storms"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False)
+    assert any("pinned to 12.0" in s for s in seen)
+
+
+# -- Phase 4: Storms sub-grouping (ui labels + declaration order) ----------------
+
+
+def test_storms_fields_grouped_into_named_subsections():
+    from gasgiant.params.model import StormsParams
+
+    expected_groups = {
+        "Hero", "Ovals", "Barges", "Pearls", "Outbreaks", "Small storms", "Mergers",
+    }
+    seen_groups = {
+        info.json_schema_extra.get("ui")
+        for info in StormsParams.model_fields.values()
+        if isinstance(info.json_schema_extra, dict)
+    }
+    assert seen_groups == expected_groups
+
+
+def test_storms_subgroup_fields_are_contiguous_by_declaration_order():
+    """_draw_model's separator_text logic assumes same-ui fields are
+    consecutive in declaration order -- verify StormsParams actually
+    satisfies that (a group label appearing, disappearing, then
+    reappearing would draw two separators for one logical group)."""
+    from gasgiant.params.model import StormsParams
+
+    seen_once: list[str] = []
+    for info in StormsParams.model_fields.values():
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        ui = extra.get("ui")
+        if not seen_once or seen_once[-1] != ui:
+            assert ui not in seen_once, f"ui label {ui!r} is not contiguous"
+            seen_once.append(ui)
+
+
+def test_other_sections_have_constant_ui_no_separators_expected():
+    """Backward-safety: every section besides Storms must still have a
+    single constant ui value across all its (non-empty-ui) leaves, so
+    _draw_model's separator_text logic never fires for them."""
+    from pydantic import BaseModel as _BaseModel
+
+    from gasgiant.params.model import PlanetParams as _PlanetParams
+
+    def walk(model, prefix=""):
+        for name, info in model.model_fields.items():
+            ann = info.annotation
+            path = f"{prefix}{name}"
+            if isinstance(ann, type) and issubclass(ann, _BaseModel):
+                yield from walk(ann, f"{path}.")
+                continue
+            extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+            yield path, extra.get("ui")
+
+    from collections import defaultdict
+
+    by_section: dict[str, set[str]] = defaultdict(set)
+    for path, ui in walk(_PlanetParams):
+        if not ui:
+            continue
+        top = path.split(".", 1)[0]
+        by_section[top].add(ui)
+
+    for section, labels in by_section.items():
+        if section == "storms":
+            continue
+        assert len(labels) == 1, f"section {section!r} has multiple ui labels: {labels}"
+
+
 # -- StudioApp._randomize: threads panel_state.locked into randomize() ----------
 
 

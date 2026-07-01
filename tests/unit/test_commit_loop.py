@@ -227,6 +227,47 @@ def test_load_dialog_resets_working_copy(tmp_path: Path) -> None:
 # -- export resolution combo writes export.width --------------------------------
 
 
+# -- Phase 4 escape hatches commit through the same pipeline --------------------
+
+
+def test_bands_template_clear_commits_through_pipeline() -> None:
+    """The panel's 'Clear template' button (panels._draw_bands_template_escape)
+    mutates the draft and reports (changed=True, committed=True), same as a
+    composite-editor add/remove-row click; this exercises the resulting
+    _process_edit call the way main.py's draw_controls would drive it."""
+    from gasgiant.params.model import BandTemplate
+
+    base = PlanetParams()
+    base.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    app = _make_app(base)
+
+    draft = _draft_with(app.params, "bands.template", None)
+    app._process_edit(draft, any_changed=True, any_committed=True)
+
+    assert app.params.bands.template is None, "the escape hatch's clear must commit"
+    assert len(app.sim.calls) == 1
+    assert app._gesture_base is None, "a discrete click, not a lingering gesture"
+
+
+def test_hero_latitude_unpin_commits_through_pipeline() -> None:
+    """The panel's 'Unpin latitude' button (panels._draw_hero_latitude_escape)
+    resets storms.hero_latitude to None; must satisfy _validate_hero_latitude
+    (which only checks a non-None value) and commit through the same pipeline
+    as any other discrete panel action."""
+    base = PlanetParams()
+    base.storms.hero_latitude = 12.0
+    app = _make_app(base)
+
+    draft = _draft_with(app.params, "storms.hero_latitude", None)
+    app._process_edit(draft, any_changed=True, any_committed=True)
+
+    assert app.params.storms.hero_latitude is None, "the escape hatch's unpin must commit"
+    assert len(app.sim.calls) == 1
+    assert app._gesture_base is None
+
+
 def test_export_resolutions_within_bounds() -> None:
     info = PlanetParams.model_fields["export"].annotation.model_fields["width"]
     lo = next(m.ge for m in info.metadata if hasattr(m, "ge"))

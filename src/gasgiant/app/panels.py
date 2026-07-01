@@ -13,6 +13,11 @@ search/filter box, per-field reset/lock/modified markers, tier-cost badges, and
 section help tooltips. All of it is driven by ``PanelState`` -- GUI-adjacent
 state owned by the caller (``StudioApp``), not ``gasgiant.params`` (the layer
 contract forbids params importing imgui/app).
+
+Phase 4 adds a Basic/Advanced split (an ``Advanced`` checkbox next to search;
+``pfield(adv=True)`` leaves hide in Basic unless a search matches them) and
+sub-grouping within a section via refined ``ui`` labels (``separator_text`` on
+a label change between consecutive leaves).
 """
 
 from __future__ import annotations
@@ -56,15 +61,18 @@ class PanelState:
     data -- the layer contract forbids params importing imgui/app.
 
     - ``search`` -- the active filter substring (case-insensitive).
-    - ``show_advanced`` -- plumbed now so Phase 4 doesn't need to touch this
-      dataclass again; THIS phase does not gate any visibility on it.
+    - ``show_advanced`` -- Basic/Advanced split (Phase 4): False (the
+      default -- newcomers land in Basic) hides any leaf whose ``pfield``
+      metadata carries ``adv=True``, unless a search is active (a search
+      always overrides the gate, so an advanced field stays findable by
+      name even in Basic mode).
     - ``locked`` -- dotted field paths excluded from ``randomize()`` (the
       panel's right-click "Lock for randomize" toggle and the header seed
       lock both write here).
     """
 
     search: str = ""
-    show_advanced: bool = True
+    show_advanced: bool = False
     locked: set[str] = dataclasses.field(default_factory=set)
 
 
@@ -132,27 +140,46 @@ def draw_params_panel(
 
 
 def _draw_search_box(state: PanelState) -> None:
-    imgui.set_next_item_width(-30.0)
+    imgui.set_next_item_width(-140.0)
     changed, text = imgui.input_text_with_hint("##panel_search", "search fields...", state.search)
     if changed:
         state.search = text
     imgui.same_line()
     if imgui.button("X##clear_search"):
         state.search = ""
+    imgui.same_line()
+    _, state.show_advanced = imgui.checkbox("Advanced", state.show_advanced)
     imgui.separator()
 
 
+def _advanced_visible(info: FieldInfo, state: PanelState) -> bool:
+    """The Basic/Advanced half of leaf visibility: a leaf not marked
+    ``adv=True`` is always visible; an ``adv=True`` leaf is visible only
+    while ``state.show_advanced`` is on. Search overrides this entirely --
+    see ``_leaf_visible``, the only caller."""
+    extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+    if not extra.get("adv"):
+        return True
+    return state.show_advanced
+
+
 def _leaf_visible(name: str, info: FieldInfo, doc: dict[str, Any], state: PanelState) -> bool:
-    """Search-filter predicate. Shared verbatim by the leaf draw (skip
-    drawing a non-matching leaf) AND the section pre-pass (skip a section
-    with zero matching leaves) -- the SAME function, not two copies that could
-    drift. Matches the field name, its display label, and its description,
-    case-insensitive substring. ``doc`` isn't used by the match itself (kept
-    in the signature for symmetry with the draw call site / future filters).
+    """Combined search + Basic/Advanced visibility predicate. Shared verbatim
+    by the leaf draw (skip drawing a non-matching/hidden leaf) AND the
+    section pre-pass (skip a section with zero visible leaves) -- the SAME
+    function, not two copies that could drift.
+
+    No active search: gate purely on Basic/Advanced (``_advanced_visible``).
+    Active search: match the field name, its display label, and its
+    description, case-insensitive substring -- and the match ALONE decides
+    visibility, bypassing the Basic/Advanced gate entirely, so a
+    searched-for advanced field is still findable with Advanced off.
+    ``doc`` isn't used by the match itself (kept in the signature for
+    symmetry with the draw call site / future filters).
     """
     query = state.search.strip().lower()
     if not query:
-        return True
+        return _advanced_visible(info, state)
     label = name.replace("_", " ")
     haystack = f"{name} {label} {info.description or ''}".lower()
     return query in haystack
@@ -172,6 +199,87 @@ def _subtree_has_match(model: type[BaseModel], doc: dict[str, Any], state: Panel
         if _leaf_visible(name, info, doc, state):
             return True
     return False
+
+
+def _count_differs_from_default(
+    model: type[BaseModel], doc: dict[str, Any], baseline: dict[str, Any]
+) -> int:
+    """Recursive count of leaves in this (possibly nested) section whose
+    current value differs from the static defaults baseline. Used by the
+    hidden-advanced-settings hint -- reuses ``_defaults_baseline()``, never
+    recomputes a default per field (Phase 3's rule for the modified-marker/
+    reset-to-default machinery, reused verbatim here)."""
+    count = 0
+    for name, info in model.model_fields.items():
+        ann = info.annotation
+        if isinstance(ann, type) and issubclass(ann, BaseModel):
+            count += _count_differs_from_default(ann, doc[name], baseline[name])
+            continue
+        if name in baseline and doc[name] != baseline[name]:
+            count += 1
+    return count
+
+
+def _draw_hidden_advanced_hint(
+    model: type[BaseModel], doc: dict[str, Any], baseline: dict[str, Any]
+) -> None:
+    """H4 + Round 2 MED-3: in Basic mode a fully-advanced section (Solver/
+    Emission/Physical/Baroclinic, or any other section that happens to have
+    zero Basic-visible leaves) renders zero leaves, so a preset that changed
+    one of them silently "disappears" from view. Drawn right under the
+    section header regardless of open/closed state -- the caller only
+    invokes this when the section currently has zero visible leaves, so
+    every leaf counted here IS hidden."""
+    n = _count_differs_from_default(model, doc, baseline)
+    if n <= 0:
+        return
+    plural = "s" if n != 1 else ""
+    imgui.text_colored(
+        imgui.ImVec4(*_MODIFIED_COLOR),
+        f"{n} advanced setting{plural} differ from default -- toggle Advanced to edit",
+    )
+
+
+def _draw_bands_template_escape(bands_doc: dict[str, Any]) -> tuple[bool, bool]:
+    """Basic-visible escape for ``bands.template`` (an ``adv=True`` field,
+    hidden in Basic mode): when a preset sets a template, seeded value
+    seasoning (value_contrast, hue_jitter, the width knobs) goes inert, so a
+    Basic-mode user dragging those sliders and seeing nothing happen would
+    otherwise have no clue why. Banner + "Clear template" button, drawn
+    whenever a template is set regardless of Advanced/collapsed state
+    (H4 + Round 2 MED-3). Returns a synthetic (changed, committed) pair on
+    click, same as the composite editors' add/remove-row buttons."""
+    if bands_doc.get("template") is None:
+        return False, False
+    imgui.text_colored(
+        imgui.ImVec4(*_MODIFIED_COLOR),
+        "band template is set -- overrides the band sliders below",
+    )
+    imgui.same_line()
+    if imgui.small_button("Clear template"):
+        bands_doc["template"] = None
+        return True, True
+    return False, False
+
+
+def _draw_hero_latitude_escape(storms_doc: dict[str, Any]) -> tuple[bool, bool]:
+    """Basic-visible unpin escape for ``storms.hero_latitude`` (an
+    ``adv=True``, preset-only field): a preset can pin the hero storm's
+    latitude, which is otherwise only reachable in Advanced mode. Unpinning
+    (back to None -- seeded placement) always satisfies
+    ``_validate_hero_latitude`` (it only checks a non-None value), so no
+    bounds juggling is needed here -- just a plain reset-to-None."""
+    lat = storms_doc.get("hero_latitude")
+    if lat is None:
+        return False, False
+    imgui.text_colored(
+        imgui.ImVec4(*_MODIFIED_COLOR), f"hero latitude pinned to {lat:.1f} deg"
+    )
+    imgui.same_line()
+    if imgui.small_button("Unpin latitude"):
+        storms_doc["hero_latitude"] = None
+        return True, True
+    return False, False
 
 
 def _draw_help_marker(text: str) -> None:
@@ -215,14 +323,20 @@ def _draw_model(
     changed = False
     committed = False
     searching = bool(state.search.strip())
+    prev_ui: str | None = None  # sub-group separator tracking (leaves only)
     for name, info in model.model_fields.items():
         ann = info.annotation
         path = f"{prefix}{name}"
         if isinstance(ann, type) and issubclass(ann, BaseModel):
+            # has_match combines search-match AND the Basic/Advanced gate
+            # (both live in _leaf_visible, which _subtree_has_match calls per
+            # leaf) -- one predicate, two uses below, never two copies that
+            # could drift (guard test M9).
+            has_match = _subtree_has_match(ann, doc[name], state)
             # Zero-match section suppression is search-only: outside a search
             # every section header still renders (a fully-advanced section
             # like Solver must show its header in plain browsing).
-            if searching and not _subtree_has_match(ann, doc[name], state):
+            if searching and not has_match:
                 continue
             flags = imgui.TreeNodeFlags_.default_open if top_level else 0
             opened = _section_header(name.capitalize(), flags, searching)
@@ -231,6 +345,20 @@ def _draw_model(
                 if blurb:
                     imgui.same_line()
                     _draw_help_marker(blurb)
+            if not searching and not has_match:
+                # Not searching, and the Basic/Advanced gate hid every leaf
+                # in this section (Solver/Emission/Physical/Baroclinic and
+                # any other section that happens to have zero Basic leaves):
+                # surface that a preset may have changed one of them anyway.
+                _draw_hidden_advanced_hint(ann, doc[name], baseline[name])
+            if name == "bands":
+                c, cm = _draw_bands_template_escape(doc[name])
+                changed |= c
+                committed |= cm
+            if name == "storms":
+                c, cm = _draw_hero_latitude_escape(doc[name])
+                changed |= c
+                committed |= cm
             if opened:
                 imgui.push_id(name)
                 imgui.indent(8.0)
@@ -240,6 +368,20 @@ def _draw_model(
                 imgui.unindent(8.0)
                 imgui.pop_id()
             continue
+        if _leaf_visible(name, info, doc, state):
+            # Sub-group separator: emit only on a CHANGE from the previous
+            # VISIBLE leaf's ui label, and only when that label is truthy --
+            # a section with one constant ui value (every section besides
+            # Storms today) never differs from its own previous value, so it
+            # renders zero separators, byte-for-byte unchanged. Falsy ui
+            # (Baroclinic's fixed-cadence fields use ui="") is transparent to
+            # grouping: it neither triggers nor absorbs a boundary.
+            extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+            ui = extra.get("ui") or None
+            if ui and prev_ui is not None and ui != prev_ui:
+                imgui.separator_text(ui)
+            if ui:
+                prev_ui = ui
         c, cm = _draw_leaf(name, info, doc, baseline, state, path)
         changed |= c
         committed |= cm
