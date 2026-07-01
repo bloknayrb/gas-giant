@@ -213,6 +213,17 @@ def _subtree_has_match(model: type[BaseModel], doc: dict[str, Any], state: Panel
     return False
 
 
+def _leaf_changed(current: Any, default: Any) -> bool:
+    """True if a leaf value differs from its default, treating a color list and
+    the tuple a live color edit produces as equal. ``model_dump()`` emits colors
+    as lists, but ``color_edit3`` writes back ``tuple(rgb)``, so a plain ``!=``
+    reads a color dragged back to its default as still modified (tuple != list) --
+    leaving the ``*`` marker stuck and inflating the "N advanced differ" count."""
+    if isinstance(current, (list, tuple)) and isinstance(default, (list, tuple)):
+        return list(current) != list(default)
+    return current != default
+
+
 def _count_differs_from_default(
     model: type[BaseModel], doc: dict[str, Any], baseline: dict[str, Any]
 ) -> int:
@@ -227,7 +238,7 @@ def _count_differs_from_default(
         if isinstance(ann, type) and issubclass(ann, BaseModel):
             count += _count_differs_from_default(ann, doc[name], baseline[name])
             continue
-        if name in baseline and doc[name] != baseline[name]:
+        if name in baseline and _leaf_changed(doc[name], baseline[name]):
             count += 1
     return count
 
@@ -518,7 +529,7 @@ def _draw_leaf(
     if path in state.locked:
         imgui.text_colored(imgui.ImVec4(*_LOCK_COLOR), "L")
         imgui.same_line()
-    if name in baseline and doc[name] != baseline[name]:
+    if name in baseline and _leaf_changed(doc[name], baseline[name]):
         imgui.text_colored(imgui.ImVec4(*_MODIFIED_COLOR), "*")
         imgui.same_line()
 
@@ -638,7 +649,9 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
         rows.append(
             {
                 "latitude": min(90.0, float(last["latitude"]) + 30.0),
-                "stops": [dict(s) for s in last["stops"]],
+                # copy each stop's color too (dict(s) is shallow) so the new row
+                # never aliases the source row's color objects
+                "stops": [{**s, "color": tuple(s["color"])} for s in last["stops"]],
             }
         )
         changed = True
@@ -682,7 +695,8 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
         committed = True
     if imgui.small_button(f"add stop##{label}"):
         last = stops[-1]
-        stops.append({"pos": min(1.0, last["pos"] + 0.1), "color": last["color"]})
+        # copy the color so the new stop never aliases the source stop's object
+        stops.append({"pos": min(1.0, last["pos"] + 0.1), "color": tuple(last["color"])})
         changed = True
         committed = True
     return changed, committed

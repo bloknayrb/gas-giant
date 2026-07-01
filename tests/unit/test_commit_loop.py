@@ -22,6 +22,7 @@ from gasgiant.params.model import PlanetParams, Tier
 from gasgiant.params.presets import save_preset
 
 main = pytest.importorskip("gasgiant.app.main")
+panels = pytest.importorskip("gasgiant.app.panels")
 StudioApp = main.StudioApp
 
 
@@ -81,6 +82,32 @@ def _draft_with(params: PlanetParams, dotted: str, value: object) -> dict:
         node = node[key]
     node[leaf] = value
     return draft
+
+
+# -- #5: a committed out-of-range value must surface, not vanish silently -------
+#
+# A Ctrl+click-typed value can exceed a slider's bounds (no AlwaysClamp flag), so
+# the draft fails model_validate. Mid-drag that's silent (the widget just freezes
+# at its last valid value); but on the COMMIT frame (Enter / release) it's a
+# deliberate entry and must tell the user why nothing happened.
+
+
+def test_committed_out_of_range_value_toasts() -> None:
+    app = _make_app()
+    app.toasts = main.Toasts()
+    draft = _draft_with(app.params, "storms.hero_radius", 99.0)  # >> hi=0.25
+    app._process_edit(draft, any_changed=True, any_committed=True)
+    errors = [m for (m, is_err, _) in app.toasts._items if is_err]
+    assert any("invalid value" in m for m in errors), "committed invalid entry must toast"
+    assert app._live.storms.hero_radius == app.params.storms.hero_radius, "kept last valid"
+
+
+def test_transient_out_of_range_value_stays_silent() -> None:
+    app = _make_app()
+    app.toasts = main.Toasts()
+    draft = _draft_with(app.params, "storms.hero_radius", 99.0)
+    app._process_edit(draft, any_changed=True, any_committed=False)
+    assert app.toasts._items == [], "mid-drag invalid states stay silent (no toast spam)"
 
 
 # -- POST tier: commits every changed frame, stays frame-live -------------------
@@ -365,6 +392,64 @@ def test_same_edit_committed_once_export_gate_lifts_via_new_interaction() -> Non
     app._process_edit(draft, any_changed=True, any_committed=False)  # user still dragging
     assert len(app.sim.calls) == 1
     assert app.params.appearance.gamma == pytest.approx(1.4)
+
+
+def _make_app_exporting():
+    """An app with an export in flight and the collaborators the discrete
+    actions need if their export guard were absent (so the RED path commits
+    cleanly rather than erroring)."""
+    app = _make_app()
+    app.toasts = main.Toasts()
+    app.panel_state = panels.PanelState()
+    app._export = (object(), Path("out"))
+    return app
+
+
+def test_load_preset_entry_blocked_while_exporting() -> None:
+    """Defense-in-depth (test-coverage gap): these discrete actions commit
+    straight through _commit, bypassing _process_edit's export gate -- today
+    only the UI begin_disabled wrapper stops them mid-export. Guard them
+    internally too, so a UI-layout refactor can't reintroduce a mid-export
+    commit that corrupts the in-flight run."""
+    app = _make_app_exporting()
+    app._load_preset_entry("gas_giant_warm", "factory")
+    assert app.sim.calls == [], "no commit while exporting"
+    assert len(app._undo_stack) == 0, "no history push while exporting"
+
+
+def test_do_randomize_blocked_while_exporting() -> None:
+    app = _make_app_exporting()
+    app._do_randomize()
+    assert app.sim.calls == []
+    assert len(app._undo_stack) == 0
+
+
+def test_do_reroll_blocked_while_exporting() -> None:
+    app = _make_app_exporting()
+    app._do_reroll()
+    assert app.sim.calls == []
+    assert len(app._undo_stack) == 0
+
+
+def test_export_failure_with_empty_message_still_reports() -> None:
+    """#7: a broad export catch must surface an actionable toast even when the
+    exception's str() is empty (e.g. a bare KeyError), and must reset the export
+    state. Otherwise the user sees 'export failed: ' with no cause."""
+    app = _make_app()
+    app.toasts = main.Toasts()
+
+    def boom_job():
+        raise KeyError()  # str(KeyError()) == "" -> the empty-message case
+        yield  # unreachable, but makes this function a generator
+
+    app._export = (boom_job(), Path("out"))
+    app._run_export_slice()
+
+    errors = [m for (m, is_err, _) in app.toasts._items if is_err]
+    assert errors, "an export failure must toast"
+    assert errors[0].strip() != "export failed:", "toast must include a cause, not an empty message"
+    assert "KeyError" in errors[0], "empty-message exception falls back to its type name"
+    assert app._export is None and app._export_progress is None, "export state must reset"
 
 
 def test_poll_dialog_defers_load_result_during_export(tmp_path: Path) -> None:

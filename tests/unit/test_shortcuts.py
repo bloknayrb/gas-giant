@@ -474,3 +474,52 @@ def test_panel_seed_leaf_survives_real_frame(imgui_ctx):
     state = PanelState()
     _frame(draw_fn=lambda: panels.draw_params_panel(PlanetParams(), state))
     _frame(draw_fn=lambda: panels.draw_params_panel(PlanetParams(), state))
+
+
+# -- #3 refutation: input_int DOES report is_item_deactivated_after_edit --------
+#
+# Two reviewers suspected the seed input_int never commits: input_int wraps the
+# widget in BeginGroup/EndGroup, EndGroup leaves LastItemData.ID == 0, and they
+# reasoned that 0 id would also defeat is_item_deactivated_after_edit() (the
+# `committed` signal panels._draw_leaf reads for _SINGLE_ITEM_KINDS, which
+# includes "int"). It does NOT: EndGroup forwards an explicit Deactivated status
+# flag, so the id==0 quirk only ever affected begin_popup_context_item (the real,
+# already-fixed crash). This drives a real focus -> type -> Enter cycle through an
+# input_int and pins that the commit signal fires -- the precondition the seed
+# leaf's RESTART rebuild depends on. Guards against a future imgui_bundle upgrade
+# silently breaking it.
+
+
+class _IntBox:
+    def __init__(self, value: int) -> None:
+        self.value = value
+        self.committed_ever = False
+
+
+def _draw_input_int(box: _IntBox, *, click: bool = False) -> None:
+    changed, box.value = imgui.input_int("seed", box.value)
+    # exactly what panels._draw_leaf does for _SINGLE_ITEM_KINDS
+    if imgui.is_item_deactivated_after_edit():
+        box.committed_ever = True
+    if click:
+        io = imgui.get_io()
+        rmin, rmax = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        cx = rmin.x + (rmax.x - rmin.x) * 0.15  # the editable text field, clear of +/-
+        io.add_mouse_pos_event(cx, (rmin.y + rmax.y) / 2)
+        io.add_mouse_button_event(0, True)
+
+
+def test_input_int_reports_commit_on_type_then_enter(imgui_ctx):
+    box = _IntBox(100)
+    _frame(draw_fn=lambda: _draw_input_int(box))              # warm-up (layout rect)
+    _frame(draw_fn=lambda: _draw_input_int(box, click=True))  # focus the text field
+    for _ in range(3):
+        _frame(draw_fn=lambda: _draw_input_int(box))
+    assert imgui.get_io().want_text_input, "setup failed to focus the input_int"
+    imgui.get_io().add_input_character(ord("9"))              # edit the value
+    _frame(draw_fn=lambda: _draw_input_int(box))
+    imgui.get_io().add_key_event(imgui.Key.enter, True)       # commit
+    imgui.get_io().add_key_event(imgui.Key.enter, False)
+    for _ in range(3):
+        _frame(draw_fn=lambda: _draw_input_int(box))
+    assert box.committed_ever, "input_int must report is_item_deactivated_after_edit on Enter"

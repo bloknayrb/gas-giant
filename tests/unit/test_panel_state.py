@@ -496,3 +496,24 @@ def test_randomize_without_locks_matches_bare_randomize():
     app = _make_app()
     result = app._randomize(77)
     assert result == randomize(77, base=app.params)
+
+
+# -- Minor: the modified (*) marker must not false-positive on colors -----------
+#
+# model_dump() emits colors as lists; color_edit3 writes back tuple(rgb). A plain
+# `current != default` then reads a colour dragged back to its default as still
+# modified (tuple != list), so the `*` sticks and the "N advanced differ" count
+# is inflated. _leaf_changed normalizes list-vs-tuple.
+
+
+def test_leaf_changed_treats_equal_color_list_and_tuple_as_unchanged():
+    assert panels._leaf_changed((0.1, 0.2, 0.3), [0.1, 0.2, 0.3]) is False
+
+
+def test_leaf_changed_detects_real_color_difference():
+    assert panels._leaf_changed((0.1, 0.2, 0.9), [0.1, 0.2, 0.3]) is True
+
+
+def test_leaf_changed_scalars_unaffected():
+    assert panels._leaf_changed(0.5, 0.5) is False
+    assert panels._leaf_changed(0.5, 0.6) is True

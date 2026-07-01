@@ -75,6 +75,54 @@ def _draft_with(params: PlanetParams, dotted: str, value: object) -> dict:
     return draft
 
 
+# -- Minor: discrete actions that don't change params add no undo entry ----------
+
+
+def test_reselecting_active_preset_adds_no_undo_entry() -> None:
+    """Re-selecting the already-active preset (or reloading the current file)
+    leaves params unchanged, so it must NOT push a no-op undo entry the user
+    would have to press Undo twice to get past."""
+    app = _make_app()
+    app.toasts = main.Toasts()
+    app._load_preset_entry("gas_giant_warm", "factory")
+    app._undo_stack.clear()  # ignore the first (genuine) load entry
+
+    app._load_preset_entry("gas_giant_warm", "factory")  # same preset, no change
+
+    assert len(app._undo_stack) == 0, "re-selecting the active preset pushes no undo entry"
+
+
+# -- #4: output-only commits must invalidate a pending redo future ---------------
+
+
+def test_export_setting_commit_clears_pending_redo() -> None:
+    """Export-resolution / PNG-compression edits are output-only (deliberately
+    NOT in undo history) but ARE a fresh user action, so they must invalidate a
+    pending redo future. Otherwise a Redo after changing an export setting would
+    replay the stale pre-undo snapshot on top of it (the #4 clobber)."""
+    app = _make_app()
+
+    # A normal committed edit -> Undo, leaving a snapshot on the redo stack.
+    edited = app.params.model_copy(deep=True)
+    edited.appearance.gamma = app.params.appearance.gamma + 0.3
+    app._push_history(app.params)
+    app._commit(edited)
+    app._undo()
+    assert app._redo_stack, "precondition: a redo future exists after undo"
+
+    # Change an export/output-only setting.
+    out = app.params.model_copy(deep=True)
+    out.export.width = 8192 if app.params.export.width != 8192 else 4096
+    app._commit_output_setting(out)
+
+    assert not app._redo_stack, "output-setting edit must clear the stale redo future"
+    assert app.params.export.width == out.export.width, "the export setting was applied"
+
+    # Redo is now a no-op -- it can't clobber the export edit.
+    app._redo()
+    assert app.params.export.width == out.export.width
+
+
 # -- gesture coalescing: one drag -> exactly one undo entry ----------------------
 
 
@@ -249,6 +297,20 @@ def test_undo_stack_evicts_oldest_past_maxlen() -> None:
     assert len(app._undo_stack) == 64, "deque caps at maxlen, evicting the oldest"
     # entries 0..5 (seeds 0..5) were evicted; the oldest survivor is seed 6
     assert app._undo_stack[0][0].seed == 6, "the six oldest entries were evicted"
+
+
+def test_redo_stack_evicts_oldest_past_maxlen() -> None:
+    """The redo stack is the same bounded deque as undo; only undo's bound was
+    tested before. _undo is the only path that grows redo, and it appends
+    _record(self.params) exactly as below."""
+    app = _make_app()
+    assert app._redo_stack.maxlen == 64
+    for i in range(70):
+        snapshot = app.params.model_copy(deep=True)
+        snapshot.seed = i
+        app._redo_stack.append(app._record(snapshot))
+    assert len(app._redo_stack) == 64, "redo deque caps at maxlen, evicting the oldest"
+    assert app._redo_stack[0][0].seed == 6, "the six oldest redo entries were evicted"
 
 
 # -- entries are deep copies, not shared references ------------------------------

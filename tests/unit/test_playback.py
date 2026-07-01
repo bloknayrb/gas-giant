@@ -143,3 +143,27 @@ def test_rebuild_resets_the_dev_run_state() -> None:
     app.sim.rebuild()
     assert app.sim.step_index == 0
     assert app.sim.rebuild_calls == 1
+
+
+# -- #1: paused mid-development must not read as a hang -------------------------
+#
+# tick() no-ops once developed, so pause deliberately freezes the development
+# animation. The bug was cosmetic: draw_perf kept animating the "recomputing..."
+# spinner while paused and stalled, so a deliberate Pause looked like a hang.
+# The label is now honest about the paused state.
+
+
+def test_dev_progress_label_paused_is_static_and_actionable() -> None:
+    label = main._dev_progress_label(done=10, target=100, playing=False, recomputing=True, spinner="/")
+    assert label == "paused 10/100 (Play/Step to develop)"
+    assert "recomputing" not in label
+
+
+def test_dev_progress_label_playing_while_recomputing_animates() -> None:
+    label = main._dev_progress_label(done=10, target=100, playing=True, recomputing=True, spinner="/")
+    assert label == "/ recomputing... 10/100"
+
+
+def test_dev_progress_label_playing_plain_progress() -> None:
+    label = main._dev_progress_label(done=10, target=100, playing=True, recomputing=False, spinner="/")
+    assert label == "10/100"

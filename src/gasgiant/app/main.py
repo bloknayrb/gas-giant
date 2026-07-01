@@ -11,7 +11,6 @@ frame-budgeted job slices in this loop.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import time
@@ -96,6 +95,24 @@ def _shortcuts_enabled() -> bool:
     ``StudioApp._handle_shortcuts``) so it can be exercised against a
     headless imgui context without driving a full app frame."""
     return not imgui.get_io().want_text_input
+
+
+def _dev_progress_label(
+    done: int, target: int, playing: bool, recomputing: bool, spinner: str
+) -> str:
+    """Label for the development-progress bar (drawn only while ``done < target``).
+
+    ``tick()`` no-ops once developed, so Pause deliberately freezes the dev-run
+    animation. When paused we must NOT keep animating the "recomputing..."
+    spinner -- a frozen-but-spinning bar reads as a hang (#1). Instead say so
+    plainly and point at the way out. Extracted as a pure function so the label
+    logic is unit-testable without an imgui frame or the ``time.monotonic``
+    spinner clock."""
+    if not playing:
+        return f"paused {done}/{target} (Play/Step to develop)"
+    if recomputing:
+        return f"{spinner} recomputing... {done}/{target}"
+    return f"{done}/{target}"
 
 
 class Toasts:
@@ -235,12 +252,21 @@ class StudioApp:
 
         backup = SESSION_PATH.with_suffix(".json.bak")
         try:
-            doc = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
-            if doc.get("preset_format", 1) < CURRENT_PRESET_FORMAT and not backup.exists():
-                backup.write_bytes(SESSION_PATH.read_bytes())
-                log.info("backed up pre-migration session to %s", backup)
+            raw = SESSION_PATH.read_bytes()
+            doc = json.loads(raw)
         except (OSError, ValueError):
-            pass  # unreadable session: the load below reports it
+            return  # unreadable session: the load below reports it
+        if doc.get("preset_format", 1) < CURRENT_PRESET_FORMAT and not backup.exists():
+            # Separate the WRITE from the read above: a failed backup write is
+            # NOT the "unreadable session" case, and swallowing it silently would
+            # let migration proceed and shutdown overwrite the user's only
+            # pre-migration copy with no trace (#6). Migrate anyway (the load
+            # still works) but leave a warning.
+            try:
+                backup.write_bytes(raw)
+                log.info("backed up pre-migration session to %s", backup)
+            except OSError as exc:
+                log.warning("could not back up pre-migration session (%s); migrating anyway", exc)
 
     def _save_session(self) -> None:
         try:
@@ -296,12 +322,15 @@ class StudioApp:
         """Load a factory/user preset by (name, source) through the shared
         push-history -> commit -> set-identity -> reset-working-copy path. Load
         failures toast and leave state untouched (no stray undo entry)."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export (see draw_controls)
         try:
             params = load_user_preset(name) if source == "user" else load_factory_preset(name)
         except (PresetError, OSError) as exc:
             self.toasts.error(str(exc))
             return
-        self._push_history(self.params)
+        if self.params != params:  # re-selecting the active preset is a no-op undo
+            self._push_history(self.params)
         self._commit(params)
         self._set_identity((name, source), params)
         self._reset_working_copy()  # discrete action wins over pending edit
@@ -324,6 +353,19 @@ class StudioApp:
         self._live = self.params
         self._gesture_base = None
 
+    def _commit_output_setting(self, new_params: PlanetParams) -> None:
+        """Commit an export/output-only setting (map resolution, PNG
+        compression). These are OUTPUT params, not planet-design edits, so they
+        are intentionally kept out of undo history -- but they ARE a fresh user
+        action, so they must invalidate any pending redo future (#4). Otherwise a
+        Redo issued after changing an export setting would replay the stale
+        pre-undo snapshot on top of it. Clearing redo here is exactly what
+        ``_push_history`` does for history-backed edits; these two sites are the
+        only commits outside the gesture/undo/redo paths."""
+        self._commit(new_params)
+        self._redo_stack.clear()
+        self._reset_working_copy()  # keep _live in lockstep with the applied setting
+
     def _process_edit(self, draft: dict, any_changed: bool, any_committed: bool) -> None:
         """One frame of panel editing → at most one engine commit.
 
@@ -344,10 +386,17 @@ class StudioApp:
         entry, the moment the export clears (see ``_run_export_slice`` /
         ``_cancel_export``)."""
         if any_changed:
-            # transient mid-drag invalid states are silent: keep last-valid _live
-            # (no toast — the active widget just freezes at its last valid value).
-            with contextlib.suppress(ValidationError):
+            try:
                 self._live = PlanetParams.model_validate(draft)
+            except ValidationError as exc:
+                # Transient mid-drag invalid states stay silent -- the active
+                # widget just freezes at its last valid _live. But a COMMIT-frame
+                # invalid draft (any_committed: Enter/release of a Ctrl+click
+                # typed value past the slider bounds) is a deliberate entry, so
+                # surface why nothing happened (#5 -- restores the toast the old
+                # _try_commit_draft gave before Phase 1 swallowed it).
+                if any_committed:
+                    self.toasts.error(f"invalid value: {exc.errors()[0]['msg']}")
             if self._gesture_base is None:
                 self._gesture_base = self.params  # pre-edit committed state (Phase 2)
 
@@ -409,11 +458,22 @@ class StudioApp:
         Time-seeded randomize is captured as a concrete params snapshot
         immediately -- never re-rolled on redo (the module's determinism
         contract)."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export (see draw_controls)
         self._push_history(self.params)
         seed = int(time.time_ns() % (2**31 - 1))
         self._commit(self._randomize(seed))
         self._reset_working_copy()  # discrete action wins over pending edit
         self.toasts.info(f"randomized (seed {seed})")
+
+    def _do_reroll(self) -> None:
+        """Reroll to the next seed (Reroll button). Extracted from draw_controls
+        so it carries the same export guard as the other discrete commits."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export (see draw_controls)
+        self._push_history(self.params)
+        self._commit(self._randomize(self.params.seed + 1))
+        self._reset_working_copy()  # discrete action wins over pending edit
 
     def _open_save_dialog(self) -> None:
         """Open the preset-save file dialog -- the exact path both the
@@ -446,11 +506,16 @@ class StudioApp:
         io = imgui.get_io()
         ctrl = io.key_ctrl
         exporting = self._export is not None
-        if imgui.is_key_pressed(imgui.Key.f1):
+        # F1/A are TOGGLES: with imgui's default key-repeat, holding the key
+        # flips the toggle many times per second and the final state depends on
+        # repeat-count parity. repeat=False fires once per physical press. (Undo/
+        # Redo/Randomize below deliberately KEEP repeat so a held key fast-repeats
+        # through history / rerolls.)
+        if imgui.is_key_pressed(imgui.Key.f1, False):
             self._show_help = not self._show_help
         if not ctrl and imgui.is_key_pressed(imgui.Key.slash):
             self.panel_state.focus_search_requested = True
-        if not ctrl and imgui.is_key_pressed(imgui.Key.a):
+        if not ctrl and imgui.is_key_pressed(imgui.Key.a, False):
             self.panel_state.show_advanced = not self.panel_state.show_advanced
         if not ctrl and imgui.is_key_pressed(imgui.Key.r) and not exporting:
             self._do_randomize()
@@ -482,8 +547,9 @@ class StudioApp:
         try:
             if kind == "load":
                 path = Path(result[0])
-                self._push_history(self.params)
-                loaded = load_preset(path)
+                loaded = load_preset(path)  # push only AFTER a successful load
+                if self.params != loaded:  # reloading the current file is a no-op undo
+                    self._push_history(self.params)
                 self._commit(loaded)
                 # Loaded-from-file becomes the active identity + dirty baseline.
                 self._set_identity((path.stem, "file"), loaded)
@@ -554,9 +620,7 @@ class StudioApp:
             self._do_randomize()
         imgui.same_line()
         if imgui.button("Reroll seed"):
-            self._push_history(self.params)
-            self._commit(self._randomize(self.params.seed + 1))
-            self._reset_working_copy()  # discrete action wins over pending edit
+            self._do_reroll()
         imgui.same_line()
         self._draw_history_buttons()
         imgui.end_disabled()
@@ -664,8 +728,7 @@ class StudioApp:
         if clicked and 0 <= idx < len(widths) and widths[idx] != current:
             new_params = self.params.model_copy(deep=True)
             new_params.export.width = widths[idx]
-            self._commit(new_params)
-            self._reset_working_copy()  # keep _live's export.width in lockstep
+            self._commit_output_setting(new_params)
         imgui.same_line()
         # Clarify that the export map size is independent of the sim grid (the
         # two were easy to confuse when export.width sat among the sliders).
@@ -697,8 +760,7 @@ class StudioApp:
         if changed and value != current:
             new_params = self.params.model_copy(deep=True)
             new_params.export.png_compression = value
-            self._commit(new_params)
-            self._reset_working_copy()  # keep _live's export.png_compression in lockstep
+            self._commit_output_setting(new_params)
         if self.params.emission.enabled:
             imgui.text("Emission: enabled (will export emission.exr)")
         else:
@@ -786,11 +848,8 @@ class StudioApp:
         self._draw_playback()
         done, target = self.sim.steps_done, self.sim.steps_target
         if done < target:
-            if self._recomputing:
-                spinner = "|/-\\"[int(time.monotonic() * 8) % 4]
-                label = f"{spinner} recomputing... {done}/{target}"
-            else:
-                label = f"{done}/{target}"
+            spinner = "|/-\\"[int(time.monotonic() * 8) % 4]
+            label = _dev_progress_label(done, target, self._playing, self._recomputing, spinner)
             imgui.progress_bar(done / max(target, 1), imgui.ImVec2(-1.0, 0.0), label)
         else:
             self._recomputing = False  # dev run caught up; back to the plain state
@@ -809,9 +868,15 @@ class StudioApp:
             self._export_progress = None
             self.toasts.info(f"exported to {out}")
         except Exception as exc:  # noqa: BLE001 - surface any export failure
+            # Record the full traceback (this catch is broad -- a GL error mid
+            # derive, an IndexError in the tiler, an OSError on the last tile),
+            # and fall back to the type name when str(exc) is empty (a bare
+            # KeyError etc.) so the toast is never "export failed: " (#7).
+            log.exception("export failed")
             self._export = None
             self._export_progress = None
-            self.toasts.error(f"export failed: {exc}")
+            detail = str(exc) or type(exc).__name__
+            self.toasts.error(f"export failed: {detail}")
         if self._export is None:
             self._flush_pending_edit()  # apply anything the export gate held back
 

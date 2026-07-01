@@ -318,7 +318,14 @@ class StormsParams(_Params):
     and ``wake_turbulence`` are hero-perimeter/wake effects -> Hero.
     ``stamp_contrast`` touches ovals/barges/pearls/small storms but not the
     hero stamp -> grouped with Small storms, the most general/catch-all of
-    those four population types."""
+    those four population types.
+
+    NOTE: declaration order is ALSO the canonical ``randomize()`` draw order --
+    the walk in randomize.py draws one RNG value per ``rand`` field in field
+    order, so reordering a ``rand``-bearing field here changes the randomized
+    output for every field after it. ``test_randomize_output_is_pinned`` guards
+    this; if you reorder, either keep ``rand`` fields in place or re-baseline
+    that golden deliberately."""
 
     # -- Hero -----------------------------------------------------------
     hero_count: int = pfield(
