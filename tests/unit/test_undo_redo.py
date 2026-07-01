@@ -55,6 +55,8 @@ def _make_app(params: PlanetParams | None = None) -> StudioApp:
     app._redo_stack = deque(maxlen=64)
     app.sim = FakeSim(params)
     app.viewport = FakeViewport()
+    # Phase 5 export gate: no export in flight unless a test sets it.
+    app._export = None
     return app
 
 

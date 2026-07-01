@@ -86,6 +86,14 @@ class Simulation:
         self._post_dirty = True
         self._extra_steps = 0
 
+    def rebuild(self) -> None:
+        """Deterministic full re-init from the current ``self.params``, back to
+        step 0. Same release+build pairing ``update_params`` already uses for a
+        RESTART-tier diff, exposed standalone so a "Restart dev" UI action can
+        re-init without needing a params diff to trigger it."""
+        self._release_sim()
+        self._build()
+
     def _release_sim(self) -> None:
         if self.solver.external_omega_tex is not None:
             self.solver.external_omega_tex.release()

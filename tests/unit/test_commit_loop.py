@@ -63,6 +63,8 @@ def _make_app(params: PlanetParams | None = None) -> StudioApp:
     app._redo_stack = deque(maxlen=64)
     app.sim = FakeSim(params)
     app.viewport = FakeViewport()
+    # Phase 5 export gate: no export in flight unless a test sets it.
+    app._export = None
     return app
 
 
@@ -274,3 +276,118 @@ def test_export_resolutions_within_bounds() -> None:
     hi = next(m.le for m in info.metadata if hasattr(m, "le"))
     for width, _label in main.EXPORT_RESOLUTIONS:
         assert lo <= width <= hi, f"{width} outside export.width bounds [{lo}, {hi}]"
+
+
+# -- Phase 5 export gate: commits (POST included) held back mid-export ----------
+#
+# Export Phase A ticks the live sim then snapshots it; committing (even a
+# cheap POST re-derive) or rebuilding mid-export can corrupt the in-flight run
+# or the exported color (M5 / Round 2 LOW-5). `_process_edit` must hold every
+# commit back while `self._export is not None`, without dropping the draft.
+
+
+def test_post_edit_blocked_while_exporting() -> None:
+    app = _make_app()
+    app._export = (object(), Path("out"))  # export in flight
+    draft = _draft_with(app.params, "appearance.gamma", 1.4)
+    app._process_edit(draft, any_changed=True, any_committed=False)
+
+    assert app.sim.calls == [], "no engine commit while an export is in flight"
+    assert app.params.appearance.gamma != pytest.approx(1.4), "engine state untouched"
+    assert app._live.appearance.gamma == pytest.approx(1.4), (
+        "the widget must not visually snap back -- _live still tracks the draft"
+    )
+
+
+def test_heavy_edit_release_blocked_while_exporting() -> None:
+    """A drag that fully completes (changed then released) during an export
+    must not commit and must not push a bogus undo entry."""
+    app = _make_app()
+    app._export = (object(), Path("out"))
+    draft = _draft_with(app.params, "bands.count", 30)
+    app._process_edit(draft, any_changed=True, any_committed=False)  # mid-drag
+    app._process_edit(draft, any_changed=False, any_committed=True)  # released
+
+    assert app.sim.calls == [], "heavy commit must not fire mid-export"
+    assert app._undo_stack == deque(), "the release must not push a bogus no-op undo entry"
+    assert app._live.bands.count == 30, "draft preserved, not dropped"
+    assert app._gesture_base is not None, "gesture stays open -- release deferred, not consumed"
+
+
+def test_flush_pending_edit_applies_once_export_clears() -> None:
+    """The highest-value gate test: an edit held back by the export gate must
+    commit -- coalesced into exactly one undo entry -- the moment the export
+    clears, not be silently dropped forever."""
+    app = _make_app()
+    pre_export_params = app.params
+    app._export = (object(), Path("out"))
+    draft = _draft_with(app.params, "bands.count", 30)
+    app._process_edit(draft, any_changed=True, any_committed=False)  # mid-drag
+    app._process_edit(draft, any_changed=False, any_committed=True)  # released
+    assert app.sim.calls == [], "still gated"
+
+    app._export = None  # export finishes / is cancelled
+    app._flush_pending_edit()
+
+    assert len(app.sim.calls) == 1, "exactly one commit once the gate lifts"
+    assert app.params.bands.count == 30
+    assert app.viewport.stale == 1
+    assert len(app._undo_stack) == 1, "coalesced into exactly one undo entry"
+    restored, _active_preset, _pristine = app._undo_stack[-1]
+    assert restored == pre_export_params, "undo restores the pre-export state"
+    assert app._gesture_base is None
+
+
+def test_flush_pending_edit_noop_when_nothing_pending() -> None:
+    app = _make_app()
+    app._export = None
+    app._flush_pending_edit()
+    assert app.sim.calls == [], "nothing was held back -- flush must not commit anything"
+    assert app._undo_stack == deque(), "no bogus undo entry from a no-op flush"
+
+
+def test_same_edit_committed_once_export_gate_lifts_via_new_interaction() -> None:
+    """Sanity check for the alternative path: once `self._export` clears, the
+    ordinary commit path (not just the explicit flush) applies the same held
+    draft exactly as it would have without the gate."""
+    app = _make_app()
+    app._export = (object(), Path("out"))
+    draft = _draft_with(app.params, "appearance.gamma", 1.4)
+    app._process_edit(draft, any_changed=True, any_committed=False)
+    assert app.sim.calls == []
+
+    app._export = None  # gate lifts
+    app._process_edit(draft, any_changed=True, any_committed=False)  # user still dragging
+    assert len(app.sim.calls) == 1
+    assert app.params.appearance.gamma == pytest.approx(1.4)
+
+
+def test_poll_dialog_defers_load_result_during_export(tmp_path: Path) -> None:
+    """A Load dialog that resolves while an export is in flight (the narrow
+    race where it was opened just before Export started) must not commit --
+    its result is held, not consumed, until the export clears."""
+    other = PlanetParams()
+    other.bands.count = 7
+    preset_file = tmp_path / "loaded.json"
+    save_preset(other, preset_file)
+
+    class FakeDialog:
+        def ready(self) -> bool:
+            return True
+
+        def result(self) -> list[str]:
+            return [str(preset_file)]
+
+    app = _make_app()
+    app.toasts = main.Toasts()
+    app._export = (object(), Path("out"))
+    app._dialog = ("load", FakeDialog())
+
+    app._poll_dialog()
+    assert app._dialog is not None, "the dialog result must be held, not consumed"
+    assert app.sim.calls == [], "no commit while exporting"
+
+    app._export = None  # export clears
+    app._poll_dialog()
+    assert app._dialog is None
+    assert app.params.bands.count == 7, "the deferred load applies once the gate lifts"

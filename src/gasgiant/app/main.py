@@ -62,6 +62,21 @@ EXPORT_RESOLUTIONS: list[tuple[int, str]] = [
     (16384, "16K"),
 ]
 
+# Playback speed options for draw_equirect's steps-per-frame. "Max" is bounded
+# (not "tick until developed" / not unbounded) so a single frame can't stall
+# for multiple seconds on a large dev_steps target -- 256 steps/frame is well
+# within the per-frame budget the export path already uses in slices (8/frame
+# there; playback can afford more since it isn't also deriving+encoding PNGs).
+MAX_STEPS_PER_FRAME = 256
+SPEED_OPTIONS: list[tuple[int, str]] = [
+    (1, "1"),
+    (2, "2"),
+    (4, "4"),
+    (8, "8"),
+    (16, "16"),
+    (MAX_STEPS_PER_FRAME, "Max"),
+]
+
 
 class Toasts:
     def __init__(self) -> None:
@@ -123,6 +138,12 @@ class StudioApp:
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
         self._recomputing = False  # a heavy commit reset the dev run; show progress
+        # Phase 5 playback state -- a pure presentation layer over Simulation.tick():
+        # these only decide how often/with what max_steps draw_equirect calls tick(),
+        # never touch tick()'s own (chunk-invariant) stepping logic.
+        self._playing = True  # default matches the old always-ticking behavior
+        self._steps_per_frame = 2  # matches the old hardcoded tick(2)
+        self._single_step_requested = False  # consumed once, the frame after Step
         # Bounded undo/redo history (Phase 2). Each entry is an UndoRecord — a
         # deep copy of a committed params snapshot plus Phase 6 preset-identity
         # placeholders. maxlen=64 evicts the oldest entry automatically.
@@ -222,7 +243,18 @@ class StudioApp:
         frame-live). Velocity/restart edits commit only on release
         (``any_committed``), so a slider drag rebuilds once. The commit goes
         straight through ``_commit`` — never ``_try_commit_draft`` — because
-        ``_live`` is already validated, and re-validating would re-toast."""
+        ``_live`` is already validated, and re-validating would re-toast.
+
+        Phase 5 (M5 / Round 2 LOW-5): while an export is in flight
+        (``self._export is not None``), ALL commits are held back — POST
+        included — because export Phase A ticks the live sim then snapshots
+        it; committing (even a cheap POST re-derive) or rebuilding mid-export
+        can corrupt the in-flight run or the exported color. ``_live`` still
+        updates above so the widget the user is dragging doesn't visually snap
+        back; the draft is just not applied to the engine yet. It is not
+        dropped: ``_flush_pending_edit`` applies it, coalesced into one undo
+        entry, the moment the export clears (see ``_run_export_slice`` /
+        ``_cancel_export``)."""
         if any_changed:
             # transient mid-drag invalid states are silent: keep last-valid _live
             # (no toast — the active widget just freezes at its last valid value).
@@ -230,6 +262,9 @@ class StudioApp:
                 self._live = PlanetParams.model_validate(draft)
             if self._gesture_base is None:
                 self._gesture_base = self.params  # pre-edit committed state (Phase 2)
+
+        if self._export is not None:
+            return  # export in flight: hold the draft, don't touch the engine
 
         tiers = diff_tiers(self.params, self._live)
         heavy = bool(tiers - {Tier.POST})
@@ -248,6 +283,21 @@ class StudioApp:
             if self._gesture_base is not None and self.params != self._gesture_base:
                 self._push_history(self._gesture_base)
             self._gesture_base = None  # gesture released; base consumed
+
+    def _flush_pending_edit(self) -> None:
+        """Apply a draft that the export gate held back, the moment the export
+        clears. Mirrors a normal gesture release (commit + coalesced undo entry)
+        so a drag that finished mid-export lands as exactly one undo step, not
+        zero (silently dropped) or many. No-op if nothing was pending."""
+        if self._live == self.params:
+            self._gesture_base = None
+            return
+        if self._gesture_base is None:
+            self._gesture_base = self.params
+        self._commit(self._live)
+        if self.params != self._gesture_base:
+            self._push_history(self._gesture_base)
+        self._gesture_base = None
 
     def _randomize(self, seed: int) -> PlanetParams:
         """``randomize()`` honoring the panel's lock set (UX G1). The walk over
@@ -270,6 +320,12 @@ class StudioApp:
             return
         kind, dlg = self._dialog
         if not dlg.ready():
+            return
+        if kind == "load" and self._export is not None:
+            # A file was already picked (dialog opened before the export
+            # started, or a race with the disabled-button gate below) but
+            # applying it now would commit mid-export. Hold the dialog --
+            # don't consume its result -- and retry next frame.
             return
         self._dialog = None
         result = dlg.result()
@@ -297,6 +353,16 @@ class StudioApp:
     # -- UI ----------------------------------------------------------------------------
 
     def draw_controls(self) -> None:
+        # Every action in this block (Phase 6 preset combo, Load/Save, seed
+        # header, Randomize/Reroll, Undo/Redo) commits straight through
+        # `self._commit`, bypassing `_process_edit`'s gate -- so while an
+        # export is in flight (M5 / Round 2 LOW-5) they're disabled outright
+        # rather than silently no-op'ing (a no-op commit here would still push
+        # a bogus before==after undo entry). `_poll_dialog` additionally holds
+        # a "load" dialog's result if it resolves mid-export via the narrow
+        # race where the dialog was opened just before Export was clicked.
+        exporting = self._export is not None
+        imgui.begin_disabled(exporting)
         names = factory_preset_names()
         imgui.set_next_item_width(160.0)
         clicked, idx = imgui.combo("##preset", -1, ["preset..."] + names)
@@ -330,6 +396,7 @@ class StudioApp:
             self._reset_working_copy()  # discrete action wins over pending edit
         imgui.same_line()
         self._draw_history_buttons()
+        imgui.end_disabled()
 
         if self._export is None:
             if imgui.button("Export...") and self._dialog is None:
@@ -448,7 +515,15 @@ class StudioApp:
         self.render_perf.begin()
         # Advance the development run a little each frame so the user watches
         # the clouds evolve; the viewport re-derives whenever tracers moved.
-        if self.sim.tick(2):
+        # Playback (_playing/_steps_per_frame/_single_step_requested, driven by
+        # _draw_playback) is purely app-level: it only changes how often / with
+        # what max_steps this calls Simulation.tick() -- tick() itself is
+        # unmodified and stays chunk-invariant. A single-step request ORs into
+        # the same one tick() call a "playing" frame would make, so pressing
+        # Step while already playing can't cause a double tick this frame.
+        step_now = self._playing or self._single_step_requested
+        self._single_step_requested = False
+        if step_now and self.sim.tick(self._steps_per_frame):
             self.viewport.mark_stale()
         self.viewport.draw(self.sim, PREVIEW_WIDTH)
         self.render_perf.end()
@@ -457,10 +532,48 @@ class StudioApp:
         color_tex, _ = self.sim.ensure_preview(PREVIEW_WIDTH)
         self.sphere.draw(color_tex, self.viewport.agx)
 
+    def _draw_playback(self) -> None:
+        """Pause/Play, Step, Restart-dev, and the steps-per-frame speed
+        selector for the live dev-run preview (Phase 5). Restart-dev is
+        disabled while an export is in flight (M5 / Round 2 LOW-5) -- export
+        Phase A ticks the live sim then snapshots it, so releasing/rebuilding
+        it mid-export would corrupt the in-flight run."""
+        if imgui.button("Pause" if self._playing else "Play"):
+            self._playing = not self._playing
+        imgui.same_line()
+        if imgui.button("Step"):
+            # Always available (not just while paused): while playing, this is
+            # redundant with the tick already happening this frame -- see the
+            # single-call OR in draw_equirect -- but disabling it would need to
+            # explain why to the user for no real benefit, so it just stays live.
+            self._single_step_requested = True
+        imgui.same_line()
+        exporting = self._export is not None
+        imgui.begin_disabled(exporting)
+        if imgui.button("Restart dev"):
+            self.sim.rebuild()
+            self.viewport.mark_stale()
+            self._recomputing = True
+        imgui.end_disabled()
+        imgui.same_line()
+        imgui.set_next_item_width(90.0)
+        labels = [label for _, label in SPEED_OPTIONS]
+        values = [value for value, _ in SPEED_OPTIONS]
+        cur_idx = values.index(self._steps_per_frame) if self._steps_per_frame in values else 1
+        clicked, idx = imgui.combo("##speed", cur_idx, labels)
+        if clicked:
+            self._steps_per_frame = values[idx]
+        if exporting:
+            imgui.text_colored(
+                imgui.ImVec4(1.0, 0.8, 0.3, 1.0),
+                "export in progress — restart & param edits paused",
+            )
+
     def draw_perf(self) -> None:
         imgui.text(f"frame  {self.frame_perf.mean_ms:6.2f} ms")
         imgui.text(f"render {self.render_perf.last_ms:6.2f} ms (last)")
         imgui.text(f"preview {PREVIEW_WIDTH}x{PREVIEW_WIDTH // 2}")
+        self._draw_playback()
         done, target = self.sim.steps_done, self.sim.steps_target
         if done < target:
             if self._recomputing:
@@ -489,6 +602,8 @@ class StudioApp:
             self._export = None
             self._export_progress = None
             self.toasts.error(f"export failed: {exc}")
+        if self._export is None:
+            self._flush_pending_edit()  # apply anything the export gate held back
 
     def _cancel_export(self) -> None:
         if self._export is None:
@@ -498,6 +613,7 @@ class StudioApp:
         self._export = None
         self._export_progress = None
         self.toasts.info("export cancelled")
+        self._flush_pending_edit()  # apply anything the export gate held back
 
     def pre_frame(self) -> None:
         """Runs once per frame before imgui NewFrame: dialogs, pacing, smoke exit."""
