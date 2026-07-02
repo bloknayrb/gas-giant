@@ -1011,6 +1011,13 @@ def main() -> int:
     # Window/dock layout persists in the OS temp folder, not the project dir.
     params.ini_folder_type = hello_imgui.IniFolderType.temp_folder
 
+    # Menu bar for the hello_imgui "View" menu: it lists every dockable window
+    # with a show/hide checkbox (so a closed pane -- e.g. Sphere -- can be
+    # reopened in-app) plus a "Restore default layout" entry. show_menu_view is
+    # on by default; we only need to turn the bar on. The App menu (Quit) rides
+    # along as the conventional first menu.
+    params.imgui_window_params.show_menu_bar = True
+
     # Docked layout: controls left, equirect main, sphere right, perf bottom-left.
     params.imgui_window_params.default_imgui_window_type = (
         hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space
