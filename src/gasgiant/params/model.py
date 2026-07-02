@@ -9,6 +9,11 @@ Every tunable field carries metadata in ``json_schema_extra``:
   never randomized.
 - ``log``: randomize/UI slider on a log scale.
 - ``ui``: display group label for auto-generated panels.
+- ``adv``: Basic/Advanced curation. False (default) = visible in Basic mode --
+  a new field "gets UI for free" without the author having to think about it.
+  True = hidden unless Advanced is toggled on (or an active search matches
+  it) -- power-user/fine-tuning knobs, opt-in byte-identical-off-by-default
+  levers, and preset-only fields.
 
 Metadata is plain JSON data only — no callables, no GUI imports — so the core
 stays GUI-agnostic in fact, not just in name.
@@ -17,6 +22,7 @@ stays GUI-agnostic in fact, not just in name.
 from __future__ import annotations
 
 import statistics
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -31,8 +37,11 @@ class Tier(StrEnum):
     RESTART = "restart"
 
 
+_UNSET = object()
+
+
 def pfield(
-    default: Any,
+    default: Any = _UNSET,
     *,
     tier: Tier,
     lo: float | None = None,
@@ -40,11 +49,24 @@ def pfield(
     rand: tuple[float, float] | None = None,
     log: bool = False,
     ui: str = "",
+    adv: bool = False,
     description: str = "",
+    factory: Any = None,
 ) -> Any:
-    extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log}
+    """A pydantic ``Field`` carrying the panel/randomize metadata (tier, ui, log,
+    adv, rand). Pass ``factory`` (a zero-arg callable) instead of ``default`` for
+    a MUTABLE default so every model instance gets its own fresh value rather than
+    sharing a module-level list -- pydantic already deep-copies a plain default per
+    instance, but a ``default_factory`` is the explicit, no-shared-singleton form
+    (and matches the ``Field(default_factory=...)`` idiom the rest of the tree
+    uses for its nested models)."""
+    extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
     if rand is not None:
         extra["rand"] = list(rand)
+    if factory is not None:
+        return Field(
+            default_factory=factory, ge=lo, le=hi, description=description, json_schema_extra=extra
+        )
     return Field(
         default,
         ge=lo,
@@ -152,7 +174,8 @@ class BandsParams(_Params):
         description="Randomness of band width distribution",
     )
     edge_softness: float = pfield(
-        0.012, tier=Tier.RESTART, lo=0.001, hi=0.1, rand=(0.005, 0.03), log=True, ui="Bands",
+        0.012, tier=Tier.RESTART, lo=0.001, hi=0.1, rand=(0.005, 0.03), log=True,
+        adv=True, ui="Bands",
         description="Half-width of band-edge transitions, radians of latitude",
     )
     value_contrast: float = pfield(
@@ -164,7 +187,7 @@ class BandsParams(_Params):
         description="Band-boundary meander amplitude, radians of latitude",
     )
     warp_freq: float = pfield(
-        3.0, tier=Tier.RESTART, lo=0.5, hi=16.0, rand=(1.5, 6.0), log=True, ui="Bands",
+        3.0, tier=Tier.RESTART, lo=0.5, hi=16.0, rand=(1.5, 6.0), log=True, adv=True, ui="Bands",
         description="Band-boundary meander spatial frequency",
     )
     detail_amount: float = pfield(
@@ -172,46 +195,46 @@ class BandsParams(_Params):
         description="Small-scale color-index noise amplitude",
     )
     hue_jitter: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=0.15, rand=(0.0, 0.08), ui="Bands",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=0.15, rand=(0.0, 0.08), adv=True, ui="Bands",
         description="Per-band color-index offset along the palette (NEB-orange vs "
                     "SEB-brown variation); seeded independently of the band layout",
     )
     variance_amount: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.02, 0.12), ui="Bands",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.02, 0.12), adv=True, ui="Bands",
         description="Within-band longitudinal color drift (real belts hold several "
                     "hues at once, varying slowly with longitude)",
     )
     faded_sector: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Bands",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), adv=True, ui="Bands",
         description="SEB-fade: one belt gets a pale desaturated sector spanning "
                     "~100 degrees of longitude",
     )
     contrast_envelope: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Bands",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), adv=True, ui="Bands",
         description="Banding contrast collapse poleward of ~45 deg toward mottle "
                     "(the real latitude-contrast profile)",
     )
     lane_density: float = pfield(
-        0.0, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.0, 0.8), ui="Bands",
+        0.0, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.0, 0.8), adv=True, ui="Bands",
         description="Thin dark lane lines at jet cores, drawn analytically at "
                     "derive time (a 1-3 px line cannot survive the sim grid)",
     )
     edge_diversity: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.8), ui="Bands",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.8), adv=True, ui="Bands",
         description="Per-edge softness variation: some band edges diffuse, some "
                     "sharp (uniform edges are a procedural tell)",
     )
     width_tail: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Bands",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), adv=True, ui="Bands",
         description="Heavier-tailed band width distribution (real maps mix very "
                     "broad zones with thin strips)",
     )
     detail_freq: float = pfield(
-        12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, ui="Bands",
+        12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, adv=True, ui="Bands",
         description="Small-scale noise spatial frequency",
     )
     template: BandTemplate | None = pfield(
-        None, tier=Tier.RESTART, ui="Bands",
+        None, tier=Tier.RESTART, adv=True, ui="Bands",
         description="Explicit band skeleton (edge latitudes + per-band values/"
                     "heights) replacing the seeded layout; preset-only -- value "
                     "seasoning (value_contrast, hue_jitter, width knobs) is "
@@ -259,7 +282,7 @@ class TurbulenceParams(_Params):
         description="Global turbulence (curl-noise) amplitude",
     )
     shear_coupling: float = pfield(
-        1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.5), ui="Turbulence",
+        1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.5), adv=True, ui="Turbulence",
         description="Extra turbulence where jet shear is strong",
     )
     belt_boost: float = pfield(
@@ -267,15 +290,16 @@ class TurbulenceParams(_Params):
         description="Turbulence multiplier inside dark belts (cyclonic bands)",
     )
     scale: float = pfield(
-        6.0, tier=Tier.VELOCITY, lo=1.0, hi=32.0, rand=(4.0, 12.0), log=True, ui="Turbulence",
+        6.0, tier=Tier.VELOCITY, lo=1.0, hi=32.0, rand=(4.0, 12.0), log=True,
+        adv=True, ui="Turbulence",
         description="Base spatial frequency of the turbulence noise",
     )
     evolution_rate: float = pfield(
-        0.012, tier=Tier.VELOCITY, lo=0.0, hi=0.1, ui="Turbulence",
+        0.012, tier=Tier.VELOCITY, lo=0.0, hi=0.1, adv=True, ui="Turbulence",
         description="How fast the turbulence pattern decorrelates per step",
     )
     relax_tau: float = pfield(
-        350.0, tier=Tier.RESTART, lo=50.0, hi=2000.0, log=True, ui="Turbulence",
+        350.0, tier=Tier.RESTART, lo=50.0, hi=2000.0, log=True, adv=True, ui="Turbulence",
         description="Relaxation time (steps) pulling band color/height back toward the stamp",
     )
     replenish_rate: float = pfield(
@@ -285,57 +309,75 @@ class TurbulenceParams(_Params):
                     "zonal jets would otherwise smear the detail away to ~half the belts'",
     )
     kh_amplitude: float = pfield(
-        0.35, tier=Tier.VELOCITY, lo=0.0, hi=2.0, rand=(0.1, 0.8), ui="Turbulence",
+        0.35, tier=Tier.VELOCITY, lo=0.0, hi=2.0, rand=(0.1, 0.8), adv=True, ui="Turbulence",
         description="Kelvin-Helmholtz wave amplitude along high-shear band boundaries",
     )
     kh_wavenumber: int = pfield(
-        24, tier=Tier.VELOCITY, lo=4, hi=80, rand=(14, 40), ui="Turbulence",
+        24, tier=Tier.VELOCITY, lo=4, hi=80, rand=(14, 40), adv=True, ui="Turbulence",
         description="KH billow longitudinal wavenumber",
     )
     belt_replenish: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=0.08, ui="Turbulence",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=0.08, adv=True, ui="Turbulence",
         description="Extra fine detail-noise replenished per step inside belts (emergent filaments)",  # noqa: E501
     )
     belt_replenish_scale: float = pfield(
-        2.0, tier=Tier.RESTART, lo=1.0, hi=4.0, ui="Turbulence",
+        2.0, tier=Tier.RESTART, lo=1.0, hi=4.0, adv=True, ui="Turbulence",
         description="Belt replenishment frequency multiplier relative to the base detail frequency",
     )
 
 
 class StormsParams(_Params):
+    """Field declaration order matches the panel's Hero / Ovals / Barges /
+    Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
+    of the same ``ui`` sub-label) so ``_draw_model`` emits one
+    ``separator_text`` per group boundary, not one per field. ``rim_contrast``
+    and ``wake_turbulence`` are hero-perimeter/wake effects -> Hero.
+    ``stamp_contrast`` touches ovals/barges/pearls/small storms but not the
+    hero stamp -> grouped with Small storms, the most general/catch-all of
+    those four population types.
+
+    NOTE: declaration order is ALSO the canonical ``randomize()`` draw order --
+    the walk in randomize.py draws one RNG value per ``rand`` field in field
+    order, so reordering a ``rand``-bearing field here changes the randomized
+    output for every field after it. ``test_randomize_output_is_pinned`` guards
+    this; if you reorder, either keep ``rand`` fields in place or re-baseline
+    that golden deliberately."""
+
+    # -- Hero -----------------------------------------------------------
     hero_count: int = pfield(
-        1, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Storms",
+        1, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Hero",
         description="GRS-class giant anticyclones",
     )
     hero_radius: float = pfield(
-        0.10, tier=Tier.RESTART, lo=0.03, hi=0.25, rand=(0.06, 0.16), ui="Storms",
+        0.10, tier=Tier.RESTART, lo=0.03, hi=0.25, rand=(0.06, 0.16), ui="Hero",
         description="Hero vortex core radius, radians of arc",
     )
     hero_strength: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Hero",
+        description="GRS-class hero storm vorticity amplitude",
     )
     hero_latitude: float | None = pfield(
-        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, ui="Storms",
+        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Hero",
         description="Pin the hero storm to this latitude (degrees); preset-only. "
                     "None = seeded tropical-zone placement. The effective range is "
                     "further limited by hero_radius (see validator) so the stamp "
                     "stays clear of the 63 deg exchange band",
     )
     rim_contrast: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True, ui="Hero",
         description="Scales the hero storm's dark perimeter ring + bright collar "
                     "(the Red Spot Hollow) amplitude; 1.0 = default, >1 deepens "
                     "the rim contrast, 0 removes the ring/collar",
     )
     hero_aspect: float = pfield(
-        1.0, tier=Tier.RESTART, lo=1.0, hi=3.0, ui="Storms",
+        1.0, tier=Tier.RESTART, lo=1.0, hi=3.0, adv=True, ui="Hero",
         description="Hero storm lon:lat elongation (real GRS ~2:1); 1.0 = round. "
                     "Stretches the stamp, perimeter ring, collar, spiral lanes "
                     "and detail mask along longitude. Wake across-width and "
                     "merge capture stay isotropic (recorded LIMITs)",
     )
     hero_mottle: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
         description="Turbulent interior churn inside hero storms: a flow-scale "
                     "fbm breaks up the smooth Gaussian core so the spot reads as "
                     "churning cloud, not an airbrushed blob. Windowed to the "
@@ -344,14 +386,14 @@ class StormsParams(_Params):
                     "filaments. 0 = smooth v1 core (byte-identical)",
     )
     hero_tint_var: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
         description="Interior color variation inside hero storms: a flow-scale "
                     "fbm modulates the warm-red tint tracer (T3) toward "
                     "salmon/white in the troughs, so the spot reads festooned "
                     "rather than flat red. 0 = uniform v1 tint (byte-identical)",
     )
     hero_rim_tint: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
         description="Dark reddish collar (the GRS 'Red Spot Hollow' rim): the "
                     "perimeter currently only darkens; this reddens (raises the "
                     "warm-red tint) and darkens the perimeter annulus so the "
@@ -360,7 +402,7 @@ class StormsParams(_Params):
                     "(byte-identical)",
     )
     hero_rim_warp: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
         description="Lumpy-oval boundary: warps the hero's dark perimeter ring + "
                     "bright collar with a low-azimuthal-wavenumber (few-lobe) "
                     "per-hero perturbation, so the spot edge reads as a naturally "
@@ -371,7 +413,7 @@ class StormsParams(_Params):
                     "oval (byte-identical, the fbm is never evaluated)",
     )
     hero_wake_detail: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
         description="Wake filament structure: the downstream wake is stamped as a "
                     "smooth wedge into the relaxation target, so it reads as a "
                     "blob even though the wake velocity is turbulent. This frays "
@@ -382,7 +424,7 @@ class StormsParams(_Params):
                     "wedge (byte-identical, the fbm is never evaluated)",
     )
     hero_solid_core: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
         description="Solid-body hero rotation (vorticity mode): blends the hero's "
                     "vorticity from the Gaussian profile (center-peaked -> "
                     "differential rotation -> the interior winds into a "
@@ -392,12 +434,18 @@ class StormsParams(_Params):
                     "(byte-identical); 1 = full patch. Pairs with a larger "
                     "hero_radius and lower hero_strength.",
     )
+    wake_turbulence: float = pfield(
+        1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), adv=True, ui="Hero",
+        description="Turbulence boost in the wake wedge downstream of hero storms",
+    )
+
+    # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Ovals",
         description="White-oval anticyclone population multiplier",
     )
     oval_solid_core: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Ovals",
         description="Solid-body rotation for LARGE white ovals (vorticity mode): "
                     "the same anti-whirlpool patch as hero_solid_core, applied to "
                     "ovals with core radius >= 0.035 rad. A Gaussian oval is "
@@ -409,43 +457,50 @@ class StormsParams(_Params):
                     "are unaffected. Pairs with hero_solid_core to de-bullseye the "
                     "whole field without lowering dev_steps or oval_density.",
     )
+
+    # -- Barges -------------------------------------------------------------
     barge_density: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.3, 1.5), ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.3, 1.5), ui="Barges",
         description="Brown-barge cyclone population multiplier (belts)",
     )
+
+    # -- Pearls -------------------------------------------------------------
     pearls_count: int = pfield(
-        7, tier=Tier.RESTART, lo=0, hi=14, rand=(0, 9), ui="Storms",
+        7, tier=Tier.RESTART, lo=0, hi=14, rand=(0, 9), ui="Pearls",
         description="String-of-pearls ovals on one seeded latitude (0 = off)",
     )
-    wake_turbulence: float = pfield(
-        1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), ui="Storms",
-        description="Turbulence boost in the wake wedge downstream of hero storms",
-    )
+
+    # -- Outbreaks ------------------------------------------------------
     outbreak_count: int = pfield(
-        0, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Storms",
+        0, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), adv=True, ui="Outbreaks",
         description="Convective outbreaks (Great-White-Spot events) during the development run",
     )
     outbreak_strength: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, adv=True, ui="Outbreaks",
+        description="Convective outbreak vorticity amplitude",
     )
+
+    # -- Small storms ---------------------------------------------------
     small_density: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), adv=True, ui="Small storms",
         description="Small-storm field: sub-oval white spots and dark spots scattered "
                     "in loose latitude rows (0 = off, the pre-v1.1 look)",
     )
     stamp_contrast: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.8, 1.3), ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.8, 1.3), adv=True, ui="Small storms",
         description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
     )
+
+    # -- Mergers ------------------------------------------------------------
     merge_rate: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.8), ui="Storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.8), adv=True, ui="Mergers",
         description="Anticyclone merger aggressiveness: converging same-sign "
                     "ovals coalesce when their gap falls under ~1.5*rate*(r1+r2), "
                     "and generation seeds convergent pairs so mergers actually "
                     "occur during the dev run (0 = off, the v1.1 behavior)",
     )
     merge_debris: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, ui="Storms",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, adv=True, ui="Mergers",
         description="Brightness of the transient turbulent collar a fresh "
                     "merger leaves behind (inert while merge_rate is 0)",
     )
@@ -483,6 +538,7 @@ class WavesParams(_Params):
     )
     ribbon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
+        description="Wavenumber of the Saturn-style ribbon wave",
     )
 
 
@@ -529,7 +585,7 @@ class DetailParams(_Params):
                     "draw here would reshuffle every later randomize draw",
     )
     hero_calm: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
         description="Calm the band-aligned grain inside hero storms: the "
                     "detail filament streak + striation are flow/band-aligned "
                     "and are amplified near heroes, so they cross the GRS as "
@@ -555,7 +611,7 @@ class DetailParams(_Params):
                     "the hero frame. 0 = off",
     )
     zone_texture: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, adv=True, ui="Detail",
         description="Flow-folded luminance structure inside ZONES (the calm "
                     "lanes between belts, gated by 1 - belt_mask). Belt "
                     "interiors get belt_texture and shear-gated filaments; "
@@ -585,7 +641,7 @@ class DetailParams(_Params):
                     "character",
     )
     polar_filaments: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail",
         description="Polar folded-filamentary region (the Juno cap look): "
                     "dense, multi-scale, flow-folded RIDGED filaments tangling "
                     "between the circumpolar cyclones poleward of ~65 deg. "
@@ -626,13 +682,13 @@ class BaroclinicParams(_Params):
     window."""
 
     enabled: bool = pfield(
-        False, tier=Tier.RESTART, ui="Solver",
+        False, tier=Tier.RESTART, adv=True, ui="Solver",
         description="Inject the evolving baroclinic vorticity source into the "
                     "vorticity solver (adds physically-grounded mid-latitude "
                     "storms; requires solver type=vorticity). Off = plain v1.6. "
                     "No rand: randomize() must never silently enable it.")
     gain: float = pfield(
-        2.0, tier=Tier.RESTART, lo=0.0, hi=8.0, ui="Solver",
+        2.0, tier=Tier.RESTART, lo=0.0, hi=8.0, adv=True, ui="Solver",
         description="Baroclinic source amplitude as a fraction of coriolis_f0 "
                     "(~3). The source is injected into the Poisson RHS (NOT the "
                     "vorticity state), so it is bounded (no accumulation) and "
@@ -641,15 +697,15 @@ class BaroclinicParams(_Params):
                     "enriching mid-latitude belt texture. ~2 = subtle; high gain "
                     "over-boils. No rand.")
     warmup_steps: int = pfield(
-        8000, tier=Tier.RESTART, lo=500, hi=20000, ui="",
+        8000, tier=Tier.RESTART, lo=500, hi=20000, adv=True, ui="",
         description="Baroclinic spin-up before coupling (fixed cadence). No rand. "
                     "hi=20000 leaves headroom past the ~12500 outcrop so a forced "
                     "outcrop can be exercised by tests.")
     baro_steps_per_update: int = pfield(
-        150, tier=Tier.RESTART, lo=10, hi=1000, ui="",
+        150, tier=Tier.RESTART, lo=10, hi=1000, adv=True, ui="",
         description="Baroclinic steps per source refresh (fixed cadence). No rand.")
     update_every: int = pfield(
-        32, tier=Tier.RESTART, lo=1, hi=512, ui="",
+        32, tier=Tier.RESTART, lo=1, hi=512, adv=True, ui="",
         description="v1.6 steps between source refreshes (fixed cadence). No rand.")
 
 
@@ -660,16 +716,16 @@ _DEFORMATION_RADIUS_FLOOR = 0.05
 
 
 class SolverParams(_Params):
-    type: SolverType = pfield(SolverType.KINEMATIC, tier=Tier.RESTART, ui="Solver",
+    type: SolverType = pfield(SolverType.KINEMATIC, tier=Tier.RESTART, adv=True, ui="Solver",
         description="Streamfunction solver: kinematic (analytic, v1.5) or "
                     "vorticity (prognostic fluid, v1.6+)")
-    poisson_iters: int = pfield(48, tier=Tier.RESTART, lo=8, hi=512, ui="Solver",
+    poisson_iters: int = pfield(48, tier=Tier.RESTART, lo=8, hi=512, adv=True, ui="Solver",
         description="Fixed red-black SOR iterations per step (vorticity mode)")
-    sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, ui="Solver",
+    sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, adv=True, ui="Solver",
         description="SOR over-relaxation factor, must be in (1,2) exclusive "
                     "(vorticity mode)")
     deformation_radius: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, ui="Solver",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, adv=True, ui="Solver",
         description="Rossby deformation radius L_d in RADIANS (vorticity mode). "
                     "Screens the streamfunction inversion to (nabla^2 - 1/L_d^2)psi "
                     "= omega instead of nabla^2 psi = omega (equivalent-barotropic "
@@ -684,30 +740,31 @@ class SolverParams(_Params):
                     "vortex/inject/relax strengths tuned for the plain 2D path read "
                     "weaker and more localized -- expect to re-tune. No rand.")
     vort_relax_tau: float = pfield(
-        120.0, tier=Tier.RESTART, lo=20.0, hi=2000.0, log=True, ui="Solver",
+        120.0, tier=Tier.RESTART, lo=20.0, hi=2000.0, log=True, adv=True, ui="Solver",
         description="Vorticity nudging timescale toward jets+vortices (vorticity mode)")
-    vort_hypervisc: float = pfield(1.0, tier=Tier.RESTART, lo=0.0, hi=10.0, ui="Solver",
+    vort_hypervisc: float = pfield(1.0, tier=Tier.RESTART, lo=0.0, hi=10.0, adv=True, ui="Solver",
         description="Scale-selective biharmonic hyperviscosity rate (vorticity mode)")
-    coriolis_f0: float = pfield(2.0, tier=Tier.RESTART, lo=0.0, hi=20.0, ui="Solver",
+    coriolis_f0: float = pfield(2.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
         description="Planetary vorticity magnitude f0 in f=f0*sin(lat); "
                     "sets the Rhines/band scale (vorticity mode)")
-    vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, ui="Solver",
+    vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, adv=True, ui="Solver",
         description="Broadband eddy-vorticity injection amplitude per step; the "
                     "jet shear folds it into filaments (the emergent-turbulence "
                     "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
-    vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, ui="Solver",
+    vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, adv=True, ui="Solver",
         description="Eddy-injection frequency as a multiple of bands.detail_freq "
                     "(vorticity mode)")
-    vort_inject_mask: InjectMask = pfield(InjectMask.GLOBAL, tier=Tier.RESTART, ui="Solver",
+    vort_inject_mask: InjectMask = pfield(
+        InjectMask.GLOBAL, tier=Tier.RESTART, adv=True, ui="Solver",
         description="Spatial localization of eddy injection: global = churn "
                     "everywhere; belts = cyclonic dark bands only (anticyclonic "
                     "zones stay smooth); shear = jet-shear flanks only (filaments "
                     "where shear is high). Vorticity mode.")
-    vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, ui="Solver",
+    vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
         description="Linear (Rayleigh) drag fraction on relative vorticity per "
                     "step; absorbs the 2D inverse-cascade energy that piles up at "
                     "large scales (0 = off). Vorticity mode.")
-    vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, ui="Solver",
+    vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
         description="Linear drag fraction on the EDDY vorticity q - <q>_x (the "
                     "deviation from the per-latitude zonal mean) per step. Leaves "
                     "the zonal-mean jets intact, but is FLAT in wavenumber, so it "
@@ -715,7 +772,7 @@ class SolverParams(_Params):
                     "gravest-mode swirl -> over-flattens the field. Prefer "
                     "vort_psi_drag (scale-selective). Equirect only. 0 = off "
                     "(byte-identical). Vorticity mode.")
-    vort_psi_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=20.0, ui="Solver",
+    vort_psi_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
         description="Scale-SELECTIVE large-scale (hypofriction) drag: a vorticity "
                     "sink proportional to the EDDY STREAMFUNCTION psi - <psi>_x. "
                     "Because psi ~ omega/(k^2 + 1/L_d^2), the effective drag rate "
@@ -783,6 +840,7 @@ class PoleParams(_Params):
     )
     strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.6, 1.5), ui="Poles",
+        description="Polar feature vorticity amplitude (central cyclone / polygon jet)",
     )
     field_density: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.4, 1.4), ui="Poles",
@@ -800,12 +858,13 @@ class PolesParams(_Params):
 
 class AppearanceParams(_Params):
     palette_rows: list[PaletteRow] = pfield(
-        default_palette_rows(), tier=Tier.POST, ui="Appearance",
+        factory=default_palette_rows, tier=Tier.POST, ui="Appearance",
         description="Latitude-anchored color gradients indexed by the color tracer "
                     "(belt dark -> zone bright), blended across signed latitude",
     )
     storm_tints: list[GradientStop] = pfield(
-        DEFAULT_STORM_TINTS, tier=Tier.POST, ui="Appearance",
+        factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_STORM_TINTS],
+        tier=Tier.POST, adv=True, ui="Appearance",
         description="Secondary tint axis for storms/festoons/hot spots",
     )
     haze_amount: float = pfield(
@@ -814,39 +873,43 @@ class AppearanceParams(_Params):
     )
     haze_color: tuple[float, float, float] = pfield(
         (0.85, 0.78, 0.62), tier=Tier.POST, ui="Appearance",
+        description="Tint of the global haze blend (see haze_amount)",
     )
     contrast: float = pfield(
         1.0, tier=Tier.POST, lo=0.2, hi=2.0, rand=(0.8, 1.2), ui="Appearance",
+        description="Color contrast multiplier about mid-gray",
     )
     saturation: float = pfield(
         1.0, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.7, 1.2), ui="Appearance",
+        description="sRGB saturation multiplier (luma-preserving mix toward gray); "
+                    "prefer chroma_scale for perceptual (Oklab) saturation",
     )
     gamma: float = pfield(
         1.0, tier=Tier.POST, lo=0.4, hi=2.5, ui="Appearance",
         description="Final tone-curve gamma on the color map",
     )
     chroma_scale: float = pfield(
-        1.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Appearance",
+        1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Appearance",
         description="Oklab chroma multiplier on the final color (1 = off) — "
                     "perceptual saturation, recommended over 'saturation' "
                     "(an sRGB luma mix). No rand: adding a draw would "
                     "reshuffle every later randomize draw",
     )
     chroma_variance: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=0.5, ui="Appearance",
+        0.0, tier=Tier.POST, lo=0.0, hi=0.5, adv=True, ui="Appearance",
         description="Longitudinal within-band chroma drift: bands hold pockets "
                     "of more/less saturated material varying slowly with "
                     "longitude (the reference's saturated-pocket texture)",
     )
     hue_variance: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=0.35, ui="Appearance",
+        0.0, tier=Tier.POST, lo=0.0, hi=0.35, adv=True, ui="Appearance",
         description="Iso-luminance Oklab hue drift (radians of max rotation): "
                     "differently-hued material at the same lightness, which a "
                     "luminance-keyed palette gradient cannot express -- the "
                     "hue-diversity lever the realism metrics name",
     )
     chroma_aging: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=0.6, ui="Appearance",
+        0.0, tier=Tier.POST, lo=0.0, hi=0.6, adv=True, ui="Appearance",
         description="Chromophore aging: ties color saturation to the dynamical "
                     "freshness tracer (T2). Aged/stagnant air holds more "
                     "reddish-brown chromophore (more saturated); fresh upwelling "
@@ -857,20 +920,20 @@ class AppearanceParams(_Params):
                     "(byte-identical)",
     )
     polar_tint_color: tuple[float, float, float] = pfield(
-        (0.42, 0.50, 0.58), tier=Tier.POST, ui="Appearance",
+        (0.42, 0.50, 0.58), tier=Tier.POST, adv=True, ui="Appearance",
         description="Polar cap tint (Juno blue-gray); applied where cloud tops "
                     "are LOW -- the blue is structural, bright clouds stay pearly",
     )
     polar_tint_strength: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.2, 0.7), ui="Appearance",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.2, 0.7), adv=True, ui="Appearance",
         description="Polar tint blend strength (0 = off, the pre-v1.1 look)",
     )
     polar_tint_start_lat: float = pfield(
-        55.0, tier=Tier.POST, lo=30.0, hi=80.0, ui="Appearance",
+        55.0, tier=Tier.POST, lo=30.0, hi=80.0, adv=True, ui="Appearance",
         description="Latitude (deg) where the polar tint begins",
     )
     polar_canvas_value: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.5), ui="Appearance",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.5), adv=True, ui="Appearance",
         description="Deepens the polar cap canvas toward a dark blue-teal floor so "
                     "the folded-filament lace and cyclones pop; 0 = off. Applied "
                     "after the lace and keyed on low local luminance, so it darkens "
@@ -889,57 +952,60 @@ class EmissionParams(_Params):
     it would surprise at export time."""
 
     thermal_strength: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="5-micron thermal glow through cloud gaps (gated on the "
                     "cloud-top DEPRESSION vs the band stamp: hot-spot chains "
                     "blaze, barges glow, belts glimmer, zones stay dark)",
     )
     thermal_color: tuple[float, float, float] = pfield(
-        (1.0, 0.36, 0.08), tier=Tier.POST, ui="Emission",
+        (1.0, 0.36, 0.08), tier=Tier.POST, adv=True, ui="Emission",
         description="Ember red-orange; linear radiance hue",
     )
     thermal_threshold: float = pfield(
-        0.18, tier=Tier.POST, lo=0.05, hi=0.5, ui="Emission",
+        0.18, tier=Tier.POST, lo=0.05, hi=0.5, adv=True, ui="Emission",
         description="Cloud-gap anomaly where the HDR hot-spot term begins "
                     "(higher = only the deepest holes blaze)",
     )
     thermal_hdr: float = pfield(
-        16.0, tier=Tier.POST, lo=1.0, hi=40.0, ui="Emission",
+        16.0, tier=Tier.POST, lo=1.0, hi=40.0, adv=True, ui="Emission",
         description="Radiance of the deepest hot spots relative to the faint "
                     "belt glow (real 5-micron maps span ~50:1)",
     )
     lightning_strength: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="Frozen lightning-flash clusters in cyclonic belts and "
                     "at high latitudes (the Juno look: light pools under the "
                     "deck plus sparse HDR cores)",
     )
     lightning_color: tuple[float, float, float] = pfield(
-        (0.72, 0.82, 1.0), tier=Tier.POST, ui="Emission",
+        (0.72, 0.82, 1.0), tier=Tier.POST, adv=True, ui="Emission",
+        description="Lightning flash hue; linear radiance",
     )
     lightning_density: float = pfield(
-        0.5, tier=Tier.POST, lo=0.0, hi=1.0, ui="Emission",
+        0.5, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Emission",
+        description="Lightning-flash cluster population density",
     )
     aurora_strength: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.0, ui="Emission",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="Auroral ovals around the (offset) magnetic poles; "
                     "written to the emission map's ALPHA channel so the "
                     "importer can lift it onto a shell",
     )
     aurora_color: tuple[float, float, float] = pfield(
-        (0.85, 0.35, 0.60), tier=Tier.POST, ui="Emission",
+        (0.85, 0.35, 0.60), tier=Tier.POST, adv=True, ui="Emission",
         description="H/H2 emission is pink-magenta (Earth's oxygen green "
                     "is impossible in a hydrogen atmosphere)",
     )
     aurora_radius: float = pfield(
-        14.0, tier=Tier.POST, lo=5.0, hi=25.0, ui="Emission",
+        14.0, tier=Tier.POST, lo=5.0, hi=25.0, adv=True, ui="Emission",
         description="Oval angular radius from the magnetic pole, degrees",
     )
     aurora_width: float = pfield(
-        2.5, tier=Tier.POST, lo=0.5, hi=8.0, ui="Emission",
+        2.5, tier=Tier.POST, lo=0.5, hi=8.0, adv=True, ui="Emission",
+        description="Auroral oval ring thickness, degrees",
     )
     aurora_pole_offset: float = pfield(
-        8.0, tier=Tier.POST, lo=0.0, hi=20.0, ui="Emission",
+        8.0, tier=Tier.POST, lo=0.0, hi=20.0, adv=True, ui="Emission",
         description="Magnetic-pole tilt from the rotation pole, degrees "
                     "(longitude seeded); Saturn's axis is aligned: use 0",
     )
@@ -956,12 +1022,20 @@ class EmissionParams(_Params):
 class PhysicalParams(_Params):
     """Real-world scale hints passed through to the Blender importer."""
 
-    radius_km: float = pfield(69911.0, tier=Tier.POST, lo=1000.0, hi=200000.0, ui="Physical")
+    radius_km: float = pfield(
+        69911.0, tier=Tier.POST, lo=1000.0, hi=200000.0, adv=True, ui="Physical",
+        description="Planet equatorial radius in kilometers, passed through to the "
+                    "Blender importer for scale",
+    )
     height_scale: float = pfield(
-        0.004, tier=Tier.POST, lo=0.0, hi=0.05, ui="Physical",
+        0.004, tier=Tier.POST, lo=0.0, hi=0.05, adv=True, ui="Physical",
         description="Cloud-deck relief as a fraction of planet radius (full height-map range)",
     )
-    height_midlevel: float = pfield(0.5, tier=Tier.POST, lo=0.0, hi=1.0, ui="Physical")
+    height_midlevel: float = pfield(
+        0.5, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Physical",
+        description="Height-map value mapped to the mid cloud deck (Blender importer "
+                    "reference level)",
+    )
 
 
 class ExportParams(_Params):
@@ -976,8 +1050,14 @@ class ExportParams(_Params):
 
 
 class PlanetParams(_Params):
-    seed: int = pfield(0, tier=Tier.RESTART, lo=0, hi=2**31 - 1, ui="Global")
-    name: str = pfield("unnamed", tier=Tier.POST, ui="Global")
+    seed: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=2**31 - 1, ui="Global",
+        description="Master RNG seed; the development run is deterministic from this",
+    )
+    name: str = pfield(
+        "unnamed", tier=Tier.POST, ui="Global",
+        description="Display/preset name",
+    )
     sim: SimParams = Field(default_factory=SimParams)
     solver: SolverParams = Field(default_factory=SolverParams)
     bands: BandsParams = Field(default_factory=BandsParams)
@@ -1000,8 +1080,34 @@ class PlanetParams(_Params):
         return cls.model_validate_json(text)
 
 
-def field_meta(model: type[BaseModel], field_name: str) -> dict[str, Any]:
-    """The json_schema_extra metadata dict for a field ({} if none)."""
-    info = model.model_fields[field_name]
-    extra = info.json_schema_extra
-    return dict(extra) if isinstance(extra, dict) else {}
+@dataclass(frozen=True)
+class FieldMeta:
+    """Typed view over a ``pfield``'s ``json_schema_extra`` metadata, so panel
+    code reads ``meta.adv``/``meta.tier`` instead of an untyped ``.get("adv")``
+    on a bare dict. Values are the JSON-plain forms ``pfield`` stores (``tier`` as
+    the ``Tier`` value, ``rand`` as a list); defaults match a non-``pfield`` leaf
+    (no tier, not advanced), so the fields that drive visibility/badges behave
+    exactly as the old ``extra.get(...)`` reads did."""
+
+    tier: Any = None
+    ui: str = ""
+    log: bool = False
+    adv: bool = False
+    rand: list[Any] | None = None
+
+    @classmethod
+    def of(cls, info: Any) -> FieldMeta:
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        return cls(
+            tier=extra.get("tier"),
+            ui=extra.get("ui", ""),
+            log=bool(extra.get("log", False)),
+            adv=bool(extra.get("adv", False)),
+            rand=extra.get("rand"),
+        )
+
+
+def field_meta(model: type[BaseModel], field_name: str) -> FieldMeta:
+    """The typed ``FieldMeta`` for a field (an all-default ``FieldMeta`` if the
+    field carries no ``pfield`` metadata)."""
+    return FieldMeta.of(model.model_fields[field_name])

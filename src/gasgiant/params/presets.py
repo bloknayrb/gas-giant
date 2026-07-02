@@ -9,6 +9,7 @@ tolerant policy.)
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 
@@ -19,6 +20,11 @@ from gasgiant.params.migrations import CURRENT_PRESET_FORMAT, migrate
 from gasgiant.params.model import PlanetParams
 
 _FACTORY_PACKAGE = "gasgiant.presets"
+
+# User presets live alongside the session file under ~/.gasgiant (matching
+# SESSION_PATH in app.main). Kept in the params layer (no GUI import) so the CLI
+# and tests can enumerate/load user presets too.
+USER_PRESET_DIR = Path.home() / ".gasgiant" / "presets"
 
 
 class PresetError(ValueError):
@@ -71,6 +77,53 @@ def load_factory_preset(name: str) -> PlanetParams:
         known = ", ".join(factory_preset_names())
         raise PresetError(f"unknown factory preset {name!r} (available: {known})")
     return load_preset_doc(json.loads(ref.read_text(encoding="utf-8")), source=f"preset:{name}")
+
+
+def user_preset_names() -> list[str]:
+    """Filename stems of JSON files in USER_PRESET_DIR.
+
+    Enumeration NEVER opens or parses a file: a corrupt user preset must not
+    crash the dropdown just by being listed. It only fails when the user
+    actually loads it (via ``load_user_preset``)."""
+    if not USER_PRESET_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in USER_PRESET_DIR.glob("*.json") if p.is_file())
+
+
+def load_user_preset(name: str) -> PlanetParams:
+    """Load ``USER_PRESET_DIR/<name>.json`` via the strict envelope path. Any
+    failure (missing file, unreadable/corrupt JSON, or a validation error)
+    surfaces as ``PresetError`` so the GUI can toast it exactly like the
+    factory-preset path -- raised only here at load/click time, never during
+    enumeration."""
+    path = USER_PRESET_DIR / f"{name}.json"
+    try:
+        return load_preset(path)
+    except PresetError:
+        raise
+    except (OSError, ValueError) as exc:  # missing file, bad JSON, etc.
+        raise PresetError(f"{path}: {exc}") from exc
+
+
+class PresetSource(StrEnum):
+    """Which namespace an active preset identity came from. A ``StrEnum`` so it
+    stays ``==``-comparable with the bare strings it replaced (and renders as the
+    plain value in f-strings), but gives callers a typed, misspell-proof vocab
+    instead of scattering ``"factory"``/``"user"``/``"file"`` literals."""
+
+    FACTORY = "factory"
+    USER = "user"
+    FILE = "file"
+
+
+def available_presets() -> list[tuple[str, PresetSource]]:
+    """(name, source) pairs for the merged dropdown: factory presets first
+    (source ``FACTORY``), then user presets (source ``USER``). The source
+    discriminates the two namespaces so the GUI can show ``user/<name>`` and so
+    a user preset can't collide with a same-named factory preset."""
+    factory = [(name, PresetSource.FACTORY) for name in factory_preset_names()]
+    user = [(name, PresetSource.USER) for name in user_preset_names()]
+    return factory + user
 
 
 def resolve_preset(name_or_path: str) -> PlanetParams:
