@@ -786,12 +786,125 @@ class StudioApp:
         self._commit(self._randomize(self.params.seed + 1))
         self._reset_working_copy()  # discrete action wins over pending edit
 
+    # -- B1-8: preset overwrite/delete lifecycle -------------------------------
+
+    def _active_user_preset_path(self) -> tuple[str, Path] | None:
+        """(name, path) of the active USER preset, or None. Only USER presets
+        are overwritable/deletable in-app: factory presets are package data,
+        and a FILE identity only stored the stem (its full path is gone)."""
+        if self._active_preset is None:
+            return None
+        name, source = self._active_preset
+        if source != PresetSource.USER:
+            return None
+        return name, USER_PRESET_DIR / f"{name}.json"
+
+    def _request_overwrite_active(self) -> None:
+        """Ctrl+S / the contextual Save button: stage the overwrite-confirm
+        modal for the active user preset, or fall back to the Save-As dialog
+        when no user preset is active (factory/file/unsaved) -- Ctrl+S always
+        does SOMETHING useful, never a silent no-op (B1-8)."""
+        if self._export is not None:
+            return  # same gate as every other Ctrl-shortcut commit path
+        entry = self._active_user_preset_path()
+        if entry is None:
+            self._open_save_dialog()
+            return
+        self._pending_overwrite = entry
+
+    def _overwrite_active_preset(self) -> None:
+        """Confirmed overwrite: save the current params over the active user
+        preset's file and adopt them as the new pristine baseline (clears the
+        dirty ``*``)."""
+        entry = self._pending_overwrite
+        self._pending_overwrite = None
+        if entry is None:
+            return
+        name, path = entry
+        try:
+            save_preset(self.params, path)
+        except OSError as exc:
+            self.toasts.error(str(exc))
+            return
+        self._set_identity((name, PresetSource.USER), self.params)
+        self._refresh_presets()
+        self.toasts.info(f"saved user/{name}")
+
+    def _request_delete_active(self) -> None:
+        if self._active_user_preset_path() is not None:
+            self._pending_delete = self._active_user_preset_path()
+
+    def _delete_active_preset(self) -> None:
+        """Confirmed delete: remove the file, drop the named identity (the
+        working params stay loaded -- deleting the file must not yank the
+        planet out from under the user -- so the combo reads 'unsaved')."""
+        entry = self._pending_delete
+        self._pending_delete = None
+        if entry is None:
+            return
+        name, path = entry
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            self.toasts.error(str(exc))
+            return
+        self._active_preset = None
+        self._refresh_presets()
+        self.toasts.info(f"deleted user/{name} (current settings kept, now unsaved)")
+
+    def _draw_preset_confirm_modals(self) -> None:
+        """The overwrite/delete confirm modals (B1-8), staged by
+        ``_pending_overwrite``/``_pending_delete``. Same held-state modal
+        idiom as ``_draw_export_overwrite_confirm``."""
+        if self._pending_overwrite is not None:
+            title = "Overwrite preset?"
+            if not imgui.is_popup_open(title):
+                imgui.open_popup(title)
+            center = imgui.get_main_viewport().get_center()
+            imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+            if imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+                name, path = self._pending_overwrite
+                imgui.text_wrapped(
+                    f"Overwrite user preset '{name}' with the current settings?"
+                )
+                imgui.text_disabled(str(path))
+                imgui.separator()
+                if imgui.button("Overwrite##preset"):
+                    self._overwrite_active_preset()
+                    imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Cancel##overwrite_preset"):
+                    self._pending_overwrite = None
+                    imgui.close_current_popup()
+                imgui.end_popup()
+        if self._pending_delete is not None:
+            title = "Delete preset?"
+            if not imgui.is_popup_open(title):
+                imgui.open_popup(title)
+            center = imgui.get_main_viewport().get_center()
+            imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+            if imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+                name, path = self._pending_delete
+                imgui.text_wrapped(
+                    f"Delete user preset '{name}'? This removes the file from disk; "
+                    "the current settings stay loaded (as 'unsaved')."
+                )
+                imgui.text_disabled(str(path))
+                imgui.separator()
+                if imgui.button("Delete##preset"):
+                    self._delete_active_preset()
+                    imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Cancel##delete_preset"):
+                    self._pending_delete = None
+                    imgui.close_current_popup()
+                imgui.end_popup()
+
     def _open_save_dialog(self) -> None:
-        """Open the preset-save file dialog -- the exact path both the
-        "Save..." button and the Ctrl+S shortcut trigger. Ctrl+S always opens
-        the dialog, identical to the button; it does not silently re-save to
-        the active preset's path. No-op if a dialog is already open (mirrors
-        the button's ``self._dialog is None`` guard)."""
+        """Open the preset-save (Save As...) file dialog -- the "Save..."
+        button's path, and Ctrl+S's fallback when no user preset is active
+        (``_request_overwrite_active``). No-op if a dialog is already open
+        (mirrors the button's ``self._dialog is None`` guard)."""
         if self._dialog is not None:
             return
         # Default the save dialog into USER_PRESET_DIR so saved presets land
@@ -835,7 +948,9 @@ class StudioApp:
         if ctrl and imgui.is_key_pressed(imgui.Key.y) and not exporting:
             self._redo()
         if ctrl and imgui.is_key_pressed(imgui.Key.s) and not exporting:
-            self._open_save_dialog()
+            # B1-8: Ctrl+S overwrites the active USER preset (after a confirm
+            # modal); with no user preset active it opens Save As, as before.
+            self._request_overwrite_active()
 
     # -- dialogs --------------------------------------------------------------------
 
@@ -934,6 +1049,22 @@ class StudioApp:
         if imgui.button("Reset to gas_giant_warm"):
             self._load_preset_entry("gas_giant_warm", PresetSource.FACTORY)
 
+        # B1-8: contextual overwrite/delete row, shown only while a USER
+        # preset is active (factory presets are package data; a FILE identity
+        # lost its full path) -- both confirm before touching the disk.
+        user_entry = self._active_user_preset_path()
+        if user_entry is not None:
+            name, _path = user_entry
+            if imgui.button(f"Save '{name}'"):
+                self._request_overwrite_active()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"overwrite user/{name} with the current settings (Ctrl+S)")
+            imgui.same_line()
+            if imgui.button("Delete##preset_row"):
+                self._request_delete_active()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"delete user/{name} from disk (asks first)")
+
         self._draw_seed_header_control()
 
         if imgui.button("Randomize"):
@@ -944,6 +1075,11 @@ class StudioApp:
         imgui.same_line()
         self._draw_history_buttons()
         imgui.end_disabled()
+
+        # Confirm modals live OUTSIDE the begin_disabled block: a modal's
+        # buttons must stay clickable (they're only staged while no export is
+        # running anyway -- every request path is export-gated).
+        self._draw_preset_confirm_modals()
 
         if self._export is None:
             if imgui.button("Export..."):
@@ -1402,7 +1538,10 @@ class StudioApp:
             imgui.bullet_text("F1        toggle this Help window")
             imgui.bullet_text("Ctrl+Z    Undo")
             imgui.bullet_text("Ctrl+Y    Redo")
-            imgui.bullet_text("Ctrl+S    Save preset...")
+            imgui.bullet_text(
+                "Ctrl+S    Save preset (overwrites the active user preset "
+                "after a confirm; otherwise opens Save As...)"
+            )
             imgui.separator()
             imgui.text_wrapped(
                 "Hover the (?) marker next to a section header for a one-line "
