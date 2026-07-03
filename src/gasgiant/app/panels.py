@@ -112,8 +112,8 @@ _SECTION_BLURBS: dict[str, str] = {
     "appearance": "Color palette, contrast, and tonal-mapping controls.",
     "detail": "Fine-scale procedural texture detail layers.",
     "emission": "Self-emissive glow channels (lightning, aurora, hot spots). "
-    "Written to the exported emission map only — the Color preview does not "
-    "composite emission.",
+    "Preview via the viewport's Emission channel (aurora included) — the "
+    "Color preview does not composite emission. Exported to emission.exr.",
     "physical": "Planet radius and physical-shading parameters.",
     "export": "Output map resolution and PNG compression for Export.",
 }
@@ -331,13 +331,14 @@ def _draw_hero_latitude_escape(storms_doc: dict[str, Any]) -> tuple[bool, bool]:
     return False, False
 
 
-# B1-7: aurora writes only the exported emission map's alpha channel; nothing
-# in the Color preview moves when it is enabled. Said exactly where the aurora
-# controls live, at the moment it applies (aurora is on), so the zero-feedback
-# slider drag stops reading as "broken".
+# B1-7/B4-3: aurora writes the exported emission map's alpha channel; the
+# viewport composites it (alpha x aurora color) into the Emission channel
+# preview, but nothing in the Color preview moves when it is enabled. Said
+# exactly where the aurora controls live, at the moment it applies (aurora is
+# on), so the zero-feedback Color-view slider drag stops reading as "broken".
 _AURORA_PREVIEW_NOTE = (
-    "aurora is on — it renders to the exported emission map (alpha), "
-    "not the Color preview"
+    "aurora is on — preview it in the viewport's Emission channel; "
+    "it is not composited into the Color preview"
 )
 
 

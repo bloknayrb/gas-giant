@@ -79,3 +79,40 @@ def test_viewport_emission_disabled_early_returns(gpu, imgui_ctx):
     _draw(lambda: vp.draw(sim, _PREVIEW))
     assert vp._display is None  # returned before allocating the display texture
     gpu.make_current()
+
+
+def test_view_transform_aurora_composite_formula(gpu):
+    """B4-3: u_channel=5 composites rgb + a * u_aurora (Standard mode is a
+    pass-through, so the check is exact), and u_channel=0 with the same input
+    ignores alpha and u_aurora entirely -- the pre-B4-3 blit is untouched.
+    Renders the real view_transform.frag into an offscreen f4 FBO; no imgui,
+    no default framebuffer needed."""
+    import struct
+
+    src = gpu.texture2d((1, 1), 4, "f4")
+    src.write(struct.pack("4f", 0.10, 0.20, 0.30, 0.5))
+    dst = gpu.texture2d((1, 1), 4, "f4")
+    fbo = gpu.framebuffer(dst)
+
+    pass_ = gpu.fullscreen_pass("gasgiant.app.shaders", "view_transform.frag")
+    src.use(location=0)
+    pass_.prog["u_image"].value = 0
+    pass_.prog["u_mode"].value = 0  # Standard = pass-through
+    pass_.prog["u_channel"].value = 5
+    pass_.prog["u_aurora"].value = (0.8, 0.4, 0.6)
+    pass_.render(fbo)
+    r, g, b, a = struct.unpack("4f", fbo.read(components=4, dtype="f4"))
+    assert (r, g, b) == pytest.approx((0.10 + 0.5 * 0.8, 0.20 + 0.5 * 0.4, 0.30 + 0.5 * 0.6))
+    assert a == pytest.approx(1.0)
+
+    # channel 0 (the plain Emission/Color blit): alpha and u_aurora ignored
+    pass_.prog["u_channel"].value = 0
+    pass_.render(fbo)
+    r, g, b, _ = struct.unpack("4f", fbo.read(components=4, dtype="f4"))
+    assert (r, g, b) == pytest.approx((0.10, 0.20, 0.30))
+
+    pass_.release()
+    fbo.release()
+    dst.release()
+    src.release()
+    gpu.make_current()

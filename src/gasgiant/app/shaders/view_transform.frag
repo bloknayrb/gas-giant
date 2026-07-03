@@ -9,7 +9,12 @@ out vec4 frag_color;
 
 uniform sampler2D u_image;
 uniform int u_mode;     // 0 standard, 1 AgX approximation
-uniform int u_channel;  // 0 rgb, 1 rrr, 2 ggg, 3 bbb, 4 aaa
+uniform int u_channel;  // 0 rgb, 1 rrr, 2 ggg, 3 bbb, 4 aaa, 5 rgb + a*u_aurora
+uniform vec3 u_aurora;  // Emission channel only (u_channel 5): composites the
+                        // alpha-channel aurora intensity as a * u_aurora, the
+                        // same alpha-times-aurora_color lift the Blender
+                        // importer applies on its aurora shell. Zero for every
+                        // other channel, so channels 0-4 are untouched.
 
 void main() {
     vec2 uv = vec2(v_uv.x, 1.0 - v_uv.y);
@@ -19,6 +24,7 @@ void main() {
     else if (u_channel == 2) color = texel.ggg;
     else if (u_channel == 3) color = texel.bbb;
     else if (u_channel == 4) color = texel.aaa;
+    else if (u_channel == 5) color = texel.rgb + texel.a * u_aurora;
     else                     color = texel.rgb;
     frag_color = vec4(viewTransform(color, u_mode), 1.0);
 }
