@@ -240,6 +240,9 @@ class StudioApp:
         # idiom Toasts.draw already uses in this file), toggled by F1 or the
         # "Help (F1)" button, drawn from gui_overlays each frame while visible.
         self._show_help = False
+        # A2-2: last observed Simulation.baroclinic_status, so the per-frame
+        # check toasts exactly once per transition INTO 'degraded'.
+        self._baro_status_seen = "off"
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -916,6 +919,21 @@ class StudioApp:
         self.toasts.info("export cancelled")
         self._flush_pending_edit()  # apply anything the export gate held back
 
+    def _check_baroclinic_status(self) -> None:
+        """A2-2: surface the engine's baroclinic graceful degrade in-window.
+        The facade degrade paths only log to file; a user who enabled
+        solver.baroclinic (RESTART-tier, long CPU warmup) and hit an outcrop
+        would otherwise get a plain-v1.6 render with zero in-window signal.
+        Toasts once per transition into 'degraded' (never per frame)."""
+        if self.sim is None:
+            return
+        status = self.sim.baroclinic_status
+        if status != self._baro_status_seen:
+            if status == "degraded":
+                reason = self.sim.baroclinic_degraded_reason or "unknown cause"
+                self.toasts.error(f"baroclinic coupling degraded: {reason}")
+            self._baro_status_seen = status
+
     def pre_frame(self) -> None:
         """Runs once per frame before imgui NewFrame: dialogs, pacing, smoke exit."""
         if self.gpu is None:  # defensive; post_init normally did this
@@ -924,6 +942,7 @@ class StudioApp:
         self.frame_perf.begin()
         self._poll_dialog()
         self._run_export_slice()
+        self._check_baroclinic_status()
         self._frame_count += 1
         if self._smoke_frames and self._frame_count >= self._smoke_frames:
             hello_imgui.get_runner_params().app_shall_exit = True

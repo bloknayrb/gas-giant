@@ -62,6 +62,7 @@ class Simulation:
         self._baro_update_every = 0
         self._baro_gain = 0.0
         self._baro_steps_per_update = 0
+        self._baro_degraded_reason: str | None = None
         self._build()
 
     # -- construction / restart -------------------------------------------------
@@ -113,13 +114,17 @@ class Simulation:
 
     def _init_baroclinic(self) -> None:
         """Build/reuse the baroclinic source driver when enabled. Caches on
-        (grid, warmup, seed) so unrelated RESTART edits don't re-warm. On warmup
-        outcrop, degrade to uncoupled (driver=None) -- never crash construction."""
+        (grid, warmup, seed) so unrelated RESTART edits don't re-warm. On the
+        DOCUMENTED degrade signals only -- warmup outcrop (BaroclinicWarmupError)
+        or a missing optional numerics dep (ImportError) -- degrade to uncoupled
+        (driver=None, status 'degraded' + reason), never crash construction; a
+        genuine unexpected error propagates loudly."""
         bp = self.params.solver.baroclinic
         self._baro_next_update = 0
         self._baro_update_every = bp.update_every
         self._baro_gain = bp.gain
         self._baro_steps_per_update = bp.baro_steps_per_update
+        self._baro_degraded_reason = None
         if not bp.enabled:
             self._baro_driver = None
             self._baro_key = None
@@ -129,31 +134,60 @@ class Simulation:
         if self._baro_driver is not None and self._baro_key == key:
             self._baro_driver.reset()  # deterministic: each dev run starts post-warmup
             return  # reuse cached driver (no re-warmup)
-        from gasgiant.sim.baroclinic_driver import BaroclinicSourceDriver
         try:
+            from gasgiant.sim.baroclinic_driver import (
+                BaroclinicSourceDriver,
+                BaroclinicWarmupError,
+            )
             self._baro_driver = BaroclinicSourceDriver(
                 grid_w=w, grid_h=h, warmup_steps=bp.warmup_steps,
                 seed=self.params.seed)
             self._baro_key = key
-        except RuntimeError as exc:
+        # ImportError FIRST: if the driver import itself failed, the
+        # BaroclinicWarmupError name below was never bound.
+        except ImportError as exc:
+            log.warning("baroclinic coupling disabled: dependency missing (%s)", exc)
+            self._degrade_baroclinic(f"dependency missing: {exc}")
+        except BaroclinicWarmupError as exc:
             log.warning("baroclinic coupling disabled: warmup outcropped (%s)", exc)
-            self._baro_driver = None
-            self._baro_key = None
+            self._degrade_baroclinic(str(exc))
+
+    def _degrade_baroclinic(self, reason: str) -> None:
+        self._baro_driver = None
+        self._baro_key = None
+        self._baro_degraded_reason = reason
+
+    @property
+    def baroclinic_status(self) -> str:
+        """``'off' | 'active' | 'degraded'``. 'degraded' means the user enabled
+        baroclinic coupling but it dropped to plain uncoupled v1.6 (warmup
+        outcrop, mid-run outcrop/incoherence, or a missing dependency) -- the
+        GUI toasts on the transition so the degrade is never silent. See
+        ``baroclinic_degraded_reason`` for the cause."""
+        if not self.params.solver.baroclinic.enabled:
+            return "off"
+        return "active" if self._baro_driver is not None else "degraded"
+
+    @property
+    def baroclinic_degraded_reason(self) -> str | None:
+        """Human-readable cause when ``baroclinic_status == 'degraded'``, else None."""
+        return self._baro_degraded_reason
 
     def _update_baroclinic_source(self) -> None:
         """Advance the baroclinic solver and re-upload the coherent source. On
         an EXPECTED degrade (lower-layer outcrop or an incoherent/checkerboard
-        source) drop to uncoupled and continue; a genuine unexpected error
-        propagates loudly rather than being silently swallowed as a degrade."""
+        source) drop to uncoupled (status 'degraded' + reason) and continue; a
+        genuine unexpected error propagates loudly rather than being silently
+        swallowed as a degrade."""
         from gasgiant.sim import baroclinic_source as bsrc
         from gasgiant.sim import shallow_water_ref as ref
         try:
             self._baro_driver.advance(self._baro_steps_per_update)
             src = self._baro_driver.current_source()
-        except (ref.PositivityViolation, bsrc.IncoherentSourceError, RuntimeError) as exc:
+        except (ref.PositivityViolation, bsrc.IncoherentSourceError) as exc:
             log.warning("baroclinic source disabled mid-run: %s", exc)
             self.set_external_vorticity_source(None)
-            self._baro_driver = None
+            self._degrade_baroclinic(str(exc))
             return
         self.set_external_vorticity_source(src, gain=self._baro_gain)
 

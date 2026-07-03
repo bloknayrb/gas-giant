@@ -17,6 +17,15 @@ from gasgiant.sim import shallow_water_ref as ref
 log = logging.getLogger(__name__)
 
 
+class BaroclinicWarmupError(RuntimeError):
+    """The warmup outcropped before reaching a finite-amplitude state — the
+    DOCUMENTED graceful-degrade signal for driver construction. Subclasses
+    RuntimeError so any existing ``except RuntimeError`` caller keeps working,
+    while letting the facade catch this *expected* degrade distinctly from a
+    genuine unexpected RuntimeError (which must propagate loudly). Mirrors the
+    IncoherentSourceError/ValueError pattern in baroclinic_source."""
+
+
 class BaroclinicSourceDriver:
     def __init__(self, grid_w: int, grid_h: int,
                  warmup_steps: int = 9000, seed: int = 0,
@@ -32,7 +41,7 @@ class BaroclinicSourceDriver:
         )
         self.advance(warmup_steps)
         if self.outcropped:
-            raise RuntimeError(
+            raise BaroclinicWarmupError(
                 f"BaroclinicSourceDriver: warmup outcropped within {warmup_steps} "
                 f"steps -- the source never reached a finite-amplitude state. "
                 f"Reduce warmup_steps or xi_unstable."
