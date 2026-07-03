@@ -222,3 +222,31 @@ def test_belt_texture_fine_zero_routes_to_default_program(gpu):
     base = Simulation(_quick_params(), gpu).render_maps(256)["color"]
     zero = Simulation(_quick_params(belt_texture_fine=0.0), gpu).render_maps(256)["color"]
     np.testing.assert_array_equal(base, zero)
+
+
+# -- A2-6: build-time uniform tripwire ----------------------------------------------
+
+
+def test_fx_variant_build_passes_uniform_tripwire(gpu):
+    """The compiled DETAIL_FX variant must contain every fx-flagged lever's
+    uniform (i.e. the tripwire passes on the shipped kernel — none of the 8
+    effect blocks got optimized out)."""
+    from gasgiant.render.detail import DetailSynth
+
+    synth = DetailSynth(gpu)
+    prog = synth._program(fx=True)  # must not raise
+    assert prog is not None
+
+
+def test_fx_uniform_tripwire_fires_on_dropped_uniform(gpu, monkeypatch):
+    """Deliberately extend the fx metadata list with a lever whose uniform does
+    not exist in the kernel: the fx-program build must raise (loud), because the
+    per-dispatch KeyError-suppressing _set would otherwise silently no-op it."""
+    from gasgiant.render import detail as detail_mod
+
+    monkeypatch.setattr(
+        detail_mod, "_FX_PARAMS", (*detail_mod._FX_PARAMS, "bogus_lever")
+    )
+    synth = detail_mod.DetailSynth(gpu)  # non-fx default program: no tripwire
+    with pytest.raises(RuntimeError, match="u_bogus_lever"):
+        synth._program(fx=True)
