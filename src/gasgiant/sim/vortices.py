@@ -439,7 +439,7 @@ def generate_vortices(
         # across the entire hero band, so sampling it put the wake due east.
         reg.vortices.append(
             Vortex(lat, float(rng.uniform(-np.pi, np.pi)), r, s, KIND_HERO,
-                   tint=0.9, brightness=0.05,
+                   tint=storms.hero_tint, brightness=storms.hero_brightness,
                    wake_dir=-1.0,
                    wake_lat_off=0.5 * r * (1.0 if lat < 0.0 else -1.0),
                    aspect=storms.hero_aspect)
@@ -502,12 +502,17 @@ def generate_vortices(
                           profiles, storms.small_density)
 
     # Stamp contrast (1 = v1): scales how hard non-hero storms register in the
-    # tracers; the velocity strength is untouched.
-    if storms.stamp_contrast != 1.0:
+    # tracers; the velocity strength is untouched. stamp_tint_contrast (B5-7)
+    # splits the tint amplitude from the brightness amplitude; None = follow
+    # stamp_contrast, which reproduces the legacy coupled arithmetic exactly.
+    tint_contrast = (storms.stamp_tint_contrast
+                     if storms.stamp_tint_contrast is not None
+                     else storms.stamp_contrast)
+    if storms.stamp_contrast != 1.0 or tint_contrast != 1.0:
         for v in reg.vortices:
             if v.kind != KIND_HERO:
                 v.brightness *= storms.stamp_contrast
-                v.tint *= storms.stamp_contrast
+                v.tint *= tint_contrast
 
     if poles is not None:
         polar_rng = subseed(seed, "poles")
@@ -533,7 +538,86 @@ def generate_vortices(
             reg, subseed(seed, "mergers"), zones, profiles,
             storms.merge_rate, dt, dev_steps,
         )
+
+    # Accent ovals (A01) and hero companions (B5-5): explicitly colored stamps
+    # on their own named substreams, seeded LAST (after the cap and the merger
+    # pairs) so every pre-existing population is byte-identical when they are
+    # off — and untouched even when they are on.
+    if storms.accent_count > 0:
+        _add_accent_ovals(reg, subseed(seed, "accent-ovals"), zones, profiles, storms)
+    if storms.hero_companions > 0:
+        _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
+                             storms.hero_companions)
+    # Atomic trim, mirroring the merger-pair rule: drop the newest entries
+    # (accents/companions), never a pre-existing storm.
+    while len(reg.vortices) > MAX_VORTICES:
+        reg.vortices.pop()
     return reg
+
+
+def _add_accent_ovals(
+    reg: VortexRegistry,
+    rng: np.random.Generator,
+    zones: list[tuple[float, float]],
+    profiles: LatProfiles,
+    storms: StormsParams,
+) -> None:
+    """Accent ovals (review A01 — the Oval BA unlock): KIND_OVAL storms whose
+    tint/brightness are EXPLICIT params rather than the kind constants, so a
+    second reddened oval can sit beside the white population. All accents share
+    one latitude and one appearance; count=2 puts the pair at offset longitudes.
+    Velocity treatment matches ordinary ovals (ambient-sign anticyclone, same
+    strength-radius law), so oval_solid_core >= the 0.035 radius gate keeps them
+    coherent in vorticity mode. stamp_contrast does NOT apply (color is verbatim
+    by design; this runs after the contrast pass)."""
+    if storms.accent_latitude is not None:
+        lat = float(np.deg2rad(storms.accent_latitude))
+    else:
+        # Auto-place: seeded zone pick, tropical-to-temperate preference
+        # (the hero's placement rule, one draw from the accent stream).
+        cands = [z for z in zones if 0.15 < abs(z[0]) < 1.0] or zones
+        if not cands:
+            return
+        center, _w = cands[int(rng.integers(0, len(cands)))]
+        lat = float(np.clip(center, -MAX_VORTEX_LAT, MAX_VORTEX_LAT))
+    r = storms.accent_radius
+    s = _ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
+    for lon in _poisson_lons(rng, storms.accent_count, min_sep=0.6):
+        reg.vortices.append(
+            Vortex(lat, lon, r, s, KIND_OVAL,
+                   tint=storms.accent_tint, brightness=storms.accent_brightness)
+        )
+
+
+def _add_hero_companions(
+    reg: VortexRegistry,
+    rng: np.random.Generator,
+    profiles: LatProfiles,
+    count: int,
+) -> None:
+    """Bright companion clouds beside each hero (review B5-5: the Neptune GDS
+    companion / Scooter class). KIND_PEARL stamps — bright spot with a slight
+    collar, never cap-dropped — placed a few core radii from the hero on its
+    wake-free flank (opposite wake_dir, so the wake turbulence does not shred
+    them immediately), alternating equatorward/poleward. Positions are
+    generation-time: differential zonal drift moves them relative to the hero
+    over the dev run, which is physical (Neptune's companions do the same)."""
+    for hero in reg.heroes():
+        side = -hero.wake_dir if hero.wake_dir != 0.0 else 1.0
+        eq = 1.0 if hero.lat < 0.0 else -1.0  # unit step toward the equator
+        for i in range(count):
+            dist = (1.7 + 0.8 * i) * hero.r_core
+            dlat = (eq * (0.6 + 0.5 * float(rng.uniform())) * hero.r_core
+                    * (1.0 if i % 2 == 0 else -0.8))
+            lat = float(np.clip(hero.lat + dlat, -MAX_VORTEX_LAT, MAX_VORTEX_LAT))
+            dlon = (side * dist / max(np.cos(lat), 0.2)
+                    + float(rng.normal(0.0, 0.2 * hero.r_core)))
+            lon = float((hero.lon + dlon + np.pi) % (2.0 * np.pi) - np.pi)
+            r = float(np.clip(0.30 * hero.r_core, 0.015, 0.035))
+            s = _ambient_sign(profiles, lat) * 0.008
+            reg.vortices.append(
+                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=0.32)
+            )
 
 
 def _seed_convergent_pairs(

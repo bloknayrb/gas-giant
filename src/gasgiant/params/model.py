@@ -448,6 +448,33 @@ class StormsParams(_Params):
         1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), adv=True, ui="Hero",
         description="Turbulence boost in the wake wedge downstream of hero storms",
     )
+    hero_tint: float = pfield(
+        0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Hero",
+        description="Hero storm tint (T3) stamped at generation: positive pulls "
+                    "toward the warm/red end of the storm_tints gradient, negative "
+                    "toward the cool end. 0.9 = the previously hardwired GRS red "
+                    "(byte-identical default). Capped at 1.0: the storm-tint LUT "
+                    "lookup clamps at the sampler edge (derive.comp indexes it at "
+                    "(T3+1)/2 clamped to [0,1]), so values past 1.0 saturate and "
+                    "buy nothing. Exempt from stamp_contrast (KIND_HERO exclusion)",
+    )
+    hero_brightness: float = pfield(
+        0.05, tier=Tier.RESTART, lo=-0.5, hi=0.5, adv=True, ui="Hero",
+        description="Hero storm brightness (T0) stamped at generation. 0.05 = the "
+                    "previously hardwired GRS value (byte-identical default). "
+                    "NEGATIVE = dark storm — the Neptune Great-Dark-Spot one-slider "
+                    "(barges use -0.28, polar vortices -0.22, so dark stamps are a "
+                    "supported axis). Exempt from stamp_contrast (KIND_HERO "
+                    "exclusion)",
+    )
+    hero_companions: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=3, adv=True, ui="Hero",
+        description="Bright companion clouds pinned beside each hero storm "
+                    "(Neptune GDS companion / Scooter class): KIND_PEARL stamps "
+                    "offset a few core radii from the hero on its wake-free flank, "
+                    "seeded on their own substream after the population cap. "
+                    "0 = off (byte-identical)",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(
@@ -466,6 +493,45 @@ class StormsParams(_Params):
                     "1 = full patch. Ovals/small storms below the radius threshold "
                     "are unaffected. Pairs with hero_solid_core to de-bullseye the "
                     "whole field without lowering dev_steps or oval_density.",
+    )
+
+    # -- Accents ----------------------------------------------------------
+    # Explicitly colored ovals (the Oval BA / second-red-spot unlock, review
+    # A01): a shared scalar group — count 0-2, one latitude, one appearance.
+    accent_count: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=2, adv=True, ui="Accents",
+        description="Accent ovals: KIND_OVAL storms with EXPLICIT color (the "
+                    "Oval BA 'second red spot' unlock — a red oval beside the "
+                    "white population). Seeded on their own substream after the "
+                    "population cap, so the base storm field is untouched; "
+                    "count=2 places a pair at offset longitudes with identical "
+                    "appearance. 0 = off (byte-identical)",
+    )
+    accent_latitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Accents",
+        description="Pin accent ovals to this latitude (degrees). None = seeded "
+                    "zone placement. Like hero_latitude, the effective range is "
+                    "radius-coupled (see validator) so the stamp stays clear of "
+                    "the 63 deg storm-free exchange band",
+    )
+    accent_tint: float = pfield(
+        0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Accents",
+        description="Accent oval tint (T3): positive = warm/red end of the "
+                    "storm_tints gradient (Oval BA red), negative = cool. Applied "
+                    "verbatim — accents bypass stamp_contrast/stamp_tint_contrast",
+    )
+    accent_brightness: float = pfield(
+        0.12, tier=Tier.RESTART, lo=-0.5, hi=0.5, adv=True, ui="Accents",
+        description="Accent oval brightness (T0); negative = dark oval. Applied "
+                    "verbatim — accents bypass stamp_contrast",
+    )
+    accent_radius: float = pfield(
+        0.05, tier=Tier.RESTART, lo=0.02, hi=0.12, adv=True, ui="Accents",
+        description="Accent oval core radius (radians of arc). Default 0.05 sits "
+                    "above the 0.035 solid-body threshold (OVAL_SOLID_MIN_R in "
+                    "vortex_omega.glsl), so oval_solid_core>0 keeps accents "
+                    "coherent in vorticity mode; below 0.035 they stay Gaussian "
+                    "and can wind into eddies over a long dev run (F07)",
     )
 
     # -- Barges -------------------------------------------------------------
@@ -500,6 +566,15 @@ class StormsParams(_Params):
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.8, 1.3), adv=True, ui="Small storms",
         description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
     )
+    stamp_tint_contrast: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=3.0, adv=True, ui="Small storms",
+        description="Tint amplitude of ovals/barges/pearls/small storms, split "
+                    "from the brightness amplitude (review B5-7): stamp_contrast "
+                    "scales brightness, this scales tint. None = follow "
+                    "stamp_contrast (byte-identical legacy coupling). Like "
+                    "stamp_contrast it EXCLUDES the hero (use hero_tint) and "
+                    "does not touch accents (explicit color)",
+    )
 
     # -- Mergers ------------------------------------------------------------
     merge_rate: float = pfield(
@@ -525,6 +600,19 @@ class StormsParams(_Params):
                     f"limit +-{cap:.1f} deg (hero_radius={self.hero_radius}); the stamp "
                     f"would smear into the 63 deg storm-free exchange band. Lower "
                     f"hero_latitude or hero_radius."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_accent_latitude(self) -> StormsParams:
+        if self.accent_latitude is not None:
+            cap = 63.0 - 206.3 * self.accent_radius
+            if abs(self.accent_latitude) > cap:
+                raise ValueError(
+                    f"accent_latitude={self.accent_latitude} exceeds the radius-coupled "
+                    f"limit +-{cap:.1f} deg (accent_radius={self.accent_radius}); the "
+                    f"stamp would smear into the 63 deg storm-free exchange band. "
+                    f"Lower accent_latitude or accent_radius."
                 )
         return self
 
