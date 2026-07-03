@@ -158,4 +158,23 @@ the imposed feel unresolved.
 > independent of this; it can ship/sit/close on its own merits regardless of the
 > banding-architecture direction. The "big orange plume" that kicked this off was the
 > hero (GRS-analog) vortex at `hero_radius=0.15`, not baroclinic — diagnosed and set
-> to 0.05 in the `jupiter_baroclinic` preset.
+> to 0.05 in the `jupiter_baroclinic` preset (that preset has since been DROPPED —
+> see "Recorded dead ends" below; the coupling engine itself remains).
+
+## Recorded dead ends (do not re-attempt)
+
+Falsified or dropped directions that are under-recorded elsewhere. Check this list
+(and the FALSIFIED sections above, plus `docs/superpowers/specs/*verdict*.md`)
+before proposing work in these areas.
+
+- **`jupiter_baroclinic` factory preset — DROPPED (2026-06-28).** Its baroclinic
+  festoon comb is intrinsically regular and reads *mechanical*; a natural-looking
+  baroclinic preset converges to an injection-driven Jupiter clone, so the preset
+  added nothing. The baroclinic coupling **engine feature is kept** (opt-in,
+  default-off, byte-identical when off) — only the factory preset is gone. See the
+  top-of-file note in `scripts/build_vorticity_presets.py`.
+- **Jupiter polar-cyclone discreteness — DEFERRED (blocked).** Rendering discrete
+  polar cyclone rings (Juno-style popcorn/ring structure) is blocked on
+  vortex-merger physics — without it, injected polar vortices merge into a smooth
+  cap instead of holding a discrete configuration. Research-grade; not scheduled.
+  See `docs/realism.md` (polar rows of the source-fidelity audit).
