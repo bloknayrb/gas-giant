@@ -39,13 +39,14 @@ panels (drag 0.08/0.15) from the swirl panel (drag 0).
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from gasgiant.engine.facade import Simulation
 from gasgiant.gl import GpuContext
-from gasgiant.params.presets import load_factory_preset
+from gasgiant.params.presets import resolve_preset
 
 # --------------------------------------------------------------------------- #
 # Frozen acceptance thresholds (calibrated 2026-06-25 across seeds 4201/7/99/   #
@@ -64,6 +65,17 @@ from gasgiant.params.presets import load_factory_preset
 # --------------------------------------------------------------------------- #
 M1_MAX = 2.30           # max eddy-blob latitude extent (band widths)
 M3_MIN = 0.57           # band-continuity fraction (robust, no bad/clean overlap)
+# Per-preset M3_MIN overrides — W9 re-baseline, 2026-07-03 (user decision on the
+# 2026-07-02 comprehensive-review Top-10 #10 investigation, see
+# docs/reviews/2026-07-03-gate-rebaseline-addendum.md): the 0.57 floor was
+# calibrated on the gas_giant_warm develop config. jupiter_vorticity's narrower
+# jets measured m3 = 0.51 at the very commit that froze the threshold (bbc1b9e,
+# PR #8) and at every commit since (8201626 PR #9, 9c73b06 PR #10, 800f3dc
+# master) — never drifted, never passed. PR #8 knowingly shipped it anyway
+# ("guard-not-oracle", memory/preset-modernization.md); this dict encodes that
+# accepted per-preset exception: 0.46 ≈ 10% below the stable measured 0.51.
+# gas_giant_warm (and every preset not listed) keeps the calibrated 0.57.
+M3_MIN_PER_PRESET = {"jupiter_vorticity": 0.46}
 M4_RANGE = (0.70, 1.60)  # belt high-freq texture vs first-panel baseline
 M5_MIN = 0.22           # hero color contrast (bold hero ~0.30+, lost hero ~0.16)
 # m6: medium-wavenumber eddy energy vs first-panel baseline. TWO-SIDED — the
@@ -101,7 +113,7 @@ def build_cfg(seed: int, drag: float, width: int, raw: bool = False,
     radius 0.18, inject 0, dev_steps 1256) on top of gas_giant_warm.  The two are
     genuinely different dynamics — see plan.  inject/inject_mask let the develop
     config carry broadband eddy injection; eddy_drag sets vort_eddy_drag (Gate 1)."""
-    p = load_factory_preset(preset).model_copy(update={"seed": seed})
+    p = resolve_preset(preset).model_copy(update={"seed": seed})
     if raw:
         p.sim = p.sim.model_copy(update={"resolution": width, "dt_scale": 1.0})
         if sweep_axis == "psi":
@@ -362,9 +374,14 @@ def metric_texture(field: Field):
 # --------------------------------------------------------------------------- #
 # Driver                                                                       #
 # --------------------------------------------------------------------------- #
-def _passes(r) -> bool:
+def m3_min_for(preset: str) -> float:
+    """Effective M3_MIN for a --preset argument (factory name or .json path)."""
+    return M3_MIN_PER_PRESET.get(Path(preset).stem, M3_MIN)
+
+
+def _passes(r, m3_min: float = M3_MIN) -> bool:
     """Co-gated acceptance: m1/m3/m4/m5/m6 must all hold (m2 is informational)."""
-    return (r["m1"] <= M1_MAX and r["m3"] >= M3_MIN
+    return (r["m1"] <= M1_MAX and r["m3"] >= m3_min
             and M4_RANGE[0] <= r["m4"] <= M4_RANGE[1]
             and r["m5"] >= M5_MIN
             and M6_RANGE[0] <= r["m6"] <= M6_RANGE[1])
@@ -391,7 +408,11 @@ def main():
                     help="ship-config mode: sweep the drag axis on the UNMODIFIED preset "
                          "(its own solver/storms), not the develop config")
     ap.add_argument("--preset", default="gas_giant_warm",
-                    help="factory preset to gate in ship-config (--raw) mode")
+                    help="preset to gate in ship-config (--raw) mode: a factory "
+                         "preset name or a path to a .json preset file")
+    ap.add_argument("--out", default=OUT,
+                    help="directory for the swirl_gate.png montage (default: the "
+                         "local _diag scratch dir)")
     ap.add_argument("--inject", type=float, default=0.0,
                     help="vort_inject on the develop config (test texture replenishment)")
     ap.add_argument("--inject-mask", default="belts")
@@ -403,6 +424,7 @@ def main():
                     help="interpret --drags values as vort_psi_drag (scale-selective; global drag 0)")
     args = ap.parse_args()
     drags = [float(x) for x in args.drags.split(",")]
+    m3_min = m3_min_for(args.preset)
 
     gpu = GpuContext.headless()
     rows = []
@@ -434,7 +456,7 @@ def main():
             rec = dict(drag=drag, m1=m1, m2=m2, m3=m3, m4=m4, m5=m5, m6=m6)
             rows.append(rec)
 
-            verdict = "—" if args.calibrate else ("PASS" if _passes(rec) else "FAIL")
+            verdict = "—" if args.calibrate else ("PASS" if _passes(rec, m3_min) else "FAIL")
             tiles.append(label_img(field.rgb[:, :, ::-1], [
                 f"drag {drag}  {verdict}",
                 f"m1 blob {m1:.2f}  m2 mean {m2:.2f}  m3 cont {m3:.2f}",
@@ -446,12 +468,14 @@ def main():
     print("\n  drag |   m1   |  m2  |  m3  |  m4  |  m5  |  m6  | verdict  (m2 reported, not gated)")
     print("  -----+--------+------+------+------+------+------+--------")
     for r in rows:
-        v = "—" if args.calibrate else ("PASS" if _passes(r) else "FAIL")
+        v = "—" if args.calibrate else ("PASS" if _passes(r, m3_min) else "FAIL")
         print(f"  {r['drag']:.3f}| {r['m1']:6.2f} | {r['m2']:.2f} | {r['m3']:.2f} "
               f"| {r['m4']:.2f} | {r['m5']:.2f} | {r['m6']:.2f} | {v}")
 
-    cv2.imwrite(f"{OUT}/swirl_gate.png", np.vstack(tiles))
-    print(f"\nwrote {OUT}/swirl_gate.png")
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out_dir / "swirl_gate.png"), np.vstack(tiles))
+    print(f"\nwrote {out_dir / 'swirl_gate.png'}")
 
 
 if __name__ == "__main__":

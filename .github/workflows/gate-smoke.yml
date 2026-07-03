@@ -1,0 +1,51 @@
+# Swirl-gate smoke under llvmpipe (A4-2 groundwork).
+#
+# workflow_dispatch ONLY — deliberately no push/schedule triggers. Measured
+# 2026-07-03 (run 28675593970, W9/PR #23): the 1024w jupiter_vorticity gate
+# takes ~22 min wall on a GitHub ubuntu runner under llvmpipe (~150x the ~10 s
+# RTX 3070 equivalent), and llvmpipe@1024 shifts the metrics vs the RTX/1536
+# calibration (m1 1.22 / m3 0.53 / m5 0.28 vs 0.91 / 0.51 / 0.52) — so the
+# frozen thresholds are NOT renderer/width-portable. Do not promote this job
+# to push/schedule without llvmpipe-calibrated thresholds of its own.
+#
+# The gate prints the metric table and writes a labeled montage (uploaded as an
+# artifact). It does not exit nonzero on FAIL — this job is a smoke/runtime
+# probe, not an enforcement gate.
+
+name: Gate smoke (swirl, llvmpipe)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gate-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      # Software OpenGL, mirroring ci.yml (llvmpipe supports GL 4.5 + compute)
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      # xvfb is REQUIRED, unlike in ci.yml: GpuContext.headless() goes through
+      # glcontext's x11 backend, which needs a DISPLAY even for llvmpipe.
+      # (In ci.yml the gpu fixture just SKIPS when XOpenDisplay fails — the
+      # "GPU smoke tests (llvmpipe)" step currently runs 6 tests and skips ~178.
+      # This job must actually render, so it gets a virtual display.)
+      - name: Install Mesa (llvmpipe), EGL and xvfb
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
+      - name: Sync dependencies
+        run: uv sync --all-extras
+      - name: Swirl gate smoke (jupiter_vorticity ship config, 1024w)
+        run: >
+          xvfb-run -a uv run python scripts/swirl_gate.py --raw --preset jupiter_vorticity
+          --drags 0.0 --seed 4201 --width 1024 --out out/gate-smoke
+      - name: Upload montage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swirl-gate-montage
+          path: out/gate-smoke/swirl_gate.png
+          if-no-files-found: warn
