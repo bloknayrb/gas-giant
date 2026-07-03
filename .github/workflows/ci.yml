@@ -8,16 +8,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      # Software OpenGL for the @gpu-marked tests (llvmpipe supports GL 4.5 + compute)
-      LIBGL_ALWAYS_SOFTWARE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
-      - name: Install Mesa (llvmpipe) and EGL
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6
       - name: Sync dependencies
         run: uv sync --all-extras
       - name: Lint
@@ -26,5 +21,26 @@ jobs:
         run: uv run lint-imports
       - name: Unit tests
         run: uv run pytest -m "not gpu" -q
-      - name: GPU smoke tests (llvmpipe)
-        run: uv run pytest -m gpu -q
+
+  # MEASUREMENT RUN (fix/ci-gpu-tests-actually-run): full gpu tier under
+  # xvfb-run + llvmpipe. Previously ci.yml ran `pytest -m gpu` with no DISPLAY,
+  # so GpuContext.headless() failed (XOpenDisplay) and ~178/184 gpu tests
+  # silently SKIPPED while the job reported green. xvfb gives glcontext's x11
+  # backend a virtual display, mirroring gate-smoke.yml.
+  gpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # Software OpenGL (llvmpipe supports GL 4.5 + compute)
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Install Mesa (llvmpipe), EGL and xvfb
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
+      - name: Sync dependencies
+        run: uv sync --all-extras
+      - name: GPU tests (llvmpipe under xvfb)
+        run: xvfb-run -a uv run pytest -m gpu -q -rs --durations=40
