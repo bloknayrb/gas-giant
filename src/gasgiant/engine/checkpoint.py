@@ -33,14 +33,22 @@ if TYPE_CHECKING:
 # serialized for vorticity-mode round-trip (equirect only — P4 incomplete).
 # 5 = v1.6 Phase B P8a: all three domains' omega+psi state serialized so
 # polar-patch vorticity round-trips are byte-exact.
-GENERATION_VERSION = 5
+# 6 = placement-chirality fixes (review F12/F06, 2026-07-03): festoon edge
+# selection and hero wake geometry changed, so old checkpoints' tracers were
+# developed under different generation; registry gains wake_lat_off and the
+# previously-unserialized aspect (restored heroes silently reset to round on
+# aspect!=1 presets before this).
+GENERATION_VERSION = 6
 
 # Registry scalar fields serialized per vortex. float64: the "restored
 # registry is identical" guarantee is exact-round-trip, and pack_ssbo computes
 # cos/sin in float64 before its f32 cast — f32-quantized lat/lon would flip
 # SSBO last bits. Trailing fields added later (cooldown/ttl) load tolerantly
 # by npz key presence.
-_REG_FIELDS = ("lat", "lon", "r_core", "strength", "kind", "tint", "brightness", "wake_dir")
+_REG_FIELDS = (
+    "lat", "lon", "r_core", "strength", "kind", "tint", "brightness",
+    "wake_dir", "wake_lat_off", "aspect",
+)
 
 
 def save_checkpoint(sim: Simulation, path: Path) -> None:

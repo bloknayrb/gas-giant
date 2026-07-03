@@ -28,7 +28,11 @@ _PKG = "gasgiant.sim.kernels"
 #       print(f, hashlib.sha1(t.encode()).hexdigest())
 # "
 _PINNED: dict[str, str] = {
-    "psi.comp":          "c2e7dcf5422aad158d47189c4e95baca48c0450e",
+    # Updated 2026-07-03 for the placement-chirality fixes (review F12/F06,
+    # montage user-approved 2026-07-03): hero wake wedge reads the new
+    # wake_lat_off lane, defaults westward, and is windowed to |across| 2.5
+    # so it can no longer leak into the psi_feather polar band.
+    "psi.comp":          "4e905a61164cea74991442622d38742482f0edeb",
     "velocity.comp":     "a5edeb117303788431b9d1ab686f0dddae402fd6",
     "advect.comp":       "a44a0061d19ac2769c45b308500e6405f8663fd1",
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
@@ -38,7 +42,11 @@ _PINNED: dict[str, str] = {
     # KIND_OUTBREAK cool push 0.15->0.07 (lead-knot visibility pass). Both edits
     # touch ONLY the KIND_OUTBREAK branch, which never fires without outbreak
     # vortices -> byte-identical kinematic GPU output for the no-outbreak case.
-    "vortex_stamp.glsl": "2b4e75cfeb69a39ccf2c156d4445d5a65c1a4370",
+    # Updated 2026-07-03 (review F06, approved with the chirality montage):
+    # tracer-side hero wake mirrors psi.comp — wake_lat_off lane read,
+    # |across| 2.5 locality window. INTENTIONAL pixel change on presets with
+    # heroes; P0.5 baseline advanced the same day (scripts/p05_baseline_hash.py).
+    "vortex_stamp.glsl": "57524532a8c40952941a750b0b01921869e12a3c",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }
