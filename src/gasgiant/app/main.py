@@ -12,6 +12,7 @@ frame-budgeted job slices in this loop.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from collections import deque
@@ -112,6 +113,16 @@ SPEED_OPTIONS: list[tuple[int, str]] = [
     (16, "16"),
     (MAX_STEPS_PER_FRAME, "Max"),
 ]
+# Default steps-per-frame for the dev-run preview. Measured (W10a, 2026-07-02,
+# RTX 3070, gas_giant_warm): GUI dev-run throughput is FLAT across this value
+# (~3.0 steps/s at 2 AND at 8 steps/frame; frame time grows 653 ms -> 2379 ms
+# to match), so raising it buys no wall-time and only worsens input latency
+# while a dev run is in flight. Kept at the historical 2. NOTE the open perf
+# question this measurement exposed: the same preset steps at ~85 ms/step in a
+# headless context vs ~330 ms/step under the GUI loop -- root-causing that
+# ~4x per-step gap (not chunking) is where the first-launch minutes actually
+# are. tick() is chunk-invariant (see Simulation.tick) either way.
+DEFAULT_STEPS_PER_FRAME = 2
 
 
 def _shortcuts_enabled() -> bool:
@@ -127,22 +138,91 @@ def _shortcuts_enabled() -> bool:
     return not imgui.get_io().want_text_input
 
 
+def _format_eta(seconds: float) -> str:
+    """Human ETA for the dev run: seconds under a minute, whole minutes above.
+    Rounds up so the estimate never under-promises ("~60s" not "~59s")."""
+    if seconds < 59.5:
+        return f"~{math.ceil(seconds)}s left"
+    return f"~{math.ceil(seconds / 60.0)}m left"
+
+
 def _dev_progress_label(
-    done: int, target: int, playing: bool, recomputing: bool, spinner: str
+    done: int,
+    target: int,
+    playing: bool,
+    recomputing: bool,
+    spinner: str,
+    eta_seconds: float | None = None,
 ) -> str:
     """Label for the development-progress bar (drawn only while ``done < target``).
 
     ``tick()`` no-ops once developed, so Pause deliberately freezes the dev-run
     animation. When paused we must NOT keep animating the "recomputing..."
     spinner -- a frozen-but-spinning bar reads as a hang (#1). Instead say so
-    plainly and point at the way out. Extracted as a pure function so the label
-    logic is unit-testable without an imgui frame or the ``time.monotonic``
-    spinner clock."""
+    plainly and point at the way out. The playing branch leads with a verb
+    (B1-1: a bare "N/M" next to a churning half-formed planet reads as
+    working, broken, or done with equal probability), plus an ETA once
+    DevRateSampler has enough span. It deliberately promises no speed-combo
+    speedup -- measured throughput is flat across steps-per-frame (see
+    DEFAULT_STEPS_PER_FRAME). Extracted as a pure function so
+    the label logic is unit-testable without an imgui frame or the
+    ``time.monotonic`` spinner clock."""
     if not playing:
         return f"paused {done}/{target} (Play/Step to develop)"
     if recomputing:
         return f"{spinner} recomputing... {done}/{target}"
-    return f"{done}/{target}"
+    eta = f" ({_format_eta(eta_seconds)})" if eta_seconds is not None else ""
+    return f"developing {done}/{target}{eta}"
+
+
+def _dev_overlay_text(
+    done: int, target: int, playing: bool, eta_seconds: float | None
+) -> str | None:
+    """One-line viewport overlay while the dev run is visibly evolving (B1-1:
+    the progress bar lives in a 10%-height side pane a new user never opens).
+    Hidden once developed; hidden while paused because the Performance-pane
+    label already says "paused ... (Play/Step to develop)" and a paused overlay
+    on top of the image would nag."""
+    if done >= target or not playing:
+        return None
+    eta = f" ({_format_eta(eta_seconds)})" if eta_seconds is not None else ""
+    return f"Developing planet — {done}/{target}{eta}"
+
+
+class DevRateSampler:
+    """Rolling steps/sec over the last few seconds of the dev run, for the ETA.
+
+    Pure (caller supplies ``now``) so it is unit-testable without patching the
+    clock. ETA is withheld until the window spans >= 2 s of wall time with real
+    progress -- a first-frame estimate from one giant chunk would be noise. A
+    steps_done that moves backwards (Restart dev, RESTART-tier commit) resets
+    the window automatically."""
+
+    _WINDOW_S = 5.0
+    _MIN_SPAN_S = 2.0
+
+    def __init__(self) -> None:
+        self._samples: deque[tuple[float, int]] = deque()
+
+    def reset(self) -> None:
+        self._samples.clear()
+
+    def add(self, now: float, steps_done: int) -> None:
+        if self._samples and steps_done < self._samples[-1][1]:
+            self._samples.clear()  # dev run restarted
+        self._samples.append((now, steps_done))
+        while self._samples and now - self._samples[0][0] > self._WINDOW_S:
+            self._samples.popleft()
+
+    def eta_seconds(self, now: float, remaining: int) -> float | None:
+        if remaining <= 0 or len(self._samples) < 2:
+            return None
+        t0, s0 = self._samples[0]
+        t1, s1 = self._samples[-1]
+        span, steps = t1 - t0, s1 - s0
+        if span < self._MIN_SPAN_S or steps <= 0:
+            return None
+        return remaining / (steps / span)
 
 
 class Toasts:
@@ -212,7 +292,10 @@ class StudioApp:
             self.toasts.info("restored previous session")
         else:
             self._active_preset = ("gas_giant_warm", PresetSource.FACTORY)
-            self.toasts.info("started from gas_giant_warm")
+            self.toasts.info(
+                f"started from gas_giant_warm — developing {self.params.sim.dev_steps} steps"
+                " (Speed control in the Playback pane)"
+            )
         self._pristine: PlanetParams | None = self.params.model_copy(deep=True)
         # Cached merged (factory + user) dropdown list; refreshed on save/load and
         # by the explicit "Refresh presets" button, never re-enumerated per frame.
@@ -224,7 +307,8 @@ class StudioApp:
         # these only decide how often/with what max_steps draw_equirect calls tick(),
         # never touch tick()'s own (chunk-invariant) stepping logic.
         self._playing = True  # default matches the old always-ticking behavior
-        self._steps_per_frame = 2  # matches the old hardcoded tick(2)
+        self._steps_per_frame = DEFAULT_STEPS_PER_FRAME  # measured choice, see constant
+        self._dev_rate = DevRateSampler()  # feeds the ETA in label + overlay
         self._single_step_requested = False  # consumed once, the frame after Step
         # Bounded undo/redo history (Phase 2). Each entry is an UndoRecord — a
         # deep copy of a committed params snapshot plus Phase 6 preset-identity
@@ -878,8 +962,12 @@ class StudioApp:
         self._draw_playback()
         done, target = self.sim.steps_done, self.sim.steps_target
         if done < target:
-            spinner = "|/-\\"[int(time.monotonic() * 8) % 4]
-            label = _dev_progress_label(done, target, self._playing, self._recomputing, spinner)
+            now = time.monotonic()
+            spinner = "|/-\\"[int(now * 8) % 4]
+            eta = self._dev_rate.eta_seconds(now, target - done)
+            label = _dev_progress_label(
+                done, target, self._playing, self._recomputing, spinner, eta
+            )
             imgui.progress_bar(done / max(target, 1), imgui.ImVec2(-1.0, 0.0), label)
         else:
             self._recomputing = False  # dev run caught up; back to the plain state
@@ -929,8 +1017,45 @@ class StudioApp:
             hello_imgui.get_runner_params().app_shall_exit = True
 
     def gui_overlays(self) -> None:
+        self._draw_dev_overlay()
         self.toasts.draw()
         self.draw_help()
+
+    def _draw_dev_overlay(self) -> None:
+        """B1-1: one line over the viewport while the dev run evolves, so the
+        state is visible without opening the Playback pane. Drawn from the
+        overlay layer (same idiom as Toasts.draw) rather than inside
+        draw_equirect, which stays a pure tick/blit body its headless tests
+        can drive without an imgui frame. Also the single per-frame feed point
+        for the ETA sampler -- gui_overlays runs after draw_equirect ticked."""
+        if self.sim is None:
+            return
+        now = time.monotonic()
+        done, target = self.sim.steps_done, self.sim.steps_target
+        if self._playing and done < target:
+            self._dev_rate.add(now, done)
+        eta = self._dev_rate.eta_seconds(now, target - done)
+        text = _dev_overlay_text(done, target, self._playing, eta)
+        if text is None:
+            return
+        vp = imgui.get_main_viewport()
+        imgui.set_next_window_pos(
+            imgui.ImVec2(vp.pos.x + vp.size.x * 0.5, vp.pos.y + 40.0),
+            imgui.Cond_.always,
+            imgui.ImVec2(0.5, 0.0),
+        )
+        imgui.set_next_window_bg_alpha(0.6)
+        flags = (
+            imgui.WindowFlags_.no_decoration
+            | imgui.WindowFlags_.always_auto_resize
+            | imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.no_focus_on_appearing
+            | imgui.WindowFlags_.no_nav
+            | imgui.WindowFlags_.no_move
+        )
+        if imgui.begin("##dev-overlay", None, flags)[0]:
+            imgui.text(text)
+        imgui.end()
 
     def draw_help(self) -> None:
         """Phase 7 help window: a plain floating imgui window (the same
@@ -1027,7 +1152,11 @@ def main() -> int:
     split_right = hello_imgui.DockingSplit("MainDockSpace", "SphereSpace", imgui.Dir.right, 0.36)
     windows = [
         hello_imgui.DockableWindow("Controls", "LeftSpace", app.draw_controls),
-        hello_imgui.DockableWindow("Performance", "PerfSpace", app.draw_perf),
+        # "###Performance" keeps the imgui window ID (and thus saved docking
+        # layouts / View-menu state from older sessions) stable while the
+        # visible title says what the pane actually hosts: transport controls
+        # and the dev-run progress, with perf text as a footnote.
+        hello_imgui.DockableWindow("Playback###Performance", "PerfSpace", app.draw_perf),
         hello_imgui.DockableWindow("Equirect", "MainDockSpace", app.draw_equirect),
         hello_imgui.DockableWindow("Sphere", "SphereSpace", app.draw_sphere),
     ]

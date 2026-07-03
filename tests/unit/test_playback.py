@@ -166,4 +166,78 @@ def test_dev_progress_label_playing_while_recomputing_animates() -> None:
 
 def test_dev_progress_label_playing_plain_progress() -> None:
     label = main._dev_progress_label(done=10, target=100, playing=True, recomputing=False, spinner="/")
-    assert label == "10/100"
+    assert label == "developing 10/100"
+
+
+# -- W10a (review B1-1): the dev run must be labeled with a verb, an ETA once
+# measurable, and surfaced where the user is looking (viewport overlay), so a
+# first launch never reads as a hang or a finished-but-ugly planet. The label
+# deliberately promises no speed-combo speedup: measured throughput is flat
+# across steps-per-frame (see DEFAULT_STEPS_PER_FRAME), so the honest signal
+# is the ETA itself.
+
+
+def test_dev_progress_label_playing_includes_eta_when_available() -> None:
+    label = main._dev_progress_label(
+        done=10, target=100, playing=True, recomputing=False, spinner="/", eta_seconds=330.0
+    )
+    assert label == "developing 10/100 (~6m left)"
+
+
+def test_format_eta_rounds_up_and_switches_units() -> None:
+    assert main._format_eta(45.0) == "~45s left"
+    assert main._format_eta(59.4) == "~60s left"
+    assert main._format_eta(61.0) == "~2m left"
+    assert main._format_eta(330.0) == "~6m left"
+
+
+def test_dev_rate_sampler_needs_two_seconds_of_samples() -> None:
+    s = main.DevRateSampler()
+    s.add(now=100.0, steps_done=0)
+    s.add(now=101.0, steps_done=3)
+    assert s.eta_seconds(now=101.0, remaining=90) is None, "under 2 s of span: no ETA yet"
+    s.add(now=102.5, steps_done=8)
+    eta = s.eta_seconds(now=102.5, remaining=92)
+    assert eta is not None
+    assert eta == pytest.approx(92 / (8 / 2.5))
+
+
+def test_dev_rate_sampler_ignores_stalled_rate() -> None:
+    s = main.DevRateSampler()
+    s.add(now=100.0, steps_done=5)
+    s.add(now=103.0, steps_done=5)  # paused/stalled: no progress
+    assert s.eta_seconds(now=103.0, remaining=50) is None
+
+
+def test_dev_rate_sampler_reset_forgets_history() -> None:
+    s = main.DevRateSampler()
+    s.add(now=100.0, steps_done=0)
+    s.add(now=103.0, steps_done=30)
+    s.reset()
+    assert s.eta_seconds(now=103.0, remaining=50) is None
+
+
+def test_dev_overlay_text_while_developing_and_playing() -> None:
+    text = main._dev_overlay_text(done=238, target=1256, playing=True, eta_seconds=372.0)
+    assert text == "Developing planet — 238/1256 (~7m left)"
+
+
+def test_dev_overlay_text_without_eta_yet() -> None:
+    text = main._dev_overlay_text(done=4, target=1256, playing=True, eta_seconds=None)
+    assert text == "Developing planet — 4/1256"
+
+
+def test_dev_overlay_text_hidden_when_done_or_paused() -> None:
+    assert main._dev_overlay_text(done=1256, target=1256, playing=True, eta_seconds=None) is None
+    assert main._dev_overlay_text(done=10, target=1256, playing=False, eta_seconds=None) is None
+
+
+def test_default_speed_is_measured_choice_and_valid_option() -> None:
+    """W10a measurement (2026-07-02, RTX 3070, gas_giant_warm): GUI dev-run
+    throughput is FLAT across steps-per-frame (~3.0 steps/s at spf=2 AND
+    spf=8; frame time just grows 653 ms -> 2379 ms), so raising the default
+    buys no wall-time and only adds input latency. The default stays 2; the
+    first-launch fix is the honest label + ETA + overlay, not a speed bump.
+    Must stay a listed SPEED_OPTIONS value so the combo shows it."""
+    assert main.DEFAULT_STEPS_PER_FRAME == 2
+    assert main.DEFAULT_STEPS_PER_FRAME in [v for v, _ in main.SPEED_OPTIONS]
