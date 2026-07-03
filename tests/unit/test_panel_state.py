@@ -517,3 +517,95 @@ def test_leaf_changed_detects_real_color_difference():
 def test_leaf_changed_scalars_unaffected():
     assert panels._leaf_changed(0.5, 0.5) is False
     assert panels._leaf_changed(0.5, 0.6) is True
+
+
+# -- B4-2: Clear-template confirm + hero_latitude pin widget ---------------------
+
+
+def test_clear_template_button_stages_confirm_not_clear(imgui_ctx, monkeypatch):
+    """Clicking "Clear template" must NOT clear the template outright -- it
+    opens a confirm modal (the cleared skeleton is recoverable only via Undo,
+    and the startup preset ships with a template engaged)."""
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    opened = []
+    monkeypatch.setattr(panels.imgui, "small_button", lambda label: True)
+    monkeypatch.setattr(panels.imgui, "open_popup", lambda title: opened.append(title))
+
+    imgui.new_frame()
+    imgui.begin("confirm_test", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False), "the click alone must not clear"
+    assert doc["bands"]["template"] is not None, "template survives until the confirm"
+    assert opened == ["Clear band template?"], "the confirm modal was staged"
+
+
+def test_clear_template_confirm_clears_and_commits(imgui_ctx, monkeypatch):
+    """Confirming inside the modal clears the template and reports a committed
+    change (one undo entry via the normal panel pipeline)."""
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    # Simulate: modal is open, its "Clear##template" button is pressed.
+    monkeypatch.setattr(panels.imgui, "small_button", lambda label: False)
+    monkeypatch.setattr(
+        panels.imgui, "begin_popup_modal", lambda title, p, flags: (True, True)
+    )
+    monkeypatch.setattr(
+        panels.imgui, "button", lambda label: label == "Clear##template"
+    )
+    monkeypatch.setattr(panels.imgui, "close_current_popup", lambda: None)
+    monkeypatch.setattr(panels.imgui, "end_popup", lambda: None)
+
+    imgui.new_frame()
+    imgui.begin("confirm_test2", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (True, True)
+    assert doc["bands"]["template"] is None
+    assert "Undo" in panels._CLEAR_TEMPLATE_CONFIRM, "the copy names the way back"
+
+
+def test_clear_template_cancel_keeps_template(imgui_ctx, monkeypatch):
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    monkeypatch.setattr(panels.imgui, "small_button", lambda label: False)
+    monkeypatch.setattr(
+        panels.imgui, "begin_popup_modal", lambda title, p, flags: (True, True)
+    )
+    monkeypatch.setattr(
+        panels.imgui, "button", lambda label: label == "Cancel##template"
+    )
+    monkeypatch.setattr(panels.imgui, "close_current_popup", lambda: None)
+    monkeypatch.setattr(panels.imgui, "end_popup", lambda: None)
+
+    imgui.new_frame()
+    imgui.begin("confirm_test3", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False)
+    assert doc["bands"]["template"] is not None

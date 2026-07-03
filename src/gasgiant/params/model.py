@@ -336,6 +336,15 @@ class TurbulenceParams(_Params):
     )
 
 
+def hero_latitude_cap(hero_radius: float) -> float:
+    """Radius-coupled |latitude| limit for a pinned hero storm (degrees): the
+    stamp must stay clear of the 63 deg storm-free exchange band. Single
+    source of truth for both the model validator and the GUI's pin-slider
+    bounds (B4-2), so the widget can never offer a value the validator would
+    reject."""
+    return 63.0 - 206.3 * hero_radius
+
+
 class StormsParams(_Params):
     """Field declaration order matches the panel's Hero / Ovals / Barges /
     Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
@@ -368,10 +377,11 @@ class StormsParams(_Params):
     )
     hero_latitude: float | None = pfield(
         None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Hero",
-        description="Pin the hero storm to this latitude (degrees); preset-only. "
-                    "None = seeded tropical-zone placement. The effective range is "
-                    "further limited by hero_radius (see validator) so the stamp "
-                    "stays clear of the 63 deg exchange band",
+        description="Pin the hero storm to this latitude (degrees; the 'pin' "
+                    "checkbox toggles it). Unpinned (None) = seeded tropical-zone "
+                    "placement. The effective range is further limited by "
+                    "hero_radius (see validator) so the stamp stays clear of the "
+                    "63 deg exchange band",
     )
     rim_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True, ui="Hero",
@@ -518,7 +528,7 @@ class StormsParams(_Params):
     @model_validator(mode="after")
     def _validate_hero_latitude(self) -> StormsParams:
         if self.hero_latitude is not None:
-            cap = 63.0 - 206.3 * self.hero_radius
+            cap = hero_latitude_cap(self.hero_radius)
             if abs(self.hero_latitude) > cap:
                 raise ValueError(
                     f"hero_latitude={self.hero_latitude} exceeds the radius-coupled "
