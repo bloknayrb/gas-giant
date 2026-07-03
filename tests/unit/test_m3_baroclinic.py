@@ -21,6 +21,10 @@ Physics (adversarial-review corrected):
   - Diagnose on eddy interface-height variance (non-zonal var of h2), NOT KE.
 """
 import numpy as np
+import pytest
+
+# ~147s of CPU reference-solver work; excluded from the fast loop (-m "not gpu and not slow").
+pytestmark = pytest.mark.slow
 
 
 def _growth_rate(st, step_2layer, eddy_var, n_steps, sample=10):

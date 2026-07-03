@@ -9,6 +9,9 @@ from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
 from gasgiant.sim.baroclinic_driver import BaroclinicSourceDriver
 
+# ~150s of CPU reference-solver work; excluded from the fast loop (-m "not gpu and not slow").
+pytestmark = pytest.mark.slow
+
 
 def test_driver_source_evolves():
     """Re-deriving the source after advancing the baroclinic solver gives a

@@ -48,6 +48,7 @@ packages = ["src/gasgiant"]
 testpaths = ["tests/unit", "tests/gpu"]
 markers = [
     "gpu: tests that require an OpenGL 4.3 context (real GPU or llvmpipe)",
+    "slow: heavy CPU tests (reference solvers); excluded from the fast loop via -m 'not gpu and not slow'",
 ]
 
 [tool.ruff]
