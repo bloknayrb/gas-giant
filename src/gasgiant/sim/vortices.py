@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gasgiant.params.model import PolesParams, StormsParams
+from gasgiant.params.model import PolesParams, StormsParams, hero_latitude_cap
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
@@ -570,16 +570,19 @@ def _add_accent_ovals(
     strength-radius law), so oval_solid_core >= the 0.035 radius gate keeps them
     coherent in vorticity mode. stamp_contrast does NOT apply (color is verbatim
     by design; this runs after the contrast pass)."""
+    # Same radius-coupled cap as the explicit-value validator: auto-placement
+    # must never yield a latitude that accent_latitude=<same value> would reject.
+    cap = min(MAX_VORTEX_LAT, float(np.deg2rad(hero_latitude_cap(storms.accent_radius))))
     if storms.accent_latitude is not None:
         lat = float(np.deg2rad(storms.accent_latitude))
     else:
         # Auto-place: seeded zone pick, tropical-to-temperate preference
         # (the hero's placement rule, one draw from the accent stream).
-        cands = [z for z in zones if 0.15 < abs(z[0]) < 1.0] or zones
+        cands = [z for z in zones if 0.15 < abs(z[0]) < min(1.0, cap)] or zones
         if not cands:
             return
         center, _w = cands[int(rng.integers(0, len(cands)))]
-        lat = float(np.clip(center, -MAX_VORTEX_LAT, MAX_VORTEX_LAT))
+        lat = float(np.clip(center, -cap, cap))
     r = storms.accent_radius
     s = _ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
     for lon in _poisson_lons(rng, storms.accent_count, min_sep=0.6):

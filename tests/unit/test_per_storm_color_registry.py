@@ -117,6 +117,27 @@ def test_accent_auto_placement_lands_on_a_band():
     assert abs(added_a[0].lat) < np.deg2rad(68.0)
 
 
+def test_accent_auto_placement_honors_radius_coupled_cap():
+    """Auto-placement obeys the SAME radius-coupled latitude cap as the
+    explicit-value validator (hero_latitude_cap): whatever latitude auto-place
+    picks, passing it back explicitly must validate. Sweeps seeds and the
+    radius extremes (cap 52.7 deg at default 0.05, 38.2 deg at hi 0.12)."""
+    from gasgiant.params.model import hero_latitude_cap
+
+    for radius in (0.05, 0.12):
+        cap = np.deg2rad(hero_latitude_cap(radius))
+        for seed in (1, 2, 3, 5, 8, 13, 21, 34):
+            base_n = len(_registry(seed=seed).vortices)
+            reg = _registry(seed=seed, accent_count=1, accent_radius=radius)
+            added = reg.vortices[base_n:]
+            assert len(added) == 1
+            assert abs(added[0].lat) <= cap + 1e-9, (
+                f"seed={seed} radius={radius}: auto-placed accent at "
+                f"{np.rad2deg(added[0].lat):.1f} deg exceeds the "
+                f"{np.rad2deg(cap):.1f} deg validator cap"
+            )
+
+
 def test_accent_bypasses_stamp_contrast():
     """Accent color is EXPLICIT (seeded after the contrast pass): stamp_contrast
     must not scale it."""

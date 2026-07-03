@@ -343,17 +343,17 @@ class TurbulenceParams(_Params):
 
 
 def hero_latitude_cap(hero_radius: float) -> float:
-    """Radius-coupled |latitude| limit for a pinned hero storm (degrees): the
+    """Radius-coupled |latitude| limit for a placed storm stamp (degrees): the
     stamp must stay clear of the 63 deg storm-free exchange band. Single
-    source of truth for both the model validator and the GUI's pin-slider
-    bounds (B4-2), so the widget can never offer a value the validator would
-    reject."""
+    source of truth for the hero validator, the GUI's pin-slider bounds
+    (B4-2), and the accent-oval validator/auto-placement, so no path can
+    produce a latitude another path would reject."""
     return 63.0 - 206.3 * hero_radius
 
 
 class StormsParams(_Params):
-    """Field declaration order matches the panel's Hero / Ovals / Barges /
-    Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
+    """Field declaration order matches the panel's Hero / Ovals / Accents /
+    Barges / Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
     of the same ``ui`` sub-label) so ``_draw_model`` emits one
     ``separator_text`` per group boundary, not one per field. ``rim_contrast``
     and ``wake_turbulence`` are hero-perimeter/wake effects -> Hero.
@@ -547,7 +547,8 @@ class StormsParams(_Params):
     )
     accent_radius: float = pfield(
         0.05, tier=Tier.RESTART, lo=0.02, hi=0.12, adv=True, ui="Accents",
-        description="Accent oval core radius (radians of arc). Default 0.05 sits "
+        description="Accent oval core radius (radians of arc; 1 rad = 57.3 deg, "
+                    "so default 0.05 ~ 2.9 deg). Default 0.05 sits "
                     "above the 0.035 solid-body threshold (OVAL_SOLID_MIN_R in "
                     "vortex_omega.glsl), so oval_solid_core>0 keeps accents "
                     "coherent in vorticity mode; below 0.035 they stay Gaussian "
@@ -626,7 +627,7 @@ class StormsParams(_Params):
     @model_validator(mode="after")
     def _validate_accent_latitude(self) -> StormsParams:
         if self.accent_latitude is not None:
-            cap = 63.0 - 206.3 * self.accent_radius
+            cap = hero_latitude_cap(self.accent_radius)
             if abs(self.accent_latitude) > cap:
                 raise ValueError(
                     f"accent_latitude={self.accent_latitude} exceeds the radius-coupled "
