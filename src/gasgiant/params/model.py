@@ -999,7 +999,8 @@ class EmissionParams(_Params):
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="Auroral ovals around the (offset) magnetic poles; "
                     "written to the emission map's ALPHA channel so the "
-                    "importer can lift it onto a shell",
+                    "importer can lift it onto a shell. Not visible in the "
+                    "Color preview — export and view emission.exr",
     )
     aurora_color: tuple[float, float, float] = pfield(
         (0.85, 0.35, 0.60), tier=Tier.POST, adv=True, ui="Emission",
