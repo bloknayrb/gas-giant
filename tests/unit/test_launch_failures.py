@@ -164,6 +164,81 @@ def test_init_gl_version_below_43_sets_friendly_error(monkeypatch):
     assert fake_runner.app_shall_exit is True
 
 
+def test_init_gl_is_atomic_when_viewport_construction_fails(monkeypatch):
+    """Partial-init regression (pre-merge review of PR #21): if Simulation
+    succeeds but EquirectViewport/SpherePreview then raise (both compile
+    shaders -- exactly the failure class B1-2 handles), self.sim must NOT be
+    left non-None. Otherwise the draw callbacks' `if self.sim is None`
+    guards pass and draw_equirect crashes on self.viewport=None through the
+    native callback -- the exact crash mode this handler exists to prevent."""
+    fake_runner = _FakeRunnerParams()
+    monkeypatch.setattr(main_mod.hello_imgui, "get_runner_params", lambda: fake_runner)
+
+    class FakeCtx:
+        version_code = 430
+        info = {"GL_RENDERER": "fake"}
+
+    class FakeGpu:
+        ctx = FakeCtx()
+
+        @classmethod
+        def attach(cls):
+            return cls()
+
+    sim_built: list[bool] = []
+
+    def fake_simulation(params, gpu):
+        sim_built.append(True)
+        return object()  # Simulation construction SUCCEEDS
+
+    def boom_viewport(gpu):
+        raise RuntimeError("fragment shader compile failed")
+
+    monkeypatch.setattr(main_mod, "GpuContext", FakeGpu)
+    monkeypatch.setattr(main_mod, "Simulation", fake_simulation)
+    monkeypatch.setattr(main_mod, "EquirectViewport", boom_viewport)
+    app = _make_init_app()
+    app.init_gl()  # must NOT raise
+
+    assert sim_built == [True], "precondition: Simulation really was constructed"
+    assert app.sim is None, "partial init must not leak: sim assigned only after ALL succeed"
+    assert app.gpu is None and app.viewport is None and app.sphere is None
+    assert app.init_error is not None
+    assert "fragment shader compile failed" in app.init_error
+    assert fake_runner.app_shall_exit is True
+
+
+def test_init_gl_is_atomic_when_sphere_construction_fails(monkeypatch):
+    """Same ordering guarantee one constructor later: viewport succeeded too,
+    only SpherePreview (the LAST constructor) failed."""
+    fake_runner = _FakeRunnerParams()
+    monkeypatch.setattr(main_mod.hello_imgui, "get_runner_params", lambda: fake_runner)
+
+    class FakeCtx:
+        version_code = 430
+        info = {"GL_RENDERER": "fake"}
+
+    class FakeGpu:
+        ctx = FakeCtx()
+
+        @classmethod
+        def attach(cls):
+            return cls()
+
+    monkeypatch.setattr(main_mod, "GpuContext", FakeGpu)
+    monkeypatch.setattr(main_mod, "Simulation", lambda params, gpu: object())
+    monkeypatch.setattr(main_mod, "EquirectViewport", lambda gpu: object())
+    monkeypatch.setattr(
+        main_mod, "SpherePreview", lambda gpu: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    app = _make_init_app()
+    app.init_gl()
+
+    assert app.sim is None and app.viewport is None and app.sphere is None and app.gpu is None
+    assert app.init_error is not None
+    assert fake_runner.app_shall_exit is True
+
+
 def test_draw_callbacks_survive_failed_init(monkeypatch):
     """After a failed init the runner may still draw a frame; every dock-pane
     callback must be a no-op (Controls shows the message) instead of an

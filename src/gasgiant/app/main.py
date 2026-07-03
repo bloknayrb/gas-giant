@@ -508,6 +508,12 @@ class StudioApp:
         an exception thrown through the native callback surfaced as a raw
         traceback, the first minute of the first-run journey (B1-2)."""
         try:
+            # Build EVERYTHING into locals first: a partial self-assignment
+            # (sim set, then viewport/sphere construction failing -- both
+            # compile shaders, exactly the failure class handled here) would
+            # slip past the draw callbacks' `if self.sim is None` guards and
+            # crash on self.viewport next frame, through the native callback.
+            # self.* is assigned only after every constructor succeeded.
             gpu = GpuContext.attach()
             version = gpu.ctx.version_code
             if version < 430:
@@ -515,16 +521,20 @@ class StudioApp:
                     f"the created OpenGL context is {version // 100}.{(version % 100) // 10}, "
                     "but 4.3 is required"
                 )
-            self.gpu = gpu
-            self.sim = Simulation(self.params, self.gpu)
-            self.viewport = EquirectViewport(self.gpu)
-            self.sphere = SpherePreview(self.gpu)
-            log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
-            self._last_export_dir = _load_last_export_dir()  # prefs need a live runner
+            sim = Simulation(self.params, gpu)
+            viewport = EquirectViewport(gpu)
+            sphere = SpherePreview(gpu)
         except Exception as exc:  # noqa: BLE001 - translated, never swallowed (logged + shown)
             log.exception("GL initialization failed")
             self.init_error = _gl_failure_message(str(exc) or type(exc).__name__)
             hello_imgui.get_runner_params().app_shall_exit = True
+            return
+        self.gpu = gpu
+        self.sim = sim
+        self.viewport = viewport
+        self.sphere = sphere
+        log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
+        self._last_export_dir = _load_last_export_dir()  # prefs need a live runner
 
     def shutdown(self) -> None:
         self._save_session()
