@@ -1292,6 +1292,14 @@ class StudioApp:
         imgui.set_next_window_size(imgui.ImVec2(520.0, 480.0), imgui.Cond_.first_use_ever)
         opened, self._show_help = imgui.begin("Help", self._show_help)
         if opened:
+            # B1-3: the app's central concept, first -- a new user opens Help
+            # precisely because the planet is still churning.
+            imgui.text("How the simulation develops:")
+            imgui.text_wrapped(_HELP_DEV_RUN)
+            imgui.separator()
+            imgui.text("Preset status ('*' and 'unsaved'):")
+            imgui.text_wrapped(_HELP_DIRTY)
+            imgui.separator()
             imgui.text_wrapped(
                 "Type in the search box to filter fields by name, label, or "
                 "description. Toggle Advanced to see the full field set -- a "
