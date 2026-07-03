@@ -31,8 +31,12 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.8",
     "import-linter>=2.1",
-    # scipy: independent sparse direct solve (helmholtz_solve_exact) used as the
-    # ground-truth for the M2 SOR Helmholtz convergence tests. Test-only.
+    # scipy: dev/test-only ground truth. Used by the M2 SOR Helmholtz convergence
+    # tests (helmholtz_solve_exact's sparse direct solve, lazily imported inside
+    # that function) and by the baroclinic_source parity tests that pin the
+    # scipy-free production equivalents (_smooth_periodic/_zoom_bilinear) against
+    # scipy.ndimage. NO production module may import scipy at module scope —
+    # test_production_import_graph_is_scipy_free enforces this.
     "scipy>=1.13",
 ]
 

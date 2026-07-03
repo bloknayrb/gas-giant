@@ -50,19 +50,29 @@ def pfield(
     log: bool = False,
     ui: str = "",
     adv: bool = False,
+    fx: bool = False,
     description: str = "",
     factory: Any = None,
 ) -> Any:
     """A pydantic ``Field`` carrying the panel/randomize metadata (tier, ui, log,
-    adv, rand). Pass ``factory`` (a zero-arg callable) instead of ``default`` for
-    a MUTABLE default so every model instance gets its own fresh value rather than
-    sharing a module-level list -- pydantic already deep-copies a plain default per
-    instance, but a ``default_factory`` is the explicit, no-shared-singleton form
-    (and matches the ``Field(default_factory=...)`` idiom the rest of the tree
-    uses for its nested models)."""
+    adv, rand, fx). Pass ``factory`` (a zero-arg callable) instead of ``default``
+    for a MUTABLE default so every model instance gets its own fresh value rather
+    than sharing a module-level list -- pydantic already deep-copies a plain
+    default per instance, but a ``default_factory`` is the explicit,
+    no-shared-singleton form (and matches the ``Field(default_factory=...)`` idiom
+    the rest of the tree uses for its nested models).
+
+    ``fx=True`` marks a DetailParams lever that lives in the DETAIL_FX kernel
+    variant: render/detail.py derives its variant-selection predicate AND its
+    build-time uniform tripwire (u_<field-name> must exist in the compiled fx
+    program) from this flag, so a new fx lever cannot silently miss either sync
+    point (the A2-6/A2-1 hand-list hazard). Stored only when True, like rand --
+    it never affects the randomize draw order."""
     extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
     if rand is not None:
         extra["rand"] = list(rand)
+    if fx:
+        extra["fx"] = True
     if factory is not None:
         return Field(
             default_factory=factory, ge=lo, le=hi, description=description, json_schema_extra=extra
@@ -578,7 +588,7 @@ class DetailParams(_Params):
                     "(the band-to-mottle transition character)",
     )
     intermittency: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail", fx=True,
         description="Longitudinal patchiness of the filament/striation texture: "
                     "violent folded patches abutting calm laminar runs (the real "
                     "mosaic's chaos is intermittent, not uniform). No rand: a "
@@ -596,14 +606,14 @@ class DetailParams(_Params):
                     "0 = full band grain (byte-identical)",
     )
     hero_spiral: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail", fx=True,
         description="Tightly wound internal spiral lanes inside hero storms "
                     "(the Juno-close-up GRS look) plus collar streamlines; "
                     "winds in the hero's actual rotation sense. Stationary in "
                     "the hero frame — fine for stills",
     )
     hero_collar_wrap: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail", fx=True,
         description="Tightly-pitched wound-lane filaments wrapping the hero "
                     "collar (the GRS 'hollow' look in stills): a log-spiral on "
                     "the rim window, wound in the storm's rotation sense. "
@@ -611,7 +621,7 @@ class DetailParams(_Params):
                     "the hero frame. 0 = off",
     )
     zone_texture: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.5, adv=True, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, adv=True, ui="Detail", fx=True,
         description="Flow-folded luminance structure inside ZONES (the calm "
                     "lanes between belts, gated by 1 - belt_mask). Belt "
                     "interiors get belt_texture and shear-gated filaments; "
@@ -621,27 +631,27 @@ class DetailParams(_Params):
                     "0 = starved zones (byte-identical)",
     )
     belt_texture: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail", fx=True,
         description="Storm-scale folded luminance structure inside belts "
                     "(0.5-3 deg, flow-backtraced so patches fold with the "
                     "flow) + a belt floor for the fine filaments; the v1.4 "
                     "audit's dominant texture gap on broad-band layouts",
     )
     belt_texture_fine: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail", fx=True,
         description="Finer sub-grid belt fold octave: a second flow-aligned "
                     "backtrace hop folds mid-frequency noise below the sim "
                     "grid scale, densifying belt texture at matched scale",
     )
     mottle: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail", fx=True,
         description="Temperate lace mottle (35-60 deg): granular bright "
                     "rings, dark dots, and lacy folds where banding gives "
                     "way -- the reference's mid-latitude storm-flecked "
                     "character",
     )
     polar_filaments: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail",
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail", fx=True,
         description="Polar folded-filamentary region (the Juno cap look): "
                     "dense, multi-scale, flow-folded RIDGED filaments tangling "
                     "between the circumpolar cyclones poleward of ~65 deg. "
@@ -1078,6 +1088,28 @@ class PlanetParams(_Params):
     @classmethod
     def from_json(cls, text: str) -> PlanetParams:
         return cls.model_validate_json(text)
+
+    def validation_warnings(self) -> list[str]:
+        """Cross-field WARNINGS -- configurations that are valid but silently
+        inert, so they must never be validation errors (legitimate presets may
+        carry them; a kinematic preset derived from a vorticity one keeps its
+        storm levers). The GUI surfaces these as toasts on preset load (B5-6).
+
+        Current checks: the vorticity-only solid-core storm levers are exact
+        no-ops under ``solver.type == "kinematic"`` (the stamp branch that
+        consumes them never runs), e.g. a Neptune dark oval preset silently
+        stays exposed to the whirlpool-winding artifact."""
+        warnings: list[str] = []
+        if self.solver.type == SolverType.KINEMATIC:
+            for field_name in ("hero_solid_core", "oval_solid_core"):
+                value = getattr(self.storms, field_name)
+                if value != 0.0:
+                    warnings.append(
+                        f"storms.{field_name}={value:g} has no effect with the "
+                        f"kinematic solver (vorticity-only lever); set "
+                        f"solver.type=vorticity or reset it to 0"
+                    )
+        return warnings
 
 
 @dataclass(frozen=True)

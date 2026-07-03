@@ -27,6 +27,54 @@ def _set(prog: moderngl.ComputeShader, name: str, value) -> None:
         prog[name].value = value
 
 
+def _fx_param_names() -> tuple[str, ...]:
+    """DETAIL_FX lever names derived from pfield metadata (``fx=True``), NOT a
+    hand-maintained list: a new fx lever gets its variant-selection predicate
+    and its build-time uniform tripwire by tagging the pfield (A2-6)."""
+    return tuple(
+        name
+        for name, info in DetailParams.model_fields.items()
+        if isinstance(info.json_schema_extra, dict) and info.json_schema_extra.get("fx")
+    )
+
+
+_FX_PARAMS: tuple[str, ...] = _fx_param_names()
+
+
+def detail_fx_enabled(params: DetailParams) -> bool:
+    """True when any fx-flagged lever is active -> select the DETAIL_FX program
+    variant. Exact-zero on every fx lever keeps the pre-FX program (its text is
+    the pre-FX kernel, so neutral defaults stay byte-identical by construction)."""
+    return any(getattr(params, name) > 0.0 for name in _FX_PARAMS)
+
+
+def _assert_fx_uniforms(prog) -> None:
+    """A2-6 tripwire, mirroring the B1 baroclinic-uniform tripwire in
+    sim/solver.py: every fx-flagged lever's ``u_<name>`` uniform must exist in
+    the compiled DETAIL_FX variant. The per-dispatch ``_set`` is
+    KeyError-suppressing (required: GLSL prunes unused uniforms and the non-fx
+    variant legitimately lacks these), so a dropped/renamed uniform declaration
+    -- or an effect block the compiler optimized away -- would make the lever
+    silently inert while reporting success. Assert once at program build so any
+    such regression fails loud at startup instead."""
+    missing = [f"u_{name}" for name in _FX_PARAMS if _absent(prog, f"u_{name}")]
+    if missing:
+        raise RuntimeError(
+            f"detail.comp DETAIL_FX variant is missing lever uniform(s) {missing}: "
+            f"the KeyError-suppressing uniform set would silently no-op these "
+            f"levers. Either the uniform declaration/effect block was dropped or "
+            f"renamed, or the compiler optimized the effect out of the kernel."
+        )
+
+
+def _absent(prog, uniform_name: str) -> bool:
+    try:
+        prog[uniform_name]
+    except KeyError:
+        return True
+    return False
+
+
 @dataclass
 class PolarRoute:
     """Patch velocity + tracer textures for routed polar backtraces."""
@@ -50,7 +98,10 @@ class DetailSynth:
     def _program(self, fx: bool) -> moderngl.ComputeShader:
         if fx not in self._progs:
             defines = {"DETAIL_FX": "1"} if fx else None
-            self._progs[fx] = self.gpu.compute(_KERNELS, "detail.comp", defines=defines)
+            prog = self.gpu.compute(_KERNELS, "detail.comp", defines=defines)
+            if fx:
+                _assert_fx_uniforms(prog)  # loud at build, never a silent no-op
+            self._progs[fx] = prog
         return self._progs[fx]
 
     def synthesize(
@@ -73,14 +124,7 @@ class DetailSynth:
         polar: patch velocity/tracer textures — when given, polar backtraces
         route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
-        fx_on = (
-            params.intermittency > 0.0 or params.hero_spiral > 0.0
-            or params.belt_texture > 0.0 or params.mottle > 0.0
-            or params.belt_texture_fine > 0.0
-            or params.hero_collar_wrap > 0.0
-            or params.zone_texture > 0.0
-            or params.polar_filaments > 0.0
-        )
+        fx_on = detail_fx_enabled(params)  # derived from pfield fx metadata
         prog = self._program(fx=fx_on)
         size = out_tex.size
         if fx_on:

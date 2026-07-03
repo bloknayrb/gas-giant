@@ -189,6 +189,22 @@ def _load_flattened(package: str, name: str, defines: dict[str, str]) -> tuple[s
     smap = SourceMap()
     out: list[str] = []
 
+    def canon(inc_name: str) -> tuple[str, str]:
+        """Canonical (package, file) identity of an include target, matching
+        _read_source's resolution ('pkg:file' is cross-package; a bare name
+        resolves against the root package)."""
+        if ":" in inc_name:
+            pkg, base = inc_name.split(":", 1)
+            return (pkg, base)
+        return (package, inc_name)
+
+    # Include-once guard (A2-7): the flattener had no include-guards or cycle
+    # detection, so a circular include recursed forever and a duplicate include
+    # (direct or diamond) emitted its text twice (redefining every symbol -> a
+    # confusing compile error). Each file is emitted once; repeats are skipped
+    # with a source-map span so later error lines still resolve correctly.
+    seen: set[tuple[str, str]] = {canon(name)}
+
     def emit(lines: list[str], source_name: str) -> None:
         i = 0
         while i < len(lines):
@@ -196,8 +212,11 @@ def _load_flattened(package: str, name: str, defines: dict[str, str]) -> tuple[s
             m = _INCLUDE_RE.match(line)
             if m:
                 inc_name = m.group("name")
-                inc_text = _read_source(package, inc_name)
-                emit(inc_text.splitlines(), inc_name)
+                key = canon(inc_name)
+                if key not in seen:
+                    seen.add(key)
+                    inc_text = _read_source(package, inc_name)
+                    emit(inc_text.splitlines(), inc_name)
                 smap.add_span(len(out) + 1, source_name, i + 2)  # resume after include
                 i += 1
                 continue

@@ -41,6 +41,8 @@ def test_enabled_builds_driver(gpu):
     sim = Simulation(_baro_params(), gpu)
     try:
         assert sim._baro_driver is not None
+        assert sim.baroclinic_status == "active"
+        assert sim.baroclinic_degraded_reason is None
     finally:
         sim._release_sim()
 
@@ -49,6 +51,7 @@ def test_disabled_has_no_driver(gpu):
     sim = Simulation(_baro_params(enabled=False), gpu)
     try:
         assert sim._baro_driver is None
+        assert sim.baroclinic_status == "off"
     finally:
         sim._release_sim()
 
@@ -131,6 +134,8 @@ def test_graceful_warmup_outcrop(gpu, monkeypatch):
     sim = Simulation(p, gpu)  # must NOT raise
     try:
         assert sim._baro_driver is None, "warmup outcrop must degrade to uncoupled"
+        assert sim.baroclinic_status == "degraded"  # A2-2: degrade is visible
+        assert "outcrop" in sim.baroclinic_degraded_reason
         outcropped = sim.render_maps(512)["color"].astype(np.float64)
     finally:
         sim._release_sim()
@@ -240,5 +245,7 @@ def test_mid_run_incoherence_degrades(gpu, monkeypatch):
         sim.run_to_completion(chunk=8)  # must NOT raise
         assert sim._baro_driver is None, "mid-run incoherence must disable coupling"
         assert sim.is_developed, "development must complete after degrading"
+        assert sim.baroclinic_status == "degraded"  # A2-2: degrade is visible
+        assert "coherence gate" in sim.baroclinic_degraded_reason
     finally:
         sim._release_sim()
