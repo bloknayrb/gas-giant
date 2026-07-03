@@ -49,9 +49,18 @@ def _draw(fn) -> None:
 
 
 def test_viewport_emission_channel_new_entry(gpu, imgui_ctx):
-    from gasgiant.app.viewport import CHANNELS
+    from gasgiant.app.viewport import _EMISSION_CHANNEL, CHANNELS
 
-    assert CHANNELS == ("Color", "Height (cloud-top)", "Emission")
+    assert CHANNELS == (
+        "Color",
+        "Height (cloud-top)",
+        "Emission",
+        "T0 color-idx",
+        "T1 thickness",
+        "T2 detail",
+        "T3 storm-tint",
+    )
+    assert CHANNELS[_EMISSION_CHANNEL] == "Emission"
 
 
 def test_viewport_emission_disabled_early_returns(gpu, imgui_ctx):
