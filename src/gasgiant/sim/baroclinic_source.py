@@ -17,8 +17,8 @@ scripts/baro_scale_sweep.py for the CPU crux sweep that selected it.
 """
 from __future__ import annotations
 
+import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter, zoom
 
 # Validated unstable baroclinic config. These name the grid + physics the source
 # is BUILT from; they are consumed by the driver and gate script that spin the
@@ -51,9 +51,33 @@ def dominant_zonal_m(field2d: np.ndarray,
     return m, spec
 
 
+def _gaussian_kernel1d(sigma: float) -> np.ndarray:
+    """Normalized 1-D Gaussian, identical to scipy.ndimage's default kernel
+    (truncate=4.0 -> radius = int(4*sigma + 0.5), weights exp(-x^2/2sigma^2),
+    sum-normalized). Kept exactly scipy-shaped so _smooth_periodic is a drop-in
+    scipy-free replacement (parity pinned in test_baroclinic_source)."""
+    radius = int(4.0 * float(sigma) + 0.5)
+    x = np.arange(-radius, radius + 1, dtype=np.float64)
+    k = np.exp(-0.5 * (x / float(sigma)) ** 2)
+    return k / k.sum()
+
+
 def _smooth_periodic(field2d: np.ndarray, sigma: float) -> np.ndarray:
-    """Gaussian smooth: wrap in longitude (axis=1), reflect in latitude (axis=0)."""
-    return gaussian_filter(field2d, sigma=sigma, mode=("reflect", "wrap"))
+    """Gaussian smooth: wrap in longitude (axis=1), reflect in latitude (axis=0).
+
+    scipy-free equivalent of gaussian_filter(mode=("reflect", "wrap")): pad each
+    axis by the kernel radius with its boundary rule (np.pad "symmetric" is
+    scipy's "reflect"), run the separable filter with cv2 (a main dependency),
+    and crop the padding — every kept pixel's footprint lies inside the padded
+    array, so cv2's own border handling never contributes."""
+    k = _gaussian_kernel1d(sigma)
+    r = (k.size - 1) // 2
+    if r == 0:
+        return field2d.astype(np.float64, copy=True)
+    padded = np.pad(field2d.astype(np.float64, copy=False), ((0, 0), (r, r)), mode="wrap")
+    padded = np.pad(padded, ((r, r), (0, 0)), mode="symmetric")
+    smoothed = cv2.sepFilter2D(padded, -1, k, k)
+    return smoothed[r:-r, r:-r]
 
 
 def geostrophic_vorticity_source(st, smooth_sigma: float = 2.5,
@@ -106,14 +130,35 @@ def assert_coherent(field2d: np.ndarray) -> int:
     return m
 
 
+def _zoom_bilinear(field2d: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
+    """scipy-free equivalent of ndimage.zoom(order=1, grid_mode=False,
+    mode="nearest"): align-corners bilinear — output index i samples input
+    coordinate i*(in-1)/(out-1), so all coordinates stay in-domain and the
+    "nearest" out-of-bounds rule never fires. cv2.resize is NOT a twin (it uses
+    half-pixel-center mapping), so this is plain vectorized numpy; weights are
+    computed in float64 and the result cast to the input dtype, matching
+    scipy's internal double-precision spline path (parity pinned in
+    test_baroclinic_source)."""
+    in_h, in_w = field2d.shape
+    ys = np.linspace(0.0, in_h - 1.0, out_h) if out_h > 1 else np.zeros(1)
+    xs = np.linspace(0.0, in_w - 1.0, out_w) if out_w > 1 else np.zeros(1)
+    y0 = np.clip(np.floor(ys).astype(np.intp), 0, in_h - 1)
+    x0 = np.clip(np.floor(xs).astype(np.intp), 0, in_w - 1)
+    y1 = np.minimum(y0 + 1, in_h - 1)
+    x1 = np.minimum(x0 + 1, in_w - 1)
+    wy = (ys - y0)[:, None]
+    wx = (xs - x0)[None, :]
+    f = field2d.astype(np.float64, copy=False)
+    top = f[np.ix_(y0, x0)] * (1.0 - wx) + f[np.ix_(y0, x1)] * wx
+    bot = f[np.ix_(y1, x0)] * (1.0 - wx) + f[np.ix_(y1, x1)] * wx
+    return (top * (1.0 - wy) + bot * wy).astype(field2d.dtype)
+
+
 def resample_to_equirect(field2d: np.ndarray, grid_w: int, grid_h: int) -> np.ndarray:
     """Bilinear-resample (H, W) -> (grid_h, grid_w) and normalize to unit std,
     so a coupling `gain` is interpreted as a fraction of the solver Coriolis
     scale (coriolis_f0 = 3.0)."""
-    zy = grid_h / field2d.shape[0]
-    zx = grid_w / field2d.shape[1]
-    resamp = zoom(field2d.astype(np.float32), (zy, zx), order=1, mode="nearest")
-    resamp = resamp[:grid_h, :grid_w]
+    resamp = _zoom_bilinear(field2d.astype(np.float32), grid_h, grid_w)
     std = float(np.std(resamp))
     if std > 0:
         resamp = resamp / std
