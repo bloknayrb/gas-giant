@@ -199,3 +199,82 @@ def test_undo_across_load_restores_identity_and_dirty() -> None:
     app._redo()
     assert app._active_preset == ("jupiter_like", "factory")
     assert not app._is_dirty()
+
+
+# -- B4-5: Import preset... (dialog flow) -----------------------------------------
+
+
+class _FakeDialog:
+    def __init__(self, path) -> None:
+        self._path = path
+
+    def ready(self) -> bool:
+        return True
+
+    def result(self) -> list[str]:
+        return [str(self._path)]
+
+
+def test_import_dialog_installs_user_preset_and_adopts_identity(
+    tmp_path, monkeypatch
+) -> None:
+    """The Import... flow: validate, copy into the user preset dir, refresh
+    the dropdown, adopt USER identity (clean), push one undo entry."""
+    user_dir = tmp_path / "user"
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", user_dir)
+
+    other = PlanetParams(seed=321)
+    other.bands.count = 9
+    src = tmp_path / "somewhere" / "cool_look.json"
+    src.parent.mkdir()
+    save_preset(other, src)
+
+    app = _make_app()
+    pre_count = app.params.bands.count
+    app._dialog = (main.DialogKind.IMPORT, _FakeDialog(src))
+    app._poll_dialog()
+
+    assert app.params.bands.count == 9, "the imported preset was adopted"
+    assert (user_dir / "cool_look.json").is_file(), "installed as a user preset"
+    assert app._active_preset == ("cool_look", "user")
+    assert not app._is_dirty(), "freshly imported = clean baseline"
+    assert ("cool_look", "user") in app._preset_cache, "dropdown refreshed"
+    assert len(app._undo_stack) == 1
+    assert app._undo_stack[-1][0].bands.count == pre_count
+
+
+def test_import_dialog_collision_toasts_and_leaves_state_untouched(
+    tmp_path, monkeypatch
+) -> None:
+    user_dir = tmp_path / "user"
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", user_dir)
+    save_preset(PlanetParams(seed=1), user_dir / "mine.json")
+    src = tmp_path / "mine.json"
+    save_preset(PlanetParams(seed=2), src)
+
+    app = _make_app()
+    before = app.params
+    app._dialog = (main.DialogKind.IMPORT, _FakeDialog(src))
+    app._poll_dialog()
+
+    assert app.params is before, "failed import commits nothing"
+    assert app._active_preset is None
+    assert len(app._undo_stack) == 0, "no stray undo entry on failure"
+    assert app.toasts._items and app.toasts._items[-1][1] is True, "an error toast"
+
+
+def test_import_dialog_held_while_export_in_flight(tmp_path, monkeypatch) -> None:
+    """Same mid-export hold as Load: the picked file is not consumed while an
+    export is running (applying it would commit mid-export)."""
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path / "user")
+    src = tmp_path / "look.json"
+    save_preset(PlanetParams(seed=7), src)
+
+    app = _make_app()
+    app._export = object()
+    dialog = (main.DialogKind.IMPORT, _FakeDialog(src))
+    app._dialog = dialog
+    app._poll_dialog()
+
+    assert app._dialog is dialog, "dialog result held, not consumed, mid-export"
+    assert not (tmp_path / "user").exists(), "nothing installed mid-export"

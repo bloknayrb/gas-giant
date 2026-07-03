@@ -30,8 +30,28 @@ CHANNELS = (
 
 _EMISSION_CHANNEL = 2
 
+# view_transform.frag's aurora-composite channel selector (B4-3): the Emission
+# channel switches to it whenever aurora is on, so the aurora sliders have live
+# preview feedback instead of a blind export/Blender loop.
+_AURORA_COMPOSITE_CHANNEL = 5
+
+
+def _emission_composite(params) -> tuple[int, tuple[float, float, float]]:
+    """(u_channel, u_aurora) for the Emission channel. With aurora on, the
+    preview composites the alpha-channel intensity as ``alpha * aurora_color``
+    -- the same lift the Blender importer applies on its aurora shell (see
+    blender_addon atmosphere.build_aurora_shell) -- so what the slider shows is
+    what Blender tints. With aurora off, plain ``.rgb`` (u_channel 0), leaving
+    the pre-B4-3 output untouched. Exported emission.exr semantics are
+    unchanged either way: this is preview-only compositing."""
+    em = params.emission
+    if em.aurora_strength > 0.0:
+        return _AURORA_COMPOSITE_CHANNEL, tuple(em.aurora_color)
+    return 0, (0.0, 0.0, 0.0)
+
+
 # (texture_selector_fn(sim, src, em_src), u_channel, force_standard_mode)
-# u_channel: 0 rgb, 1 rrr, 2 ggg, 3 bbb, 4 aaa (view_transform.frag)
+# u_channel: 0 rgb, 1 rrr, 2 ggg, 3 bbb, 4 aaa, 5 rgb+a*aurora (view_transform.frag)
 # force_standard_mode=True bypasses AgX for raw diagnostic channels (AgX matrix tints grays)
 _CHANNEL_MAP = [
     (lambda sim, src, em: src,                         0, False),  # Color    → .rgb
@@ -83,8 +103,9 @@ class EquirectViewport:
 
         # Emission derives via its own preview path (separate scratch textures +
         # dirty flag) only when its channel is selected -- don't force the extra
-        # ~33.5 MB derive every frame on the other channels. Aurora is in the
-        # alpha channel and is NOT visible in this RGB preview (a LIMIT).
+        # ~33.5 MB derive every frame on the other channels. Aurora rides the
+        # alpha channel; the blit composites it as alpha * aurora_color when it
+        # is on (B4-3, see _emission_composite).
         em_src = None
         if self.channel == _EMISSION_CHANNEL:
             em_src, em_rerendered = sim.ensure_preview_emission(preview_width)
@@ -97,6 +118,9 @@ class EquirectViewport:
         self._ensure_display(src.size)
         if self._stale:
             tex_fn, u_ch, force_std = _CHANNEL_MAP[self.channel]
+            aurora = (0.0, 0.0, 0.0)
+            if self.channel == _EMISSION_CHANNEL:
+                u_ch, aurora = _emission_composite(sim.params)
             # Single-threaded loop: tick() completes before draw(), so tracers.cur is stable here
             source = tex_fn(sim, src, em_src)
             assert source is not None, "ensure_preview must be called before tex_fn dispatch"
@@ -104,6 +128,7 @@ class EquirectViewport:
             self.pass_.prog["u_image"].value = 0
             self.pass_.prog["u_mode"].value = 0 if force_std else (1 if self.agx else 0)
             self.pass_.prog["u_channel"].value = u_ch
+            self.pass_.prog["u_aurora"].value = aurora
             self.pass_.render(self._fbo)
             self._stale = False
             # Rebind the default framebuffer: imgui's native backend renders

@@ -1267,7 +1267,7 @@ _Shown on the **emission map** (night-side glow) with all three glows enabled; t
 
 `emission.aurora_strength` &mdash; range **0 to 2**, default **0**, tier `post`.
 
-Auroral ovals around the (offset) magnetic poles; written to the emission map's ALPHA channel so the importer can lift it onto a shell
+Auroral ovals around the (offset) magnetic poles; written to the emission map's ALPHA channel so the importer can lift it onto a shell. Not visible in the Color preview — export and view emission.exr
 
 _Shown on the **emission map** (night-side glow) with all three glows enabled; tonemapped for display. The color map is unchanged by emission sliders._
 

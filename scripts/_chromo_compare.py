@@ -41,14 +41,21 @@ def main() -> None:
     sdo, sdn = so[band].std(), sn[band].std()
     mean_pct = 100.0 * (mn - mo) / max(mo, 1e-6)
     std_pct = 100.0 * (sdn - sdo) / max(sdo, 1e-6)
-    # Reviewer gate: net mean-sat rise <= +12% (don't regress the muted Cassini
-    # calibration); variety (std) should rise MORE than the mean (the on-target
-    # signal dominates the side effect).
-    g_mean = "PASS" if mean_pct <= 12.0 else "FAIL"
+    # Mean-sat bound — W9 re-baseline, 2026-07-03 (user decision, see
+    # docs/reviews/2026-07-03-gate-rebaseline-addendum.md): the original <=+12%
+    # was the MUTED source-fidelity reviewer value, but the user's vivid
+    # amp=0.35 art-direction call at PR #11 ship time (~+33% recorded,
+    # memory/jupiter-missing-features.md) deliberately overrode it and was
+    # never encoded here — the lever measured +28% at the calibration commit
+    # (07b43dc) itself, so the old bound never passed the shipped config.
+    # <=+35% covers the measured +28..29% and the recorded ~+33% intent.
+    # Variety (std >= mean rise) and targeting (corr < 0) gates are unchanged.
+    sat_bound = 35.0
+    g_mean = "PASS" if mean_pct <= sat_bound else "FAIL"
     g_ratio = "PASS" if std_pct >= mean_pct else "WEAK"
     print(f"wrote {args.out} (+_crop)", flush=True)
-    print(f"  tropics mean sat OFF {mo:.1f} -> ON {mn:.1f} ({mean_pct:+.0f}%) [{g_mean} <=+12%]",
-          flush=True)
+    print(f"  tropics mean sat OFF {mo:.1f} -> ON {mn:.1f} ({mean_pct:+.0f}%) "
+          f"[{g_mean} <=+{sat_bound:.0f}%]", flush=True)
     print(f"  tropics sat std  OFF {sdo:.1f} -> ON {sdn:.1f} ({std_pct:+.0f}% variety) "
           f"[{g_ratio}: variety>=mean]", flush=True)
     # Targeting gate (fidelity reviewer): warming (delta R - delta B) must

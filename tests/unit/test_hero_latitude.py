@@ -161,3 +161,118 @@ def test_preset_roundtrip_with_hero_latitude(tmp_path):
     p2 = PlanetParams()
     save_preset(p2, path)
     assert load_preset(path).storms.hero_latitude is None
+
+
+# ------------------------------------------------- B4-2: the pin-checkbox widget
+
+def test_hero_latitude_cap_matches_validator():
+    """The GUI slider bounds and the model validator share one formula."""
+    from gasgiant.params.model import hero_latitude_cap
+
+    assert hero_latitude_cap(0.10) == pytest.approx(63.0 - 206.3 * 0.10)
+    # every legal hero_radius leaves a strictly positive symmetric cap, so
+    # pinning at 0.0 is always valid
+    assert hero_latitude_cap(0.25) > 0.0
+
+
+def test_optional_float_bounds_clamp_to_radius_cap():
+    panels = pytest.importorskip("gasgiant.app.panels")
+    from gasgiant.params.model import hero_latitude_cap
+
+    doc = {"hero_radius": 0.10, "hero_latitude": None}
+    lo, hi = panels._optional_float_bounds("hero_latitude", doc, -55.0, 55.0)
+    cap = hero_latitude_cap(0.10)
+    assert (lo, hi) == (-cap, cap)
+
+    # a small radius leaves the field bounds in charge
+    doc["hero_radius"] = 0.03
+    lo, hi = panels._optional_float_bounds("hero_latitude", doc, -55.0, 55.0)
+    assert (lo, hi) == (-55.0, 55.0)
+
+    # a non-hero optional float just uses the field bounds
+    lo, hi = panels._optional_float_bounds("other", {}, -1.0, 2.0)
+    assert (lo, hi) == (-1.0, 2.0)
+
+
+@pytest.fixture
+def imgui_ctx():
+    imgui = pytest.importorskip("imgui_bundle.imgui")
+    ctx = imgui.create_context()
+    io = imgui.get_io()
+    io.display_size = imgui.ImVec2(800.0, 600.0)
+    io.delta_time = 1.0 / 60.0
+    io.set_ini_filename(None)
+    io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+    yield imgui
+    imgui.destroy_context(ctx)
+
+
+def test_pin_checkbox_pins_at_zero(imgui_ctx, monkeypatch):
+    """Checking "pin" turns None into a committed 0.0 (always validator-legal)."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+
+    doc = {"hero_radius": 0.10, "hero_latitude": None}
+    monkeypatch.setattr(panels.imgui, "checkbox", lambda label, v: (True, True))
+
+    imgui.new_frame()
+    imgui.begin("pin_test", None, 0)
+    changed, committed = panels._draw_optional_float(
+        "hero_latitude", "hero latitude", doc, -55.0, 55.0
+    )
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (True, True)
+    assert doc["hero_latitude"] == 0.0
+
+
+def test_pin_checkbox_unpins_to_none(imgui_ctx, monkeypatch):
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+
+    doc = {"hero_radius": 0.10, "hero_latitude": -22.5}
+    monkeypatch.setattr(panels.imgui, "checkbox", lambda label, v: (True, False))
+
+    imgui.new_frame()
+    imgui.begin("pin_test2", None, 0)
+    changed, committed = panels._draw_optional_float(
+        "hero_latitude", "hero latitude", doc, -55.0, 55.0
+    )
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (True, True)
+    assert doc["hero_latitude"] is None
+
+
+def test_pinned_slider_edits_value_within_cap(imgui_ctx, monkeypatch):
+    """While pinned, the slider edits the value and its bounds are the
+    radius-coupled cap, not the raw field bounds."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    from gasgiant.params.model import hero_latitude_cap
+    imgui = imgui_ctx
+
+    doc = {"hero_radius": 0.10, "hero_latitude": -22.5}
+    seen_bounds = []
+
+    monkeypatch.setattr(panels.imgui, "checkbox", lambda label, v: (False, v))
+
+    def fake_slider(label, value, lo, hi, flags=0):
+        seen_bounds.append((lo, hi))
+        return True, -18.0
+
+    monkeypatch.setattr(panels.imgui, "slider_float", fake_slider)
+
+    imgui.new_frame()
+    imgui.begin("pin_test3", None, 0)
+    changed, committed = panels._draw_optional_float(
+        "hero_latitude", "hero latitude", doc, -55.0, 55.0
+    )
+    imgui.end()
+    imgui.end_frame()
+
+    assert changed is True
+    assert doc["hero_latitude"] == -18.0
+    cap = hero_latitude_cap(0.10)
+    assert seen_bounds == [(-cap, cap)]

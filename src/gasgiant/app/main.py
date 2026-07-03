@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+import subprocess
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -32,6 +34,7 @@ from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
 from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.export.exporter import export_job
+from gasgiant.export.manifest import MANIFEST_FILENAME
 from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
 from gasgiant.params.model import PlanetParams, Tier
@@ -40,6 +43,7 @@ from gasgiant.params.presets import (
     PresetError,
     PresetSource,
     available_presets,
+    import_preset,
     load_factory_preset,
     load_preset,
     load_user_preset,
@@ -56,6 +60,7 @@ class DialogKind(StrEnum):
     LOAD = "load"
     SAVE = "save"
     EXPORT = "export"
+    IMPORT = "import"
 
 
 @dataclass
@@ -123,6 +128,183 @@ SPEED_OPTIONS: list[tuple[int, str]] = [
 # ~4x per-step gap (not chunking) is where the first-launch minutes actually
 # are. tick() is chunk-invariant (see Simulation.tick) either way.
 DEFAULT_STEPS_PER_FRAME = 2
+
+
+# -- B1-2: friendly GL-failure message ---------------------------------------
+
+def _gl_failure_message(detail: str) -> str:
+    """Actionable message for any GL-init failure (context attach, version
+    check, first compute-shader compile). Names the hard requirement (the sim
+    runs in GLSL 4.3 compute shaders) and the two realistic ways out."""
+    return (
+        "Gas Giant Studio could not initialize OpenGL 4.3.\n"
+        f"  cause: {detail}\n"
+        "The simulation runs in GLSL 4.3 compute shaders, so it needs a GPU/driver\n"
+        "with OpenGL 4.3 support. Try updating your GPU driver; on a headless or\n"
+        "virtual machine, Mesa's llvmpipe software renderer works\n"
+        "(set LIBGL_ALWAYS_SOFTWARE=1)."
+    )
+
+
+# -- B1-4/B1-5: export UX helpers (pure, unit-tested) -------------------------
+
+# Every file the exporter can write into the chosen folder -- the overwrite
+# check scans for exactly these (the exporter's own cancellation cleanup list).
+_EXPORT_FILENAMES = ("color.png", "height.exr", "emission.exr", MANIFEST_FILENAME)
+
+_LAST_EXPORT_PREF = "GasGiantStudio_LastExportDir"
+
+
+def _export_file_lines(params: PlanetParams) -> list[str]:
+    """The files the export will write, for the confirm modal (B1-4: the modal
+    never named its outputs). emission.exr appears only when emission is on --
+    mirrors export_job's own emission_on gate."""
+    w = params.export.width
+    h = w // 2
+    lines = [
+        f"color.png — 16-bit sRGB color map, {w}x{h}",
+        f"height.exr — 32-bit float height map, {w}x{h}",
+    ]
+    if params.emission.enabled:
+        lines.append(f"emission.exr — HDR emission map (aurora in alpha), {w}x{h}")
+    lines.append(f"{MANIFEST_FILENAME} — manifest; import this in Blender (docs/blender_addon.md)")
+    return lines
+
+
+def _export_conflicts(out_dir: Path) -> list[str]:
+    """Map-set files already present in ``out_dir`` (B1-4: the exporter
+    silently overwrites -- `mkdir exist_ok=True` + unconditional writes -- so
+    the GUI must ask first)."""
+    return [name for name in _EXPORT_FILENAMES if (out_dir / name).exists()]
+
+
+def _export_progress_label(prog: Progress | None) -> str:
+    """Progress-bar label for an in-flight export. Phase A of export_job
+    finishes the development run first (its Progress says just "developing");
+    surface that hold state in plain words (B1-5) instead of an unexplained
+    long 'developing' stall before the first tile."""
+    if prog is None:
+        return "starting"
+    if prog.message == "developing":
+        return f"finishing dev run {prog.done}/{prog.total}"
+    return prog.message
+
+
+def _export_hold_notice(developing: bool) -> str:
+    """The export-hold explanation drawn in the Controls pane -- the SAME pane
+    whose sliders are frozen (B1-5: the old notice lived only in the Playback
+    pane, a different pane than the frozen controls)."""
+    base = (
+        "Export in progress — controls are paused; pending edits apply "
+        "automatically when it finishes."
+    )
+    if developing:
+        return "Export is finishing the development run first. " + base
+    return base
+
+
+def _pending_hint_text(tiers: set[Tier]) -> str | None:
+    """Plain-language pending-edit hint (B1-5: 'release to apply
+    (restart/velocity)' was tier jargon). None when nothing heavy is pending.
+    RESTART wins the wording when both heavy tiers are pending -- it is the
+    costlier consequence."""
+    heavy = set(tiers) - {Tier.POST}
+    if not heavy:
+        return None
+    if Tier.RESTART in heavy:
+        return "pending change — applies when you release (restarts the development run)"
+    return "pending change — applies when you release (rebuilds the flow; the run continues)"
+
+
+def _load_last_export_dir(load=None) -> Path | None:
+    """Last-export folder from hello_imgui's user prefs -- the same ini
+    mechanism that already persists window geometry and docking layout, so no
+    new config file (B1-4). ``load`` is injectable for tests: the real
+    ``hello_imgui.load_user_pref`` requires a live runner (it segfaults
+    outside one), so this must only be called from inside the app run
+    (init_gl / frame callbacks)."""
+    load = load or hello_imgui.load_user_pref
+    try:
+        raw = load(_LAST_EXPORT_PREF)
+    except Exception:  # noqa: BLE001 - prefs are best-effort, never fatal
+        return None
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_dir() else None
+
+
+def _save_last_export_dir(path: Path, save=None) -> None:
+    """Persist the last-export folder (see _load_last_export_dir for the
+    mechanism/injection rationale). Best-effort: a pref failure must never
+    break the export success path."""
+    save = save or hello_imgui.save_user_pref
+    try:
+        save(_LAST_EXPORT_PREF, str(path))
+    except Exception:  # noqa: BLE001 - prefs are best-effort, never fatal
+        log.warning("could not persist last-export folder %s", path)
+
+
+def _open_folder(path: Path) -> bool:
+    """Open ``path`` in the OS file browser (the post-export 'open folder'
+    affordance, B1-4). Returns False on failure so the caller can toast."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except OSError as exc:
+        log.warning("could not open folder %s: %s", path, exc)
+        return False
+    return True
+
+
+# -- B1-3: Help window copy (module constants so tests can pin the content) ---
+
+_HELP_DEV_RUN = (
+    "Every planet is grown by a development run: the simulation advects the "
+    "cloud tracers for a fixed number of steps (sim.dev_steps) before the "
+    "image is final. While it runs you'll see 'developing N/M' with a time "
+    "estimate in the Playback pane and overlaid on the viewport — the picture "
+    "keeps changing until it completes. Pause/Play/Step and the Speed control "
+    "live in the Playback pane. Edits marked R (RESTART) re-run the "
+    "development run from step 0; V (VELOCITY) rebuilds the flow and the run "
+    "continues; P (POST) recolors instantly."
+)
+
+_HELP_DIRTY = (
+    "The preset selector shows where the current settings came from. A '*' "
+    "after the name means they differ from the loaded preset — save to keep "
+    "them. 'unsaved' means this session was restored from your last run and "
+    "is not tied to a named preset; use Save... to give it a name."
+)
+
+# B2-4: the recurring unglossed vocabulary, collected in one Help block.
+_HELP_GLOSSARY = (
+    "GRS = Great Red Spot, Jupiter's giant storm; 'hero' storms are its "
+    "class. Anticyclone = high-pressure vortex (bright/red ovals like the "
+    "GRS); cyclonic = the opposite spin (dark, stormy belts). Retrograde = "
+    "flowing against the planet's rotation; prograde = with it. Zones are "
+    "the bright bands, belts the dark ones. Some fields take latitudes/"
+    "widths in radians: 1 rad = 57.3 degrees (tooltips give the degree "
+    "equivalent)."
+)
+
+# B4-6: what Undo covers and what it deliberately does not -- the exclusions
+# were previously undiscoverable ("I pressed Ctrl+Z and nothing came back").
+_HELP_UNDO = (
+    "Undo/redo (Ctrl+Z / Ctrl+Y) covers every committed parameter edit — a "
+    "whole slider drag counts as one step — plus preset loads, Randomize, "
+    "Reroll, and the export settings in the Export... dialog (resolution, "
+    "PNG compression). NOT undoable: Restart dev and the playback controls "
+    "(Play/Pause/Step/Speed — they steer the run, not the parameters), "
+    "per-field locks, saving/overwriting/deleting preset files on disk, "
+    "viewport channel/AgX and sun-angle choices, and a finished export's "
+    "files. History keeps the most recent 64 steps; older steps fall off "
+    "the end."
+)
 
 
 def _shortcuts_enabled() -> bool:
@@ -317,6 +499,21 @@ class StudioApp:
         self._redo_stack: deque[UndoRecord] = deque(maxlen=64)
         self._dialog: tuple[DialogKind, object] | None = None
         self._export: ExportJob | None = None
+        # B1-2: friendly GL-failure message, set by init_gl on failure and
+        # printed by main() after the runner exits (never a raw traceback).
+        self.init_error: str | None = None
+        # B1-4: last successful export folder. Loaded from hello_imgui user
+        # prefs in init_gl (prefs need a live runner), saved on every export
+        # success; feeds the folder-picker default, the persistent
+        # "last export" line, and the Open-folder button.
+        self._last_export_dir: Path | None = None
+        # B1-4: a picked export folder that already contains a map set, held
+        # here until the user confirms/cancels the overwrite modal.
+        self._pending_export: tuple[Path, list[str]] | None = None
+        # B1-8: (name, path) of a user preset awaiting overwrite/delete
+        # confirmation in their respective modals.
+        self._pending_overwrite: tuple[str, Path] | None = None
+        self._pending_delete: tuple[str, Path] | None = None
         self._frame_count = 0
         self._smoke_frames = int(os.environ.get("GASGIANT_SMOKE_FRAMES", "0"))
         self._smoke_shot = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
@@ -331,15 +528,40 @@ class StudioApp:
     # -- lifecycle ------------------------------------------------------------
 
     def init_gl(self) -> None:
+        """post_init: attach ModernGL to the runner's GL context and build the
+        sim. On ANY failure (attach, an actual < 4.3 context the window system
+        silently fell back to, the first compute-shader compile) this stores a
+        friendly message and asks the runner to exit instead of re-raising --
+        an exception thrown through the native callback surfaced as a raw
+        traceback, the first minute of the first-run journey (B1-2)."""
         try:
-            self.gpu = GpuContext.attach()
-            self.sim = Simulation(self.params, self.gpu)
-            self.viewport = EquirectViewport(self.gpu)
-            self.sphere = SpherePreview(self.gpu)
-            log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
-        except Exception:
+            # Build EVERYTHING into locals first: a partial self-assignment
+            # (sim set, then viewport/sphere construction failing -- both
+            # compile shaders, exactly the failure class handled here) would
+            # slip past the draw callbacks' `if self.sim is None` guards and
+            # crash on self.viewport next frame, through the native callback.
+            # self.* is assigned only after every constructor succeeded.
+            gpu = GpuContext.attach()
+            version = gpu.ctx.version_code
+            if version < 430:
+                raise RuntimeError(
+                    f"the created OpenGL context is {version // 100}.{(version % 100) // 10}, "
+                    "but 4.3 is required"
+                )
+            sim = Simulation(self.params, gpu)
+            viewport = EquirectViewport(gpu)
+            sphere = SpherePreview(gpu)
+        except Exception as exc:  # noqa: BLE001 - translated, never swallowed (logged + shown)
             log.exception("GL initialization failed")
-            raise
+            self.init_error = _gl_failure_message(str(exc) or type(exc).__name__)
+            hello_imgui.get_runner_params().app_shall_exit = True
+            return
+        self.gpu = gpu
+        self.sim = sim
+        self.viewport = viewport
+        self.sphere = sphere
+        log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
+        self._last_export_dir = _load_last_export_dir()  # prefs need a live runner
 
     def shutdown(self) -> None:
         self._save_session()
@@ -479,18 +701,19 @@ class StudioApp:
         self._live = self.params
         self._gesture_base = None
 
-    def _commit_output_setting(self, new_params: PlanetParams) -> None:
-        """Commit an export/output-only setting (map resolution, PNG
-        compression). These are OUTPUT params, not planet-design edits, so they
-        are intentionally kept out of undo history -- but they ARE a fresh user
-        action, so they must invalidate any pending redo future (#4). Otherwise a
-        Redo issued after changing an export setting would replay the stale
-        pre-undo snapshot on top of it. Clearing redo here is exactly what
-        ``_push_history`` does for history-backed edits; these two sites are the
-        only commits outside the gesture/undo/redo paths."""
-        self._commit(new_params)
-        self._redo_stack.clear()
-        self._reset_working_copy()  # keep _live in lockstep with the applied setting
+    def _commit_export_field(self, name: str, value: object) -> None:
+        """B4-4: the export modal's editors (resolution combo, PNG-compression
+        slider) commit through the SAME ``_process_edit`` pipeline as every
+        panel widget -- ONE undo policy for the whole app. That makes output
+        edits ordinary undoable history entries, clears redo only via the
+        standard a-new-edit-clears-redo rule (no more silently destroyed Redo,
+        B4-6), honors the export-in-flight hold (the draft is kept, not
+        dropped, and flushes as one undo step), and RELEASES rather than
+        discards a pending heavy edit (the old ``_commit_output_setting``
+        reset the working copy wholesale, dropping pending drafts)."""
+        draft = self._live.model_dump()
+        draft["export"][name] = value
+        self._process_edit(draft, any_changed=True, any_committed=True)
 
     def _process_edit(self, draft: dict, any_changed: bool, any_committed: bool) -> None:
         """One frame of panel editing → at most one engine commit.
@@ -601,12 +824,125 @@ class StudioApp:
         self._commit(self._randomize(self.params.seed + 1))
         self._reset_working_copy()  # discrete action wins over pending edit
 
+    # -- B1-8: preset overwrite/delete lifecycle -------------------------------
+
+    def _active_user_preset_path(self) -> tuple[str, Path] | None:
+        """(name, path) of the active USER preset, or None. Only USER presets
+        are overwritable/deletable in-app: factory presets are package data,
+        and a FILE identity only stored the stem (its full path is gone)."""
+        if self._active_preset is None:
+            return None
+        name, source = self._active_preset
+        if source != PresetSource.USER:
+            return None
+        return name, USER_PRESET_DIR / f"{name}.json"
+
+    def _request_overwrite_active(self) -> None:
+        """Ctrl+S / the contextual Save button: stage the overwrite-confirm
+        modal for the active user preset, or fall back to the Save-As dialog
+        when no user preset is active (factory/file/unsaved) -- Ctrl+S always
+        does SOMETHING useful, never a silent no-op (B1-8)."""
+        if self._export is not None:
+            return  # same gate as every other Ctrl-shortcut commit path
+        entry = self._active_user_preset_path()
+        if entry is None:
+            self._open_save_dialog()
+            return
+        self._pending_overwrite = entry
+
+    def _overwrite_active_preset(self) -> None:
+        """Confirmed overwrite: save the current params over the active user
+        preset's file and adopt them as the new pristine baseline (clears the
+        dirty ``*``)."""
+        entry = self._pending_overwrite
+        self._pending_overwrite = None
+        if entry is None:
+            return
+        name, path = entry
+        try:
+            save_preset(self.params, path)
+        except OSError as exc:
+            self.toasts.error(str(exc))
+            return
+        self._set_identity((name, PresetSource.USER), self.params)
+        self._refresh_presets()
+        self.toasts.info(f"saved user/{name}")
+
+    def _request_delete_active(self) -> None:
+        if self._active_user_preset_path() is not None:
+            self._pending_delete = self._active_user_preset_path()
+
+    def _delete_active_preset(self) -> None:
+        """Confirmed delete: remove the file, drop the named identity (the
+        working params stay loaded -- deleting the file must not yank the
+        planet out from under the user -- so the combo reads 'unsaved')."""
+        entry = self._pending_delete
+        self._pending_delete = None
+        if entry is None:
+            return
+        name, path = entry
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            self.toasts.error(str(exc))
+            return
+        self._active_preset = None
+        self._refresh_presets()
+        self.toasts.info(f"deleted user/{name} (current settings kept, now unsaved)")
+
+    def _draw_preset_confirm_modals(self) -> None:
+        """The overwrite/delete confirm modals (B1-8), staged by
+        ``_pending_overwrite``/``_pending_delete``. Same held-state modal
+        idiom as ``_draw_export_overwrite_confirm``."""
+        if self._pending_overwrite is not None:
+            title = "Overwrite preset?"
+            if not imgui.is_popup_open(title):
+                imgui.open_popup(title)
+            center = imgui.get_main_viewport().get_center()
+            imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+            if imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+                name, path = self._pending_overwrite
+                imgui.text_wrapped(
+                    f"Overwrite user preset '{name}' with the current settings?"
+                )
+                imgui.text_disabled(str(path))
+                imgui.separator()
+                if imgui.button("Overwrite##preset"):
+                    self._overwrite_active_preset()
+                    imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Cancel##overwrite_preset"):
+                    self._pending_overwrite = None
+                    imgui.close_current_popup()
+                imgui.end_popup()
+        if self._pending_delete is not None:
+            title = "Delete preset?"
+            if not imgui.is_popup_open(title):
+                imgui.open_popup(title)
+            center = imgui.get_main_viewport().get_center()
+            imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+            if imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+                name, path = self._pending_delete
+                imgui.text_wrapped(
+                    f"Delete user preset '{name}'? This removes the file from disk; "
+                    "the current settings stay loaded (as 'unsaved')."
+                )
+                imgui.text_disabled(str(path))
+                imgui.separator()
+                if imgui.button("Delete##preset"):
+                    self._delete_active_preset()
+                    imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Cancel##delete_preset"):
+                    self._pending_delete = None
+                    imgui.close_current_popup()
+                imgui.end_popup()
+
     def _open_save_dialog(self) -> None:
-        """Open the preset-save file dialog -- the exact path both the
-        "Save..." button and the Ctrl+S shortcut trigger. Ctrl+S always opens
-        the dialog, identical to the button; it does not silently re-save to
-        the active preset's path. No-op if a dialog is already open (mirrors
-        the button's ``self._dialog is None`` guard)."""
+        """Open the preset-save (Save As...) file dialog -- the "Save..."
+        button's path, and Ctrl+S's fallback when no user preset is active
+        (``_request_overwrite_active``). No-op if a dialog is already open
+        (mirrors the button's ``self._dialog is None`` guard)."""
         if self._dialog is not None:
             return
         # Default the save dialog into USER_PRESET_DIR so saved presets land
@@ -650,7 +986,9 @@ class StudioApp:
         if ctrl and imgui.is_key_pressed(imgui.Key.y) and not exporting:
             self._redo()
         if ctrl and imgui.is_key_pressed(imgui.Key.s) and not exporting:
-            self._open_save_dialog()
+            # B1-8: Ctrl+S overwrites the active USER preset (after a confirm
+            # modal); with no user preset active it opens Save As, as before.
+            self._request_overwrite_active()
 
     # -- dialogs --------------------------------------------------------------------
 
@@ -660,7 +998,7 @@ class StudioApp:
         kind, dlg = self._dialog
         if not dlg.ready():
             return
-        if kind == DialogKind.LOAD and self._export is not None:
+        if kind in (DialogKind.LOAD, DialogKind.IMPORT) and self._export is not None:
             # A file was already picked (dialog opened before the export
             # started, or a race with the disabled-button gate below) but
             # applying it now would commit mid-export. Hold the dialog --
@@ -682,6 +1020,20 @@ class StudioApp:
                 self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"loaded {path.name}")
                 self._toast_param_warnings(loaded)
+            elif kind == DialogKind.IMPORT:
+                # B4-5 "Import preset...": validate + install as a durable
+                # user preset (vs Load's transient FILE identity), then adopt
+                # it as the active preset through the same history path.
+                path = Path(result[0])
+                name, imported = import_preset(path)
+                if self.params != imported:
+                    self._push_history(self.params)
+                self._commit(imported)
+                self._set_identity((name, PresetSource.USER), imported)
+                self._reset_working_copy()
+                self._refresh_presets()
+                self.toasts.info(f"imported {path.name} as user/{name}")
+                self._toast_param_warnings(imported)
             elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
@@ -695,13 +1047,22 @@ class StudioApp:
                 self.toasts.info(f"saved {path.name}")
             elif kind == DialogKind.EXPORT:
                 out = Path(result)
-                self._export = ExportJob(export_job(self.sim, out), out)
+                conflicts = _export_conflicts(out)
+                if conflicts:
+                    # B1-4: the exporter itself overwrites silently, so ask
+                    # first. Held here; draw_controls draws the confirm modal.
+                    self._pending_export = (out, conflicts)
+                else:
+                    self._start_export(out)
         except (PresetError, OSError, ValueError) as exc:
             self.toasts.error(str(exc))
 
     # -- UI ----------------------------------------------------------------------------
 
     def draw_controls(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            imgui.text_wrapped(self.init_error or "initializing...")
+            return
         # Every action in this block (Phase 6 preset combo, Load/Save, seed
         # header, Randomize/Reroll, Undo/Redo) commits straight through
         # `self._commit`, bypassing `_process_edit`'s gate -- so while an
@@ -733,12 +1094,43 @@ class StudioApp:
         imgui.same_line()
         if imgui.button("Load...") and self._dialog is None:
             self._dialog = (DialogKind.LOAD, pfd.open_file("Load preset", "", ["JSON", "*.json"]))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("load a preset .json for this session (not added to the dropdown)")
+        imgui.same_line()
+        if imgui.button("Import...") and self._dialog is None:
+            # B4-5: pick a preset .json from anywhere; it is validated and
+            # installed into the user preset dir, so it joins the dropdown.
+            self._dialog = (
+                DialogKind.IMPORT,
+                pfd.open_file("Import preset", "", ["JSON", "*.json"]),
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "copy a preset .json into your user presets (~/.gasgiant/presets) "
+                "and load it"
+            )
         imgui.same_line()
         if imgui.button("Save..."):
             self._open_save_dialog()
         imgui.same_line()
         if imgui.button("Reset to gas_giant_warm"):
             self._load_preset_entry("gas_giant_warm", PresetSource.FACTORY)
+
+        # B1-8: contextual overwrite/delete row, shown only while a USER
+        # preset is active (factory presets are package data; a FILE identity
+        # lost its full path) -- both confirm before touching the disk.
+        user_entry = self._active_user_preset_path()
+        if user_entry is not None:
+            name, _path = user_entry
+            if imgui.button(f"Save '{name}'"):
+                self._request_overwrite_active()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"overwrite user/{name} with the current settings (Ctrl+S)")
+            imgui.same_line()
+            if imgui.button("Delete##preset_row"):
+                self._request_delete_active()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"delete user/{name} from disk (asks first)")
 
         self._draw_seed_header_control()
 
@@ -751,18 +1143,29 @@ class StudioApp:
         self._draw_history_buttons()
         imgui.end_disabled()
 
+        # Confirm modals live OUTSIDE the begin_disabled block: a modal's
+        # buttons must stay clickable (they're only staged while no export is
+        # running anyway -- every request path is export-gated).
+        self._draw_preset_confirm_modals()
+
         if self._export is None:
             if imgui.button("Export..."):
                 imgui.open_popup("Export map set")
             self._draw_export_modal()
+            self._draw_export_overwrite_confirm()
+            self._draw_last_export_line()
         else:
             prog = self._export.progress
             frac = prog.fraction if prog else 0.0
-            label = prog.message if prog else "starting"
-            imgui.progress_bar(frac, imgui.ImVec2(180.0, 0.0), label)
+            imgui.progress_bar(frac, imgui.ImVec2(180.0, 0.0), _export_progress_label(prog))
             imgui.same_line()
             if imgui.button("Cancel"):
                 self._cancel_export()
+            # B1-5: the hold notice in the SAME pane as the frozen sliders.
+            developing = prog is not None and prog.message == "developing"
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.8, 0.3, 1.0))
+            imgui.text_wrapped(_export_hold_notice(developing))
+            imgui.pop_style_color()
 
         self._draw_pending_hint()
         imgui.separator()
@@ -842,19 +1245,21 @@ class StudioApp:
         imgui.end_disabled()
 
     def _draw_export_resolution(self) -> None:
-        """Resolution combo next to Export, writing export.width (POST tier).
-        Kept in sync with the working copy so a pending panel edit can't revert
-        it on the next frame."""
-        widths = [w for w, _ in EXPORT_RESOLUTIONS]
-        labels = [lbl for _, lbl in EXPORT_RESOLUTIONS]
-        current = self.params.export.width
-        cur_idx = widths.index(current) if current in widths else -1
-        imgui.set_next_item_width(70.0)
-        clicked, idx = imgui.combo("##exportres", cur_idx, labels)
-        if clicked and 0 <= idx < len(widths) and widths[idx] != current:
-            new_params = self.params.model_copy(deep=True)
-            new_params.export.width = widths[idx]
-            self._commit_output_setting(new_params)
+        """Resolution combo in the export modal -- THE editor for export.width
+        (B4-4: the auto-panel renders it read-only, so there is exactly one
+        live editor and one undo policy). Reads the working copy so a held
+        mid-export draft can't visually snap back; a width outside the snap
+        list (from a preset) previews as "<N> px (custom)" instead of blank."""
+        current = self._live.export.width
+        preview = next(
+            (lbl for w, lbl in EXPORT_RESOLUTIONS if w == current), f"{current} px (custom)"
+        )
+        imgui.set_next_item_width(110.0)
+        if imgui.begin_combo("##exportres", preview):
+            for width, label in EXPORT_RESOLUTIONS:
+                if imgui.selectable(label, width == current)[0] and width != current:
+                    self._commit_export_field("width", width)
+            imgui.end_combo()
         imgui.same_line()
         # Clarify that the export map size is independent of the sim grid (the
         # two were easy to confuse when export.width sat among the sliders).
@@ -866,8 +1271,9 @@ class StudioApp:
     def _draw_export_modal(self) -> None:
         """Confirm-step modal in front of the folder picker: resolution +
         PNG-compression + an emission indicator + the sim-vs-export clarifier.
-        Both resolution and compression commit POST-tier (cheap re-derive) the
-        same way the old inline combo did. The final "Export..." opens the SAME
+        This modal is the ONE live editor for the output settings (B4-4); both
+        commit POST-tier through the shared _process_edit pipeline, so they
+        are ordinary undoable edits. The final "Export..." opens the SAME
         folder dialog the bare button used to open directly, then closes the
         modal; "Cancel" closes it with no side effect. Nothing fires on the
         first click that merely opened the modal (an explicit confirm step)."""
@@ -880,36 +1286,99 @@ class StudioApp:
         # Resolution combo + the "map size is independent of the sim grid"
         # clarifier text, reused verbatim from the old inline placement.
         self._draw_export_resolution()
-        # PNG compression (0-9), committed POST-tier like the resolution combo.
-        current = self.params.export.png_compression
+        # PNG compression (0-9). Reads the working copy and commits through
+        # the shared pipeline (same rationale as _draw_seed_header_control):
+        # POST-tier drags stay live, the release coalesces into one undo entry.
+        current = self._live.export.png_compression
         changed, value = imgui.slider_int("PNG compression", current, 0, 9)
-        if changed and value != current:
-            new_params = self.params.model_copy(deep=True)
-            new_params.export.png_compression = value
-            self._commit_output_setting(new_params)
-        if self.params.emission.enabled:
-            imgui.text("Emission: enabled (will export emission.exr)")
-        else:
-            imgui.text("Emission: disabled")
+        committed = imgui.is_item_deactivated_after_edit()
+        if changed or committed:
+            draft = self._live.model_dump()
+            if changed:
+                draft["export"]["png_compression"] = value
+            self._process_edit(draft, changed, committed)
+        # B1-4: name what will actually be written (the modal never listed its
+        # outputs) and where the map set goes next (Blender). The file list
+        # subsumes the old bare "Emission: enabled/disabled" indicator --
+        # emission.exr appears in it exactly when params.emission.enabled.
+        imgui.separator()
+        imgui.text("Files written to the chosen folder:")
+        for line in _export_file_lines(self.params):
+            imgui.bullet_text(line)
         imgui.separator()
         if imgui.button("Export...") and self._dialog is None:
-            self._dialog = (DialogKind.EXPORT, pfd.select_folder("Export map set to folder"))
+            default_dir = str(self._last_export_dir) if self._last_export_dir else ""
+            self._dialog = (
+                DialogKind.EXPORT,
+                pfd.select_folder("Export map set to folder", default_dir),
+            )
             imgui.close_current_popup()
         imgui.same_line()
         if imgui.button("Cancel"):
             imgui.close_current_popup()
         imgui.end_popup()
 
-    def _draw_pending_hint(self) -> None:
-        """While a heavy (velocity/restart) edit waits for release, tell the user
-        the rebuild is deferred so the absence of a live update isn't confusing."""
-        heavy_pending = bool(diff_tiers(self.params, self._live) - {Tier.POST})
-        if heavy_pending:
-            imgui.text_colored(
-                imgui.ImVec4(1.0, 0.8, 0.3, 1.0), "release to apply (restart/velocity)"
+    def _start_export(self, out: Path) -> None:
+        """Kick off the tiled export job into ``out`` (folder already picked
+        and, if it contained a map set, overwrite-confirmed)."""
+        self._export = ExportJob(export_job(self.sim, out), out)
+
+    def _draw_export_overwrite_confirm(self) -> None:
+        """B1-4: confirm modal shown when the picked folder already contains
+        map-set files (``self._pending_export``). Overwrite starts the job;
+        Cancel drops it with no side effect."""
+        if self._pending_export is None:
+            return
+        title = "Overwrite existing export?"
+        if not imgui.is_popup_open(title):
+            imgui.open_popup(title)
+        center = imgui.get_main_viewport().get_center()
+        imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+        if not imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+            return
+        out, conflicts = self._pending_export
+        imgui.text_wrapped(f"{out} already contains a map set:")
+        for name in conflicts:
+            imgui.bullet_text(name)
+        imgui.text_wrapped("Exporting here will overwrite these files.")
+        imgui.separator()
+        if imgui.button("Overwrite"):
+            self._pending_export = None
+            self._start_export(out)
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Cancel##overwrite_export"):
+            self._pending_export = None
+            imgui.close_current_popup()
+        imgui.end_popup()
+
+    def _draw_last_export_line(self) -> None:
+        """B1-4: persistent 'last exported to...' line + Open-folder button
+        (the success toast vanished after 4 s with no way back to the files).
+        Drawn only while no export is in flight."""
+        if self._last_export_dir is None:
+            return
+        if imgui.small_button("Open folder") and not _open_folder(self._last_export_dir):
+            self.toasts.error(f"could not open {self._last_export_dir}")
+        imgui.same_line()
+        imgui.text_disabled(f"last export: {self._last_export_dir}")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                f"{self._last_export_dir}\nImport mapset.json in Blender "
+                "(File > Import > Gas Giant Map Set)"
             )
 
+    def _draw_pending_hint(self) -> None:
+        """While a heavy (velocity/restart) edit waits for release, tell the user
+        the rebuild is deferred so the absence of a live update isn't confusing.
+        Wording is plain-language, worst-tier-first (B1-5)."""
+        hint = _pending_hint_text(diff_tiers(self.params, self._live))
+        if hint is not None:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.3, 1.0), hint)
+
     def draw_equirect(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            return
         self.render_perf.begin()
         # Advance the development run a little each frame so the user watches
         # the clouds evolve; the viewport re-derives whenever tracers moved.
@@ -927,6 +1396,8 @@ class StudioApp:
         self.render_perf.end()
 
     def draw_sphere(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            return
         color_tex, _ = self.sim.ensure_preview(PREVIEW_WIDTH)
         self.sphere.draw(color_tex, self.viewport.agx)
 
@@ -968,6 +1439,8 @@ class StudioApp:
             )
 
     def draw_perf(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            return
         imgui.text(f"frame  {self.frame_perf.mean_ms:6.2f} ms")
         imgui.text(f"render {self.render_perf.last_ms:6.2f} ms (last)")
         imgui.text(f"preview {PREVIEW_WIDTH}x{PREVIEW_WIDTH // 2}")
@@ -995,7 +1468,11 @@ class StudioApp:
             self._export.progress = next(job)
         except StopIteration:
             self._export = None
-            self.toasts.info(f"exported to {out}")
+            # B1-4: remember where (this session + persisted via the same
+            # hello_imgui prefs that keep window geometry/docking layout).
+            self._last_export_dir = out
+            _save_last_export_dir(out)
+            self.toasts.info(f"exported to {out} — 'Open folder' in Controls")
         except Exception as exc:  # noqa: BLE001 - surface any export failure
             # Record the full traceback (this catch is broad -- a GL error mid
             # derive, an IndexError in the tiler, an OSError on the last tile),
@@ -1033,7 +1510,7 @@ class StudioApp:
 
     def pre_frame(self) -> None:
         """Runs once per frame before imgui NewFrame: dialogs, pacing, smoke exit."""
-        if self.gpu is None:  # defensive; post_init normally did this
+        if self.gpu is None and self.init_error is None:  # defensive; post_init normally did this
             self.init_gl()
         self.frame_perf.end()
         self.frame_perf.begin()
@@ -1098,6 +1575,14 @@ class StudioApp:
         imgui.set_next_window_size(imgui.ImVec2(520.0, 480.0), imgui.Cond_.first_use_ever)
         opened, self._show_help = imgui.begin("Help", self._show_help)
         if opened:
+            # B1-3: the app's central concept, first -- a new user opens Help
+            # precisely because the planet is still churning.
+            imgui.text("How the simulation develops:")
+            imgui.text_wrapped(_HELP_DEV_RUN)
+            imgui.separator()
+            imgui.text("Preset status ('*' and 'unsaved'):")
+            imgui.text_wrapped(_HELP_DIRTY)
+            imgui.separator()
             imgui.text_wrapped(
                 "Type in the search box to filter fields by name, label, or "
                 "description. Toggle Advanced to see the full field set -- a "
@@ -1115,6 +1600,12 @@ class StudioApp:
             imgui.bullet_text("Randomize / Reroll seed: re-roll unlocked fields from a fresh seed.")
             imgui.bullet_text("Undo / Redo: step back/forward through committed edits.")
             imgui.bullet_text("Export...: render the current look to a map set on disk.")
+            imgui.separator()
+            imgui.text("What Undo covers:")
+            imgui.text_wrapped(_HELP_UNDO)
+            imgui.separator()
+            imgui.text("Glossary:")
+            imgui.text_wrapped(_HELP_GLOSSARY)
             imgui.bullet_text(
                 "Ctrl-click any slider to type an exact value (built-in imgui "
                 "behavior -- already works everywhere, nothing to enable)."
@@ -1127,7 +1618,10 @@ class StudioApp:
             imgui.bullet_text("F1        toggle this Help window")
             imgui.bullet_text("Ctrl+Z    Undo")
             imgui.bullet_text("Ctrl+Y    Redo")
-            imgui.bullet_text("Ctrl+S    Save preset...")
+            imgui.bullet_text(
+                "Ctrl+S    Save preset (overwrites the active user preset "
+                "after a confirm; otherwise opens Save As...)"
+            )
             imgui.separator()
             imgui.text_wrapped(
                 "Hover the (?) marker next to a section header for a one-line "
@@ -1193,7 +1687,17 @@ def main() -> int:
         dockable_windows=windows,
     )
 
-    hello_imgui.run(params)
+    try:
+        hello_imgui.run(params)
+    except Exception as exc:  # noqa: BLE001 - window/GL-context creation failed in the runner
+        # The runner couldn't even create the 4.3 window/context (init_gl
+        # never ran). Same friendly translation as the init_gl path (B1-2).
+        log.exception("GUI runner failed")
+        print(_gl_failure_message(str(exc) or type(exc).__name__), file=sys.stderr)
+        return 1
+    if app.init_error is not None:
+        print(app.init_error, file=sys.stderr)
+        return 1
 
     shot_path = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
     if shot_path:
