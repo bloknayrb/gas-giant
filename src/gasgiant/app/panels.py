@@ -111,7 +111,9 @@ _SECTION_BLURBS: dict[str, str] = {
     "poles": "Polar vortex style and cap appearance.",
     "appearance": "Color palette, contrast, and tonal-mapping controls.",
     "detail": "Fine-scale procedural texture detail layers.",
-    "emission": "Self-emissive glow channels (lightning, aurora, hot spots).",
+    "emission": "Self-emissive glow channels (lightning, aurora, hot spots). "
+    "Written to the exported emission map only — the Color preview does not "
+    "composite emission.",
     "physical": "Planet radius and physical-shading parameters.",
     "export": "Output map resolution and PNG compression for Export.",
 }
@@ -304,6 +306,27 @@ def _draw_hero_latitude_escape(storms_doc: dict[str, Any]) -> tuple[bool, bool]:
     return False, False
 
 
+# B1-7: aurora writes only the exported emission map's alpha channel; nothing
+# in the Color preview moves when it is enabled. Said exactly where the aurora
+# controls live, at the moment it applies (aurora is on), so the zero-feedback
+# slider drag stops reading as "broken".
+_AURORA_PREVIEW_NOTE = (
+    "aurora is on — it renders to the exported emission map (alpha), "
+    "not the Color preview"
+)
+
+
+def _draw_emission_aurora_note(emission_doc: dict[str, Any]) -> None:
+    """Informational banner under the Emission header while aurora is active
+    (same always-visible idiom as ``_draw_bands_template_escape``, minus the
+    button: there is nothing to fix, only something to know). Draws regardless
+    of Advanced/collapsed state -- the confusion happens precisely when the
+    (advanced) aurora fields are hidden."""
+    if emission_doc.get("aurora_strength", 0.0) <= 0.0:
+        return
+    imgui.text_colored(imgui.ImVec4(*_MODIFIED_COLOR), _AURORA_PREVIEW_NOTE)
+
+
 def _draw_help_marker(text: str) -> None:
     imgui.text_disabled("(?)")
     if imgui.is_item_hovered():
@@ -381,6 +404,8 @@ def _draw_model(
                 c, cm = _draw_hero_latitude_escape(doc[name])
                 changed |= c
                 committed |= cm
+            if name == "emission":
+                _draw_emission_aurora_note(doc[name])
             if opened:
                 imgui.push_id(name)
                 imgui.indent(8.0)

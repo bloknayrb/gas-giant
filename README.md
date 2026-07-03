@@ -34,6 +34,10 @@ uv sync --all-extras
 
 # Live-preview GUI: watch the simulation evolve, tweak, export.
 uv run gasgiant-studio
+# First launch grows the default planet through a ~1256-step development run
+# (up to ~15 min at the default speed on a midrange GPU) — watch the
+# "developing N/M (~Xm left)" progress in the Playback pane and over the
+# viewport; the image is not final until it completes.
 # What each slider does, shown on the planet: docs/sliders.md
 
 # Headless: render a map set (factory presets: gas_giant_warm [default],
