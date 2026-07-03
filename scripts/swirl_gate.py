@@ -39,13 +39,14 @@ panels (drag 0.08/0.15) from the swirl panel (drag 0).
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from gasgiant.engine.facade import Simulation
 from gasgiant.gl import GpuContext
-from gasgiant.params.presets import load_factory_preset
+from gasgiant.params.presets import resolve_preset
 
 # --------------------------------------------------------------------------- #
 # Frozen acceptance thresholds (calibrated 2026-06-25 across seeds 4201/7/99/   #
@@ -101,7 +102,7 @@ def build_cfg(seed: int, drag: float, width: int, raw: bool = False,
     radius 0.18, inject 0, dev_steps 1256) on top of gas_giant_warm.  The two are
     genuinely different dynamics — see plan.  inject/inject_mask let the develop
     config carry broadband eddy injection; eddy_drag sets vort_eddy_drag (Gate 1)."""
-    p = load_factory_preset(preset).model_copy(update={"seed": seed})
+    p = resolve_preset(preset).model_copy(update={"seed": seed})
     if raw:
         p.sim = p.sim.model_copy(update={"resolution": width, "dt_scale": 1.0})
         if sweep_axis == "psi":
@@ -391,7 +392,11 @@ def main():
                     help="ship-config mode: sweep the drag axis on the UNMODIFIED preset "
                          "(its own solver/storms), not the develop config")
     ap.add_argument("--preset", default="gas_giant_warm",
-                    help="factory preset to gate in ship-config (--raw) mode")
+                    help="preset to gate in ship-config (--raw) mode: a factory "
+                         "preset name or a path to a .json preset file")
+    ap.add_argument("--out", default=OUT,
+                    help="directory for the swirl_gate.png montage (default: the "
+                         "local _diag scratch dir)")
     ap.add_argument("--inject", type=float, default=0.0,
                     help="vort_inject on the develop config (test texture replenishment)")
     ap.add_argument("--inject-mask", default="belts")
@@ -450,8 +455,10 @@ def main():
         print(f"  {r['drag']:.3f}| {r['m1']:6.2f} | {r['m2']:.2f} | {r['m3']:.2f} "
               f"| {r['m4']:.2f} | {r['m5']:.2f} | {r['m6']:.2f} | {v}")
 
-    cv2.imwrite(f"{OUT}/swirl_gate.png", np.vstack(tiles))
-    print(f"\nwrote {OUT}/swirl_gate.png")
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out_dir / "swirl_gate.png"), np.vstack(tiles))
+    print(f"\nwrote {out_dir / 'swirl_gate.png'}")
 
 
 if __name__ == "__main__":
