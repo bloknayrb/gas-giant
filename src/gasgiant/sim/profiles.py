@@ -195,7 +195,7 @@ def _stamp_profiles(
     softness multipliers (edge diversity)."""
     values = bands.values.astype(np.float64)
     heights = bands.heights.astype(np.float64)
-    is_belt = (values < np.median(values)).astype(np.float64)
+    is_belt = bands.is_belt.astype(np.float64)
 
     t0 = np.full_like(lat, values[0])
     t1 = np.full_like(lat, heights[0])

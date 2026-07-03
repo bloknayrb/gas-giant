@@ -33,6 +33,18 @@ class BandLayout:
     # all radians. Drawn for every layout; applied only when
     # bands.faded_sector > 0.
     fade_sector: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    # Explicit zone/belt identity, (count,) bool, computed ONCE at layout
+    # build from `values < median(values)`. Consumers (stamp profiles,
+    # fade-sector pick, storm seeding, outbreak candidates) must read this
+    # instead of re-deriving from values, so a later value edit (belt fade)
+    # can never flip a band's class. None -> derived in __post_init__ for
+    # hand-built layouts (tests).
+    is_belt: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        if self.is_belt is None:
+            values = np.asarray(self.values, dtype=np.float64)
+            object.__setattr__(self, "is_belt", values < np.median(values))
 
 
 def generate_bands(seed: int, params: BandsParams) -> BandLayout:
@@ -71,46 +83,50 @@ def generate_bands(seed: int, params: BandsParams) -> BandLayout:
     values += params.hue_jitter * hue_rng.uniform(-1.0, 1.0, size=count)
 
     values = np.clip(values, 0.0, 1.0)
+    is_belt = values < np.median(values)
     return BandLayout(
         edges=edges.astype(np.float32),
         values=values.astype(np.float32),
         heights=np.clip(heights, 0.0, 1.0).astype(np.float32),
-        fade_sector=_select_fade_sector(seed, edges, values),
+        fade_sector=_select_fade_sector(seed, edges, is_belt),
+        is_belt=is_belt,
     )
 
 
 def _bands_from_template(seed: int, template) -> BandLayout:
     """The explicit-skeleton path: edges/values/heights verbatim (validated
     by BandTemplate -- identity alternation, descending edges, extents).
-    NO value seasoning runs here: consumers re-derive zone/belt identity
-    from `values < median(values)`, and jitter on both a value and the
-    median can flip a band's class -- verbatim values keep it deterministic.
+    NO value seasoning runs here: zone/belt identity is frozen from the
+    verbatim values (`values < median(values)`) into BandLayout.is_belt --
+    jitter on both a value and the median could flip a band's class.
     Fade-sector selection still applies (its own seed stream; works off any
     edges/values); warp, edge softness/diversity, and detail noise are
     applied downstream of the layout and are unaffected."""
     edges = np.deg2rad(np.asarray(template.edges_deg, dtype=np.float64))
     values = np.asarray(template.values, dtype=np.float64)
+    is_belt = values < np.median(values)
     return BandLayout(
         edges=edges.astype(np.float32),
         values=values.astype(np.float32),
         heights=np.asarray(template.heights, dtype=np.float32),
-        fade_sector=_select_fade_sector(seed, edges, values),
+        fade_sector=_select_fade_sector(seed, edges, is_belt),
+        is_belt=is_belt,
     )
 
 
 def _select_fade_sector(
-    seed: int, edges: np.ndarray, values: np.ndarray
+    seed: int, edges: np.ndarray, is_belt: np.ndarray
 ) -> tuple[float, float, float, float]:
     """The widest low/mid-latitude belt gets the (potential) faded sector;
     longitude and width come from a dedicated stream so drawing them never
-    perturbs the band layout."""
+    perturbs the band layout. Identity comes in precomputed (see
+    BandLayout.is_belt) — never re-derive it from values here."""
     rng = subseed(seed, "faded-sector")
     lon = float(rng.uniform(-np.pi, np.pi))
     halfwidth = float(np.deg2rad(rng.uniform(38.0, 58.0)))
 
     centers = 0.5 * (edges[:-1] + edges[1:])
     widths = -np.diff(edges)
-    is_belt = values < np.median(values)
     candidates = np.where(is_belt & (np.abs(centers) < 0.9))[0]
     if candidates.size == 0:
         return (0.0, 0.0, lon, halfwidth)

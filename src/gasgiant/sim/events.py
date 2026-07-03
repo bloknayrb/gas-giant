@@ -65,14 +65,16 @@ class EventSchedule:
         if count == 0 or params.sim.dev_steps < 50:
             return sched
         values = bands.values
-        median = float(np.median(values))
         # DARK belts only (review: a plume on a light zone/boundary is white-on-
         # white and vanishes). Take the darkest half of the belts so the bright-
         # on-dark convective-revival contrast is the rule, not the exception.
+        # Belt identity from BandLayout.is_belt (frozen at layout build): a
+        # belt faded toward zone-white must STAY an outbreak candidate — the
+        # SEB-revival story is outbreaks erupting in the faded belt.
         belts = [
             (0.5 * (bands.edges[j] + bands.edges[j + 1]), float(values[j]))
             for j in range(len(values))
-            if values[j] < median
+            if bands.is_belt[j]
             and 0.20 < abs(0.5 * (bands.edges[j] + bands.edges[j + 1])) < 1.0
         ]
         if not belts:

@@ -312,17 +312,16 @@ def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
 
 
 def _band_centers(bands: BandLayout, want_belt: bool) -> list[tuple[float, float]]:
-    """(center latitude, width) of zones or belts within the vortex latitude range."""
-    values = bands.values
-    median = float(np.median(values))
+    """(center latitude, width) of zones or belts within the vortex latitude range.
+    Identity from BandLayout.is_belt (frozen at layout build) — never from
+    values, which a belt fade may later edit."""
     out = []
-    for j in range(len(values)):
+    for j in range(len(bands.values)):
         center = 0.5 * (bands.edges[j] + bands.edges[j + 1])
         width = float(bands.edges[j] - bands.edges[j + 1])
         if abs(center) > MAX_VORTEX_LAT:
             continue
-        is_belt = values[j] < median
-        if is_belt == want_belt:
+        if bool(bands.is_belt[j]) == want_belt:
             out.append((float(center), width))
     return out
 
