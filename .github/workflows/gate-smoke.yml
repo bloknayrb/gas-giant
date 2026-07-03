@@ -1,28 +1,21 @@
 # Swirl-gate smoke under llvmpipe (A4-2 groundwork).
 #
-# workflow_dispatch ONLY — deliberately no push/schedule triggers: llvmpipe
-# runtime for a 1024-grid 700-step vorticity develop run is unmeasured and may
-# be 10-50x slower than the RTX dev box (~10 s). Measure via a manual dispatch
-# before anyone considers wiring this into a schedule.
+# workflow_dispatch ONLY — deliberately no push/schedule triggers. Measured
+# 2026-07-03 (run 28675593970, W9/PR #23): the 1024w jupiter_vorticity gate
+# takes ~22 min wall on a GitHub ubuntu runner under llvmpipe (~150x the ~10 s
+# RTX 3070 equivalent), and llvmpipe@1024 shifts the metrics vs the RTX/1536
+# calibration (m1 1.22 / m3 0.53 / m5 0.28 vs 0.91 / 0.51 / 0.52) — so the
+# frozen thresholds are NOT renderer/width-portable. Do not promote this job
+# to push/schedule without llvmpipe-calibrated thresholds of its own.
 #
 # The gate prints the metric table and writes a labeled montage (uploaded as an
-# artifact). It does not yet exit nonzero on FAIL — this job is a smoke/runtime
-# probe, not an enforcement gate; enforcement waits on the W9 threshold
-# re-baseline decision.
+# artifact). It does not exit nonzero on FAIL — this job is a smoke/runtime
+# probe, not an enforcement gate.
 
 name: Gate smoke (swirl, llvmpipe)
 
 on:
   workflow_dispatch:
-  # TEMPORARY dispatch bootstrap (remove after the first runtime measurement):
-  # GitHub only allows manual dispatch of workflows that exist on the DEFAULT
-  # branch, so a branch-only workflow_dispatch job cannot be triggered at all.
-  # This paths-scoped pull_request trigger fires only when this file itself
-  # changes in a PR — i.e. exactly once, for the W9 groundwork PR — and is NOT
-  # a push/schedule trigger (the job stays out of normal CI).
-  pull_request:
-    paths:
-      - ".github/workflows/gate-smoke.yml"
 
 jobs:
   gate-smoke:

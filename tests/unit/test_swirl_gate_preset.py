@@ -17,7 +17,7 @@ from gasgiant.params.presets import PresetError, load_factory_preset, save_prese
 # scripts/ is not a package; add it to sys.path so we can import directly.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
-from swirl_gate import build_cfg  # noqa: E402
+from swirl_gate import M3_MIN, build_cfg, m3_min_for  # noqa: E402
 
 
 def test_build_cfg_accepts_factory_name():
@@ -42,3 +42,14 @@ def test_build_cfg_accepts_json_path(tmp_path):
 def test_build_cfg_unknown_name_still_errors():
     with pytest.raises(PresetError):
         build_cfg(seed=1, drag=0.0, width=512, raw=True, preset="no_such_preset")
+
+
+def test_m3_min_per_preset_rebaseline():
+    """W9 re-baseline (2026-07-03): jupiter_vorticity has a per-preset M3_MIN;
+    everything else keeps the warm-calibrated default. A .json path keys off
+    its filename stem so candidate re-tunes inherit their preset's threshold."""
+    assert m3_min_for("jupiter_vorticity") == pytest.approx(0.46)
+    assert m3_min_for("gas_giant_warm") == pytest.approx(M3_MIN)
+    assert m3_min_for("some_new_preset") == pytest.approx(M3_MIN)
+    assert m3_min_for("out/candidates/jupiter_vorticity.json") == pytest.approx(0.46)
+    assert m3_min_for("out/candidates/other_thing.json") == pytest.approx(M3_MIN)
