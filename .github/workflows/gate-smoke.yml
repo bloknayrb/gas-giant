@@ -36,13 +36,18 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
-      - name: Install Mesa (llvmpipe) and EGL
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6
+      # xvfb is REQUIRED, unlike in ci.yml: GpuContext.headless() goes through
+      # glcontext's x11 backend, which needs a DISPLAY even for llvmpipe.
+      # (In ci.yml the gpu fixture just SKIPS when XOpenDisplay fails — the
+      # "GPU smoke tests (llvmpipe)" step currently runs 6 tests and skips ~178.
+      # This job must actually render, so it gets a virtual display.)
+      - name: Install Mesa (llvmpipe), EGL and xvfb
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
       - name: Sync dependencies
         run: uv sync --all-extras
       - name: Swirl gate smoke (jupiter_vorticity ship config, 1024w)
         run: >
-          uv run python scripts/swirl_gate.py --raw --preset jupiter_vorticity
+          xvfb-run -a uv run python scripts/swirl_gate.py --raw --preset jupiter_vorticity
           --drags 0.0 --seed 4201 --width 1024 --out out/gate-smoke
       - name: Upload montage
         if: always()
