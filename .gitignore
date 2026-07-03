@@ -20,6 +20,11 @@ refs/
 
 # Session/handoff state (local memory, not project source)
 .remember/
+.claude/tdd-guard/
+
+# Local diagnostics and scratch scripts
+_diag/
+scripts/scratch/
 
 # OS
 Thumbs.db
