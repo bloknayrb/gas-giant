@@ -279,6 +279,20 @@ _HELP_DIRTY = (
     "is not tied to a named preset; use Save... to give it a name."
 )
 
+# B4-6: what Undo covers and what it deliberately does not -- the exclusions
+# were previously undiscoverable ("I pressed Ctrl+Z and nothing came back").
+_HELP_UNDO = (
+    "Undo/redo (Ctrl+Z / Ctrl+Y) covers every committed parameter edit — a "
+    "whole slider drag counts as one step — plus preset loads, Randomize, "
+    "Reroll, and the export settings in the Export... dialog (resolution, "
+    "PNG compression). NOT undoable: Restart dev and the playback controls "
+    "(Play/Pause/Step/Speed — they steer the run, not the parameters), "
+    "per-field locks, saving/overwriting/deleting preset files on disk, "
+    "viewport channel/AgX and sun-angle choices, and a finished export's "
+    "files. History keeps the most recent 64 steps; older steps fall off "
+    "the end."
+)
+
 
 def _shortcuts_enabled() -> bool:
     """Global keyboard shortcuts (Phase 7) fire only when no text-input
@@ -1544,6 +1558,9 @@ class StudioApp:
             imgui.bullet_text("Randomize / Reroll seed: re-roll unlocked fields from a fresh seed.")
             imgui.bullet_text("Undo / Redo: step back/forward through committed edits.")
             imgui.bullet_text("Export...: render the current look to a map set on disk.")
+            imgui.separator()
+            imgui.text("What Undo covers:")
+            imgui.text_wrapped(_HELP_UNDO)
             imgui.bullet_text(
                 "Ctrl-click any slider to type an exact value (built-in imgui "
                 "behavior -- already works everywhere, nothing to enable)."
