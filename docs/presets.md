@@ -1,5 +1,8 @@
 # Presets and the manifest contract
 
+> Looking for the parameter overlays that reproduce documented historical
+> atmosphere states (faded SEB, ochre EZ)? Those live in [recipes.md](recipes.md).
+
 ## Presets (STRICT policy)
 
 A preset is a JSON envelope around the parameter tree:
