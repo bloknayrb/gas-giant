@@ -43,6 +43,7 @@ from gasgiant.params.presets import (
     PresetError,
     PresetSource,
     available_presets,
+    import_preset,
     load_factory_preset,
     load_preset,
     load_user_preset,
@@ -59,6 +60,7 @@ class DialogKind(StrEnum):
     LOAD = "load"
     SAVE = "save"
     EXPORT = "export"
+    IMPORT = "import"
 
 
 @dataclass
@@ -985,7 +987,7 @@ class StudioApp:
         kind, dlg = self._dialog
         if not dlg.ready():
             return
-        if kind == DialogKind.LOAD and self._export is not None:
+        if kind in (DialogKind.LOAD, DialogKind.IMPORT) and self._export is not None:
             # A file was already picked (dialog opened before the export
             # started, or a race with the disabled-button gate below) but
             # applying it now would commit mid-export. Hold the dialog --
@@ -1007,6 +1009,20 @@ class StudioApp:
                 self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"loaded {path.name}")
                 self._toast_param_warnings(loaded)
+            elif kind == DialogKind.IMPORT:
+                # B4-5 "Import preset...": validate + install as a durable
+                # user preset (vs Load's transient FILE identity), then adopt
+                # it as the active preset through the same history path.
+                path = Path(result[0])
+                name, imported = import_preset(path)
+                if self.params != imported:
+                    self._push_history(self.params)
+                self._commit(imported)
+                self._set_identity((name, PresetSource.USER), imported)
+                self._reset_working_copy()
+                self._refresh_presets()
+                self.toasts.info(f"imported {path.name} as user/{name}")
+                self._toast_param_warnings(imported)
             elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
@@ -1067,6 +1083,21 @@ class StudioApp:
         imgui.same_line()
         if imgui.button("Load...") and self._dialog is None:
             self._dialog = (DialogKind.LOAD, pfd.open_file("Load preset", "", ["JSON", "*.json"]))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("load a preset .json for this session (not added to the dropdown)")
+        imgui.same_line()
+        if imgui.button("Import...") and self._dialog is None:
+            # B4-5: pick a preset .json from anywhere; it is validated and
+            # installed into the user preset dir, so it joins the dropdown.
+            self._dialog = (
+                DialogKind.IMPORT,
+                pfd.open_file("Import preset", "", ["JSON", "*.json"]),
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "copy a preset .json into your user presets (~/.gasgiant/presets) "
+                "and load it"
+            )
         imgui.same_line()
         if imgui.button("Save..."):
             self._open_save_dialog()
