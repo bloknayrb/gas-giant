@@ -52,10 +52,7 @@ def main() -> None:
     # net albedo into the cap. Measured on the equirect polar rows poleward of
     # the 66 deg gate, where routeW>0.
     h, w = off.shape[:2]
-    if args.pole == "n":
-        band = slice(0, int(h * 24 / 180))
-    else:
-        band = slice(int(h * 156 / 180), h)
+    band = slice(0, int(h * 24 / 180)) if args.pole == "n" else slice(int(h * 156 / 180), h)
     sd = (on.astype(np.float64) - off.astype(np.float64))[band]
     lum = sd.mean(axis=2)  # per-pixel mean-channel delta
     frac_bright = float((lum > 2.0).mean())
