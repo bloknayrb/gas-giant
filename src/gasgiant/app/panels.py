@@ -446,9 +446,10 @@ def _draw_model(
             # VISIBLE leaf's ui label, and only when that label is truthy --
             # a section with one constant ui value (every section besides
             # Storms today) never differs from its own previous value, so it
-            # renders zero separators, byte-for-byte unchanged. Falsy ui
-            # (Baroclinic's fixed-cadence fields use ui="") is transparent to
-            # grouping: it neither triggers nor absorbs a boundary.
+            # renders zero separators, byte-for-byte unchanged. Falsy ui is
+            # transparent to grouping: it neither triggers nor absorbs a
+            # boundary. (Baroclinic's cadence trio now carries ui="Fixed
+            # cadence" -- B2-3 -- so it draws under its own sub-label.)
             ui = FieldMeta.of(info).ui or None
             if ui and prev_ui is not None and ui != prev_ui:
                 imgui.separator_text(ui)
@@ -747,6 +748,13 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
             row["latitude"] = lat
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
+        if imgui.is_item_hovered():
+            # B2-3: the composite editors' sub-widgets have no pfield
+            # description to inherit, so they carry their own tooltips.
+            imgui.set_tooltip(
+                "Anchor latitude of this gradient row, degrees (north positive); "
+                "rows blend into each other across latitude"
+            )
         if len(rows) > 1:
             imgui.same_line()
             if imgui.small_button("remove row"):
@@ -792,6 +800,8 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
             stop["color"] = tuple(rgb)
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Color of this gradient stop (sRGB)")
         imgui.same_line()
         imgui.set_next_item_width(120.0)
         c, pos = imgui.slider_float("##p", float(stop["pos"]), 0.0, 1.0)
@@ -799,6 +809,12 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
             stop["pos"] = pos
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Position of this stop along the gradient: 0 = darkest belt "
+                "end, 1 = brightest zone end (for storm_tints: 0 = festoon "
+                "blue-gray end, 1 = reddest storm end)"
+            )
         if len(stops) > 1:
             imgui.same_line()
             if imgui.small_button("x"):

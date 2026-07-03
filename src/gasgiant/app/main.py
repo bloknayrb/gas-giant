@@ -281,6 +281,17 @@ _HELP_DIRTY = (
     "is not tied to a named preset; use Save... to give it a name."
 )
 
+# B2-4: the recurring unglossed vocabulary, collected in one Help block.
+_HELP_GLOSSARY = (
+    "GRS = Great Red Spot, Jupiter's giant storm; 'hero' storms are its "
+    "class. Anticyclone = high-pressure vortex (bright/red ovals like the "
+    "GRS); cyclonic = the opposite spin (dark, stormy belts). Retrograde = "
+    "flowing against the planet's rotation; prograde = with it. Zones are "
+    "the bright bands, belts the dark ones. Some fields take latitudes/"
+    "widths in radians: 1 rad = 57.3 degrees (tooltips give the degree "
+    "equivalent)."
+)
+
 # B4-6: what Undo covers and what it deliberately does not -- the exclusions
 # were previously undiscoverable ("I pressed Ctrl+Z and nothing came back").
 _HELP_UNDO = (
@@ -1592,6 +1603,9 @@ class StudioApp:
             imgui.separator()
             imgui.text("What Undo covers:")
             imgui.text_wrapped(_HELP_UNDO)
+            imgui.separator()
+            imgui.text("Glossary:")
+            imgui.text_wrapped(_HELP_GLOSSARY)
             imgui.bullet_text(
                 "Ctrl-click any slider to type an exact value (built-in imgui "
                 "behavior -- already works everywhere, nothing to enable)."

@@ -444,6 +444,13 @@ def test_other_sections_have_constant_ui_no_separators_expected():
     for section, labels in by_section.items():
         if section == "storms":
             continue
+        if section == "solver":
+            # B2-3: the baroclinic cadence trio renders under its own "Fixed
+            # cadence" sub-label (it used to ship ui="" and draw unlabeled).
+            assert labels == {"Solver", "Fixed cadence"}, (
+                f"solver sub-groups drifted: {labels}"
+            )
+            continue
         assert len(labels) == 1, f"section {section!r} has multiple ui labels: {labels}"
 
 
