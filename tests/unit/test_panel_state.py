@@ -388,7 +388,8 @@ def test_storms_fields_grouped_into_named_subsections():
     from gasgiant.params.model import StormsParams
 
     expected_groups = {
-        "Hero", "Ovals", "Barges", "Pearls", "Outbreaks", "Small storms", "Mergers",
+        "Hero", "Ovals", "Accents", "Barges", "Pearls", "Outbreaks",
+        "Small storms", "Mergers",
     }
     seen_groups = {
         info.json_schema_extra.get("ui")

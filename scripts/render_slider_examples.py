@@ -287,7 +287,9 @@ def _baseline_params(kind: str) -> PlanetParams:
     elif kind == "vorticity":
         p = load_factory_preset("jupiter_vorticity")
     elif kind == "baroclinic":
-        p = load_factory_preset("jupiter_baroclinic")
+        # jupiter_baroclinic was DROPPED 2026-06-28 (the coupling engine stays);
+        # demo the baroclinic sliders on the vorticity preset with coupling on.
+        p = load_factory_preset("jupiter_vorticity")
         p.solver.baroclinic.enabled = True
         # The preset spins the baroclinic CPU solver up for 8000 steps; that is
         # minutes per render under software GL. Only baroclinic.gain is shown
