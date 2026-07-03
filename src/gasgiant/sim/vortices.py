@@ -77,8 +77,13 @@ class Vortex:
     tint: float = 0.0
     # T0 brightness stamped at init (ovals bright, barges dark).
     brightness: float = 0.0
-    # Downstream direction of the ambient jet (heroes: wake side), +1 east.
+    # Wake side, +1 east / -1 west. Heroes are always -1: the GRS turbulent
+    # wake trails WNW (review F06) — the local jet is eastward across the
+    # whole hero band, so a jet-sampled direction can never produce it.
     wake_dir: float = 0.0
+    # Latitude offset of the wake wedge center (radians, signed toward the
+    # equator for heroes; 0 = centered on the vortex).
+    wake_lat_off: float = 0.0
     # lon:lat elongation of the iso-contours (heroes only; 1.0 = round).
     aspect: float = 1.0
     # CPU-only (never packed into the SSBO): merger hysteresis countdown.
@@ -97,7 +102,8 @@ class VortexRegistry:
 
     def pack_ssbo(self) -> np.ndarray:
         """(N, 12) float32, three vec4 per vortex:
-        [x, y, z, r_core], [strength, kind, tint, brightness], [wake_dir, aspect, 0, 0].
+        [x, y, z, r_core], [strength, kind, tint, brightness],
+        [wake_dir, aspect, wake_lat_off, 0].
         Vectorized: this runs every sim step."""
         n = len(self.vortices)
         if n == 0:
@@ -105,7 +111,7 @@ class VortexRegistry:
         fields = np.array(
             [
                 (v.lat, v.lon, v.r_core, v.strength, v.kind,
-                 v.tint, v.brightness, v.wake_dir, v.aspect)
+                 v.tint, v.brightness, v.wake_dir, v.aspect, v.wake_lat_off)
                 for v in self.vortices
             ],
             dtype=np.float64,
@@ -120,6 +126,7 @@ class VortexRegistry:
         out[:, 4:8] = fields[:, 3:7]
         out[:, 8] = fields[:, 7]
         out[:, 9] = fields[:, 8]
+        out[:, 10] = fields[:, 9]
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -167,6 +174,10 @@ def _merge_pair(a: Vortex, b: Vortex, profiles: LatProfiles) -> Vortex:
         float(lat), float(lon), r_new, sign * s_mag, KIND_OVAL,
         tint=(w1 * a.tint + w2 * b.tint) / wt,
         brightness=(w1 * a.brightness + w2 * b.brightness) / wt,
+        # Jet-sampled and INERT: both wake consumers gate on KIND_HERO and
+        # the product is KIND_OVAL. Kept for the packed lane only; if merge
+        # products ever gain wakes, use the hero convention (wake_dir=-1,
+        # equatorward wake_lat_off), not this jet sample (see F06).
         wake_dir=1.0 if u_here >= 0.0 else -1.0,
         cooldown=MERGE_COOLDOWN,
     )
@@ -312,17 +323,16 @@ def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
 
 
 def _band_centers(bands: BandLayout, want_belt: bool) -> list[tuple[float, float]]:
-    """(center latitude, width) of zones or belts within the vortex latitude range."""
-    values = bands.values
-    median = float(np.median(values))
+    """(center latitude, width) of zones or belts within the vortex latitude range.
+    Identity from BandLayout.is_belt (frozen at layout build) — never from
+    values, which a belt fade may later edit."""
     out = []
-    for j in range(len(values)):
+    for j in range(len(bands.values)):
         center = 0.5 * (bands.edges[j] + bands.edges[j + 1])
         width = float(bands.edges[j] - bands.edges[j + 1])
         if abs(center) > MAX_VORTEX_LAT:
             continue
-        is_belt = values[j] < median
-        if is_belt == want_belt:
+        if bool(bands.is_belt[j]) == want_belt:
             out.append((float(center), width))
     return out
 
@@ -424,11 +434,14 @@ def generate_vortices(
             lat = float(np.deg2rad(storms.hero_latitude))
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
         s = _ambient_sign(profiles, lat) * storms.hero_strength * 0.045
-        u_here = float(np.interp(-lat, -profiles.lat, profiles.u))
+        # Wake trails WNW (review F06): westward, biased half a core radius
+        # toward the equator. Not jet-derived — the ambient jet is eastward
+        # across the entire hero band, so sampling it put the wake due east.
         reg.vortices.append(
             Vortex(lat, float(rng.uniform(-np.pi, np.pi)), r, s, KIND_HERO,
                    tint=0.9, brightness=0.05,
-                   wake_dir=1.0 if u_here >= 0.0 else -1.0,
+                   wake_dir=-1.0,
+                   wake_lat_off=0.5 * r * (1.0 if lat < 0.0 else -1.0),
                    aspect=storms.hero_aspect)
         )
 

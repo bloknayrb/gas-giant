@@ -104,17 +104,28 @@ void main() {
             psi += b.x * exp(-q * q);
         }
         // Hero wake wedge: boost turbulence downstream of GRS-class storms.
+        // down is -1 (westward) for heroes and the wedge center is biased
+        // toward the equator (wake_lat_off lane) => the wake reads WNW of a
+        // southern hero (review F06), matching vortex_stamp.glsl.
         if (b.y == KIND_HERO) {
             float down = vortex_data[3 * i + 2].x;  // packed at generation
+            float woff = vortex_data[3 * i + 2].z;  // wake center lat offset
             // Angular offsets from the vortex in lon/lat.
             float vlat = asin(clamp(a.y, -1.0, 1.0));
             float vlon = atan(a.z, a.x);
             float dlon = mod(ll.x - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;  // positive = downstream
-            float across = (ll.y - vlat) / max(rc * 1.6, 1e-4);
-            if (along > 0.0 && along < rc * 7.0) {
+            float across = (ll.y - (vlat + woff)) / max(rc * 1.6, 1e-4);
+            // Latitude window: the Gaussian tail has no natural cutoff and
+            // psi.comp stays LIVE poleward of 60 deg in vorticity mode (the
+            // psi_feather blend band) — an unwindowed hero wake leaks an
+            // e^-7-scale turbulence boost into the polar feather 40 deg away
+            // from the storm (found as a -60..-62 deg change lobe in the F06
+            // render diff). Zero beyond |across| 2.5, smooth from 2.0.
+            if (along > 0.0 && along < rc * 7.0 && abs(across) < 2.5) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
-                wake += exp(-across * across) * (1.0 - along / (rc * 7.0)) * ramp;
+                float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
+                wake += exp(-across * across) * win * (1.0 - along / (rc * 7.0)) * ramp;
             }
         }
     }
