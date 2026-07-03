@@ -391,6 +391,10 @@ class Simulation:
     def preview_height_texture(self) -> moderngl.Texture | None:
         return self._preview_height
 
+    @property
+    def preview_tracers_texture(self) -> moderngl.Texture:
+        return self.solver.equirect.tracers.cur
+
     # -- export -------------------------------------------------------------------------
 
     def render_maps(self, width: int | None = None) -> dict[str, np.ndarray]:
