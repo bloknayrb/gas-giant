@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+import subprocess
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -32,6 +34,7 @@ from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
 from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.export.exporter import export_job
+from gasgiant.export.manifest import MANIFEST_FILENAME
 from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
 from gasgiant.params.model import PlanetParams, Tier
@@ -123,6 +126,158 @@ SPEED_OPTIONS: list[tuple[int, str]] = [
 # ~4x per-step gap (not chunking) is where the first-launch minutes actually
 # are. tick() is chunk-invariant (see Simulation.tick) either way.
 DEFAULT_STEPS_PER_FRAME = 2
+
+
+# -- B1-2: friendly GL-failure message ---------------------------------------
+
+def _gl_failure_message(detail: str) -> str:
+    """Actionable message for any GL-init failure (context attach, version
+    check, first compute-shader compile). Names the hard requirement (the sim
+    runs in GLSL 4.3 compute shaders) and the two realistic ways out."""
+    return (
+        "Gas Giant Studio could not initialize OpenGL 4.3.\n"
+        f"  cause: {detail}\n"
+        "The simulation runs in GLSL 4.3 compute shaders, so it needs a GPU/driver\n"
+        "with OpenGL 4.3 support. Try updating your GPU driver; on a headless or\n"
+        "virtual machine, Mesa's llvmpipe software renderer works\n"
+        "(set LIBGL_ALWAYS_SOFTWARE=1)."
+    )
+
+
+# -- B1-4/B1-5: export UX helpers (pure, unit-tested) -------------------------
+
+# Every file the exporter can write into the chosen folder -- the overwrite
+# check scans for exactly these (the exporter's own cancellation cleanup list).
+_EXPORT_FILENAMES = ("color.png", "height.exr", "emission.exr", MANIFEST_FILENAME)
+
+_LAST_EXPORT_PREF = "GasGiantStudio_LastExportDir"
+
+
+def _export_file_lines(params: PlanetParams) -> list[str]:
+    """The files the export will write, for the confirm modal (B1-4: the modal
+    never named its outputs). emission.exr appears only when emission is on --
+    mirrors export_job's own emission_on gate."""
+    w = params.export.width
+    h = w // 2
+    lines = [
+        f"color.png — 16-bit sRGB color map, {w}x{h}",
+        f"height.exr — 32-bit float height map, {w}x{h}",
+    ]
+    if params.emission.enabled:
+        lines.append(f"emission.exr — HDR emission map (aurora in alpha), {w}x{h}")
+    lines.append(f"{MANIFEST_FILENAME} — manifest; import this in Blender (docs/blender_addon.md)")
+    return lines
+
+
+def _export_conflicts(out_dir: Path) -> list[str]:
+    """Map-set files already present in ``out_dir`` (B1-4: the exporter
+    silently overwrites -- `mkdir exist_ok=True` + unconditional writes -- so
+    the GUI must ask first)."""
+    return [name for name in _EXPORT_FILENAMES if (out_dir / name).exists()]
+
+
+def _export_progress_label(prog: Progress | None) -> str:
+    """Progress-bar label for an in-flight export. Phase A of export_job
+    finishes the development run first (its Progress says just "developing");
+    surface that hold state in plain words (B1-5) instead of an unexplained
+    long 'developing' stall before the first tile."""
+    if prog is None:
+        return "starting"
+    if prog.message == "developing":
+        return f"finishing dev run {prog.done}/{prog.total}"
+    return prog.message
+
+
+def _export_hold_notice(developing: bool) -> str:
+    """The export-hold explanation drawn in the Controls pane -- the SAME pane
+    whose sliders are frozen (B1-5: the old notice lived only in the Playback
+    pane, a different pane than the frozen controls)."""
+    base = (
+        "Export in progress — controls are paused; pending edits apply "
+        "automatically when it finishes."
+    )
+    if developing:
+        return "Export is finishing the development run first. " + base
+    return base
+
+
+def _pending_hint_text(tiers: set[Tier]) -> str | None:
+    """Plain-language pending-edit hint (B1-5: 'release to apply
+    (restart/velocity)' was tier jargon). None when nothing heavy is pending.
+    RESTART wins the wording when both heavy tiers are pending -- it is the
+    costlier consequence."""
+    heavy = set(tiers) - {Tier.POST}
+    if not heavy:
+        return None
+    if Tier.RESTART in heavy:
+        return "pending change — applies when you release (restarts the development run)"
+    return "pending change — applies when you release (rebuilds the flow; the run continues)"
+
+
+def _load_last_export_dir(load=None) -> Path | None:
+    """Last-export folder from hello_imgui's user prefs -- the same ini
+    mechanism that already persists window geometry and docking layout, so no
+    new config file (B1-4). ``load`` is injectable for tests: the real
+    ``hello_imgui.load_user_pref`` requires a live runner (it segfaults
+    outside one), so this must only be called from inside the app run
+    (init_gl / frame callbacks)."""
+    load = load or hello_imgui.load_user_pref
+    try:
+        raw = load(_LAST_EXPORT_PREF)
+    except Exception:  # noqa: BLE001 - prefs are best-effort, never fatal
+        return None
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_dir() else None
+
+
+def _save_last_export_dir(path: Path, save=None) -> None:
+    """Persist the last-export folder (see _load_last_export_dir for the
+    mechanism/injection rationale). Best-effort: a pref failure must never
+    break the export success path."""
+    save = save or hello_imgui.save_user_pref
+    try:
+        save(_LAST_EXPORT_PREF, str(path))
+    except Exception:  # noqa: BLE001 - prefs are best-effort, never fatal
+        log.warning("could not persist last-export folder %s", path)
+
+
+def _open_folder(path: Path) -> bool:
+    """Open ``path`` in the OS file browser (the post-export 'open folder'
+    affordance, B1-4). Returns False on failure so the caller can toast."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except OSError as exc:
+        log.warning("could not open folder %s: %s", path, exc)
+        return False
+    return True
+
+
+# -- B1-3: Help window copy (module constants so tests can pin the content) ---
+
+_HELP_DEV_RUN = (
+    "Every planet is grown by a development run: the simulation advects the "
+    "cloud tracers for a fixed number of steps (sim.dev_steps) before the "
+    "image is final. While it runs you'll see 'developing N/M' with a time "
+    "estimate in the Playback pane and overlaid on the viewport — the picture "
+    "keeps changing until it completes. Pause/Play/Step and the Speed control "
+    "live in the Playback pane. Edits marked R (RESTART) re-run the "
+    "development run from step 0; V (VELOCITY) rebuilds the flow and the run "
+    "continues; P (POST) recolors instantly."
+)
+
+_HELP_DIRTY = (
+    "The preset selector shows where the current settings came from. A '*' "
+    "after the name means they differ from the loaded preset — save to keep "
+    "them. 'unsaved' means this session was restored from your last run and "
+    "is not tied to a named preset; use Save... to give it a name."
+)
 
 
 def _shortcuts_enabled() -> bool:
@@ -317,6 +472,21 @@ class StudioApp:
         self._redo_stack: deque[UndoRecord] = deque(maxlen=64)
         self._dialog: tuple[DialogKind, object] | None = None
         self._export: ExportJob | None = None
+        # B1-2: friendly GL-failure message, set by init_gl on failure and
+        # printed by main() after the runner exits (never a raw traceback).
+        self.init_error: str | None = None
+        # B1-4: last successful export folder. Loaded from hello_imgui user
+        # prefs in init_gl (prefs need a live runner), saved on every export
+        # success; feeds the folder-picker default, the persistent
+        # "last export" line, and the Open-folder button.
+        self._last_export_dir: Path | None = None
+        # B1-4: a picked export folder that already contains a map set, held
+        # here until the user confirms/cancels the overwrite modal.
+        self._pending_export: tuple[Path, list[str]] | None = None
+        # B1-8: (name, path) of a user preset awaiting overwrite/delete
+        # confirmation in their respective modals.
+        self._pending_overwrite: tuple[str, Path] | None = None
+        self._pending_delete: tuple[str, Path] | None = None
         self._frame_count = 0
         self._smoke_frames = int(os.environ.get("GASGIANT_SMOKE_FRAMES", "0"))
         self._smoke_shot = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
@@ -331,15 +501,30 @@ class StudioApp:
     # -- lifecycle ------------------------------------------------------------
 
     def init_gl(self) -> None:
+        """post_init: attach ModernGL to the runner's GL context and build the
+        sim. On ANY failure (attach, an actual < 4.3 context the window system
+        silently fell back to, the first compute-shader compile) this stores a
+        friendly message and asks the runner to exit instead of re-raising --
+        an exception thrown through the native callback surfaced as a raw
+        traceback, the first minute of the first-run journey (B1-2)."""
         try:
-            self.gpu = GpuContext.attach()
+            gpu = GpuContext.attach()
+            version = gpu.ctx.version_code
+            if version < 430:
+                raise RuntimeError(
+                    f"the created OpenGL context is {version // 100}.{(version % 100) // 10}, "
+                    "but 4.3 is required"
+                )
+            self.gpu = gpu
             self.sim = Simulation(self.params, self.gpu)
             self.viewport = EquirectViewport(self.gpu)
             self.sphere = SpherePreview(self.gpu)
             log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
-        except Exception:
+            self._last_export_dir = _load_last_export_dir()  # prefs need a live runner
+        except Exception as exc:  # noqa: BLE001 - translated, never swallowed (logged + shown)
             log.exception("GL initialization failed")
-            raise
+            self.init_error = _gl_failure_message(str(exc) or type(exc).__name__)
+            hello_imgui.get_runner_params().app_shall_exit = True
 
     def shutdown(self) -> None:
         self._save_session()
@@ -702,6 +887,9 @@ class StudioApp:
     # -- UI ----------------------------------------------------------------------------
 
     def draw_controls(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            imgui.text_wrapped(self.init_error or "initializing...")
+            return
         # Every action in this block (Phase 6 preset combo, Load/Save, seed
         # header, Randomize/Reroll, Undo/Redo) commits straight through
         # `self._commit`, bypassing `_process_edit`'s gate -- so while an
@@ -910,6 +1098,8 @@ class StudioApp:
             )
 
     def draw_equirect(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            return
         self.render_perf.begin()
         # Advance the development run a little each frame so the user watches
         # the clouds evolve; the viewport re-derives whenever tracers moved.
@@ -927,6 +1117,8 @@ class StudioApp:
         self.render_perf.end()
 
     def draw_sphere(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            return
         color_tex, _ = self.sim.ensure_preview(PREVIEW_WIDTH)
         self.sphere.draw(color_tex, self.viewport.agx)
 
@@ -968,6 +1160,8 @@ class StudioApp:
             )
 
     def draw_perf(self) -> None:
+        if self.sim is None:  # init_gl failed; the runner is already exiting
+            return
         imgui.text(f"frame  {self.frame_perf.mean_ms:6.2f} ms")
         imgui.text(f"render {self.render_perf.last_ms:6.2f} ms (last)")
         imgui.text(f"preview {PREVIEW_WIDTH}x{PREVIEW_WIDTH // 2}")
@@ -1033,7 +1227,7 @@ class StudioApp:
 
     def pre_frame(self) -> None:
         """Runs once per frame before imgui NewFrame: dialogs, pacing, smoke exit."""
-        if self.gpu is None:  # defensive; post_init normally did this
+        if self.gpu is None and self.init_error is None:  # defensive; post_init normally did this
             self.init_gl()
         self.frame_perf.end()
         self.frame_perf.begin()
@@ -1193,7 +1387,17 @@ def main() -> int:
         dockable_windows=windows,
     )
 
-    hello_imgui.run(params)
+    try:
+        hello_imgui.run(params)
+    except Exception as exc:  # noqa: BLE001 - window/GL-context creation failed in the runner
+        # The runner couldn't even create the 4.3 window/context (init_gl
+        # never ran). Same friendly translation as the init_gl path (B1-2).
+        log.exception("GUI runner failed")
+        print(_gl_failure_message(str(exc) or type(exc).__name__), file=sys.stderr)
+        return 1
+    if app.init_error is not None:
+        print(app.init_error, file=sys.stderr)
+        return 1
 
     shot_path = os.environ.get("GASGIANT_SMOKE_SCREENSHOT", "")
     if shot_path:

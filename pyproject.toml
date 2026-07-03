@@ -24,7 +24,9 @@ gui = [
 
 [project.scripts]
 gasgiant = "gasgiant.cli:main"
-gasgiant-studio = "gasgiant.app.main:main"
+# Routed through launcher (not app.main directly) so a missing GUI extra
+# prints an actionable install hint instead of a bare ImportError traceback (B1-2).
+gasgiant-studio = "gasgiant.app.launcher:main"
 
 [dependency-groups]
 dev = [
