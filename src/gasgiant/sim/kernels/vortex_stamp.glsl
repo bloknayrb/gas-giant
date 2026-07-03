@@ -238,9 +238,12 @@ vec3 vortexStamp(vec3 p) {
                 across += u_hero_wake_detail * 0.30
                         * fbm(vec3(an * 0.5, 0.0, wseed + 11.0), 2, 2.0, 0.5);
             }
-            if (along > 0.0 && along < rc * 6.0) {
+            // Same latitude window as psi.comp's wedge: keep the stamp
+            // strictly local (the raw Gaussian tail never truly reaches zero).
+            if (along > 0.0 && along < rc * 6.0 && abs(across) < 2.5) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
-                float w = exp(-across * across) * (1.0 - along / (rc * 6.0)) * ramp;
+                float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
+                float w = exp(-across * across) * win * (1.0 - along / (rc * 6.0)) * ramp;
                 if (u_hero_wake_detail > 0.0) {
                     // (2) Intermittent flow-aligned filaments: anisotropic fbm (low
                     // along-freq, higher across-freq => downstream streaks), sheared so

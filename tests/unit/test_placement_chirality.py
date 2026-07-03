@@ -16,6 +16,7 @@ from gasgiant.params.presets import load_factory_preset
 from gasgiant.sim.bands import BandLayout, generate_bands
 from gasgiant.sim.profiles import build_profiles, select_wave_latitudes
 from gasgiant.sim.vortices import (
+    KIND_HERO,
     generate_vortices,
 )
 
@@ -108,3 +109,21 @@ def test_pack_ssbo_carries_wake_lat_off_in_lane_10():
     for i, v in enumerate(reg.vortices):
         np.testing.assert_allclose(packed[i, 8], v.wake_dir, atol=1e-7)
         np.testing.assert_allclose(packed[i, 10], v.wake_lat_off, atol=1e-7)
+
+
+def test_wake_lat_off_lane_is_zero_for_every_non_hero_kind():
+    """Lane-10 collision guard: both GLSL readers gate on KIND_HERO, and no
+    other kind may carry a nonzero value in that lane (polar vortices live in
+    the psi_feather band where psi.comp stays live in vorticity mode)."""
+    p = PlanetParams(seed=5)
+    p.storms.small_density = 1.5
+    p.storms.outbreak_count = 2
+    bands = generate_bands(5, p.bands)
+    profiles = build_profiles(5, bands, p.bands, p.jets)
+    reg = generate_vortices(5, bands, profiles, p.storms, p.poles)
+    assert any(v.kind != KIND_HERO for v in reg.vortices)
+    packed = reg.pack_ssbo()
+    for i, v in enumerate(reg.vortices):
+        if v.kind != KIND_HERO:
+            assert v.wake_lat_off == 0.0, f"kind {v.kind} carries wake_lat_off"
+            assert packed[i, 10] == 0.0
