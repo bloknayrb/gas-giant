@@ -61,12 +61,14 @@ the warm equatorial palette rows render as ochre tans. Base:
 
 ```json
 {
-  "bands": { "belt_fade": 0.45, "faded_band_index": 5 }
+  "bands": { "belt_fade": 0.6, "faded_band_index": 5 }
 }
 ```
 
-- `belt_fade 0.45` puts the EZ stamp at ~0.62 (between zone cream and belt
-  tan). 0.3 is a light haze; beyond ~0.6 the EZ reads as a full belt.
+- `belt_fade 0.6` puts the EZ stamp between zone cream and belt tan — a clear
+  ochre wash at disk scale (verified against the default render: the EZ
+  warms/darkens while bands south of the SEB are untouched). 0.3–0.45 is a
+  lighter haze; much beyond 0.6 the EZ starts reading as a full belt.
 - Optional deepeners: `appearance.chroma_aging 0.2` ties the discoloration to
   stagnant air; `appearance.haze_amount` warms the global cast instead — keep
   it at 0 if only the EZ should change.
