@@ -36,7 +36,8 @@ uv sync --all-extras
 uv run gasgiant-studio
 # What each slider does, shown on the planet: docs/sliders.md
 
-# Headless: render a map set (factory presets: jupiter_like, saturn_pale, ice_giant)
+# Headless: render a map set (factory presets: gas_giant_warm [default],
+# jupiter_like, jupiter_vorticity, saturn_pale, ice_giant)
 uv run gasgiant export --preset jupiter_like --res 4096 --out out/jove
 uv run gasgiant validate out/jove        # seam/pole invariants
 

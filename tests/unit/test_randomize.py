@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from pydantic import BaseModel
 
 from gasgiant.params.model import PlanetParams
@@ -49,3 +50,25 @@ def test_locked_fields_keep_base_value_without_shifting_others():
 
 def test_randomize_sets_seed():
     assert randomize(seed=99).seed == 99
+
+
+def test_randomize_output_is_pinned():
+    """Golden guard pinning the exact ``randomize(seed)`` output for a fixed
+    seed. This is a BEHAVIORAL PIN of the CURRENT declaration order, NOT a
+    correctness check: the randomize walk draws one RNG value per ``rand`` field
+    in StormsParams (and every other model) in DECLARATION order, so reordering a
+    ``rand``-bearing field -- or inserting/removing one mid-list -- silently
+    changes the roll for every field after it. That is exactly what the Phase 4
+    Storms sub-grouping did (it moved ``wake_turbulence`` and shifted
+    ``oval_density``/``barge_density``/``pearls_count``) with no test to catch it.
+    If this test fails after a field reorder, that is the signal: either restore
+    the order or re-baseline these constants deliberately (and note the
+    randomize-output change in the PR)."""
+    p = randomize(seed=12345)
+    # A field early in the tree (guards the whole draw sequence upstream)...
+    assert p.bands.width_jitter == pytest.approx(0.5965876168020049, abs=1e-9)
+    # ...and the Storms fields the Phase 4 reorder disturbed.
+    assert p.storms.oval_density == pytest.approx(1.1674481331441742, abs=1e-9)
+    assert p.storms.barge_density == pytest.approx(1.1486749689049411, abs=1e-9)
+    assert p.storms.pearls_count == 3
+    assert p.storms.wake_turbulence == pytest.approx(1.1276795025451216, abs=1e-9)

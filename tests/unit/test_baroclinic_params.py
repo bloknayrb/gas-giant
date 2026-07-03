@@ -37,4 +37,4 @@ def test_baroclinic_fields_have_no_rand():
     # randomize() must never flip these on; lock the trap against future edits.
     from gasgiant.params.model import BaroclinicParams, field_meta
     for f in ("enabled", "gain", "warmup_steps", "baro_steps_per_update", "update_every"):
-        assert "rand" not in field_meta(BaroclinicParams, f), f
+        assert field_meta(BaroclinicParams, f).rand is None, f

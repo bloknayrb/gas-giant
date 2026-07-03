@@ -4,14 +4,18 @@ import json
 
 import pytest
 
+from gasgiant.params import presets as presets_mod
 from gasgiant.params.model import PlanetParams
 from gasgiant.params.presets import (
     PresetError,
+    available_presets,
     factory_preset_names,
     load_factory_preset,
     load_preset,
+    load_user_preset,
     resolve_preset,
     save_preset,
+    user_preset_names,
 )
 
 
@@ -91,9 +95,9 @@ def test_palette_has_value_contrast(name):
 
 
 def test_jupiter_like_keeps_zones_detailed():
-    """jupiter_like (the startup default) got the same zone-detail fix as
-    gas_giant_warm: a high replenish_rate re-feeds detail faster than the fast
-    jets smear it, so the quiescent zones stay textured instead of reading as
+    """jupiter_like got the same zone-detail fix as gas_giant_warm (the startup
+    default): a high replenish_rate re-feeds detail faster than the fast jets
+    smear it, so the quiescent zones stay textured instead of reading as
     smooth 'blurry bands'. Pin it against a silent revert to the starved default."""
     p = load_factory_preset("jupiter_like")
     assert p.turbulence.replenish_rate >= 0.25, p.turbulence.replenish_rate
@@ -139,6 +143,59 @@ def test_resolve_preset_path_and_name(tmp_path):
     save_preset(p, path)
     assert resolve_preset(str(path)) == p
     assert resolve_preset("jupiter_like").name == "jupiter_like"
+
+
+# -- user preset directory (Phase 6) --------------------------------------------
+
+
+def test_user_preset_names_empty_when_dir_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path / "nope")
+    assert user_preset_names() == []
+
+
+def test_user_preset_names_enumerates_by_stem_without_parsing(tmp_path, monkeypatch):
+    """Enumeration must list stems without opening files -- a corrupt file in the
+    directory can't crash the dropdown just by being present."""
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path)
+    save_preset(PlanetParams(seed=1), tmp_path / "alpha.json")
+    save_preset(PlanetParams(seed=2), tmp_path / "beta.json")
+    (tmp_path / "broken.json").write_text("{ not valid json", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("ignore me", encoding="utf-8")
+    # includes the corrupt file's stem; excludes the non-json file; sorted.
+    assert user_preset_names() == ["alpha", "beta", "broken"]
+
+
+def test_load_user_preset_round_trips(tmp_path, monkeypatch):
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path)
+    p = PlanetParams(seed=99, name="mine")
+    save_preset(p, tmp_path / "mine.json")
+    assert load_user_preset("mine") == p
+
+
+def test_load_corrupt_user_preset_raises_preset_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path)
+    (tmp_path / "broken.json").write_text("{ not valid json", encoding="utf-8")
+    with pytest.raises(PresetError):
+        load_user_preset("broken")
+
+
+def test_load_missing_user_preset_raises_preset_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path)
+    with pytest.raises(PresetError):
+        load_user_preset("ghost")
+
+
+def test_available_presets_factory_first_then_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path)
+    save_preset(PlanetParams(seed=1), tmp_path / "my_look.json")
+    merged = available_presets()
+    factory = [(n, "factory") for n in factory_preset_names()]
+    assert merged[: len(factory)] == factory, "factory presets come first"
+    assert ("my_look", "user") in merged
+    # every factory entry precedes every user entry
+    last_factory = max(i for i, (_, src) in enumerate(merged) if src == "factory")
+    first_user = min(i for i, (_, src) in enumerate(merged) if src == "user")
+    assert last_factory < first_user
 
 
 def test_sparse_preset_takes_defaults(tmp_path):
