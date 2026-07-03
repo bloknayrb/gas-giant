@@ -402,8 +402,9 @@ class Simulation:
         with emission disabled the EMISSION program variant preprocesses its
         terms OUT to an all-zero map, and the GUI shows an "emission disabled"
         note off ``params.emission.enabled`` rather than relying on texture
-        contents. Aurora lives in the alpha channel and is not visible in the
-        RGB preview (a recorded LIMIT). Returns ``(texture, rerendered)``."""
+        contents. Aurora lives in the alpha channel; the app-side viewport blit
+        composites it (alpha x aurora_color) into its Emission-channel preview
+        (B4-3). Returns ``(texture, rerendered)``."""
         height = width // 2
         recreated = False
         if self._preview_emission is None or self._preview_emission.size != (width, height):

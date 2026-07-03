@@ -444,6 +444,13 @@ def test_other_sections_have_constant_ui_no_separators_expected():
     for section, labels in by_section.items():
         if section == "storms":
             continue
+        if section == "solver":
+            # B2-3: the baroclinic cadence trio renders under its own "Fixed
+            # cadence" sub-label (it used to ship ui="" and draw unlabeled).
+            assert labels == {"Solver", "Fixed cadence"}, (
+                f"solver sub-groups drifted: {labels}"
+            )
+            continue
         assert len(labels) == 1, f"section {section!r} has multiple ui labels: {labels}"
 
 
@@ -517,3 +524,135 @@ def test_leaf_changed_detects_real_color_difference():
 def test_leaf_changed_scalars_unaffected():
     assert panels._leaf_changed(0.5, 0.5) is False
     assert panels._leaf_changed(0.5, 0.6) is True
+
+
+# -- B4-2: Clear-template confirm + hero_latitude pin widget ---------------------
+
+
+def test_clear_template_button_stages_confirm_not_clear(imgui_ctx, monkeypatch):
+    """Clicking "Clear template" must NOT clear the template outright -- it
+    opens a confirm modal (the cleared skeleton is recoverable only via Undo,
+    and the startup preset ships with a template engaged)."""
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    opened = []
+    monkeypatch.setattr(panels.imgui, "small_button", lambda label: True)
+    monkeypatch.setattr(panels.imgui, "open_popup", lambda title: opened.append(title))
+
+    imgui.new_frame()
+    imgui.begin("confirm_test", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False), "the click alone must not clear"
+    assert doc["bands"]["template"] is not None, "template survives until the confirm"
+    assert opened == ["Clear band template?"], "the confirm modal was staged"
+
+
+def test_clear_template_confirm_clears_and_commits(imgui_ctx, monkeypatch):
+    """Confirming inside the modal clears the template and reports a committed
+    change (one undo entry via the normal panel pipeline)."""
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    # Simulate: modal is open, its "Clear##template" button is pressed.
+    monkeypatch.setattr(panels.imgui, "small_button", lambda label: False)
+    monkeypatch.setattr(
+        panels.imgui, "begin_popup_modal", lambda title, p, flags: (True, True)
+    )
+    monkeypatch.setattr(
+        panels.imgui, "button", lambda label: label == "Clear##template"
+    )
+    monkeypatch.setattr(panels.imgui, "close_current_popup", lambda: None)
+    monkeypatch.setattr(panels.imgui, "end_popup", lambda: None)
+
+    imgui.new_frame()
+    imgui.begin("confirm_test2", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (True, True)
+    assert doc["bands"]["template"] is None
+    assert "Undo" in panels._CLEAR_TEMPLATE_CONFIRM, "the copy names the way back"
+
+
+def test_clear_template_cancel_keeps_template(imgui_ctx, monkeypatch):
+    from gasgiant.params.model import BandTemplate
+
+    params = PlanetParams()
+    params.bands.template = BandTemplate(
+        edges_deg=[90.0, 0.0, -90.0], values=[0.2, 0.8], heights=[0.5, 0.5]
+    )
+    doc = params.model_dump()
+
+    monkeypatch.setattr(panels.imgui, "small_button", lambda label: False)
+    monkeypatch.setattr(
+        panels.imgui, "begin_popup_modal", lambda title, p, flags: (True, True)
+    )
+    monkeypatch.setattr(
+        panels.imgui, "button", lambda label: label == "Cancel##template"
+    )
+    monkeypatch.setattr(panels.imgui, "close_current_popup", lambda: None)
+    monkeypatch.setattr(panels.imgui, "end_popup", lambda: None)
+
+    imgui.new_frame()
+    imgui.begin("confirm_test3", None, 0)
+    changed, committed = panels._draw_bands_template_escape(doc["bands"])
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False)
+    assert doc["bands"]["template"] is not None
+
+
+# -- B4-4: output settings have exactly one live editor (the Export modal) -------
+
+
+@pytest.mark.parametrize("field", ["width", "png_compression"])
+def test_export_leaves_render_read_only_in_panel(imgui_ctx, monkeypatch, field):
+    """The auto-panel must NOT render an editable widget for export.width /
+    export.png_compression -- the Export... modal is the single live editor
+    (one editor, one undo policy)."""
+    params = PlanetParams()
+    doc = params.model_dump()
+    baseline = panels._defaults_baseline()
+    state = PanelState(show_advanced=True)
+
+    sliders = []
+    monkeypatch.setattr(
+        panels.imgui, "slider_int", lambda *a, **k: sliders.append(a) or (False, a[1])
+    )
+    monkeypatch.setattr(
+        panels.imgui, "input_int", lambda *a, **k: sliders.append(a) or (False, a[1])
+    )
+    texts = []
+    real_text_disabled = panels.imgui.text_disabled
+    monkeypatch.setattr(
+        panels.imgui, "text_disabled", lambda t: texts.append(t) or real_text_disabled(t)
+    )
+
+    info = type(params.export).model_fields[field]
+    imgui.new_frame()
+    imgui.begin("modal_only_test", None, 0)
+    changed, committed = panels._draw_leaf(
+        field, info, doc["export"], baseline["export"], state, f"export.{field}"
+    )
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False)
+    assert sliders == [], "no editable widget in the panel for this field"
+    assert any("Export" in t for t in texts), "the text points at the one live editor"

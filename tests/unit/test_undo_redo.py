@@ -92,17 +92,37 @@ def test_reselecting_active_preset_adds_no_undo_entry() -> None:
     assert len(app._undo_stack) == 0, "re-selecting the active preset pushes no undo entry"
 
 
-# -- #4: output-only commits must invalidate a pending redo future ---------------
+# -- B4-4: ONE undo policy -- output settings are ordinary, history-backed edits --
+#
+# The old policy kept export.width / png_compression out of undo history and
+# silently cleared the redo stack on every output commit ("I changed PNG
+# compression and lost my Redo" -- unexplainable from the user's chair, B4-6).
+# The one policy now: the export modal's editors commit through the SAME
+# _process_edit pipeline as every panel widget, so output edits are undoable
+# and redo is cleared only by the standard a-new-edit-clears-redo rule.
 
 
-def test_export_setting_commit_clears_pending_redo() -> None:
-    """Export-resolution / PNG-compression edits are output-only (deliberately
-    NOT in undo history) but ARE a fresh user action, so they must invalidate a
-    pending redo future. Otherwise a Redo after changing an export setting would
-    replay the stale pre-undo snapshot on top of it (the #4 clobber)."""
+def test_export_width_commit_is_undoable() -> None:
     app = _make_app()
+    old = app.params.export.width
+    app._commit_export_field("width", 8192)
 
-    # A normal committed edit -> Undo, leaving a snapshot on the redo stack.
+    assert app.params.export.width == 8192, "the modal commit was applied"
+    assert len(app._undo_stack) == 1, "output edits land in undo history (one policy)"
+
+    app._undo()
+    assert app.params.export.width == old, "undo restores the previous width"
+    app._redo()
+    assert app.params.export.width == 8192, "and redo re-applies it"
+
+
+def test_export_setting_clears_redo_via_standard_edit_rule() -> None:
+    """After Undo, changing an export setting clears redo exactly like any
+    other fresh edit -- and the setting change itself is undoable, so no state
+    is ever silently unreachable."""
+    app = _make_app()
+    old_compression = app.params.export.png_compression
+
     edited = app.params.model_copy(deep=True)
     edited.appearance.gamma = app.params.appearance.gamma + 0.3
     app._push_history(app.params)
@@ -110,17 +130,57 @@ def test_export_setting_commit_clears_pending_redo() -> None:
     app._undo()
     assert app._redo_stack, "precondition: a redo future exists after undo"
 
-    # Change an export/output-only setting.
-    out = app.params.model_copy(deep=True)
-    out.export.width = 8192 if app.params.export.width != 8192 else 4096
-    app._commit_output_setting(out)
+    app._commit_export_field("png_compression", 7)
 
-    assert not app._redo_stack, "output-setting edit must clear the stale redo future"
-    assert app.params.export.width == out.export.width, "the export setting was applied"
+    assert not app._redo_stack, "a fresh edit (of any kind) clears redo"
+    assert app.params.export.png_compression == 7
+    app._undo()
+    assert app.params.export.png_compression == old_compression, "the edit is undoable"
 
-    # Redo is now a no-op -- it can't clobber the export edit.
-    app._redo()
-    assert app.params.export.width == out.export.width
+
+def test_export_width_edit_held_during_export_flushes_as_one_undo_entry() -> None:
+    """Deferred-commit interaction: a width commit while an export is in
+    flight is held in the working copy (no engine commit, no snap-back), then
+    flushed as exactly ONE undoable step when the export clears -- the same
+    contract every held panel edit has."""
+    app = _make_app()
+    old = app.params.export.width
+    app._export = object()  # in flight (only None-checked by _process_edit)
+
+    app._commit_export_field("width", 8192)
+    assert app.params.export.width == old, "held: no engine commit mid-export"
+    assert app._live.export.width == 8192, "the modal widget must not snap back"
+    assert len(app._undo_stack) == 0
+
+    app._export = None
+    app._flush_pending_edit()
+    assert app.params.export.width == 8192, "the held edit applied on flush"
+    assert len(app._undo_stack) == 1, "exactly one undo entry for the held edit"
+    app._undo()
+    assert app.params.export.width == old
+
+
+def test_width_commit_releases_a_pending_heavy_edit_as_one_entry() -> None:
+    """A heavy edit left mid-gesture plus a modal width commit land as ONE
+    committed state and ONE undo entry: the modal commit is a committed frame
+    of the same pipeline, so it releases the pending draft rather than
+    dropping it (the old _commit_output_setting discarded pending edits) or
+    letting it resurrect next frame."""
+    app = _make_app()
+    pre = app.params.model_copy(deep=True)
+
+    draft = _draft_with(app.params, "bands.count", 20)
+    app._process_edit(draft, any_changed=True, any_committed=False)  # unreleased
+    assert app.params.bands.count == pre.bands.count, "heavy edit still pending"
+
+    app._commit_export_field("width", 8192)
+
+    assert app.params.bands.count == 20, "the pending heavy edit was not dropped"
+    assert app.params.export.width == 8192
+    assert len(app._undo_stack) == 1, "one coalesced entry for the combined commit"
+    entry = app._undo_stack[-1][0]
+    assert entry.bands.count == pre.bands.count
+    assert entry.export.width == pre.export.width
 
 
 # -- gesture coalescing: one drag -> exactly one undo entry ----------------------

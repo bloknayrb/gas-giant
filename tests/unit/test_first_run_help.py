@@ -49,3 +49,31 @@ def test_draw_help_renders_new_sections(imgui_ctx):
     app.draw_help()
     imgui.end_frame()
     assert app._show_help is True  # not self-closed by drawing
+
+
+def test_help_documents_undo_scope_and_exclusions():
+    """B4-6: Help must disclose what undo covers, the exclusions (export
+    settings are now IN scope after B4-4; Restart dev, locks, and on-disk
+    preset file operations are out), and the 64-entry cap."""
+    text = main._HELP_UNDO
+    # in scope
+    assert "export settings" in text
+    assert "preset loads" in text
+    assert "one step" in text  # drag coalescing
+    # exclusions
+    assert "Restart dev" in text
+    assert "locks" in text
+    assert "deleting preset files" in text
+    # the cap
+    assert "64" in text
+
+
+def test_help_undo_wording_matches_the_b44_policy():
+    """The Help copy must not claim export settings are excluded -- B4-4
+    folded them into history (guards against the copy regressing if the
+    policy ever changes without updating Help)."""
+    text = main._HELP_UNDO
+    assert "NOT undoable" in text
+    exclusions = text.split("NOT undoable")[1]
+    assert "resolution" not in exclusions
+    assert "PNG compression" not in exclusions

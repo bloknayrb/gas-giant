@@ -186,7 +186,8 @@ class BandsParams(_Params):
     edge_softness: float = pfield(
         0.012, tier=Tier.RESTART, lo=0.001, hi=0.1, rand=(0.005, 0.03), log=True,
         adv=True, ui="Bands",
-        description="Half-width of band-edge transitions, radians of latitude",
+        description="Half-width of band-edge transitions, radians of latitude"
+                    " (1 rad = 57.3 deg; default 0.012 rad is about 0.7 deg)",
     )
     value_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.6, 1.3), ui="Bands",
@@ -194,7 +195,8 @@ class BandsParams(_Params):
     )
     warp_amount: float = pfield(
         0.035, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.01, 0.09), ui="Bands",
-        description="Band-boundary meander amplitude, radians of latitude",
+        description="Band-boundary meander amplitude, radians of latitude"
+                    " (1 rad = 57.3 deg; default 0.035 rad is about 2 deg)",
     )
     warp_freq: float = pfield(
         3.0, tier=Tier.RESTART, lo=0.5, hi=16.0, rand=(1.5, 6.0), log=True, adv=True, ui="Bands",
@@ -274,11 +276,13 @@ class JetsParams(_Params):
     )
     equatorial_speed: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=-3.0, hi=4.0, rand=(0.5, 2.5), ui="Jets",
-        description="Equatorial superrotation jet peak speed (negative = retrograde)",
+        description="Equatorial superrotation jet peak speed (negative ="
+                    " retrograde, flowing against the planet's rotation)",
     )
     equatorial_width: float = pfield(
         0.12, tier=Tier.VELOCITY, lo=0.03, hi=0.4, rand=(0.07, 0.25), ui="Jets",
-        description="Equatorial jet half-width, radians of latitude",
+        description="Equatorial jet half-width, radians of latitude"
+                    " (1 rad = 57.3 deg; default 0.12 rad is about 7 deg)",
     )
     polar_decay: float = pfield(
         0.5, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Jets",
@@ -297,7 +301,9 @@ class TurbulenceParams(_Params):
     )
     belt_boost: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=1.0, hi=4.0, rand=(1.2, 2.5), ui="Turbulence",
-        description="Turbulence multiplier inside dark belts (cyclonic bands)",
+        description="Turbulence multiplier inside dark belts (cyclonic ="
+                    " spinning with the local planetary rotation; the"
+                    " storm-prone bands)",
     )
     scale: float = pfield(
         6.0, tier=Tier.VELOCITY, lo=1.0, hi=32.0, rand=(4.0, 12.0), log=True,
@@ -336,6 +342,15 @@ class TurbulenceParams(_Params):
     )
 
 
+def hero_latitude_cap(hero_radius: float) -> float:
+    """Radius-coupled |latitude| limit for a pinned hero storm (degrees): the
+    stamp must stay clear of the 63 deg storm-free exchange band. Single
+    source of truth for both the model validator and the GUI's pin-slider
+    bounds (B4-2), so the widget can never offer a value the validator would
+    reject."""
+    return 63.0 - 206.3 * hero_radius
+
+
 class StormsParams(_Params):
     """Field declaration order matches the panel's Hero / Ovals / Barges /
     Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
@@ -356,11 +371,15 @@ class StormsParams(_Params):
     # -- Hero -----------------------------------------------------------
     hero_count: int = pfield(
         1, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Hero",
-        description="GRS-class giant anticyclones",
+        description="Giant anticyclones of Great Red Spot (GRS) class — the"
+                    " planet-dominating bright/red oval storms (anticyclone ="
+                    " high-pressure vortex spinning against the local cyclonic"
+                    " sense)",
     )
     hero_radius: float = pfield(
         0.10, tier=Tier.RESTART, lo=0.03, hi=0.25, rand=(0.06, 0.16), ui="Hero",
-        description="Hero vortex core radius, radians of arc",
+        description="Hero vortex core radius, radians of arc (1 rad = 57.3"
+                    " deg; default 0.10 rad is about 5.7 deg — GRS-scale)",
     )
     hero_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Hero",
@@ -368,10 +387,11 @@ class StormsParams(_Params):
     )
     hero_latitude: float | None = pfield(
         None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Hero",
-        description="Pin the hero storm to this latitude (degrees); preset-only. "
-                    "None = seeded tropical-zone placement. The effective range is "
-                    "further limited by hero_radius (see validator) so the stamp "
-                    "stays clear of the 63 deg exchange band",
+        description="Pin the hero storm to this latitude (degrees; the 'pin' "
+                    "checkbox toggles it). Unpinned (None) = seeded tropical-zone "
+                    "placement. The effective range is further limited by "
+                    "hero_radius (see validator) so the stamp stays clear of the "
+                    "63 deg exchange band",
     )
     rim_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True, ui="Hero",
@@ -518,7 +538,7 @@ class StormsParams(_Params):
     @model_validator(mode="after")
     def _validate_hero_latitude(self) -> StormsParams:
         if self.hero_latitude is not None:
-            cap = 63.0 - 206.3 * self.hero_radius
+            cap = hero_latitude_cap(self.hero_radius)
             if abs(self.hero_latitude) > cap:
                 raise ValueError(
                     f"hero_latitude={self.hero_latitude} exceeds the radius-coupled "
@@ -536,7 +556,9 @@ class WavesParams(_Params):
     )
     festoon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=24, rand=(8, 16), ui="Waves",
-        description="Rossby wavenumber of the festoon/hot-spot train",
+        description="How many festoon plumes fit around the equator "
+                    "(higher = more, smaller plumes; the Rossby wavenumber of "
+                    "the train)",
     )
     hotspot_depth: float = pfield(
         0.6, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.9), ui="Waves",
@@ -687,9 +709,9 @@ class BaroclinicParams(_Params):
     """Opt-in 2-layer baroclinic vorticity source coupled into the vorticity
     solver's equirect pass (M3). OFF by default => byte-identical to plain v1.6.
     Default gain=2.0 (bounded mid-latitude belt-texture enrichment; the final
-    aesthetic gain is the user's full-res call). The cadence fields are fixed
-    (non-UI): they keep the baroclinic CPU solver in its healthy pre-outcrop
-    window."""
+    aesthetic gain is the user's full-res call). The cadence fields are a
+    fixed trio (Advanced, "Fixed cadence" sub-label, no rand): they keep the
+    baroclinic CPU solver in its healthy pre-outcrop window."""
 
     enabled: bool = pfield(
         False, tier=Tier.RESTART, adv=True, ui="Solver",
@@ -706,17 +728,25 @@ class BaroclinicParams(_Params):
                     "the source each step and never enters the advected q state), "
                     "enriching mid-latitude belt texture. ~2 = subtle; high gain "
                     "over-boils. No rand.")
+    # The cadence trio renders under a "Fixed cadence" sub-label (B2-3: they
+    # previously shipped ui="" and drew unlabeled in Advanced mode).
     warmup_steps: int = pfield(
-        8000, tier=Tier.RESTART, lo=500, hi=20000, adv=True, ui="",
-        description="Baroclinic spin-up before coupling (fixed cadence). No rand. "
-                    "hi=20000 leaves headroom past the ~12500 outcrop so a forced "
-                    "outcrop can be exercised by tests.")
+        8000, tier=Tier.RESTART, lo=500, hi=20000, adv=True, ui="Fixed cadence",
+        description="Internal pacing of the baroclinic storm generator — leave "
+                    "at default; only affects how the extra mid-latitude storms "
+                    "mature (spin-up steps before coupling; fixed cadence, no "
+                    "rand; hi=20000 leaves headroom past the ~12500 lower-layer "
+                    "blow-up so tests can force it)")
     baro_steps_per_update: int = pfield(
-        150, tier=Tier.RESTART, lo=10, hi=1000, adv=True, ui="",
-        description="Baroclinic steps per source refresh (fixed cadence). No rand.")
+        150, tier=Tier.RESTART, lo=10, hi=1000, adv=True, ui="Fixed cadence",
+        description="Internal pacing of the baroclinic storm generator — leave "
+                    "at default (baroclinic steps per source refresh; fixed "
+                    "cadence, no rand)")
     update_every: int = pfield(
-        32, tier=Tier.RESTART, lo=1, hi=512, adv=True, ui="",
-        description="v1.6 steps between source refreshes (fixed cadence). No rand.")
+        32, tier=Tier.RESTART, lo=1, hi=512, adv=True, ui="Fixed cadence",
+        description="Internal pacing of the baroclinic storm generator — leave "
+                    "at default (main-solver steps between source refreshes; "
+                    "fixed cadence, no rand)")
 
 
 # Practical floor for a screened-Poisson deformation radius: below ~a few grid
@@ -727,43 +757,59 @@ _DEFORMATION_RADIUS_FLOOR = 0.05
 
 class SolverParams(_Params):
     type: SolverType = pfield(SolverType.KINEMATIC, tier=Tier.RESTART, adv=True, ui="Solver",
-        description="Streamfunction solver: kinematic (analytic, v1.5) or "
-                    "vorticity (prognostic fluid, v1.6+)")
+        description="How clouds move: kinematic = fast and painterly, bands stay "
+                    "where they are painted (analytic streamfunction, v1.5); "
+                    "vorticity = a real fluid sim — storms interact and shed "
+                    "filaments, slower, and required by the solid-core storm "
+                    "levers (prognostic vorticity, v1.6+)")
     poisson_iters: int = pfield(48, tier=Tier.RESTART, lo=8, hi=512, adv=True, ui="Solver",
-        description="Fixed red-black SOR iterations per step (vorticity mode)")
+        description="Solver accuracy per step: too low leaves smeared, laggy "
+                    "swirls; higher is slower with diminishing returns "
+                    "(fixed red-black SOR iterations; vorticity mode)")
     sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, adv=True, ui="Solver",
-        description="SOR over-relaxation factor, must be in (1,2) exclusive "
-                    "(vorticity mode)")
+        description="Solver convergence speed — leave at 1.7: it changes solve "
+                    "time, not the picture, unless set so low the swirls lag "
+                    "(SOR over-relaxation factor, must be in (1,2) exclusive; "
+                    "vorticity mode)")
     deformation_radius: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, adv=True, ui="Solver",
-        description="Rossby deformation radius L_d in RADIANS (vorticity mode). "
-                    "Screens the streamfunction inversion to (nabla^2 - 1/L_d^2)psi "
-                    "= omega instead of nabla^2 psi = omega (equivalent-barotropic "
-                    "/ 1.5-layer reduced gravity). A vortex's induced velocity then "
-                    "decays ~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail, so "
-                    "storms become LOCAL: a dominant hero perturbs its own band "
-                    "without destabilizing the rest of the map (real Jupiter "
-                    "L_d << the GRS). 0 = off (infinite L_d = plain 2D Poisson, "
-                    "byte-identical). Smaller = more screening/locality; values "
-                    "below ~0.05 rad are rejected (degenerate solve). Note: with "
-                    "screening on, the advected q is equivalent-barotropic QGPV, so "
-                    "vortex/inject/relax strengths tuned for the plain 2D path read "
-                    "weaker and more localized -- expect to re-tune. No rand.")
+        description="Storm locality: how far each vortex's swirl reaches. "
+                    "Smaller = more local — a dominant hero stirs its own band "
+                    "without destabilizing the rest of the map; 0 = off "
+                    "(infinite reach, plain 2D, byte-identical). Values in the "
+                    "(0, 0.05) rad band are rejected (degenerate solve). "
+                    "(Physics: Rossby deformation radius L_d in RADIANS, "
+                    "1 rad = 57.3 deg; vorticity mode. Screens the inversion to "
+                    "(nabla^2 - 1/L_d^2)psi = omega — equivalent-barotropic / "
+                    "1.5-layer reduced gravity — so induced velocity decays "
+                    "~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail; real "
+                    "Jupiter has L_d << the GRS. With screening on, the advected "
+                    "q is equivalent-barotropic QGPV, so vortex/inject/relax "
+                    "strengths tuned for the plain 2D path read weaker and more "
+                    "localized -- expect to re-tune. No rand.)")
     vort_relax_tau: float = pfield(
         120.0, tier=Tier.RESTART, lo=20.0, hi=2000.0, log=True, adv=True, ui="Solver",
-        description="Vorticity nudging timescale toward jets+vortices (vorticity mode)")
+        description="How tightly the flow is leashed to the painted jets and "
+                    "storms: low = tidy and band-locked, high = free-running "
+                    "turbulence that can wander off the template (nudging "
+                    "timescale in steps; vorticity mode)")
     vort_hypervisc: float = pfield(1.0, tier=Tier.RESTART, lo=0.0, hi=10.0, adv=True, ui="Solver",
-        description="Scale-selective biharmonic hyperviscosity rate (vorticity mode)")
+        description="Fine-scale smoothing: cleans up pixel-level crackle; too "
+                    "high blurs away the thinnest filaments (scale-selective "
+                    "biharmonic hyperviscosity; vorticity mode)")
     coriolis_f0: float = pfield(2.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
-        description="Planetary vorticity magnitude f0 in f=f0*sin(lat); "
-                    "sets the Rhines/band scale (vorticity mode)")
+        description="Planet-rotation strength: higher = more, narrower bands "
+                    "and flatter storms; lower = fewer, fatter bands (f0 in "
+                    "f = f0*sin(lat), sets the Rhines/band scale; vorticity mode)")
     vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, adv=True, ui="Solver",
         description="Broadband eddy-vorticity injection amplitude per step; the "
                     "jet shear folds it into filaments (the emergent-turbulence "
                     "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
     vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, adv=True, ui="Solver",
-        description="Eddy-injection frequency as a multiple of bands.detail_freq "
-                    "(vorticity mode)")
+        description="Size of the injected churn: higher = finer speckle that "
+                    "the shear folds into thin filaments; lower = big blobs "
+                    "(injection frequency as a multiple of bands.detail_freq; "
+                    "vorticity mode)")
     vort_inject_mask: InjectMask = pfield(
         InjectMask.GLOBAL, tier=Tier.RESTART, adv=True, ui="Solver",
         description="Spatial localization of eddy injection: global = churn "
@@ -771,9 +817,12 @@ class SolverParams(_Params):
                     "zones stay smooth); shear = jet-shear flanks only (filaments "
                     "where shear is high). Vorticity mode.")
     vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
-        description="Linear (Rayleigh) drag fraction on relative vorticity per "
-                    "step; absorbs the 2D inverse-cascade energy that piles up at "
-                    "large scales (0 = off). Vorticity mode.")
+        description="Global brake on swirling: tames runaway planet-scale swirl "
+                    "but also weakens every storm — prefer vort_psi_drag, which "
+                    "targets only the oversized swirl (linear Rayleigh drag "
+                    "fraction on relative vorticity per step, absorbing the 2D "
+                    "inverse-cascade pileup at large scales; 0 = off; vorticity "
+                    "mode)")
     vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
         description="Linear drag fraction on the EDDY vorticity q - <q>_x (the "
                     "deviation from the per-latitude zonal mean) per step. Leaves "
@@ -783,16 +832,19 @@ class SolverParams(_Params):
                     "vort_psi_drag (scale-selective). Equirect only. 0 = off "
                     "(byte-identical). Vorticity mode.")
     vort_psi_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
-        description="Scale-SELECTIVE large-scale (hypofriction) drag: a vorticity "
-                    "sink proportional to the EDDY STREAMFUNCTION psi - <psi>_x. "
-                    "Because psi ~ omega/(k^2 + 1/L_d^2), the effective drag rate "
-                    "is ~1/(k^2+1/L_d^2) -- it hits the gravest-mode inverse-cascade "
-                    "swirl far harder than medium eddies, removing the oversized "
-                    "swirl while PRESERVING festoons/band-edge waves/mid vortices "
-                    "(unlike the flat vort_eddy_drag). Reuses the screened-Poisson "
-                    "psi the solver already computes (one step stale). Coefficient "
-                    "is numerically larger than vort_eddy_drag since psi << omega. "
-                    "Equirect only. 0 = off (byte-identical). Vorticity mode.")
+        description="Removes oversized planet-scale swirl while PRESERVING "
+                    "festoons, band-edge waves, and mid-size vortices — the "
+                    "scale-selective brake to reach for before vort_drag or "
+                    "vort_eddy_drag. 0 = off (byte-identical). (Physics: "
+                    "large-scale hypofriction — a vorticity sink proportional to "
+                    "the EDDY STREAMFUNCTION psi - <psi>_x; because psi ~ "
+                    "omega/(k^2 + 1/L_d^2), the effective drag rate ~1/(k^2+"
+                    "1/L_d^2) hits the gravest-mode inverse-cascade swirl far "
+                    "harder than medium eddies, unlike the flat-in-k "
+                    "vort_eddy_drag. Reuses the screened-Poisson psi the solver "
+                    "already computes (one step stale); coefficient runs "
+                    "numerically larger than vort_eddy_drag since psi << omega. "
+                    "Equirect only. Vorticity mode.)")
     baroclinic: BaroclinicParams = Field(default_factory=BaroclinicParams)
 
     @model_validator(mode="after")
@@ -913,7 +965,8 @@ class AppearanceParams(_Params):
     )
     hue_variance: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=0.35, adv=True, ui="Appearance",
-        description="Iso-luminance Oklab hue drift (radians of max rotation): "
+        description="Iso-luminance Oklab hue drift (radians of max rotation; "
+                    "1 rad = 57.3 deg): "
                     "differently-hued material at the same lightness, which a "
                     "luminance-keyed palette gradient cannot express -- the "
                     "hue-diversity lever the realism metrics name",
@@ -957,68 +1010,82 @@ class EmissionParams(_Params):
     shading). All-zero strengths disable the map: no emission.exr is
     written and manifest consumers tolerate its absence. Values are linear
     radiance multipliers (the EXR is float32 HDR; AgX rolls strong emitters
-    off into bloomable hotspots). No rand on the strengths: emission is
-    invisible in the GUI preview, so seeded randomization silently enabling
-    it would surprise at export time."""
+    off into bloomable hotspots). Preview via the viewport's Emission channel
+    (aurora composited as alpha x aurora_color); the Color preview never
+    composites emission. No rand on the strengths: emission is invisible in
+    the default Color view, so seeded randomization silently enabling it
+    would surprise at export time."""
 
     thermal_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="5-micron thermal glow through cloud gaps (gated on the "
                     "cloud-top DEPRESSION vs the band stamp: hot-spot chains "
-                    "blaze, barges glow, belts glimmer, zones stay dark)",
+                    "blaze, barges glow, belts glimmer, zones stay dark). "
+                    "Preview: Emission channel, not Color",
     )
     thermal_color: tuple[float, float, float] = pfield(
         (1.0, 0.36, 0.08), tier=Tier.POST, adv=True, ui="Emission",
-        description="Ember red-orange; linear radiance hue",
+        description="Ember red-orange; linear radiance hue. Preview: Emission "
+                    "channel, not Color",
     )
     thermal_threshold: float = pfield(
         0.18, tier=Tier.POST, lo=0.05, hi=0.5, adv=True, ui="Emission",
         description="Cloud-gap anomaly where the HDR hot-spot term begins "
-                    "(higher = only the deepest holes blaze)",
+                    "(higher = only the deepest holes blaze). Preview: Emission "
+                    "channel, not Color",
     )
     thermal_hdr: float = pfield(
         16.0, tier=Tier.POST, lo=1.0, hi=40.0, adv=True, ui="Emission",
         description="Radiance of the deepest hot spots relative to the faint "
-                    "belt glow (real 5-micron maps span ~50:1)",
+                    "belt glow (real 5-micron maps span ~50:1). Preview: Emission "
+                    "channel, not Color",
     )
     lightning_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="Frozen lightning-flash clusters in cyclonic belts and "
                     "at high latitudes (the Juno look: light pools under the "
-                    "deck plus sparse HDR cores)",
+                    "deck plus sparse HDR cores). Preview: Emission channel, not "
+                    "Color",
     )
     lightning_color: tuple[float, float, float] = pfield(
         (0.72, 0.82, 1.0), tier=Tier.POST, adv=True, ui="Emission",
-        description="Lightning flash hue; linear radiance",
+        description="Lightning flash hue; linear radiance. Preview: Emission "
+                    "channel, not Color",
     )
     lightning_density: float = pfield(
         0.5, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Emission",
-        description="Lightning-flash cluster population density",
+        description="Lightning-flash cluster population density. Preview: "
+                    "Emission channel, not Color",
     )
     aurora_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
         description="Auroral ovals around the (offset) magnetic poles; "
-                    "written to the emission map's ALPHA channel so the "
-                    "importer can lift it onto a shell. Not visible in the "
-                    "Color preview — export and view emission.exr",
+                    "written to emission.exr's ALPHA channel so the importer "
+                    "can lift it onto a shell. Preview via the viewport's "
+                    "Emission channel (composited as alpha x aurora_color); "
+                    "not visible in the Color preview",
     )
     aurora_color: tuple[float, float, float] = pfield(
         (0.85, 0.35, 0.60), tier=Tier.POST, adv=True, ui="Emission",
         description="H/H2 emission is pink-magenta (Earth's oxygen green "
-                    "is impossible in a hydrogen atmosphere)",
+                    "is impossible in a hydrogen atmosphere). Composited into "
+                    "the Emission channel preview; not in Color",
     )
     aurora_radius: float = pfield(
         14.0, tier=Tier.POST, lo=5.0, hi=25.0, adv=True, ui="Emission",
-        description="Oval angular radius from the magnetic pole, degrees",
+        description="Oval angular radius from the magnetic pole, degrees. "
+                    "Preview: Emission channel, not Color",
     )
     aurora_width: float = pfield(
         2.5, tier=Tier.POST, lo=0.5, hi=8.0, adv=True, ui="Emission",
-        description="Auroral oval ring thickness, degrees",
+        description="Auroral oval ring thickness, degrees. Preview: Emission "
+                    "channel, not Color",
     )
     aurora_pole_offset: float = pfield(
         8.0, tier=Tier.POST, lo=0.0, hi=20.0, adv=True, ui="Emission",
         description="Magnetic-pole tilt from the rotation pole, degrees "
-                    "(longitude seeded); Saturn's axis is aligned: use 0",
+                    "(longitude seeded); Saturn's axis is aligned: use 0. "
+                    "Preview: Emission channel, not Color",
     )
 
     @property

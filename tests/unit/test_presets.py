@@ -205,3 +205,97 @@ def test_sparse_preset_takes_defaults(tmp_path):
     p = load_preset(path)
     assert p.seed == 3
     assert p.bands.count == PlanetParams().bands.count
+
+
+# -- B4-5: app_version-aware rejection + Import preset... -------------------------
+
+
+def _doc_with_unknown_field(app_version: str) -> dict:
+    return {
+        "preset_format": 2,
+        "app_version": app_version,
+        "name": "shared",
+        "params": {"bands": {"future_lever": 1.0}},
+    }
+
+
+def test_newer_app_version_named_in_rejection(tmp_path):
+    """A preset saved by a NEWER app that fails validation (e.g. an additive
+    field this version doesn't know) must blame the version gap, not read
+    like a typo -- app_version is stored in every envelope for exactly this."""
+    path = tmp_path / "from_the_future.json"
+    path.write_text(json.dumps(_doc_with_unknown_field("99.0.0")), encoding="utf-8")
+    with pytest.raises(PresetError, match=r"99\.0\.0") as excinfo:
+        load_preset(path)
+    msg = str(excinfo.value)
+    assert "newer" in msg
+    assert "pgrade" in msg  # Upgrade/upgrade
+    assert "future_lever" in msg, "the underlying pydantic summary is still included"
+
+
+def test_same_or_older_app_version_keeps_typo_message(tmp_path):
+    """A same-version preset with an unknown key is a typo, not a version gap:
+    the message must NOT blame versions."""
+    import gasgiant
+
+    path = tmp_path / "typo2.json"
+    path.write_text(
+        json.dumps(_doc_with_unknown_field(gasgiant.__version__)), encoding="utf-8"
+    )
+    with pytest.raises(PresetError, match="future_lever") as excinfo:
+        load_preset(path)
+    assert "newer" not in str(excinfo.value)
+
+
+def test_missing_app_version_keeps_typo_message(tmp_path):
+    doc = _doc_with_unknown_field("x")
+    del doc["app_version"]
+    path = tmp_path / "no_ver.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(PresetError, match="future_lever") as excinfo:
+        load_preset(path)
+    assert "newer" not in str(excinfo.value)
+
+
+def test_version_tuple_parsing():
+    vt = presets_mod._version_tuple
+    assert vt("0.1.0") == (0, 1, 0)
+    assert vt("10.2") > vt("9.9.9")
+    assert vt("0.2.0rc1") == (0, 2, 0)  # non-numeric tails don't crash
+    assert vt("garbage") == (0,)
+
+
+def test_import_preset_copies_into_user_dir(tmp_path, monkeypatch):
+    user_dir = tmp_path / "user"
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", user_dir)
+    src = tmp_path / "elsewhere" / "shared_look.json"
+    src.parent.mkdir()
+    p = PlanetParams(seed=1234, name="shared_look")
+    save_preset(p, src)
+
+    name, params = presets_mod.import_preset(src)
+
+    assert name == "shared_look"
+    assert params == p
+    assert (user_dir / "shared_look.json").is_file(), "imported into the user dir"
+    assert user_preset_names() == ["shared_look"], "now enumerated in the dropdown"
+
+
+def test_import_preset_rejects_name_collision(tmp_path, monkeypatch):
+    user_dir = tmp_path / "user"
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", user_dir)
+    save_preset(PlanetParams(seed=1), user_dir / "mine.json")
+    src = tmp_path / "mine.json"
+    save_preset(PlanetParams(seed=2), src)
+    with pytest.raises(PresetError, match="already exists"):
+        presets_mod.import_preset(src)
+    assert load_user_preset("mine").seed == 1, "the existing preset was not clobbered"
+
+
+def test_import_preset_invalid_file_raises_preset_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(presets_mod, "USER_PRESET_DIR", tmp_path / "user")
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not json", encoding="utf-8")
+    with pytest.raises(PresetError):
+        presets_mod.import_preset(bad)
+    assert not (tmp_path / "user").exists(), "nothing written on failure"

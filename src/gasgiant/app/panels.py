@@ -31,7 +31,7 @@ from imgui_bundle import imgui
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from gasgiant.params.model import FieldMeta, PlanetParams
+from gasgiant.params.model import FieldMeta, PlanetParams, hero_latitude_cap
 
 
 def _bounds(info: FieldInfo) -> tuple[float | None, float | None]:
@@ -112,8 +112,8 @@ _SECTION_BLURBS: dict[str, str] = {
     "appearance": "Color palette, contrast, and tonal-mapping controls.",
     "detail": "Fine-scale procedural texture detail layers.",
     "emission": "Self-emissive glow channels (lightning, aurora, hot spots). "
-    "Written to the exported emission map only — the Color preview does not "
-    "composite emission.",
+    "Preview via the viewport's Emission channel (aurora included) — the "
+    "Color preview does not composite emission. Exported to emission.exr.",
     "physical": "Planet radius and physical-shading parameters.",
     "export": "Output map resolution and PNG compression for Export.",
 }
@@ -280,10 +280,35 @@ def _draw_bands_template_escape(bands_doc: dict[str, Any]) -> tuple[bool, bool]:
         "band template is set -- overrides the band sliders below",
     )
     imgui.same_line()
+    # B4-2: clearing is destructive (the template values are kept nowhere but
+    # the undo history), and the startup preset ships WITH a template -- so
+    # the button stages a confirm modal instead of clearing outright.
+    title = "Clear band template?"
     if imgui.small_button("Clear template"):
-        bands_doc["template"] = None
-        return True, True
-    return False, False
+        imgui.open_popup(title)
+    changed = committed = False
+    center = imgui.get_main_viewport().get_center()
+    imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+    if imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+        imgui.text_wrapped(_CLEAR_TEMPLATE_CONFIRM)
+        imgui.separator()
+        if imgui.button("Clear##template"):
+            bands_doc["template"] = None
+            changed = committed = True
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Cancel##template"):
+            imgui.close_current_popup()
+        imgui.end_popup()
+    return changed, committed
+
+
+# B4-2: the confirm-modal copy, a module constant so tests can pin it.
+_CLEAR_TEMPLATE_CONFIRM = (
+    "Clear the preset's calibrated band skeleton? The seeded band sliders "
+    "take over, and the template values are not kept anywhere -- only Undo "
+    "(Ctrl+Z) brings them back."
+)
 
 
 def _draw_hero_latitude_escape(storms_doc: dict[str, Any]) -> tuple[bool, bool]:
@@ -306,13 +331,14 @@ def _draw_hero_latitude_escape(storms_doc: dict[str, Any]) -> tuple[bool, bool]:
     return False, False
 
 
-# B1-7: aurora writes only the exported emission map's alpha channel; nothing
-# in the Color preview moves when it is enabled. Said exactly where the aurora
-# controls live, at the moment it applies (aurora is on), so the zero-feedback
-# slider drag stops reading as "broken".
+# B1-7/B4-3: aurora writes the exported emission map's alpha channel; the
+# viewport composites it (alpha x aurora color) into the Emission channel
+# preview, but nothing in the Color preview moves when it is enabled. Said
+# exactly where the aurora controls live, at the moment it applies (aurora is
+# on), so the zero-feedback Color-view slider drag stops reading as "broken".
 _AURORA_PREVIEW_NOTE = (
-    "aurora is on — it renders to the exported emission map (alpha), "
-    "not the Color preview"
+    "aurora is on — preview it in the viewport's Emission channel; "
+    "it is not composited into the Color preview"
 )
 
 
@@ -420,9 +446,10 @@ def _draw_model(
             # VISIBLE leaf's ui label, and only when that label is truthy --
             # a section with one constant ui value (every section besides
             # Storms today) never differs from its own previous value, so it
-            # renders zero separators, byte-for-byte unchanged. Falsy ui
-            # (Baroclinic's fixed-cadence fields use ui="") is transparent to
-            # grouping: it neither triggers nor absorbs a boundary.
+            # renders zero separators, byte-for-byte unchanged. Falsy ui is
+            # transparent to grouping: it neither triggers nor absorbs a
+            # boundary. (Baroclinic's cadence trio now carries ui="Fixed
+            # cadence" -- B2-3 -- so it draws under its own sub-label.)
             ui = FieldMeta.of(info).ui or None
             if ui and prev_ui is not None and ui != prev_ui:
                 imgui.separator_text(ui)
@@ -498,6 +525,13 @@ _TIER_GLYPHS: dict[str, tuple[str, tuple[float, float, float, float], str]] = {
 _LOCK_COLOR = (0.55, 0.75, 1.0, 1.0)
 _MODIFIED_COLOR = (1.0, 0.85, 0.3, 1.0)
 
+# B4-4: exactly ONE live editor for the output settings -- the Export... modal
+# (main._draw_export_modal). The auto-panel renders these read-only so two
+# widgets can never again disagree on affordance or undo semantics (the old
+# split: an undoable Basic slider here vs. a history-excluded snapped combo in
+# the modal, which also went blank on non-preset widths).
+_MODAL_ONLY_PATHS = frozenset({"export.width", "export.png_compression"})
+
 
 def _draw_tier_badge(tier: Any) -> None:
     """One-char colored change-cost tag from ``extra.get('tier')`` (full word
@@ -556,6 +590,16 @@ def _draw_leaf(
         imgui.text_colored(imgui.ImVec4(*_MODIFIED_COLOR), "*")
         imgui.same_line()
 
+    if path in _MODAL_ONLY_PATHS:
+        # Read-only mirror of the value; the Export... modal is the editor.
+        # Early return also skips the right-click Reset (a second editor in
+        # disguise) -- the tooltip still explains the field.
+        imgui.text_disabled(f"{label}: {value} — set in the Export... dialog")
+        if info.description and imgui.is_item_hovered():
+            imgui.set_tooltip(info.description)
+        imgui.pop_id()
+        return False, False
+
     kind = leaf_kind(name, info, value)
     ann = info.annotation
     if kind == "enum":
@@ -591,7 +635,7 @@ def _draw_leaf(
     elif kind == "palette_rows":
         changed, committed = _draw_palette_rows(label, value)
     elif kind == "optional_float":
-        imgui.text_disabled(f"{label}: {value if value is not None else 'none (auto)'}")
+        changed, committed = _draw_optional_float(name, label, doc, lo, hi)
     elif kind == "optional_model":
         imgui.text_disabled(f"{label}: {'set (preset-only)' if value else 'none'}")
     else:
@@ -633,6 +677,55 @@ def _draw_leaf(
     return changed, committed
 
 
+def _optional_float_bounds(
+    name: str, doc: dict[str, Any], lo: float | None, hi: float | None
+) -> tuple[float, float]:
+    """Slider bounds for an optional-float leaf. For ``storms.hero_latitude``
+    the field bounds are tightened by the same radius-coupled cap the model
+    validator enforces (``hero_latitude_cap``), read live from the sibling
+    ``hero_radius`` in the draft -- so the widget can never offer a value the
+    commit would reject with a validation toast (B4-2)."""
+    flo = lo if lo is not None else 0.0
+    fhi = hi if hi is not None else 1.0
+    if name == "hero_latitude" and "hero_radius" in doc:
+        cap = hero_latitude_cap(float(doc["hero_radius"]))
+        flo, fhi = max(flo, -cap), min(fhi, cap)
+    return flo, fhi
+
+
+def _draw_optional_float(
+    name: str, label: str, doc: dict[str, Any], lo: float | None, hi: float | None
+) -> tuple[bool, bool]:
+    """B4-2: a real widget for an optional float (``storms.hero_latitude``),
+    replacing the old read-only text. A "pin" checkbox toggles None (seeded/
+    auto placement) <-> a pinned value; while pinned, a slider edits the value
+    inside validator-safe bounds. Pinning starts at 0.0 clamped into bounds
+    (always valid: the cap is symmetric about 0 and strictly positive for
+    every legal hero_radius). Returns ``(changed, committed)`` like the other
+    composite editors."""
+    changed = committed = False
+    flo, fhi = _optional_float_bounds(name, doc, lo, hi)
+    pinned = doc[name] is not None
+    clicked, want_pin = imgui.checkbox(f"pin##{name}", pinned)
+    if clicked and want_pin != pinned:
+        doc[name] = min(max(0.0, flo), fhi) if want_pin else None
+        changed = committed = True
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(
+            "pinned: the slider value is used verbatim; unpinned: seeded auto placement"
+        )
+    imgui.same_line()
+    if doc[name] is not None:
+        c, v = imgui.slider_float(label, float(doc[name]), flo, fhi)
+        if c:
+            doc[name] = v
+            changed = True
+        committed = committed or imgui.is_item_deactivated_after_edit()
+    else:
+        imgui.text_disabled(f"{label}: none (auto)")
+    return changed, committed
+
+
 def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]:
     """Latitude-anchored palette rows: a latitude slider plus the shared
     stops editor per row.
@@ -655,6 +748,13 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
             row["latitude"] = lat
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
+        if imgui.is_item_hovered():
+            # B2-3: the composite editors' sub-widgets have no pfield
+            # description to inherit, so they carry their own tooltips.
+            imgui.set_tooltip(
+                "Anchor latitude of this gradient row, degrees (north positive); "
+                "rows blend into each other across latitude"
+            )
         if len(rows) > 1:
             imgui.same_line()
             if imgui.small_button("remove row"):
@@ -700,6 +800,8 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
             stop["color"] = tuple(rgb)
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Color of this gradient stop (sRGB)")
         imgui.same_line()
         imgui.set_next_item_width(120.0)
         c, pos = imgui.slider_float("##p", float(stop["pos"]), 0.0, 1.0)
@@ -707,6 +809,12 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
             stop["pos"] = pos
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Position of this stop along the gradient: 0 = darkest belt "
+                "end, 1 = brightest zone end (for storm_tints: 0 = festoon "
+                "blue-gray end, 1 = reddest storm end)"
+            )
         if len(stops) > 1:
             imgui.same_line()
             if imgui.small_button("x"):

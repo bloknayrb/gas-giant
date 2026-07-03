@@ -45,6 +45,24 @@ def save_preset(params: PlanetParams, path: Path, name: str | None = None) -> No
     path.write_text(json.dumps(to_preset_doc(params, name), indent=2), encoding="utf-8")
 
 
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Best-effort numeric version key for app_version comparisons: leading
+    digits per dot-segment, non-numeric tails ignored ("0.2.0rc1" -> (0, 2, 0)),
+    a fully non-numeric string collapses to (0,). Deliberately tiny -- this
+    only decides which ERROR MESSAGE a failed load gets, never load behavior."""
+    parts: list[int] = []
+    for piece in str(version).split("."):
+        digits = ""
+        for ch in piece:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) or (0,)
+
+
 def load_preset_doc(doc: dict, source: str = "<preset>") -> PlanetParams:
     if not isinstance(doc, dict) or "params" not in doc:
         raise PresetError(f"{source}: not a preset file (missing 'params')")
@@ -58,6 +76,20 @@ def load_preset_doc(doc: dict, source: str = "<preset>") -> PlanetParams:
     try:
         return PlanetParams.model_validate(doc["params"])
     except ValidationError as exc:
+        # B4-5: strict models reject unknown keys, so a preset saved by a
+        # NEWER app (an additive field this version doesn't know) would read
+        # exactly like a typo. app_version travels in every envelope for this
+        # moment -- consult it and blame the version gap when it applies.
+        saved_by = doc.get("app_version")
+        if saved_by is not None and _version_tuple(str(saved_by)) > _version_tuple(
+            gasgiant.__version__
+        ):
+            raise PresetError(
+                f"{source}: this preset was saved by gasgiant {saved_by}, which is "
+                f"newer than this app ({gasgiant.__version__}) — it may use fields "
+                f"this version doesn't know. Upgrade gasgiant to load it as-is. "
+                f"(details: {_summarize(exc)})"
+            ) from exc
         raise PresetError(f"{source}: {_summarize(exc)}") from exc
 
 
@@ -103,6 +135,31 @@ def load_user_preset(name: str) -> PlanetParams:
         raise
     except (OSError, ValueError) as exc:  # missing file, bad JSON, etc.
         raise PresetError(f"{path}: {exc}") from exc
+
+
+def import_preset(path: Path) -> tuple[str, PlanetParams]:
+    """B4-5 "Import preset...": validate ``path`` through the strict envelope
+    (including the version-aware rejection messages), then install it as a
+    durable USER preset -- ``USER_PRESET_DIR/<stem>.json`` -- so it appears in
+    the merged dropdown, unlike Load's transient FILE identity. Re-saved via
+    ``save_preset`` (not byte-copied) so an old-format import lands migrated
+    in the current envelope. Returns ``(name, params)``. Never clobbers an
+    existing user preset; never writes anything if validation fails."""
+    try:
+        params = load_preset(path)
+    except PresetError:
+        raise
+    except (OSError, ValueError) as exc:  # missing file, bad JSON, etc.
+        raise PresetError(f"{path}: {exc}") from exc
+    name = path.stem
+    dest = USER_PRESET_DIR / f"{name}.json"
+    if dest.exists():
+        raise PresetError(
+            f"user preset '{name}' already exists ({dest}); delete it first or "
+            f"rename the file being imported"
+        )
+    save_preset(params, dest, name=name)
+    return name, params
 
 
 class PresetSource(StrEnum):
