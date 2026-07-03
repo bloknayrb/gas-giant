@@ -609,3 +609,43 @@ def test_clear_template_cancel_keeps_template(imgui_ctx, monkeypatch):
 
     assert (changed, committed) == (False, False)
     assert doc["bands"]["template"] is not None
+
+
+# -- B4-4: output settings have exactly one live editor (the Export modal) -------
+
+
+@pytest.mark.parametrize("field", ["width", "png_compression"])
+def test_export_leaves_render_read_only_in_panel(imgui_ctx, monkeypatch, field):
+    """The auto-panel must NOT render an editable widget for export.width /
+    export.png_compression -- the Export... modal is the single live editor
+    (one editor, one undo policy)."""
+    params = PlanetParams()
+    doc = params.model_dump()
+    baseline = panels._defaults_baseline()
+    state = PanelState(show_advanced=True)
+
+    sliders = []
+    monkeypatch.setattr(
+        panels.imgui, "slider_int", lambda *a, **k: sliders.append(a) or (False, a[1])
+    )
+    monkeypatch.setattr(
+        panels.imgui, "input_int", lambda *a, **k: sliders.append(a) or (False, a[1])
+    )
+    texts = []
+    real_text_disabled = panels.imgui.text_disabled
+    monkeypatch.setattr(
+        panels.imgui, "text_disabled", lambda t: texts.append(t) or real_text_disabled(t)
+    )
+
+    info = type(params.export).model_fields[field]
+    imgui.new_frame()
+    imgui.begin("modal_only_test", None, 0)
+    changed, committed = panels._draw_leaf(
+        field, info, doc["export"], baseline["export"], state, f"export.{field}"
+    )
+    imgui.end()
+    imgui.end_frame()
+
+    assert (changed, committed) == (False, False)
+    assert sliders == [], "no editable widget in the panel for this field"
+    assert any("Export" in t for t in texts), "the text points at the one live editor"

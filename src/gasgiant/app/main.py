@@ -674,18 +674,19 @@ class StudioApp:
         self._live = self.params
         self._gesture_base = None
 
-    def _commit_output_setting(self, new_params: PlanetParams) -> None:
-        """Commit an export/output-only setting (map resolution, PNG
-        compression). These are OUTPUT params, not planet-design edits, so they
-        are intentionally kept out of undo history -- but they ARE a fresh user
-        action, so they must invalidate any pending redo future (#4). Otherwise a
-        Redo issued after changing an export setting would replay the stale
-        pre-undo snapshot on top of it. Clearing redo here is exactly what
-        ``_push_history`` does for history-backed edits; these two sites are the
-        only commits outside the gesture/undo/redo paths."""
-        self._commit(new_params)
-        self._redo_stack.clear()
-        self._reset_working_copy()  # keep _live in lockstep with the applied setting
+    def _commit_export_field(self, name: str, value: object) -> None:
+        """B4-4: the export modal's editors (resolution combo, PNG-compression
+        slider) commit through the SAME ``_process_edit`` pipeline as every
+        panel widget -- ONE undo policy for the whole app. That makes output
+        edits ordinary undoable history entries, clears redo only via the
+        standard a-new-edit-clears-redo rule (no more silently destroyed Redo,
+        B4-6), honors the export-in-flight hold (the draft is kept, not
+        dropped, and flushes as one undo step), and RELEASES rather than
+        discards a pending heavy edit (the old ``_commit_output_setting``
+        reset the working copy wholesale, dropping pending drafts)."""
+        draft = self._live.model_dump()
+        draft["export"][name] = value
+        self._process_edit(draft, any_changed=True, any_committed=True)
 
     def _process_edit(self, draft: dict, any_changed: bool, any_committed: bool) -> None:
         """One frame of panel editing → at most one engine commit.
@@ -1188,19 +1189,21 @@ class StudioApp:
         imgui.end_disabled()
 
     def _draw_export_resolution(self) -> None:
-        """Resolution combo next to Export, writing export.width (POST tier).
-        Kept in sync with the working copy so a pending panel edit can't revert
-        it on the next frame."""
-        widths = [w for w, _ in EXPORT_RESOLUTIONS]
-        labels = [lbl for _, lbl in EXPORT_RESOLUTIONS]
-        current = self.params.export.width
-        cur_idx = widths.index(current) if current in widths else -1
-        imgui.set_next_item_width(70.0)
-        clicked, idx = imgui.combo("##exportres", cur_idx, labels)
-        if clicked and 0 <= idx < len(widths) and widths[idx] != current:
-            new_params = self.params.model_copy(deep=True)
-            new_params.export.width = widths[idx]
-            self._commit_output_setting(new_params)
+        """Resolution combo in the export modal -- THE editor for export.width
+        (B4-4: the auto-panel renders it read-only, so there is exactly one
+        live editor and one undo policy). Reads the working copy so a held
+        mid-export draft can't visually snap back; a width outside the snap
+        list (from a preset) previews as "<N> px (custom)" instead of blank."""
+        current = self._live.export.width
+        preview = next(
+            (lbl for w, lbl in EXPORT_RESOLUTIONS if w == current), f"{current} px (custom)"
+        )
+        imgui.set_next_item_width(110.0)
+        if imgui.begin_combo("##exportres", preview):
+            for width, label in EXPORT_RESOLUTIONS:
+                if imgui.selectable(label, width == current)[0] and width != current:
+                    self._commit_export_field("width", width)
+            imgui.end_combo()
         imgui.same_line()
         # Clarify that the export map size is independent of the sim grid (the
         # two were easy to confuse when export.width sat among the sliders).
@@ -1212,8 +1215,9 @@ class StudioApp:
     def _draw_export_modal(self) -> None:
         """Confirm-step modal in front of the folder picker: resolution +
         PNG-compression + an emission indicator + the sim-vs-export clarifier.
-        Both resolution and compression commit POST-tier (cheap re-derive) the
-        same way the old inline combo did. The final "Export..." opens the SAME
+        This modal is the ONE live editor for the output settings (B4-4); both
+        commit POST-tier through the shared _process_edit pipeline, so they
+        are ordinary undoable edits. The final "Export..." opens the SAME
         folder dialog the bare button used to open directly, then closes the
         modal; "Cancel" closes it with no side effect. Nothing fires on the
         first click that merely opened the modal (an explicit confirm step)."""
@@ -1226,13 +1230,17 @@ class StudioApp:
         # Resolution combo + the "map size is independent of the sim grid"
         # clarifier text, reused verbatim from the old inline placement.
         self._draw_export_resolution()
-        # PNG compression (0-9), committed POST-tier like the resolution combo.
-        current = self.params.export.png_compression
+        # PNG compression (0-9). Reads the working copy and commits through
+        # the shared pipeline (same rationale as _draw_seed_header_control):
+        # POST-tier drags stay live, the release coalesces into one undo entry.
+        current = self._live.export.png_compression
         changed, value = imgui.slider_int("PNG compression", current, 0, 9)
-        if changed and value != current:
-            new_params = self.params.model_copy(deep=True)
-            new_params.export.png_compression = value
-            self._commit_output_setting(new_params)
+        committed = imgui.is_item_deactivated_after_edit()
+        if changed or committed:
+            draft = self._live.model_dump()
+            if changed:
+                draft["export"]["png_compression"] = value
+            self._process_edit(draft, changed, committed)
         # B1-4: name what will actually be written (the modal never listed its
         # outputs) and where the map set goes next (Blender). The file list
         # subsumes the old bare "Emission: enabled/disabled" indicator --

@@ -524,6 +524,13 @@ _TIER_GLYPHS: dict[str, tuple[str, tuple[float, float, float, float], str]] = {
 _LOCK_COLOR = (0.55, 0.75, 1.0, 1.0)
 _MODIFIED_COLOR = (1.0, 0.85, 0.3, 1.0)
 
+# B4-4: exactly ONE live editor for the output settings -- the Export... modal
+# (main._draw_export_modal). The auto-panel renders these read-only so two
+# widgets can never again disagree on affordance or undo semantics (the old
+# split: an undoable Basic slider here vs. a history-excluded snapped combo in
+# the modal, which also went blank on non-preset widths).
+_MODAL_ONLY_PATHS = frozenset({"export.width", "export.png_compression"})
+
 
 def _draw_tier_badge(tier: Any) -> None:
     """One-char colored change-cost tag from ``extra.get('tier')`` (full word
@@ -581,6 +588,16 @@ def _draw_leaf(
     if name in baseline and _leaf_changed(doc[name], baseline[name]):
         imgui.text_colored(imgui.ImVec4(*_MODIFIED_COLOR), "*")
         imgui.same_line()
+
+    if path in _MODAL_ONLY_PATHS:
+        # Read-only mirror of the value; the Export... modal is the editor.
+        # Early return also skips the right-click Reset (a second editor in
+        # disguise) -- the tooltip still explains the field.
+        imgui.text_disabled(f"{label}: {value} — set in the Export... dialog")
+        if info.description and imgui.is_item_hovered():
+            imgui.set_tooltip(info.description)
+        imgui.pop_id()
+        return False, False
 
     kind = leaf_kind(name, info, value)
     ann = info.annotation
