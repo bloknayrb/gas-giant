@@ -370,6 +370,14 @@ class StudioApp:
         self._reset_working_copy()  # discrete action wins over pending edit
         label = f"user/{name}" if source == PresetSource.USER else name
         self.toasts.info(f"preset: {label}")
+        self._toast_param_warnings(params)
+
+    def _toast_param_warnings(self, params: PlanetParams) -> None:
+        """B5-6: surface model-level cross-field WARNINGS (valid-but-inert
+        configurations, e.g. a vorticity-only storm lever under the kinematic
+        solver) once on each preset/file load -- never per frame or per edit."""
+        for message in params.validation_warnings():
+            self.toasts.info(f"warning: {message}")
 
     def _push_history(self, params: PlanetParams) -> None:
         """Push the pre-edit/pre-action state onto the undo stack and clear the
@@ -589,6 +597,7 @@ class StudioApp:
                 self._set_identity((path.stem, "file"), loaded)
                 self._reset_working_copy()  # discrete action wins over pending edit
                 self.toasts.info(f"loaded {path.name}")
+                self._toast_param_warnings(loaded)
             elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":

@@ -1089,6 +1089,28 @@ class PlanetParams(_Params):
     def from_json(cls, text: str) -> PlanetParams:
         return cls.model_validate_json(text)
 
+    def validation_warnings(self) -> list[str]:
+        """Cross-field WARNINGS -- configurations that are valid but silently
+        inert, so they must never be validation errors (legitimate presets may
+        carry them; a kinematic preset derived from a vorticity one keeps its
+        storm levers). The GUI surfaces these as toasts on preset load (B5-6).
+
+        Current checks: the vorticity-only solid-core storm levers are exact
+        no-ops under ``solver.type == "kinematic"`` (the stamp branch that
+        consumes them never runs), e.g. a Neptune dark oval preset silently
+        stays exposed to the whirlpool-winding artifact."""
+        warnings: list[str] = []
+        if self.solver.type == SolverType.KINEMATIC:
+            for field_name in ("hero_solid_core", "oval_solid_core"):
+                value = getattr(self.storms, field_name)
+                if value != 0.0:
+                    warnings.append(
+                        f"storms.{field_name}={value:g} has no effect with the "
+                        f"kinematic solver (vorticity-only lever); set "
+                        f"solver.type=vorticity or reset it to 0"
+                    )
+        return warnings
+
 
 @dataclass(frozen=True)
 class FieldMeta:
