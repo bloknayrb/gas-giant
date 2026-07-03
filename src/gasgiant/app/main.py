@@ -880,7 +880,13 @@ class StudioApp:
                 self.toasts.info(f"saved {path.name}")
             elif kind == DialogKind.EXPORT:
                 out = Path(result)
-                self._export = ExportJob(export_job(self.sim, out), out)
+                conflicts = _export_conflicts(out)
+                if conflicts:
+                    # B1-4: the exporter itself overwrites silently, so ask
+                    # first. Held here; draw_controls draws the confirm modal.
+                    self._pending_export = (out, conflicts)
+                else:
+                    self._start_export(out)
         except (PresetError, OSError, ValueError) as exc:
             self.toasts.error(str(exc))
 
@@ -943,14 +949,20 @@ class StudioApp:
             if imgui.button("Export..."):
                 imgui.open_popup("Export map set")
             self._draw_export_modal()
+            self._draw_export_overwrite_confirm()
+            self._draw_last_export_line()
         else:
             prog = self._export.progress
             frac = prog.fraction if prog else 0.0
-            label = prog.message if prog else "starting"
-            imgui.progress_bar(frac, imgui.ImVec2(180.0, 0.0), label)
+            imgui.progress_bar(frac, imgui.ImVec2(180.0, 0.0), _export_progress_label(prog))
             imgui.same_line()
             if imgui.button("Cancel"):
                 self._cancel_export()
+            # B1-5: the hold notice in the SAME pane as the frozen sliders.
+            developing = prog is not None and prog.message == "developing"
+            imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.8, 0.3, 1.0))
+            imgui.text_wrapped(_export_hold_notice(developing))
+            imgui.pop_style_color()
 
         self._draw_pending_hint()
         imgui.separator()
@@ -1075,27 +1087,84 @@ class StudioApp:
             new_params = self.params.model_copy(deep=True)
             new_params.export.png_compression = value
             self._commit_output_setting(new_params)
-        if self.params.emission.enabled:
-            imgui.text("Emission: enabled (will export emission.exr)")
-        else:
-            imgui.text("Emission: disabled")
+        # B1-4: name what will actually be written (the modal never listed its
+        # outputs) and where the map set goes next (Blender). The file list
+        # subsumes the old bare "Emission: enabled/disabled" indicator --
+        # emission.exr appears in it exactly when params.emission.enabled.
+        imgui.separator()
+        imgui.text("Files written to the chosen folder:")
+        for line in _export_file_lines(self.params):
+            imgui.bullet_text(line)
         imgui.separator()
         if imgui.button("Export...") and self._dialog is None:
-            self._dialog = (DialogKind.EXPORT, pfd.select_folder("Export map set to folder"))
+            default_dir = str(self._last_export_dir) if self._last_export_dir else ""
+            self._dialog = (
+                DialogKind.EXPORT,
+                pfd.select_folder("Export map set to folder", default_dir),
+            )
             imgui.close_current_popup()
         imgui.same_line()
         if imgui.button("Cancel"):
             imgui.close_current_popup()
         imgui.end_popup()
 
+    def _start_export(self, out: Path) -> None:
+        """Kick off the tiled export job into ``out`` (folder already picked
+        and, if it contained a map set, overwrite-confirmed)."""
+        self._export = ExportJob(export_job(self.sim, out), out)
+
+    def _draw_export_overwrite_confirm(self) -> None:
+        """B1-4: confirm modal shown when the picked folder already contains
+        map-set files (``self._pending_export``). Overwrite starts the job;
+        Cancel drops it with no side effect."""
+        if self._pending_export is None:
+            return
+        title = "Overwrite existing export?"
+        if not imgui.is_popup_open(title):
+            imgui.open_popup(title)
+        center = imgui.get_main_viewport().get_center()
+        imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+        if not imgui.begin_popup_modal(title, None, imgui.WindowFlags_.always_auto_resize)[0]:
+            return
+        out, conflicts = self._pending_export
+        imgui.text_wrapped(f"{out} already contains a map set:")
+        for name in conflicts:
+            imgui.bullet_text(name)
+        imgui.text_wrapped("Exporting here will overwrite these files.")
+        imgui.separator()
+        if imgui.button("Overwrite"):
+            self._pending_export = None
+            self._start_export(out)
+            imgui.close_current_popup()
+        imgui.same_line()
+        if imgui.button("Cancel##overwrite_export"):
+            self._pending_export = None
+            imgui.close_current_popup()
+        imgui.end_popup()
+
+    def _draw_last_export_line(self) -> None:
+        """B1-4: persistent 'last exported to...' line + Open-folder button
+        (the success toast vanished after 4 s with no way back to the files).
+        Drawn only while no export is in flight."""
+        if self._last_export_dir is None:
+            return
+        if imgui.small_button("Open folder") and not _open_folder(self._last_export_dir):
+            self.toasts.error(f"could not open {self._last_export_dir}")
+        imgui.same_line()
+        imgui.text_disabled(f"last export: {self._last_export_dir}")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                f"{self._last_export_dir}\nImport mapset.json in Blender "
+                "(File > Import > Gas Giant Map Set)"
+            )
+
     def _draw_pending_hint(self) -> None:
         """While a heavy (velocity/restart) edit waits for release, tell the user
-        the rebuild is deferred so the absence of a live update isn't confusing."""
-        heavy_pending = bool(diff_tiers(self.params, self._live) - {Tier.POST})
-        if heavy_pending:
-            imgui.text_colored(
-                imgui.ImVec4(1.0, 0.8, 0.3, 1.0), "release to apply (restart/velocity)"
-            )
+        the rebuild is deferred so the absence of a live update isn't confusing.
+        Wording is plain-language, worst-tier-first (B1-5)."""
+        hint = _pending_hint_text(diff_tiers(self.params, self._live))
+        if hint is not None:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.3, 1.0), hint)
 
     def draw_equirect(self) -> None:
         if self.sim is None:  # init_gl failed; the runner is already exiting
@@ -1189,7 +1258,11 @@ class StudioApp:
             self._export.progress = next(job)
         except StopIteration:
             self._export = None
-            self.toasts.info(f"exported to {out}")
+            # B1-4: remember where (this session + persisted via the same
+            # hello_imgui prefs that keep window geometry/docking layout).
+            self._last_export_dir = out
+            _save_last_export_dir(out)
+            self.toasts.info(f"exported to {out} — 'Open folder' in Controls")
         except Exception as exc:  # noqa: BLE001 - surface any export failure
             # Record the full traceback (this catch is broad -- a GL error mid
             # derive, an IndexError in the tiler, an OSError on the last tile),
