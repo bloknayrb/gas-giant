@@ -5,7 +5,8 @@
 // vortices' CURRENT (drifted) positions.
 
 layout(std430, binding = 2) readonly buffer Vortices {
-    // Triples: [x,y,z,r_core], [strength,kind,tint,brightness], [wake_dir,-,-,-]
+    // Triples: [x,y,z,r_core], [strength,kind,tint,brightness],
+    //          [wake_dir, aspect, wake_lat_off, -]
     vec4 vortex_data[];
 };
 uniform int u_vortex_count;
@@ -215,6 +216,7 @@ vec3 vortexStamp(vec3 p) {
         // velocity wedge in psi.comp.
         if (b.y == VKIND_HERO) {
             float down = vortex_data[3 * i + 2].x;
+            float woff = vortex_data[3 * i + 2].z;  // equatorward wake bias (F06)
             float rc = a.w;
             float vlat = asin(clamp(a.y, -1.0, 1.0));
             float vlon = atan(a.z, a.x);
@@ -222,7 +224,7 @@ vec3 vortexStamp(vec3 p) {
             float plon = atan(p.z, p.x);
             float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
             float along = dlon * down;
-            float across = (plat - vlat) / max(rc * 1.6, 1e-4);
+            float across = (plat - (vlat + woff)) / max(rc * 1.6, 1e-4);
             // Wake filaments: fray the smooth wedge into ragged folded streaks so it
             // reads as turbulence, not a blob. The wake is the relaxation TARGET, so a
             // structured target makes a structured wake (advect.comp folds it; the

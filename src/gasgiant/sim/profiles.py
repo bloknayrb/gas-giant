@@ -167,13 +167,23 @@ def select_lanes(
 
 
 def select_wave_latitudes(bands: BandLayout, profiles: LatProfiles) -> tuple[float, float]:
-    """(festoon latitude, ribbon latitude): the band edge nearest ~7 deg for
-    the festoon/hot-spot train, and the strongest mid-latitude jet for the
-    ribbon wave."""
+    """(festoon latitude, ribbon latitude): the band edge nearest +7 deg (the
+    NEB-S side — real festoons root on the belt edge NORTH of the equator, so
+    the target is signed) for the festoon/hot-spot train, and the strongest
+    mid-latitude jet for the ribbon wave (sign-blind by design: Saturn's
+    ribbon is hemisphere-generic)."""
     interior = bands.edges[1:-1].astype(np.float64)
     if interior.size == 0:
         return 0.12, 0.82
-    festoon = float(interior[np.argmin(np.abs(np.abs(interior) - 0.12))])
+    # Signed distance to the +0.12 rad target; a sign-blind |abs| pick chose
+    # -7.31 deg over +5.91 deg on the Cassini template (review F12). Templates
+    # with no edge inside +/-0.1 rad of the signed target keep the old
+    # sign-blind nearest pick rather than jumping to a far-north edge.
+    signed_dist = np.abs(interior - 0.12)
+    if float(np.min(signed_dist)) <= 0.1:
+        festoon = float(interior[np.argmin(signed_dist)])
+    else:
+        festoon = float(interior[np.argmin(np.abs(np.abs(interior) - 0.12))])
 
     mid = [e for e in interior if 0.6 < abs(e) < 1.0]
     if mid:
