@@ -14,6 +14,15 @@ name: Gate smoke (swirl, llvmpipe)
 
 on:
   workflow_dispatch:
+  # TEMPORARY dispatch bootstrap (remove after the first runtime measurement):
+  # GitHub only allows manual dispatch of workflows that exist on the DEFAULT
+  # branch, so a branch-only workflow_dispatch job cannot be triggered at all.
+  # This paths-scoped pull_request trigger fires only when this file itself
+  # changes in a PR — i.e. exactly once, for the W9 groundwork PR — and is NOT
+  # a push/schedule trigger (the job stays out of normal CI).
+  pull_request:
+    paths:
+      - ".github/workflows/gate-smoke.yml"
 
 jobs:
   gate-smoke:
