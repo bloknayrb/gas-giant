@@ -83,6 +83,19 @@ a GitHub ubuntu runner under xvfb + llvmpipe:
   DISPLAY, so `GpuContext.headless()` fails (`XOpenDisplay`) and the `gpu` fixture
   **skips ~178 of 184 gpu tests** — CI's llvmpipe GPU coverage is largely illusory.
   Follow-up candidate for the A4/CI wave (add xvfb to ci.yml).
+  **Resolved 2026-07-03 (PR #25):** ci.yml now runs gpu tests under xvfb-run — a
+  PR-blocking `gpu-smoke` job (byte-identity/no-op class, ~31 tests, ~24 min,
+  `LP_NUM_THREADS=1`) plus the full tier non-blocking on master push/nightly/
+  dispatch (threaded, with the 15 determinism-sensitive vorticity tests split
+  into a single-threaded step). The full tier measured >3 h under llvmpipe
+  (146/185 tests in 180 min before timeout, run 28683137520), confirming it
+  cannot be PR-blocking. Measurement also extended this addendum's
+  threshold-portability finding to the test suite: under llvmpipe's default
+  thread pool, vorticity/SOR output diverges 0.06–0.53 run-to-run — far past the
+  RTX-calibrated `GPU_NOISE_ATOL` floors (run 28688930797: 8 vorticity no-op
+  tests fail threaded) — while `LP_NUM_THREADS=1` is deterministic and green
+  (run 28689357120). Same lesson as the gate metrics: RTX-calibrated constants
+  are not renderer-portable.
 
 ## Evidence (local, out-of-git per `out/` ignore policy)
 

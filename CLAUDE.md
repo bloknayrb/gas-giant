@@ -33,12 +33,27 @@ searchable auto-generated panels, per-slider help, undo/redo, and playback contr
 - GPU tests are marked `pytestmark = pytest.mark.gpu` and use the session `gpu` fixture
   (`tests/conftest.py`), which **skips cleanly if no OpenGL 4.3 context exists** — a sandboxed
   agent without a GPU can still run the full command; gpu tests skip, unit tests run.
-- CI (`.github/workflows/ci.yml`) runs everything on llvmpipe: `LIBGL_ALWAYS_SOFTWARE=1` plus
-  apt `libegl1 libgl1-mesa-dri libosmesa6`. Replicate that on Linux for software-GL runs.
+- CI (`.github/workflows/ci.yml`) runs GL under xvfb-run + llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`
+  plus apt `libegl1 libgl1-mesa-dri libosmesa6 xvfb`; glcontext's x11 backend needs a DISPLAY
+  even for software GL — before 2026-07-03/PR #25 the runner had none, so ~178/185 gpu tests
+  silently skipped while CI reported green). Per event: every PR runs the no-GPU tier plus a
+  PR-blocking `gpu-smoke` job = the full byte-identity/no-op class
+  (`pytest -m gpu -k "identical or noop or no_op"`, ~31 tests, ~24 min) under
+  `LP_NUM_THREADS=1` — single-threaded llvmpipe is deterministic; the default thread pool
+  gives run-to-run vorticity/SOR divergence of 0.06–0.53, far past the RTX-calibrated
+  floors. The FULL gpu tier (~185 tests, >3 h under llvmpipe — ~150x slower than native
+  GPU) runs as a non-blocking `gpu-full` job on push to master + nightly schedule +
+  workflow_dispatch: threaded for speed with the 15 determinism-sensitive vorticity tests
+  deselected, then those 15 re-run single-threaded in a second step. "CI is authoritative
+  for byte-identity" = gpu-smoke on every PR. Replicate the xvfb+llvmpipe (+
+  `LP_NUM_THREADS=1` for determinism) setup on Linux for software-GL runs.
 - **Machine-local GPU flakiness (KNOWN, not your bug):** ~12 GPU byte-identity/no-op tests
   are flaky on the primary dev box (RTX 3070) — GL session-context LSB noise (~0.004) that
-  appears after other GL work has run in the same session. They PASS in CI under llvmpipe
-  and on a fresh boot. The flaky set SHIFTS between reruns (10 vs 6 with different members
+  appears after other GL work has run in the same session. They pass on a fresh boot and
+  in CI under single-threaded llvmpipe (an earlier "they PASS in CI under llvmpipe" claim
+  predated the 2026-07-03 CI fix — CI was silently skipping them; under THREADED llvmpipe
+  the vorticity no-op tests fail with run-to-run divergence 0.06–0.53, hence
+  `LP_NUM_THREADS=1` in ci.yml). The flaky set SHIFTS between reruns (10 vs 6 with different members
   observed) — no fixed blocklist is possible. Protocol: (a) establish a green/red baseline
   on the SAME machine/session BEFORE attributing any GPU test failure to your change;
   (b) CI is authoritative for byte-identity claims; (c) re-run a suspected-flaky GPU test
