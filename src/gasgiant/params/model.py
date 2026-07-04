@@ -221,6 +221,30 @@ class BandsParams(_Params):
         description="SEB-fade: one belt gets a pale desaturated sector spanning "
                     "~100 degrees of longitude",
     )
+    belt_fade: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Bands",
+        description="Whole-belt fade (the SEB-fade epoch): blends the target "
+                    "band's stamped color toward the mean of its neighboring "
+                    "bands, all the way around the planet -- at 1.0 a faded "
+                    "belt reads as a pale ghost band at zone level. VISUAL "
+                    "only (recorded LIMIT): the belt keeps belt-like churn/"
+                    "dynamics and stays a storm host and outbreak candidate, "
+                    "which is the real SEB-fade phenomenology (revival "
+                    "outbreaks erupt IN the faded belt). Target band = "
+                    "faded_band_index, or the widest low/mid belt when that "
+                    "is unset. 0 = off (byte-identical)",
+    )
+    faded_band_index: int | None = pfield(
+        None, tier=Tier.RESTART, lo=0, hi=MAX_BANDS - 1, adv=True, ui="Bands",
+        description="Band targeted by belt_fade AND the faded_sector "
+                    "longitude window (index 0 = northernmost band). None = "
+                    "auto: the widest belt within ~52 deg of the equator -- "
+                    "note the shipped Jupiter template's SEB wins that pick "
+                    "by only 0.01 deg over the NEB, so set this explicitly "
+                    "when the target matters. Pointing it at a ZONE is "
+                    "allowed (the ochre-EZ recipe: the zone blends toward "
+                    "its belt neighbors). Validated against the band count",
+    )
     contrast_envelope: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), adv=True, ui="Bands",
         description="Banding contrast collapse poleward of ~45 deg toward mottle "
@@ -252,6 +276,17 @@ class BandsParams(_Params):
                     "seasoning (value_contrast, hue_jitter, width knobs) is "
                     "inert when set",
     )
+
+    @model_validator(mode="after")
+    def _validate_faded_band_index(self) -> BandsParams:
+        if self.faded_band_index is not None:
+            n = len(self.template.values) if self.template is not None else self.count
+            if self.faded_band_index >= n:
+                raise ValueError(
+                    f"faded_band_index={self.faded_band_index} is out of range: the "
+                    f"layout has {n} bands (indices 0..{n - 1})"
+                )
+        return self
 
 
 class SimParams(_Params):
@@ -575,6 +610,33 @@ class StormsParams(_Params):
     outbreak_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, adv=True, ui="Outbreaks",
         description="Convective outbreak vorticity amplitude",
+    )
+    outbreak_latitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Outbreaks",
+        description="Pin convective outbreaks to this latitude (degrees; the "
+                    "'pin' checkbox toggles it) -- the 2010 Saturn Great White "
+                    "Spot erupted at ~35 N, the 1990 event on the equator. "
+                    "None = seeded placement in a dark belt. A pin bypasses "
+                    "the belt-candidate selection entirely (including the "
+                    "outbreak_lat_min floor), so equatorial eruptions work",
+    )
+    outbreak_phase: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Outbreaks",
+        description="Pin WHEN outbreaks erupt: eruption start as a fraction "
+                    "of the development run (0 = at init, 1 = at the final "
+                    "snapshot). None = seeded 0.55..0.85 draw per eruption, "
+                    "which catches plumes across their life. ~0.6 shows a "
+                    "fresh mid-eruption train at the snapshot; early values "
+                    "leave only the sheared-out streak",
+    )
+    outbreak_lat_min: float = pfield(
+        0.20, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Outbreaks",
+        description="Minimum |latitude| for AUTO outbreak-belt selection, "
+                    "radians of latitude (1 rad = 57.3 deg; default 0.20 rad "
+                    "is about 11.5 deg). The floor keeps seeded eruptions off "
+                    "the equatorial zone where white-on-white plumes vanish; "
+                    "lower it to admit equatorial belts to the candidate "
+                    "pool, or use outbreak_latitude to pin exactly",
     )
 
     # -- Small storms ---------------------------------------------------
