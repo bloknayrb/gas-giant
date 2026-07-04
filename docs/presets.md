@@ -25,6 +25,22 @@ A preset is a JSON envelope around the parameter tree:
 - Factory presets are package data (`src/gasgiant/presets/*.json`); the GUI
   autosaves the session to `~/.gasgiant/session.json` on exit.
 
+## User presets
+
+User presets live in `~/.gasgiant/presets/` (`USER_PRESET_DIR` in
+`params/presets.py`), one `<name>.json` per preset, and appear in the GUI's
+preset dropdown merged after the factory entries (displayed as
+`user/<name>`, so a user preset can never shadow a same-named factory
+preset). The GUI's *Save As* dialog
+defaults into that directory (created on demand); Ctrl+S overwrites the
+active user preset after a confirm modal, or falls back to Save As when a
+factory/file/unsaved identity is active. Enumeration never opens the files —
+a corrupt preset cannot crash the dropdown; it only fails (with a toast) when
+actually loaded. *Import preset…* validates an external `.json` through the
+strict envelope path (running any format migrations) and installs it as a
+durable user preset — unlike *Load*, whose file identity is transient — and
+it never overwrites an existing user preset of the same name.
+
 ## mapset.json (TOLERANT policy)
 
 The exporter ↔ Blender contract. Canonical JSON Schema:
