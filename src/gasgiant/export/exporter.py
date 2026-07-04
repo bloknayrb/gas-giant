@@ -13,7 +13,9 @@ close) removes partial output files after the pool drains.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import shutil
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -21,7 +23,13 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from gasgiant.export.manifest import MANIFEST_FILENAME, build_manifest, write_manifest
+from gasgiant.export.manifest import (
+    MANIFEST_FILENAME,
+    attach_frames,
+    build_manifest,
+    read_manifest,
+    write_manifest,
+)
 from gasgiant.export.writers import write_exr_gray, write_exr_rgba, write_png16_rgb_u16
 from gasgiant.jobs import Progress
 from gasgiant.params.presets import to_preset_doc
@@ -211,4 +219,110 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
 def run_export(sim: Any, out_dir: Path, width: int | None = None) -> None:
     """Drain the job synchronously (CLI / tests)."""
     for _ in export_job(sim, out_dir, width):
+        pass
+
+
+def export_sequence_job(
+    sim: Any, out_dir: Path, frames: int, steps_per_frame: int,
+    width: int | None = None,
+) -> Iterator[Progress]:
+    """Animated sequence export.
+
+    Frame 0 is the full existing mapset export (its color map duplicated as
+    ``frames/frame_0000.png``); each subsequent frame advances the sim by
+    ``steps_per_frame`` via ``Simulation.extend_run`` and renders COLOR ONLY
+    through the same per-tile path as the mapset export. The manifest gains an
+    optional ``frames`` block, written only once every frame file exists — a
+    cancelled/failed sequence removes everything it wrote, so no half-written
+    frame is ever counted in a manifest.
+
+    Determinism note: the kinematic path is byte-exact across runs; vorticity
+    frames carry compounding SOR LSB noise (structural guarantees only).
+    """
+    if frames < 1:
+        raise ValueError(f"frames must be >= 1, got {frames}")
+    if steps_per_frame < 1:
+        raise ValueError(f"steps_per_frame must be >= 1, got {steps_per_frame}")
+
+    frames_dir = out_dir / "frames"
+    written: list[Path] = []
+    tile_texs: list[Any] = []
+    completed = False
+    total = frames + 1  # frames + manifest rewrite
+    try:
+        # Frame 0: the full mapset export (writes color/height/manifest and
+        # cleans up after ITSELF if cancelled inside this phase).
+        yield from export_job(sim, out_dir, width)
+
+        params = sim.params
+        w = width or params.export.width
+        h = w // 2
+        gpu = sim.gpu
+
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        frame0 = frames_dir / "frame_0000.png"
+        written.append(frame0)
+        shutil.copyfile(out_dir / "color.png", frame0)
+        yield Progress(1, total, "frame 0")
+
+        tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
+        tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
+        tile_detail = gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
+        tile_texs += [tile_color, tile_height, tile_detail]
+        tiles = [(x, y) for y in range(0, h, TILE) for x in range(0, w, TILE)]
+        color_full = np.empty((h, w, 3), dtype=np.uint16)
+
+        for fi in range(1, frames):
+            sim.extend_run(steps_per_frame)
+            snap = sim.create_snapshot()
+            try:
+                for x0, y0 in tiles:
+                    tw = min(TILE, w - x0)
+                    th = min(TILE, h - y0)
+                    _derive_tile(
+                        sim, snap, snap.params, x0, y0, w, h,
+                        tile_color, tile_height, tile_detail, None,
+                    )
+                    color = gpu.read_texture(tile_color)[:th, :tw, :3]
+                    color_full[y0 : y0 + th, x0 : x0 + tw] = (
+                        np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
+                    ).astype(np.uint16)
+            finally:
+                snap.release()
+            path = frames_dir / f"frame_{fi:04d}.png"
+            written.append(path)  # tracked BEFORE the write so a partial file
+            write_png16_rgb_u16(path, color_full, params.export.png_compression)
+            yield Progress(fi + 1, total, f"frame {fi}")
+
+        manifest = read_manifest(out_dir)
+        attach_frames(
+            manifest, count=frames, steps_per_frame=steps_per_frame,
+            files=[f"frames/frame_{i:04d}.png" for i in range(frames)],
+        )
+        write_manifest(out_dir, manifest)
+        completed = True
+        yield Progress(total, total, "done")
+    finally:
+        for tex in tile_texs:
+            tex.release()
+        if not completed:
+            # Remove only files WE wrote: the frame PNGs plus the base map set
+            # (export_job's own cancellation already covers the frame-0 phase;
+            # these unlinks are no-ops then). The user's files are untouched.
+            for p in written:
+                p.unlink(missing_ok=True)
+            if frames_dir.is_dir():
+                with contextlib.suppress(OSError):  # user data in frames/: leave it
+                    frames_dir.rmdir()
+            for name in ("color.png", "height.exr", "emission.exr", MANIFEST_FILENAME):
+                (out_dir / name).unlink(missing_ok=True)
+            log.info("sequence export cancelled; partial output removed")
+
+
+def run_export_sequence(
+    sim: Any, out_dir: Path, frames: int, steps_per_frame: int,
+    width: int | None = None,
+) -> None:
+    """Drain the sequence job synchronously (CLI / tests)."""
+    for _ in export_sequence_job(sim, out_dir, frames, steps_per_frame, width):
         pass

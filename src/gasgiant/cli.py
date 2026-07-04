@@ -20,6 +20,12 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--res", type=int, default=None, help="equirect width in pixels (2:1 maps)")
     exp.add_argument("--dev-steps", type=int, default=None,
                      help="override the preset's development step count")
+    exp.add_argument("--frames", type=int, default=None,
+                     help="export an animation sequence of N color frames "
+                          "(frame 0 = the map set's color map)")
+    exp.add_argument("--steps-per-frame", type=int, default=None,
+                     help="sim steps advanced between sequence frames "
+                          "(required with --frames)")
     exp.add_argument("--seed", type=int, default=None, help="override the preset seed")
     exp.add_argument("--name", default=None, help="override the planet name")
     exp.add_argument("--out", type=Path, required=True, help="output map-set directory")
@@ -37,8 +43,16 @@ def main(argv: list[str] | None = None) -> int:
 
 def _export(args: argparse.Namespace) -> int:
     from gasgiant.engine import Simulation
-    from gasgiant.export.exporter import run_export
+    from gasgiant.export.exporter import run_export, run_export_sequence
     from gasgiant.params.presets import PresetError, resolve_preset
+
+    if (args.frames is None) != (args.steps_per_frame is None):
+        print("error: --frames and --steps-per-frame must be given together",
+              file=sys.stderr)
+        return 2
+    if args.frames is not None and (args.frames < 1 or args.steps_per_frame < 1):
+        print("error: --frames and --steps-per-frame must be >= 1", file=sys.stderr)
+        return 2
 
     try:
         params = resolve_preset(args.preset)
@@ -60,9 +74,15 @@ def _export(args: argparse.Namespace) -> int:
 
     started = time.perf_counter()
     sim = Simulation(params)
-    run_export(sim, args.out)
+    if args.frames is not None:
+        run_export_sequence(
+            sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame
+        )
+    else:
+        run_export(sim, args.out)
     elapsed = time.perf_counter() - started
-    print(f"exported {params.export.width}x{params.export.width // 2} map set "
+    seq = f" + {args.frames}-frame sequence" if args.frames is not None else ""
+    print(f"exported {params.export.width}x{params.export.width // 2} map set{seq} "
           f"to {args.out} in {elapsed:.1f}s")
     return 0
 
