@@ -33,8 +33,17 @@ searchable auto-generated panels, per-slider help, undo/redo, and playback contr
 - GPU tests are marked `pytestmark = pytest.mark.gpu` and use the session `gpu` fixture
   (`tests/conftest.py`), which **skips cleanly if no OpenGL 4.3 context exists** — a sandboxed
   agent without a GPU can still run the full command; gpu tests skip, unit tests run.
-- CI (`.github/workflows/ci.yml`) runs everything on llvmpipe: `LIBGL_ALWAYS_SOFTWARE=1` plus
-  apt `libegl1 libgl1-mesa-dri libosmesa6`. Replicate that on Linux for software-GL runs.
+- CI (`.github/workflows/ci.yml`) runs GL under xvfb-run + llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`
+  plus apt `libegl1 libgl1-mesa-dri libosmesa6 xvfb`; glcontext's x11 backend needs a DISPLAY
+  even for software GL — before 2026-07-03/PR #25 the runner had none, so ~178/184 gpu tests
+  silently skipped while CI reported green). Per event: every PR runs the no-GPU tier plus a
+  PR-blocking `gpu-smoke` job = the byte-identity/no-op class
+  (`pytest -m gpu -k "identical or noop or no_op"`, ~29 tests); the FULL gpu tier (~182 tests,
+  >3 h wall under llvmpipe — ~150x slower than native GPU) runs as a non-blocking `gpu-full`
+  job on push to master + nightly schedule + workflow_dispatch. "CI is authoritative for
+  byte-identity" = gpu-smoke on PRs; gpu regressions outside that slice surface on the
+  master-push/nightly gpu-full run, not on PRs. Replicate the xvfb+llvmpipe setup on Linux
+  for software-GL runs.
 - **Machine-local GPU flakiness (KNOWN, not your bug):** ~12 GPU byte-identity/no-op tests
   are flaky on the primary dev box (RTX 3070) — GL session-context LSB noise (~0.004) that
   appears after other GL work has run in the same session. They PASS in CI under llvmpipe

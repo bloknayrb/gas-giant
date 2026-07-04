@@ -83,6 +83,11 @@ a GitHub ubuntu runner under xvfb + llvmpipe:
   DISPLAY, so `GpuContext.headless()` fails (`XOpenDisplay`) and the `gpu` fixture
   **skips ~178 of 184 gpu tests** — CI's llvmpipe GPU coverage is largely illusory.
   Follow-up candidate for the A4/CI wave (add xvfb to ci.yml).
+  **Resolved 2026-07-03 (PR #25):** ci.yml now runs gpu tests under xvfb-run — a
+  PR-blocking `gpu-smoke` job (byte-identity/no-op class, ~29 tests) plus the full
+  tier non-blocking on master push/nightly/dispatch. The full tier measured >3 h
+  under llvmpipe (146/182 tests in 180 min before timeout, run 28683137520),
+  confirming it cannot be PR-blocking.
 
 ## Evidence (local, out-of-git per `out/` ignore policy)
 

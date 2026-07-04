@@ -4,6 +4,11 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Nightly full GPU tier (llvmpipe is ~150x slower than native GPU; the
+    # full tier measured >3 h wall on 2026-07-03, so it cannot be PR-blocking).
+    - cron: "0 6 * * *"
 
 jobs:
   test:
@@ -22,14 +27,15 @@ jobs:
       - name: Unit tests
         run: uv run pytest -m "not gpu" -q
 
-  # MEASUREMENT RUN (fix/ci-gpu-tests-actually-run): full gpu tier under
-  # xvfb-run + llvmpipe. Previously ci.yml ran `pytest -m gpu` with no DISPLAY,
-  # so GpuContext.headless() failed (XOpenDisplay) and ~178/184 gpu tests
-  # silently SKIPPED while the job reported green. xvfb gives glcontext's x11
-  # backend a virtual display, mirroring gate-smoke.yml.
-  gpu:
+  # PR-blocking GPU smoke: the byte-identity / no-op class — the tests the
+  # testing policy ("CI is authoritative for byte-identity") actually leans
+  # on. Runs under xvfb because glcontext's x11 backend needs a DISPLAY even
+  # for llvmpipe; without it GpuContext.headless() fails (XOpenDisplay) and
+  # the session gpu fixture skips everything — the pre-2026-07-03 ci.yml
+  # silently skipped ~178/184 gpu tests while reporting green.
+  gpu-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
     env:
       # Software OpenGL (llvmpipe supports GL 4.5 + compute)
       LIBGL_ALWAYS_SOFTWARE: "1"
@@ -42,5 +48,31 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
       - name: Sync dependencies
         run: uv sync --all-extras
-      - name: GPU tests (llvmpipe under xvfb)
-        run: xvfb-run -a uv run pytest -m gpu -q -rs --durations=40
+      - name: GPU smoke — byte-identity/no-op class (llvmpipe under xvfb)
+        run: >
+          xvfb-run -a uv run pytest -m gpu
+          -k "identical or noop or no_op"
+          -q -rs --durations=40
+
+  # Full GPU tier — NOT PR-blocking and must NOT be made a required check:
+  # measured 2026-07-03 under llvmpipe at >3 h wall (146/182 tests in 180 min
+  # before the job timed out; run 28683137520). Runs on push to master,
+  # nightly schedule, and manual dispatch; regressions outside the smoke
+  # slice surface here.
+  gpu-full:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Install Mesa (llvmpipe), EGL and xvfb
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
+      - name: Sync dependencies
+        run: uv sync --all-extras
+      - name: Full GPU tier (llvmpipe under xvfb)
+        run: xvfb-run -a uv run pytest -m gpu -q -rs --durations=60
