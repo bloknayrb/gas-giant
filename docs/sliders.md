@@ -1,8 +1,8 @@
 # Slider reference
 
-What every slider in the live-preview GUI (`uv run gasgiant-studio`) actually does, shown on the planet. Each row renders the **low**, **preset**, and **high** value of one slider; everything else is held at the `jupiter_like` preset (seed 4201, sim resolution 768, 150 development steps). Images are the raw equirectangular color map -- the same texture the exporter writes and the viewport's *Standard* mode shows.
+What every slider in the live-preview GUI (`uv run gasgiant-studio`) actually does, shown on the planet. Each row renders the **low**, **preset**, and **high** value of one slider; everything else is held at the `jupiter_like` preset (seed 4201, sim resolution 768, 150 development steps). Images are the raw equirectangular color map -- the same texture the exporter writes and the viewport's *Color* channel shows (under the *Standard* view transform).
 
-> The panels are auto-generated from `PlanetParams` (`src/gasgiant/params/model.py`): every `int`/`float` field becomes a slider. This document is generated from the same model by `scripts/render_slider_examples.py`, so it tracks the real UI.
+> The panels are auto-generated from `PlanetParams` (`src/gasgiant/params/model.py`): every `int`/`float` field becomes a slider, and every `StrEnum` field becomes a dropdown (documented here as a text entry). This document is generated from the same model by `scripts/render_slider_examples.py`, so it tracks the real UI (CI runs it with `--check` and fails when this file is stale).
 
 > **Tier** is what the engine recomputes when you move the slider: `post` re-derives the maps only (instant), `velocity` rebuilds the flow field, `restart` re-runs the development from step 0.
 
@@ -132,6 +132,14 @@ Solver convergence speed — leave at 1.7: it changes solve time, not the pictur
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### type
+
+`solver.type` &mdash; dropdown, one of `kinematic` / `vorticity`, default **`kinematic`**, tier `restart`.
+
+How clouds move: kinematic = fast and painterly, bands stay where they are painted (analytic streamfunction, v1.5); vorticity = a real fluid sim — storms interact and shed filaments, slower, and required by the solid-core storm levers (prognostic vorticity, v1.6+)
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
+
 ### vort drag
 
 `solver.vort_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
@@ -177,6 +185,14 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 <table><tr>
 <td align="center"><img src="img/sliders/solver__vort_inject__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/solver__vort_inject__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
+
+### vort inject mask
+
+`solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
+
+Spatial localization of eddy injection: global = churn everywhere; belts = cyclonic dark bands only (anticyclonic zones stay smooth); shear = jet-shear flanks only (filaments where shear is high). Vorticity mode.
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 ### vort inject scale
 
@@ -930,6 +946,14 @@ Polar feature vorticity amplitude (central cyclone / polygon jet)
 <td align="center"><img src="img/sliders/poles__north__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__north__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
+### style
+
+`poles.north.style` &mdash; dropdown, one of `cyclone_cluster` / `polygon_jet` / `plain_vortex` / `calm`, default **`cyclone_cluster`**, tier `restart`.
+
+Polar feature style
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
+
 ### cyclone count
 
 `poles.south.cyclone_count` &mdash; range **3 to 9**, default **6**, tier `restart`.
@@ -969,6 +993,14 @@ Polar feature vorticity amplitude (central cyclone / polygon jet)
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__south__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
+
+### style
+
+`poles.south.style` &mdash; dropdown, one of `cyclone_cluster` / `polygon_jet` / `plain_vortex` / `calm`, default **`plain_vortex`**, tier `restart`.
+
+Polar feature style
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 
 ## Appearance

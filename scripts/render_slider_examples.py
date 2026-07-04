@@ -25,6 +25,10 @@ Usage::
 
     # regenerate markdown only, from images already on disk
     uv run python scripts/render_slider_examples.py --no-render
+
+    # CI doc-drift gate: fail if docs/sliders.md is stale vs the params model
+    # (text-only comparison -- no GL, no image rendering)
+    uv run python scripts/render_slider_examples.py --check
 """
 
 from __future__ import annotations
@@ -172,6 +176,9 @@ class Slider:
     channel: str = "color"       # which map to show: "color" | "emission"
     visual: bool = True          # whether to render images
     preset_value: float | None = None  # value in the baseline (the middle column)
+    # StrEnum dropdowns (B3-6): documented as text entries, never rendered.
+    enum_values: tuple[str, ...] | None = None
+    enum_default: str | None = None
 
 
 def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
@@ -186,6 +193,20 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
             continue
         value = doc[name]
         kind = leaf_kind(name, info, value)
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        if kind == "enum":
+            # StrEnum dropdowns (B3-6: e.g. solver.vort_inject_mask) get a
+            # text-only entry -- values + default + description, no images.
+            out.append(Slider(
+                path=path, group=group or "Global", label=name.replace("_", " "),
+                lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
+                tier=str(extra.get("tier", "")),
+                description=info.description or "",
+                visual=False,
+                enum_values=tuple(m.value for m in ann),
+                enum_default=str(value),
+            ))
+            continue
         if kind not in ("int", "float"):
             continue
         lo, hi = _bounds(info)
@@ -193,7 +214,6 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
             continue
         if kind == "int" and (int(hi) - int(lo)) > SLIDER_INPUT_INT_LIMIT:
             continue  # seed etc. -- free input, not a slider
-        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
         out.append(Slider(
             path=path,
             group=group or "Global",
@@ -228,8 +248,8 @@ def enumerate_sliders() -> list[Slider]:
     # labels and the lo/hi dedup are correct. Emission keeps None (demo baseline).
     preset_cache: dict[str, dict[str, Any]] = {}
     for s in sliders:
-        if s.channel == "emission":
-            continue
+        if s.channel == "emission" or s.enum_values is not None:
+            continue  # emission uses the demo baseline; enums are text-only
         dump = preset_cache.get(s.baseline)
         if dump is None:
             dump = _baseline_params(s.baseline).model_dump()
@@ -446,7 +466,7 @@ def _img_cell(path: Path, caption: str) -> str:
     return f'<td align="center"><sub>{caption}<br>(not rendered)</sub></td>'
 
 
-def write_markdown(sliders: list[Slider]) -> None:
+def build_markdown(sliders: list[Slider]) -> str:
     lines: list[str] = []
     lines.append("# Slider reference\n")
     lines.append(
@@ -456,12 +476,15 @@ def write_markdown(sliders: list[Slider]) -> None:
         "at the `jupiter_like` preset (seed "
         f"{SEED}, sim resolution {SIM_RES}, {DEV_STEPS} development steps). "
         "Images are the raw equirectangular color map -- the same texture the "
-        "exporter writes and the viewport's *Standard* mode shows.\n")
+        "exporter writes and the viewport's *Color* channel shows (under the "
+        "*Standard* view transform).\n")
     lines.append(
         "> The panels are auto-generated from `PlanetParams` "
         "(`src/gasgiant/params/model.py`): every `int`/`float` field becomes a "
-        "slider. This document is generated from the same model by "
-        "`scripts/render_slider_examples.py`, so it tracks the real UI.\n")
+        "slider, and every `StrEnum` field becomes a dropdown (documented here "
+        "as a text entry). This document is generated from the same model by "
+        "`scripts/render_slider_examples.py`, so it tracks the real UI "
+        "(CI runs it with `--check` and fails when this file is stale).\n")
     lines.append(
         "> **Tier** is what the engine recomputes when you move the slider: "
         "`post` re-derives the maps only (instant), `velocity` rebuilds the "
@@ -481,6 +504,18 @@ def write_markdown(sliders: list[Slider]) -> None:
         lines.append(f"\n## {g}\n")
         for s in [s for s in sliders if s.group == g]:
             lines.append(f"### {s.label}\n")
+            if s.enum_values is not None:
+                meta = (
+                    f"`{s.path}` &mdash; dropdown, one of "
+                    + " / ".join(f"`{v}`" for v in s.enum_values)
+                    + f", default **`{s.enum_default}`**, tier `{s.tier}`")
+                lines.append(meta + ".\n")
+                if s.description:
+                    lines.append(f"{s.description}\n")
+                lines.append(
+                    "_Choice field (GUI dropdown) &mdash; documented as text; "
+                    "no rendered example._\n")
+                continue
             meta = (
                 f"`{s.path}` &mdash; range **{_fmt(s.lo, s.is_int)} "
                 f"to {_fmt(s.hi, s.is_int)}**, default "
@@ -527,9 +562,40 @@ def write_markdown(sliders: list[Slider]) -> None:
             lines.append("".join(cells))
             lines.append("</tr></table>\n")
 
+    return "\n".join(lines) + "\n"
+
+
+def write_markdown(sliders: list[Slider]) -> None:
     DOC.parent.mkdir(parents=True, exist_ok=True)
-    DOC.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    DOC.write_text(build_markdown(sliders), encoding="utf-8", newline="\n")
     print(f"wrote {DOC.relative_to(REPO)}")
+
+
+def check_markdown(sliders: list[Slider]) -> int:
+    """Text-only doc-drift gate (no GL, no rendering): regenerate the markdown
+    in memory and diff it against docs/sliders.md. Exit 1 when stale. Image
+    cells only depend on which files EXIST under docs/img/sliders (committed),
+    so this is deterministic on a clean checkout."""
+    import difflib
+
+    expected = build_markdown(sliders)
+    actual = DOC.read_text(encoding="utf-8") if DOC.exists() else ""
+    if actual == expected:
+        print(f"{DOC.relative_to(REPO)} is up to date ({len(sliders)} entries)")
+        return 0
+    diff = list(difflib.unified_diff(
+        actual.splitlines(), expected.splitlines(),
+        "docs/sliders.md (on disk)", "generated from params model", lineterm=""))
+    head = diff[:120]
+    print("\n".join(head))
+    if len(diff) > len(head):
+        print(f"... ({len(diff) - len(head)} more diff lines)")
+    print(
+        "\ndocs/sliders.md is STALE relative to the params model. Regenerate the "
+        "text with `uv run python scripts/render_slider_examples.py --no-render` "
+        "and commit; if the diff shows '(not rendered)' cells, also render the "
+        "missing images (see this script's docstring for the render commands).")
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -540,9 +606,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--group", default=None, help="render only this group")
     ap.add_argument("--no-render", action="store_true",
                     help="(re)write markdown from existing PNGs, no rendering")
+    ap.add_argument("--check", action="store_true",
+                    help="exit 1 if docs/sliders.md is stale vs the params model "
+                         "(text-only; no GL, no image rendering)")
     args = ap.parse_args(argv)
 
     sliders = enumerate_sliders()
+
+    if args.check:
+        return check_markdown(sliders)
 
     if args.list:
         for g in GROUP_ORDER + sorted({s.group for s in sliders} - set(GROUP_ORDER)):
@@ -551,6 +623,10 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             print(f"\n{g} ({len(gs)})")
             for s in gs:
+                if s.enum_values is not None:
+                    print(f"  {s.path:36s} enum: {'|'.join(s.enum_values)} "
+                          f"def={s.enum_default}  {s.tier}  [dropdown]")
+                    continue
                 flag = "" if s.visual else "  [non-visual]"
                 base = "" if s.baseline == "kinematic" else f"  [{s.baseline}]"
                 print(f"  {s.path:36s} {_fmt(s.lo, s.is_int):>8} .. "
