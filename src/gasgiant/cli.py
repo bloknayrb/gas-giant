@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
     exp = sub.add_parser("export", help="render a map set headlessly")
     exp.add_argument("--preset", default="jupiter_like", help="factory preset name or .json path")
     exp.add_argument("--res", type=int, default=None, help="equirect width in pixels (2:1 maps)")
+    exp.add_argument("--dev-steps", type=int, default=None,
+                     help="override the preset's development step count")
     exp.add_argument("--seed", type=int, default=None, help="override the preset seed")
     exp.add_argument("--name", default=None, help="override the planet name")
     exp.add_argument("--out", type=Path, required=True, help="output map-set directory")
@@ -53,6 +55,8 @@ def _export(args: argparse.Namespace) -> int:
         params = params.model_copy(update=updates)
     if args.res is not None:
         params.export.width = args.res
+    if args.dev_steps is not None:
+        params.sim.dev_steps = args.dev_steps
 
     started = time.perf_counter()
     sim = Simulation(params)
