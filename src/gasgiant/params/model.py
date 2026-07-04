@@ -221,6 +221,30 @@ class BandsParams(_Params):
         description="SEB-fade: one belt gets a pale desaturated sector spanning "
                     "~100 degrees of longitude",
     )
+    belt_fade: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Bands",
+        description="Whole-belt fade (the SEB-fade epoch): blends the target "
+                    "band's stamped color toward the mean of its neighboring "
+                    "bands, all the way around the planet -- at 1.0 a faded "
+                    "belt reads as a pale ghost band at zone level. VISUAL "
+                    "only (recorded LIMIT): the belt keeps belt-like churn/"
+                    "dynamics and stays a storm host and outbreak candidate, "
+                    "which is the real SEB-fade phenomenology (revival "
+                    "outbreaks erupt IN the faded belt). Target band = "
+                    "faded_band_index, or the widest low/mid belt when that "
+                    "is unset. 0 = off (byte-identical)",
+    )
+    faded_band_index: int | None = pfield(
+        None, tier=Tier.RESTART, lo=0, hi=MAX_BANDS - 1, adv=True, ui="Bands",
+        description="Band targeted by belt_fade AND the faded_sector "
+                    "longitude window (index 0 = northernmost band). None = "
+                    "auto: the widest belt within ~52 deg of the equator -- "
+                    "note the shipped Jupiter template's SEB wins that pick "
+                    "by only 0.01 deg over the NEB, so set this explicitly "
+                    "when the target matters. Pointing it at a ZONE is "
+                    "allowed (the ochre-EZ recipe: the zone blends toward "
+                    "its belt neighbors). Validated against the band count",
+    )
     contrast_envelope: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), adv=True, ui="Bands",
         description="Banding contrast collapse poleward of ~45 deg toward mottle "
@@ -252,6 +276,17 @@ class BandsParams(_Params):
                     "seasoning (value_contrast, hue_jitter, width knobs) is "
                     "inert when set",
     )
+
+    @model_validator(mode="after")
+    def _validate_faded_band_index(self) -> BandsParams:
+        if self.faded_band_index is not None:
+            n = len(self.template.values) if self.template is not None else self.count
+            if self.faded_band_index >= n:
+                raise ValueError(
+                    f"faded_band_index={self.faded_band_index} is out of range: the "
+                    f"layout has {n} bands (indices 0..{n - 1})"
+                )
+        return self
 
 
 class SimParams(_Params):
@@ -343,17 +378,17 @@ class TurbulenceParams(_Params):
 
 
 def hero_latitude_cap(hero_radius: float) -> float:
-    """Radius-coupled |latitude| limit for a pinned hero storm (degrees): the
+    """Radius-coupled |latitude| limit for a placed storm stamp (degrees): the
     stamp must stay clear of the 63 deg storm-free exchange band. Single
-    source of truth for both the model validator and the GUI's pin-slider
-    bounds (B4-2), so the widget can never offer a value the validator would
-    reject."""
+    source of truth for the hero validator, the GUI's pin-slider bounds
+    (B4-2), and the accent-oval validator/auto-placement, so no path can
+    produce a latitude another path would reject."""
     return 63.0 - 206.3 * hero_radius
 
 
 class StormsParams(_Params):
-    """Field declaration order matches the panel's Hero / Ovals / Barges /
-    Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
+    """Field declaration order matches the panel's Hero / Ovals / Accents /
+    Barges / Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
     of the same ``ui`` sub-label) so ``_draw_model`` emits one
     ``separator_text`` per group boundary, not one per field. ``rim_contrast``
     and ``wake_turbulence`` are hero-perimeter/wake effects -> Hero.
@@ -468,6 +503,33 @@ class StormsParams(_Params):
         1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), adv=True, ui="Hero",
         description="Turbulence boost in the wake wedge downstream of hero storms",
     )
+    hero_tint: float = pfield(
+        0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Hero",
+        description="Hero storm tint (T3) stamped at generation: positive pulls "
+                    "toward the warm/red end of the storm_tints gradient, negative "
+                    "toward the cool end. 0.9 = the previously hardwired GRS red "
+                    "(byte-identical default). Capped at 1.0: the storm-tint LUT "
+                    "lookup clamps at the sampler edge (derive.comp indexes it at "
+                    "(T3+1)/2 clamped to [0,1]), so values past 1.0 saturate and "
+                    "buy nothing. Exempt from stamp_contrast (KIND_HERO exclusion)",
+    )
+    hero_brightness: float = pfield(
+        0.05, tier=Tier.RESTART, lo=-0.5, hi=0.5, adv=True, ui="Hero",
+        description="Hero storm brightness (T0) stamped at generation. 0.05 = the "
+                    "previously hardwired GRS value (byte-identical default). "
+                    "NEGATIVE = dark storm — the Neptune Great-Dark-Spot one-slider "
+                    "(barges use -0.28, polar vortices -0.22, so dark stamps are a "
+                    "supported axis). Exempt from stamp_contrast (KIND_HERO "
+                    "exclusion)",
+    )
+    hero_companions: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=3, adv=True, ui="Hero",
+        description="Bright companion clouds pinned beside each hero storm "
+                    "(Neptune GDS companion / Scooter class): KIND_PEARL stamps "
+                    "offset a few core radii from the hero on its wake-free flank, "
+                    "seeded on their own substream after the population cap. "
+                    "0 = off (byte-identical)",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(
@@ -486,6 +548,46 @@ class StormsParams(_Params):
                     "1 = full patch. Ovals/small storms below the radius threshold "
                     "are unaffected. Pairs with hero_solid_core to de-bullseye the "
                     "whole field without lowering dev_steps or oval_density.",
+    )
+
+    # -- Accents ----------------------------------------------------------
+    # Explicitly colored ovals (the Oval BA / second-red-spot unlock, review
+    # A01): a shared scalar group — count 0-2, one latitude, one appearance.
+    accent_count: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=2, adv=True, ui="Accents",
+        description="Accent ovals: KIND_OVAL storms with EXPLICIT color (the "
+                    "Oval BA 'second red spot' unlock — a red oval beside the "
+                    "white population). Seeded on their own substream after the "
+                    "population cap, so the base storm field is untouched; "
+                    "count=2 places a pair at offset longitudes with identical "
+                    "appearance. 0 = off (byte-identical)",
+    )
+    accent_latitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Accents",
+        description="Pin accent ovals to this latitude (degrees). None = seeded "
+                    "zone placement. Like hero_latitude, the effective range is "
+                    "radius-coupled (see validator) so the stamp stays clear of "
+                    "the 63 deg storm-free exchange band",
+    )
+    accent_tint: float = pfield(
+        0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Accents",
+        description="Accent oval tint (T3): positive = warm/red end of the "
+                    "storm_tints gradient (Oval BA red), negative = cool. Applied "
+                    "verbatim — accents bypass stamp_contrast/stamp_tint_contrast",
+    )
+    accent_brightness: float = pfield(
+        0.12, tier=Tier.RESTART, lo=-0.5, hi=0.5, adv=True, ui="Accents",
+        description="Accent oval brightness (T0); negative = dark oval. Applied "
+                    "verbatim — accents bypass stamp_contrast",
+    )
+    accent_radius: float = pfield(
+        0.05, tier=Tier.RESTART, lo=0.02, hi=0.12, adv=True, ui="Accents",
+        description="Accent oval core radius (radians of arc; 1 rad = 57.3 deg, "
+                    "so default 0.05 ~ 2.9 deg). Default 0.05 sits "
+                    "above the 0.035 solid-body threshold (OVAL_SOLID_MIN_R in "
+                    "vortex_omega.glsl), so oval_solid_core>0 keeps accents "
+                    "coherent in vorticity mode; below 0.035 they stay Gaussian "
+                    "and can wind into eddies over a long dev run (F07)",
     )
 
     # -- Barges -------------------------------------------------------------
@@ -509,6 +611,33 @@ class StormsParams(_Params):
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, adv=True, ui="Outbreaks",
         description="Convective outbreak vorticity amplitude",
     )
+    outbreak_latitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Outbreaks",
+        description="Pin convective outbreaks to this latitude (degrees; the "
+                    "'pin' checkbox toggles it) -- the 2010 Saturn Great White "
+                    "Spot erupted at ~35 N, the 1990 event on the equator. "
+                    "None = seeded placement in a dark belt. A pin bypasses "
+                    "the belt-candidate selection entirely (including the "
+                    "outbreak_lat_min floor), so equatorial eruptions work",
+    )
+    outbreak_phase: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Outbreaks",
+        description="Pin WHEN outbreaks erupt: eruption start as a fraction "
+                    "of the development run (0 = at init, 1 = at the final "
+                    "snapshot). None = seeded 0.55..0.85 draw per eruption, "
+                    "which catches plumes across their life. ~0.6 shows a "
+                    "fresh mid-eruption train at the snapshot; early values "
+                    "leave only the sheared-out streak",
+    )
+    outbreak_lat_min: float = pfield(
+        0.20, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Outbreaks",
+        description="Minimum |latitude| for AUTO outbreak-belt selection, "
+                    "radians of latitude (1 rad = 57.3 deg; default 0.20 rad "
+                    "is about 11.5 deg). The floor keeps seeded eruptions off "
+                    "the equatorial zone where white-on-white plumes vanish; "
+                    "lower it to admit equatorial belts to the candidate "
+                    "pool, or use outbreak_latitude to pin exactly",
+    )
 
     # -- Small storms ---------------------------------------------------
     small_density: float = pfield(
@@ -519,6 +648,15 @@ class StormsParams(_Params):
     stamp_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.8, 1.3), adv=True, ui="Small storms",
         description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
+    )
+    stamp_tint_contrast: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=3.0, adv=True, ui="Small storms",
+        description="Tint amplitude of ovals/barges/pearls/small storms, split "
+                    "from the brightness amplitude (review B5-7): stamp_contrast "
+                    "scales brightness, this scales tint. None = follow "
+                    "stamp_contrast (byte-identical legacy coupling). Like "
+                    "stamp_contrast it EXCLUDES the hero (use hero_tint) and "
+                    "does not touch accents (explicit color)",
     )
 
     # -- Mergers ------------------------------------------------------------
@@ -545,6 +683,19 @@ class StormsParams(_Params):
                     f"limit +-{cap:.1f} deg (hero_radius={self.hero_radius}); the stamp "
                     f"would smear into the 63 deg storm-free exchange band. Lower "
                     f"hero_latitude or hero_radius."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_accent_latitude(self) -> StormsParams:
+        if self.accent_latitude is not None:
+            cap = hero_latitude_cap(self.accent_radius)
+            if abs(self.accent_latitude) > cap:
+                raise ValueError(
+                    f"accent_latitude={self.accent_latitude} exceeds the radius-coupled "
+                    f"limit +-{cap:.1f} deg (accent_radius={self.accent_radius}); the "
+                    f"stamp would smear into the 63 deg storm-free exchange band. "
+                    f"Lower accent_latitude or accent_radius."
                 )
         return self
 

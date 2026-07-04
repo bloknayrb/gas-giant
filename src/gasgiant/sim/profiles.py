@@ -202,8 +202,11 @@ def _stamp_profiles(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Banded T0/T1 stamps and the belt mask, with smoothstep edge transitions
     (the same shape the init/relaxation kernels expect). soft_mult: per-edge
-    softness multipliers (edge diversity)."""
-    values = bands.values.astype(np.float64)
+    softness multipliers (edge diversity). T0 reads the STAMP view of the
+    band values (bands.belt_fade applied); the belt mask reads the frozen
+    pre-fade identity, so a fully faded belt still counts as a belt for
+    every dynamics consumer."""
+    values = bands.stamp_values.astype(np.float64)
     heights = bands.heights.astype(np.float64)
     is_belt = bands.is_belt.astype(np.float64)
 

@@ -304,6 +304,23 @@ class Simulation:
         while self.tick(chunk):
             pass
 
+    def extend_run(self, steps: int, chunk: int = 64) -> None:
+        """Raise the development target by ``steps`` and advance to it (running
+        any outstanding development first). Wraps the same ``_extra_steps``
+        mechanism a VELOCITY-tier adaptation uses; ``tick``'s chunk-invariance
+        contract makes the result independent of ``chunk``. Sequence export
+        uses this to advance between frames.
+
+        NOTE: this continues the CURRENT world — it is not equivalent to a
+        fresh run with a larger ``sim.dev_steps`` (vortex census and event
+        schedule are seeded from the configured dev-step count)."""
+        if steps < 0:
+            raise ValueError(f"extend_run steps must be >= 0, got {steps}")
+        if steps == 0:
+            return
+        self._extra_steps += steps
+        self.run_to_completion(chunk)
+
     def create_snapshot(self):
         """Immutable copy of the renderable state for tiled export."""
         from gasgiant.engine.snapshot import ExportSnapshot
@@ -325,12 +342,14 @@ class Simulation:
         height_tex: moderngl.Texture,
         emission_tex: moderngl.Texture | None = None,
     ) -> None:
-        """emission_tex=None (the preview path) selects a non-EMISSION
-        program variant — the GUI never displays emission, and disabled
-        features preprocess OUT of the kernel, so neutral defaults stay
-        byte-identical by construction. Chroma FX is different: it affects
-        the displayed color, so the deriver picks the CHROMA_FX variant
-        from the appearance params alone — preview included."""
+        """emission_tex=None (the Color-preview path) selects a non-EMISSION
+        program variant — the viewport's Emission channel derives into its
+        OWN scratch textures via ensure_preview_emission, so the Color path
+        never compiles the EMISSION variant, and disabled features preprocess
+        OUT of the kernel, so neutral defaults stay byte-identical by
+        construction. Chroma FX is different: it affects the displayed color,
+        so the deriver picks the CHROMA_FX variant from the appearance params
+        alone — preview included."""
         s = self.solver
         p = self.params
         detail_tex = None

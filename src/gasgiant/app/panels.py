@@ -478,6 +478,8 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
             return "optional_model"
         if len(inner) == 1 and inner[0] is float:
             return "optional_float"
+        if len(inner) == 1 and inner[0] is int:
+            return "optional_int"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -636,6 +638,8 @@ def _draw_leaf(
         changed, committed = _draw_palette_rows(label, value)
     elif kind == "optional_float":
         changed, committed = _draw_optional_float(name, label, doc, lo, hi)
+    elif kind == "optional_int":
+        changed, committed = _draw_optional_int(name, label, doc, lo, hi)
     elif kind == "optional_model":
         imgui.text_disabled(f"{label}: {'set (preset-only)' if value else 'none'}")
     else:
@@ -717,6 +721,54 @@ def _draw_optional_float(
     imgui.same_line()
     if doc[name] is not None:
         c, v = imgui.slider_float(label, float(doc[name]), flo, fhi)
+        if c:
+            doc[name] = v
+            changed = True
+        committed = committed or imgui.is_item_deactivated_after_edit()
+    else:
+        imgui.text_disabled(f"{label}: none (auto)")
+    return changed, committed
+
+
+def _optional_int_bounds(
+    name: str, doc: dict[str, Any], lo: float | None, hi: float | None
+) -> tuple[int, int]:
+    """Slider bounds for an optional-int leaf. For ``bands.faded_band_index``
+    the ceiling is the live band count from the sibling draft fields
+    (template length when a template is set, else ``count``) -- the same rule
+    the model validator enforces -- so the widget can never offer an index
+    the commit would reject with a validation toast (B4-2 discipline)."""
+    ilo = int(lo) if lo is not None else 0
+    ihi = int(hi) if hi is not None else 100
+    if name == "faded_band_index":
+        template = doc.get("template")
+        if isinstance(template, dict) and template.get("values"):
+            ihi = min(ihi, len(template["values"]) - 1)
+        elif "count" in doc:
+            ihi = min(ihi, int(doc["count"]) - 1)
+    return ilo, ihi
+
+
+def _draw_optional_int(
+    name: str, label: str, doc: dict[str, Any], lo: float | None, hi: float | None
+) -> tuple[bool, bool]:
+    """Optional-int twin of ``_draw_optional_float`` (``bands.faded_band_index``):
+    a "pin" checkbox toggles None (auto selection) <-> an explicit value edited
+    with a validator-safe int slider. Pinning starts at the low bound."""
+    changed = committed = False
+    ilo, ihi = _optional_int_bounds(name, doc, lo, hi)
+    pinned = doc[name] is not None
+    clicked, want_pin = imgui.checkbox(f"pin##{name}", pinned)
+    if clicked and want_pin != pinned:
+        doc[name] = ilo if want_pin else None
+        changed = committed = True
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(
+            "pinned: the slider value is used verbatim; unpinned: automatic selection"
+        )
+    imgui.same_line()
+    if doc[name] is not None:
+        c, v = imgui.slider_int(label, int(doc[name]), ilo, ihi)
         if c:
             doc[name] = v
             changed = True

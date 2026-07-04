@@ -53,6 +53,25 @@ def build_manifest(
     return manifest
 
 
+def attach_frames(
+    manifest: dict[str, Any],
+    *,
+    count: int,
+    steps_per_frame: int,
+    files: list[str],
+) -> dict[str, Any]:
+    """Attach the optional animation ``frames`` block to a built manifest and
+    re-validate (the writer self-validates; readers stay tolerant)."""
+    manifest["frames"] = {
+        "count": count,
+        "steps_per_frame": steps_per_frame,
+        "pattern": "frames/frame_%04d.png",
+        "files": files,
+    }
+    jsonschema.validate(manifest, load_schema())
+    return manifest
+
+
 def write_manifest(out_dir: Path, manifest: dict[str, Any]) -> Path:
     path = out_dir / MANIFEST_FILENAME
     path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

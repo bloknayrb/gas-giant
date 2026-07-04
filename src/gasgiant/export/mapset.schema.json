@@ -69,9 +69,19 @@
     },
     "preset": { "type": "object" },
     "frames": {
-      "type": "array",
-      "description": "Reserved for animated sequences (future).",
-      "items": { "type": "object" }
+      "type": "object",
+      "description": "Optional animation sequence: color-only frames rendered steps_per_frame sim steps apart; frames/frame_0000.png duplicates maps.color. Absent for single-mapset exports.",
+      "required": ["count", "steps_per_frame", "files"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 1 },
+        "steps_per_frame": { "type": "integer", "minimum": 1 },
+        "pattern": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
     }
   }
 }

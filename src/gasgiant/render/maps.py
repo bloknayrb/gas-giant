@@ -151,8 +151,10 @@ class MapDeriver:
             and profile_stamp is not None
         )
         # Chroma FX affects the displayed color, so (unlike emission, which
-        # the preview never shows) the preview uses the FX variant whenever
-        # the params are active — selection depends on appearance only.
+        # the Color preview never composites — the Emission channel derives
+        # separately via ensure_preview_emission) the preview uses the FX
+        # variant whenever the params are active — selection depends on
+        # appearance only.
         chroma_on = (
             appearance.chroma_scale != 1.0
             or appearance.chroma_variance > 0.0

@@ -22,6 +22,19 @@ from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.vortices import MAX_VORTEX_LAT, Vortex, VortexRegistry
 
 KIND_OUTBREAK = 6.0
+# ---------------------------------------------------------------------------
+# Outbreak look constants (review B5-8 promote-or-document pass, W6):
+# these stay MODULE CONSTANTS deliberately. They were calibrated by paired
+# adversarial visual review (see the LEAD_BRIGHT note below) and define what
+# an outbreak IS -- a belt-girdling convective plume train -- rather than a
+# per-planet look axis. The user-facing axes are the params: outbreak_count,
+# outbreak_strength (brightness+outflow amplitude), outbreak_latitude /
+# outbreak_phase (where/when, B5-3), and outbreak_lat_min (the auto-candidate
+# floor, promoted from a hardcoded 0.20 in this pass). Recorded LIMIT:
+# outbreak_strength scales BRIGHTNESS and OUTFLOW in lockstep, so "brighter
+# but dynamically gentler" stays inexpressible until a real need shows up --
+# splitting them doubles the knob count for a look nobody has asked for yet.
+# ---------------------------------------------------------------------------
 LIFETIME = 300       # steps from eruption to fully sheared out (long streak)
 RAMP = 16            # outflow spin-up steps
 RADIUS = 0.048       # radians (plume scale, below the oval size range)
@@ -68,25 +81,42 @@ class EventSchedule:
         # DARK belts only (review: a plume on a light zone/boundary is white-on-
         # white and vanishes). Take the darkest half of the belts so the bright-
         # on-dark convective-revival contrast is the rule, not the exception.
-        # Belt identity from BandLayout.is_belt (frozen at layout build): a
-        # belt faded toward zone-white must STAY an outbreak candidate — the
-        # SEB-revival story is outbreaks erupting in the faded belt.
+        # Belt identity from BandLayout.is_belt (frozen at layout build) AND
+        # darkness ordering from bands.values, which is the PRE-fade view by
+        # construction (bands.belt_fade only touches BandLayout.stamp_values):
+        # a belt faded toward zone-white must STAY an outbreak candidate with
+        # its pre-fade darkness rank — the SEB-revival story is outbreaks
+        # erupting in the faded belt.
+        pin = params.storms.outbreak_latitude  # degrees, None = seeded belt pick
         belts = [
             (0.5 * (bands.edges[j] + bands.edges[j + 1]), float(values[j]))
             for j in range(len(values))
             if bands.is_belt[j]
-            and 0.20 < abs(0.5 * (bands.edges[j] + bands.edges[j + 1])) < 1.0
+            and params.storms.outbreak_lat_min
+            < abs(0.5 * (bands.edges[j] + bands.edges[j + 1]))
+            < 1.0
         ]
-        if not belts:
+        if not belts and pin is None:
             return sched
         belts.sort(key=lambda cv: cv[1])              # darkest first
         dark_belts = belts[: max(1, (len(belts) + 1) // 2)]
         for _ in range(count):
             # Later window so the development snapshot catches plumes across
             # their life: freshly-bright ones plus older ones already sheared
-            # into streaks (LIFETIME peaks brightness at mid-life).
-            step0 = int(rng.uniform(0.55, 0.85) * params.sim.dev_steps)
-            center = float(dark_belts[rng.integers(0, len(dark_belts))][0])
+            # into streaks (LIFETIME peaks brightness at mid-life). The pins
+            # (outbreak_phase / outbreak_latitude) CONSUME the same seeded
+            # draws and then override, so toggling a pin never reshuffles the
+            # other outbreak properties.
+            draw_phase = float(rng.uniform(0.55, 0.85))
+            phase = params.storms.outbreak_phase
+            step0 = int((draw_phase if phase is None else phase) * params.sim.dev_steps)
+            # The 0.0 fallback is only reachable when pinned (belts empty).
+            center = (
+                float(dark_belts[rng.integers(0, len(dark_belts))][0])
+                if dark_belts else 0.0
+            )
+            if pin is not None:
+                center = float(np.deg2rad(pin))
             base_lon = float(rng.uniform(-np.pi, np.pi))
             # A TRAIN strung DOWNSTREAM along the belt: a head knot plus a chain
             # offset in longitude with a tight latitude bracket and a size
