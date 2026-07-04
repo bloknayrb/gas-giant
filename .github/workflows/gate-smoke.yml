@@ -29,11 +29,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
-      # xvfb is REQUIRED, unlike in ci.yml: GpuContext.headless() goes through
-      # glcontext's x11 backend, which needs a DISPLAY even for llvmpipe.
-      # (In ci.yml the gpu fixture just SKIPS when XOpenDisplay fails — the
-      # "GPU smoke tests (llvmpipe)" step currently runs 6 tests and skips ~178.
-      # This job must actually render, so it gets a virtual display.)
+      # xvfb is REQUIRED: GpuContext.headless() goes through glcontext's x11
+      # backend, which needs a DISPLAY even for llvmpipe. ci.yml uses the same
+      # xvfb-run setup since PR #25 (before that, its gpu step silently
+      # skipped ~178/185 tests); its gpu-smoke/gpu-full jobs now render for
+      # real, with LP_NUM_THREADS=1 where determinism is asserted.
       - name: Install Mesa (llvmpipe), EGL and xvfb
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
       - name: Sync dependencies
