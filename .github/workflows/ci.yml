@@ -39,6 +39,12 @@ jobs:
     env:
       # Software OpenGL (llvmpipe supports GL 4.5 + compute)
       LIBGL_ALWAYS_SOFTWARE: "1"
+      # Single-threaded llvmpipe: with the default thread pool, llvmpipe's
+      # run-to-run vorticity/SOR divergence reaches 0.06-0.53 (measured
+      # 2026-07-03, run 28688930797), blowing past the RTX-calibrated
+      # GPU_NOISE_ATOL floors and failing 8 vorticity no-op tests.
+      # LP_NUM_THREADS=1 makes execution deterministic.
+      LP_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -55,10 +61,13 @@ jobs:
           -q -rs --durations=40
 
   # Full GPU tier — NOT PR-blocking and must NOT be made a required check:
-  # measured 2026-07-03 under llvmpipe at >3 h wall (146/182 tests in 180 min
+  # measured 2026-07-03 under llvmpipe at >3 h wall (146/185 tests in 180 min
   # before the job timed out; run 28683137520). Runs on push to master,
   # nightly schedule, and manual dispatch; regressions outside the smoke
-  # slice surface here.
+  # slice surface here. With the default llvmpipe thread pool, ~13
+  # vorticity-mode tests fail (run-to-run SOR divergence 0.06–0.53 vs
+  # RTX-calibrated GPU_NOISE_ATOL floors — renderer, not bugs); see the
+  # LP_NUM_THREADS note on gpu-smoke.
   gpu-full:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
