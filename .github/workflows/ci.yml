@@ -24,6 +24,8 @@ jobs:
         run: uv run ruff check .
       - name: Import contracts
         run: uv run lint-imports
+      - name: Slider-doc drift check (text-only, no GL)
+        run: uv run python scripts/render_slider_examples.py --check
       - name: Unit tests
         run: uv run pytest -m "not gpu" -q
       - name: GPU smoke tests (llvmpipe)

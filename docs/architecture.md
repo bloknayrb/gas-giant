@@ -153,6 +153,38 @@ param-responsiveness (changing `coriolis_f0` measurably moves the ω field), (b)
 ω evolves over dev steps, (c) steady-state ω magnitude is bounded in the production
 regime. Recorded as a test-design lesson.
 
+### Opt-in baroclinic coupling (M3)
+
+`solver.baroclinic.enabled` (`BaroclinicParams`) couples the v1.6 development
+run to an evolving CPU baroclinic source. It requires `solver.type =
+vorticity` — a params validator rejects the combination otherwise. A seeded,
+cached `BaroclinicSourceDriver` (`sim/baroclinic_driver.py`) is warmed up at
+construction (`warmup_steps`), advanced every `update_every` v1.6 steps, and
+its coherent vorticity source is uploaded and overlaid onto the Poisson RHS
+with `gain` (`Simulation.set_external_vorticity_source`). The overlay enters
+ω\_rel in `omega_recover.comp` each step — NOT the persistent q state — so it
+stays bounded and decoupled from `vort_relax_tau`. `Simulation.tick` clamps
+step chunks so they never straddle a source-update boundary: preview (small
+chunks) and export (large chunks) develop identically.
+
+- **Off = byte-identical:** the default path never calls
+  `set_external_vorticity_source`; the shader gate is an exact-zero compare
+  (`u_external_gain != 0.0` in `omega_recover.comp`, always bound to a
+  Python-side float), so disabled means a strict no-op, not a hoped-for
+  branch elimination.
+- **Graceful degrade:** on the documented failure signals only — warmup
+  outcrop, mid-run outcrop / incoherent source, or a missing optional
+  dependency — the facade drops to plain uncoupled v1.6 instead of crashing.
+  `Simulation.baroclinic_status` reads `'off' | 'active' | 'degraded'` and
+  `baroclinic_degraded_reason` carries the cause (the GUI toasts on the
+  transition, so the degrade is never silent). Genuinely unexpected errors
+  still propagate loudly.
+- The `jupiter_baroclinic` preset was dropped 2026-06-28 (its comb read
+  mechanical — see `docs/roadmap.md`); the coupling engine remains. The
+  facade path above is what the GUI/CLI use;
+  `engine/baroclinic_coupling.py::run_coupled` is the instrumented
+  measurement harness (per-phase wall time, residency recommendation).
+
 ## Invalidation tiers
 
 Every parameter declares its tier in field metadata; the engine diffs
@@ -182,12 +214,19 @@ intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
 
 **Program variants.** Optional shader features are preprocessor-gated and
 cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX) —
-up to four programs — and detail.comp per DETAIL_FX
-(intermittency/hero-spiral). A disabled feature preprocesses OUT of the
-kernel text, so neutral-default output is identical by construction rather
-than by hoping the compiler doesn't reschedule FP around untaken branches;
-forced-variant no-op tests (epsilon parameter values) pin each variant.
-Unlike emission (which the preview never displays), the CHROMA_FX and
+up to four programs — and detail.comp per DETAIL_FX. The DETAIL_FX variant
+is selected whenever **any detail-FX lever is nonzero**; the lever set is
+not hand-enumerated but derived from the `fx=True` pfield flag in
+`params/model.py` (`render/detail.py::detail_fx_enabled`), which also
+drives a build-time tripwire asserting every flagged lever's `u_<name>`
+uniform exists in the compiled variant. A disabled feature preprocesses
+OUT of the kernel text, so neutral-default output is identical by
+construction rather than by hoping the compiler doesn't reschedule FP
+around untaken branches; forced-variant no-op tests (epsilon parameter
+values) pin each variant. The Color preview always derives with the
+non-EMISSION variant — the viewport's Emission channel derives into its
+own scratch textures (`engine/facade.py::ensure_preview_emission`), so
+displaying emission never perturbs the Color path. The CHROMA_FX and
 DETAIL_FX variants run in the GUI preview whenever their params are active
 — they affect the displayed color.
 
@@ -202,7 +241,9 @@ real texture instead of fading to neutral (v1.1).
 ## Checkpoints
 
 `engine/checkpoint.py` saves a compressed .npz: the generating preset,
-`generation_version` (= 3), step counters (including the VELOCITY-edit
+`generation_version` (the `GENERATION_VERSION` constant in
+`engine/checkpoint.py` — cited by reference because it bumps whenever the
+generation algorithms change), step counters (including the VELOCITY-edit
 adaptation window), the three tracer textures, AND the vortex registry as
 per-field float64 arrays + outbreak links — serialized, not replayed,
 because live registry evolution (events, mergers) is not a pure function of
@@ -230,8 +271,22 @@ Parameter panels are auto-generated from pydantic field metadata.
 
 One master seed; every stochastic subsystem draws from a named
 `SeedSequence` substream (`params/seeds.py`), so changing storm parameters
-never reshuffles the bands. No atomics or order-dependent GPU reductions:
-same seed → identical exports on the same machine/driver (tested).
+never reshuffles the bands. No atomics or order-dependent GPU reductions.
+How far "same seed → same bytes" goes is **solver-mode-dependent**:
+
+- **Kinematic path: byte-exact** on the same machine/driver. Pinned by a
+  kernel source-hash test (`tests/unit/test_kinematic_kernels_pinned.py`)
+  and a float32 render-hash gate (`scripts/p05_baseline_hash.py --check`,
+  machine-local baseline). A kinematic hash mismatch means the output
+  actually moved — update the pin deliberately, never paper over it with a
+  tolerance.
+- **Vorticity path: deterministic within documented noise floors, NOT
+  byte-exact.** Its red-black SOR Poisson solve carries ~1e-3
+  cross-instance LSB noise (`_VORT_SOR_ATOL = 1e-3`,
+  `tests/gpu/test_checkpoint.py`) and ~0.004 cross-session GL-context
+  noise on real GPUs (asserted within `GPU_NOISE_ATOL = 1e-2` in the GPU
+  tests; llvmpipe in CI is stable). Never write a byte-exact assertion
+  against vorticity-mode output.
 
 ## Testing
 

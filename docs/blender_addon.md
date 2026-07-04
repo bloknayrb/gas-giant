@@ -11,6 +11,10 @@
 *File → Import → Gas Giant Map Set (.json)* and pick the `mapset.json` in an
 exported folder. Options in the import panel:
 
+- **Radius** — planet radius in Blender units (default 1.0).
+- **Mesh Segments** — sphere resolution (default 256, range 32–1024). High
+  values shrink the pole fan; texture lookup is exact regardless under
+  procedural mapping.
 - **Mapping** — *Procedural spherical* (default) computes equirect UV per
   pixel from object coordinates: exact at the poles, no seam — best for
   Cycles. Use *Mesh UV* for EEVEE (the procedural mapping shows a one-pixel
@@ -24,8 +28,8 @@ exported folder. Options in the import panel:
 - **Atmosphere** — *Volume shell* (default, Cycles): a thin Volume Scatter
   shell, light-aware for free (correct terminator scattering, dark night
   limb). *Rim glow* is the fast EEVEE-safe fallback, gated by the sun
-  direction captured at import. The shell never casts shadows
-  (`visible_shadow = False`).
+  direction captured at import. *None* skips the atmosphere entirely. The
+  shell never casts shadows (`visible_shadow = False`).
 - **Limb darkening / Limb haze** — facing-based grading on the surface
   material.
 - **Longitude offset / Axial tilt** — put your hero storm where the camera

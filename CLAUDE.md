@@ -93,18 +93,24 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
 
 1. `pfield()` in the params model (tier + rand + ui metadata; default = no-op).
 2. Shader uniform + preprocessor block (variant define, not a runtime branch).
-3. `fx_on` predicate so the variant only compiles when the lever is active.
+3. Variant-selection predicate: for detail-FX levers, tag the pfield `fx=True` — the
+   DETAIL_FX predicate, the build-time uniform tripwire, AND the cross-ref test all derive
+   from that flag (`render/detail.py`; tests/unit/test_detail_fx_metadata.py). Other kernels
+   need an explicit `fx_on`-style predicate so the variant only compiles when active.
 4. `_set` call wiring the uniform in the render/sim pass.
 5. Preset build scripts (`scripts/build_*_preset*.py`) updated if the lever ships in a preset.
 6. Regenerated preset JSONs (build scripts have a load==save reproducibility diff-guard).
 7. Dedicated behavior test + forced-variant no-op test (byte-identical when off).
-8. `docs/sliders.md` entry.
+8. `docs/sliders.md` entry: regenerate the text with
+   `uv run python scripts/render_slider_examples.py --no-render` and render the new images
+   (see the script docstring). CI fails on a stale sliders.md — the test job runs the
+   generator's `--check` drift gate (text-only, no GL).
 
 ## Docs map
 
 - `docs/architecture.md` — solver, three-domain seamlessness, invalidation tiers, export,
-  variants. Mostly accurate; known drift: generation_version literal, DETAIL_FX trigger list,
-  no baroclinic section, determinism claim unqualified for vorticity (see Testing policy).
+  variants, opt-in baroclinic coupling, mode-qualified determinism (kinematic byte-exact,
+  vorticity within noise floors). Truth pass 2026-07-03 (W8) cleared the known drift list.
 - `docs/formations.md` — the phenomenon catalog and which mechanism implements each.
 - `docs/realism.md`, `docs/sliders.md`, `docs/presets.md`, `docs/blender_addon.md`.
 - `docs/roadmap.md` — includes FALSIFIED verdicts and the dead-end record; read before

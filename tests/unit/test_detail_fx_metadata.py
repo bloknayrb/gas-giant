@@ -16,6 +16,10 @@ dropped uniform must fail the build) is GPU-marked in tests/gpu/test_detail_fx.p
 """
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
+
 import pytest
 
 from gasgiant.params.model import DetailParams
@@ -69,6 +73,59 @@ def test_tripwire_raises_naming_the_missing_uniform():
     del prog["u_polar_filaments"]
     with pytest.raises(RuntimeError, match="u_polar_filaments"):
         detail_mod._assert_fx_uniforms(prog)
+
+
+def _fx_on_block() -> ast.If:
+    """The ``if fx_on:`` dispatch block inside DetailSynth.synthesize."""
+    src = textwrap.dedent(inspect.getsource(detail_mod.DetailSynth.synthesize))
+    fn = ast.parse(src).body[0]
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+                and node.test.id == "fx_on"):
+            return node
+    raise AssertionError("no `if fx_on:` block found in DetailSynth.synthesize")
+
+
+def test_fx_levers_cross_reference_the_synthesize_dispatch_block():
+    """W8 cross-ref gate for the LAST hand-maintained fx sync point: the
+    per-lever ``_set(prog, "u_<name>", params.<name>)`` calls in
+    DetailSynth.synthesize. The predicate and the uniform tripwire are already
+    DERIVED from the ``fx=True`` pfield metadata, but the Python-side upload
+    block is hand-written -- a new fx lever whose uniform exists in the shader
+    would pass the build tripwire yet stay at 0.0 forever if its ``_set`` call
+    is missing. Both directions:
+
+    - every fx-flagged pfield is read (``params.<name>``) and uploaded
+      (``"u_<name>"``) inside the ``if fx_on:`` block;
+    - every ``params.<field>`` the block consumes is fx-flagged (a non-fx
+      lever wired here would silently require the fx variant to work).
+    """
+    block = _fx_on_block()
+    fx = set(detail_mod._FX_PARAMS)
+    params_reads = {
+        node.attr
+        for node in ast.walk(block)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "params"
+    }
+    uniform_names = {
+        node.value
+        for node in ast.walk(block)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("u_")
+    }
+    assert params_reads == fx, (
+        f"fx pfield metadata vs synthesize `if fx_on:` block out of sync: "
+        f"flagged-but-not-wired={sorted(fx - params_reads)}, "
+        f"wired-but-not-flagged={sorted(params_reads - fx)}"
+    )
+    not_uploaded = {name for name in fx if f"u_{name}" not in uniform_names}
+    assert not not_uploaded, (
+        f"fx lever(s) read but never uploaded to their u_<name> uniform "
+        f"inside the fx_on block: {sorted(not_uploaded)}"
+    )
 
 
 def test_fx_levers_have_no_rand_metadata():
