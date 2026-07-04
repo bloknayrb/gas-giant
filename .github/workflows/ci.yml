@@ -10,6 +10,18 @@ on:
     # full tier measured >3 h wall on 2026-07-03, so it cannot be PR-blocking).
     - cron: "0 6 * * *"
 
+# GL-in-CI primer (measured 2026-07-03, PR #25):
+# - glcontext's x11 backend needs a DISPLAY even for software GL, so every
+#   GL step runs under xvfb-run. Before PR #25 the runner had no DISPLAY,
+#   GpuContext.headless() failed (XOpenDisplay), the session gpu fixture
+#   skipped cleanly, and ~178/185 gpu tests silently SKIPPED while CI
+#   reported green.
+# - Under llvmpipe's default thread pool, vorticity/SOR output diverges
+#   run-to-run by 0.06-0.53 (run 28688930797) — far past the RTX-calibrated
+#   GPU_NOISE_ATOL floors — so within-run comparison tests fail for renderer
+#   reasons, not bugs. LP_NUM_THREADS=1 makes llvmpipe deterministic (run
+#   28689357120: same slice all-green), at ~2.7x the wall time.
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -29,21 +41,16 @@ jobs:
 
   # PR-blocking GPU smoke: the byte-identity / no-op class — the tests the
   # testing policy ("CI is authoritative for byte-identity") actually leans
-  # on. Runs under xvfb because glcontext's x11 backend needs a DISPLAY even
-  # for llvmpipe; without it GpuContext.headless() fails (XOpenDisplay) and
-  # the session gpu fixture skips everything — the pre-2026-07-03 ci.yml
-  # silently skipped ~178/184 gpu tests while reporting green.
+  # on. Single-threaded llvmpipe (see primer above) so the vorticity no-op
+  # tests are deterministic and genuinely enforced. Measured 2026-07-03:
+  # ~24 min wall (vs ~9 min threaded with 8 spurious vorticity failures).
   gpu-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 40
     env:
       # Software OpenGL (llvmpipe supports GL 4.5 + compute)
       LIBGL_ALWAYS_SOFTWARE: "1"
-      # Single-threaded llvmpipe: with the default thread pool, llvmpipe's
-      # run-to-run vorticity/SOR divergence reaches 0.06-0.53 (measured
-      # 2026-07-03, run 28688930797), blowing past the RTX-calibrated
-      # GPU_NOISE_ATOL floors and failing 8 vorticity no-op tests.
-      # LP_NUM_THREADS=1 makes execution deterministic.
+      # Determinism — see primer at the top of this file.
       LP_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
@@ -54,24 +61,29 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
       - name: Sync dependencies
         run: uv sync --all-extras
-      - name: GPU smoke — byte-identity/no-op class (llvmpipe under xvfb)
+      - name: GPU smoke — byte-identity/no-op class (llvmpipe, single-threaded)
         run: >
           xvfb-run -a uv run pytest -m gpu
           -k "identical or noop or no_op"
           -q -rs --durations=40
 
-  # Full GPU tier — NOT PR-blocking and must NOT be made a required check:
+  # Full GPU tier — non-blocking; must NOT be made a required check:
   # measured 2026-07-03 under llvmpipe at >3 h wall (146/185 tests in 180 min
-  # before the job timed out; run 28683137520). Runs on push to master,
-  # nightly schedule, and manual dispatch; regressions outside the smoke
-  # slice surface here. With the default llvmpipe thread pool, ~13
-  # vorticity-mode tests fail (run-to-run SOR divergence 0.06–0.53 vs
-  # RTX-calibrated GPU_NOISE_ATOL floors — renderer, not bugs); see the
-  # LP_NUM_THREADS note on gpu-smoke.
+  # before the job timed out; run 28683137520), so it runs on push to master,
+  # nightly schedule, and manual dispatch only. Two steps:
+  #  1. threaded llvmpipe for speed, with the determinism-sensitive tests
+  #     deselected (they fail under threaded llvmpipe for renderer reasons —
+  #     see primer; do NOT "fix" them by loosening floors);
+  #  2. those same tests re-run single-threaded, where they are meaningful.
+  # The deselect/rerun list = every test observed failing threaded on
+  # 2026-07-03 (runs 28683137520 + 28688930797): all are vorticity-mode
+  # within-run comparisons. The tail of the tier (~40 tests) has never
+  # completed threaded — if the first full runs surface more such failures,
+  # move them to this list rather than touching tolerances.
   gpu-full:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 330
     env:
       LIBGL_ALWAYS_SOFTWARE: "1"
     steps:
@@ -83,5 +95,42 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 xvfb
       - name: Sync dependencies
         run: uv sync --all-extras
-      - name: Full GPU tier (llvmpipe under xvfb)
-        run: xvfb-run -a uv run pytest -m gpu -q -rs --durations=60
+      - name: Full GPU tier, threaded (minus determinism-sensitive tests)
+        run: >
+          xvfb-run -a uv run pytest -m gpu -q -rs --durations=60
+          --deselect tests/gpu/test_checkpoint.py::test_mid_outbreak_checkpoint_restores_registry_exactly
+          --deselect tests/gpu/test_deformation_radius.py::test_deformation_radius_off_is_noop
+          --deselect tests/gpu/test_eddy_drag.py::test_eddy_drag_off_is_noop
+          --deselect tests/gpu/test_hero_solid_core.py::test_solid_core_off_is_a_noop
+          --deselect tests/gpu/test_m3_external_source.py::test_off_path_is_a_noop
+          --deselect tests/gpu/test_m3_external_source.py::test_polar_domains_ignore_external_source
+          --deselect tests/gpu/test_m3_ship.py::test_off_path_matches_plain_vorticity
+          --deselect tests/gpu/test_m3_ship.py::test_preview_equals_export
+          --deselect tests/gpu/test_m3_ship.py::test_seed_determinism
+          --deselect tests/gpu/test_m3_ship.py::test_graceful_warmup_outcrop
+          --deselect tests/gpu/test_m3_ship.py::test_restart_reuse_independent_of_prior_ticks
+          --deselect tests/gpu/test_oval_solid_core.py::test_oval_solid_core_off_is_a_noop
+          --deselect tests/gpu/test_per_storm_color.py::test_forced_defaults_noop_vorticity
+          --deselect tests/gpu/test_psi_drag.py::test_psi_drag_off_is_noop
+          --deselect tests/gpu/test_vort_inject_mask.py::test_mask_is_noop_when_inject_zero
+      - name: Determinism-sensitive tests, single-threaded
+        if: always()
+        env:
+          LP_NUM_THREADS: "1"
+        run: >
+          xvfb-run -a uv run pytest -q -rs --durations=20
+          tests/gpu/test_checkpoint.py::test_mid_outbreak_checkpoint_restores_registry_exactly
+          tests/gpu/test_deformation_radius.py::test_deformation_radius_off_is_noop
+          tests/gpu/test_eddy_drag.py::test_eddy_drag_off_is_noop
+          tests/gpu/test_hero_solid_core.py::test_solid_core_off_is_a_noop
+          tests/gpu/test_m3_external_source.py::test_off_path_is_a_noop
+          tests/gpu/test_m3_external_source.py::test_polar_domains_ignore_external_source
+          tests/gpu/test_m3_ship.py::test_off_path_matches_plain_vorticity
+          tests/gpu/test_m3_ship.py::test_preview_equals_export
+          tests/gpu/test_m3_ship.py::test_seed_determinism
+          tests/gpu/test_m3_ship.py::test_graceful_warmup_outcrop
+          tests/gpu/test_m3_ship.py::test_restart_reuse_independent_of_prior_ticks
+          tests/gpu/test_oval_solid_core.py::test_oval_solid_core_off_is_a_noop
+          tests/gpu/test_per_storm_color.py::test_forced_defaults_noop_vorticity
+          tests/gpu/test_psi_drag.py::test_psi_drag_off_is_noop
+          tests/gpu/test_vort_inject_mask.py::test_mask_is_noop_when_inject_zero
