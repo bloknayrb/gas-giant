@@ -2,7 +2,7 @@
 
 What every slider in the live-preview GUI (`uv run gasgiant-studio`) actually does, shown on the planet. Each row renders the **low**, **preset**, and **high** value of one slider; everything else is held at the `jupiter_like` preset (seed 4201, sim resolution 768, 150 development steps). Images are the raw equirectangular color map -- the same texture the exporter writes and the viewport's *Color* channel shows (under the *Standard* view transform).
 
-> The panels are auto-generated from `PlanetParams` (`src/gasgiant/params/model.py`): every `int`/`float` field becomes a slider, and every `StrEnum` field becomes a dropdown (documented here as a text entry). This document is generated from the same model by `scripts/render_slider_examples.py`, so it tracks the real UI (CI runs it with `--check` and fails when this file is stale).
+> The panels are auto-generated from `PlanetParams` (`src/gasgiant/params/model.py`): every `int`/`float` field becomes a slider, every `StrEnum` field becomes a dropdown, and every optional numeric field becomes a pin-checkbox + slider (dropdowns and optional fields are documented here as text entries). This document is generated from the same model by `scripts/render_slider_examples.py`, so it tracks the real UI (CI runs it with `--check` and fails when this file is stale).
 
 > **Tier** is what the engine recomputes when you move the slider: `post` re-derives the maps only (instant), `velocity` rebuilds the flow field, `restart` re-runs the development from step 0.
 
@@ -301,6 +301,14 @@ Half-width of band-edge transitions, radians of latitude (1 rad = 57.3 deg; defa
 <td align="center"><img src="img/sliders/bands__edge_softness__lo.jpg" width="320"><br><sub>low &middot; 0.001</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><img src="img/sliders/bands__edge_softness__hi.jpg" width="320"><br><sub>high &middot; 0.1</sub></td>
 </tr></table>
 
+### faded band index
+
+`bands.faded_band_index` &mdash; optional; pin range **0 to 39**, default **None (auto)**, tier `restart`.
+
+Band targeted by belt_fade AND the faded_sector longitude window (index 0 = northernmost band). None = auto: the widest belt within ~52 deg of the equator -- note the shipped Jupiter template's SEB wins that pick by only 0.01 deg over the NEB, so set this explicitly when the target matters. Pointing it at a ZONE is allowed (the ochre-EZ recipe: the zone blends toward its belt neighbors). Validated against the band count
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
 ### faded sector
 
 `bands.faded_sector` &mdash; range **0 to 1**, default **0**, tier `restart`.
@@ -570,6 +578,14 @@ Accent ovals: KIND_OVAL storms with EXPLICIT color (the Oval BA 'second red spot
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__accent_count__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
+### accent latitude
+
+`storms.accent_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
+
+Pin accent ovals to this latitude (degrees). None = seeded zone placement. Like hero_latitude, the effective range is radius-coupled (see validator) so the stamp stays clear of the 63 deg storm-free exchange band
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
 ### accent radius
 
 `storms.accent_radius` &mdash; range **0.02 to 0.12**, default **0.05**, tier `restart`.
@@ -639,6 +655,14 @@ Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating brigh
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
+
+### hero latitude
+
+`storms.hero_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
+
+Pin the hero storm to this latitude (degrees; the 'pin' checkbox toggles it). Unpinned (None) = seeded tropical-zone placement. The effective range is further limited by hero_radius (see validator) so the stamp stays clear of the 63 deg exchange band
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
 ### hero mottle
 
@@ -770,6 +794,22 @@ Minimum |latitude| for AUTO outbreak-belt selection, radians of latitude (1 rad 
 <td align="center"><img src="img/sliders/storms__outbreak_lat_min__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.2</sub></td><td align="center"><img src="img/sliders/storms__outbreak_lat_min__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
+### outbreak latitude
+
+`storms.outbreak_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
+
+Pin convective outbreaks to this latitude (degrees; the 'pin' checkbox toggles it) -- the 2010 Saturn Great White Spot erupted at ~35 N, the 1990 event on the equator. None = seeded placement in a dark belt. A pin bypasses the belt-candidate selection entirely (including the outbreak_lat_min floor), so equatorial eruptions work
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
+### outbreak phase
+
+`storms.outbreak_phase` &mdash; optional; pin range **0 to 1**, default **None (auto)**, tier `restart`.
+
+Pin WHEN outbreaks erupt: eruption start as a fraction of the development run (0 = at init, 1 = at the final snapshot). None = seeded 0.55..0.85 draw per eruption, which catches plumes across their life. ~0.6 shows a fresh mid-eruption train at the snapshot; early values leave only the sheared-out streak
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
 ### outbreak strength
 
 `storms.outbreak_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
@@ -839,6 +879,14 @@ Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)
 <table><tr>
 <td align="center"><img src="img/sliders/storms__stamp_contrast__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/storms__stamp_contrast__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
+
+### stamp tint contrast
+
+`storms.stamp_tint_contrast` &mdash; optional; pin range **0 to 3**, default **None (auto)**, tier `restart`.
+
+Tint amplitude of ovals/barges/pearls/small storms, split from the brightness amplitude (review B5-7): stamp_contrast scales brightness, this scales tint. None = follow stamp_contrast (byte-identical legacy coupling). Like stamp_contrast it EXCLUDES the hero (use hero_tint) and does not touch accents (explicit color)
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
 ### wake turbulence
 

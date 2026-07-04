@@ -80,6 +80,8 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
             return "optional_model"
         if len(inner) == 1 and inner[0] is float:
             return "optional_float"
+        if len(inner) == 1 and inner[0] is int:
+            return "optional_int"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -179,6 +181,11 @@ class Slider:
     # StrEnum dropdowns (B3-6): documented as text entries, never rendered.
     enum_values: tuple[str, ...] | None = None
     enum_default: str | None = None
+    # Optional numerics (pin checkbox + slider in the GUI, None = auto):
+    # documented as text entries, never rendered (None defaults can't anchor
+    # a fair lo/preset/hi image row, and pinned extremes can be
+    # validator-coupled to sibling fields).
+    optional: bool = False
 
 
 def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
@@ -205,6 +212,21 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
                 visual=False,
                 enum_values=tuple(m.value for m in ann),
                 enum_default=str(value),
+            ))
+            continue
+        if kind in ("optional_float", "optional_int"):
+            # Pin-checkbox + slider widgets (None = auto), e.g.
+            # storms.hero_latitude, bands.faded_band_index: text-only entry.
+            lo, hi = _bounds(info)
+            if lo is None or hi is None:
+                continue
+            out.append(Slider(
+                path=path, group=group or "Global", label=name.replace("_", " "),
+                lo=float(lo), hi=float(hi), default=0.0,
+                is_int=(kind == "optional_int"), log=bool(extra.get("log")),
+                tier=str(extra.get("tier", "")),
+                description=info.description or "",
+                visual=False, optional=True,
             ))
             continue
         if kind not in ("int", "float"):
@@ -248,8 +270,8 @@ def enumerate_sliders() -> list[Slider]:
     # labels and the lo/hi dedup are correct. Emission keeps None (demo baseline).
     preset_cache: dict[str, dict[str, Any]] = {}
     for s in sliders:
-        if s.channel == "emission" or s.enum_values is not None:
-            continue  # emission uses the demo baseline; enums are text-only
+        if s.channel == "emission" or s.enum_values is not None or s.optional:
+            continue  # emission uses a demo baseline; enums/optionals are text-only
         dump = preset_cache.get(s.baseline)
         if dump is None:
             dump = _baseline_params(s.baseline).model_dump()
@@ -481,8 +503,10 @@ def build_markdown(sliders: list[Slider]) -> str:
     lines.append(
         "> The panels are auto-generated from `PlanetParams` "
         "(`src/gasgiant/params/model.py`): every `int`/`float` field becomes a "
-        "slider, and every `StrEnum` field becomes a dropdown (documented here "
-        "as a text entry). This document is generated from the same model by "
+        "slider, every `StrEnum` field becomes a dropdown, and every optional "
+        "numeric field becomes a pin-checkbox + slider (dropdowns and optional "
+        "fields are documented here as text entries). This document is "
+        "generated from the same model by "
         "`scripts/render_slider_examples.py`, so it tracks the real UI "
         "(CI runs it with `--check` and fails when this file is stale).\n")
     lines.append(
@@ -515,6 +539,21 @@ def build_markdown(sliders: list[Slider]) -> str:
                 lines.append(
                     "_Choice field (GUI dropdown) &mdash; documented as text; "
                     "no rendered example._\n")
+                continue
+            if s.optional:
+                meta = (
+                    f"`{s.path}` &mdash; optional; pin range "
+                    f"**{_fmt(s.lo, s.is_int)} to {_fmt(s.hi, s.is_int)}**, "
+                    f"default **None (auto)**, tier `{s.tier}`"
+                    + (", log scale" if s.log else ""))
+                lines.append(meta + ".\n")
+                if s.description:
+                    lines.append(f"{s.description}\n")
+                lines.append(
+                    "_Optional field: the GUI shows a **pin** checkbox &mdash; "
+                    "unpinned (None) keeps the automatic/seeded behavior, pinned "
+                    "uses the slider value verbatim. Documented as text; no "
+                    "rendered example._\n")
                 continue
             meta = (
                 f"`{s.path}` &mdash; range **{_fmt(s.lo, s.is_int)} "
@@ -626,6 +665,11 @@ def main(argv: list[str] | None = None) -> int:
                 if s.enum_values is not None:
                     print(f"  {s.path:36s} enum: {'|'.join(s.enum_values)} "
                           f"def={s.enum_default}  {s.tier}  [dropdown]")
+                    continue
+                if s.optional:
+                    print(f"  {s.path:36s} {_fmt(s.lo, s.is_int):>8} .. "
+                          f"{_fmt(s.hi, s.is_int):<8} def=None     "
+                          f"{s.tier}  [optional]")
                     continue
                 flag = "" if s.visual else "  [non-visual]"
                 base = "" if s.baseline == "kinematic" else f"  [{s.baseline}]"
