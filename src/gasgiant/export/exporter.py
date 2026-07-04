@@ -35,6 +35,51 @@ log = logging.getLogger(__name__)
 TILE = 1024
 
 
+def _derive_tile(
+    sim: Any,
+    snap: Any,
+    params: Any,
+    x0: int,
+    y0: int,
+    w: int,
+    h: int,
+    tile_color: Any,
+    tile_height: Any,
+    tile_detail: Any,
+    tile_emission: Any,
+) -> None:
+    """Synthesize detail + derive color/height(/emission) into the tile
+    textures for the TILE-sized tile at (x0, y0) of a (w, h) map, reading only
+    the immutable snapshot. Shared by the mapset export and the sequence
+    per-frame color render; ``tile_emission=None`` selects the non-EMISSION
+    derive variant."""
+    use_detail = params.detail.intensity > 0.0
+    if use_detail:
+        sim.detail_synth.synthesize(
+            params.seed, snap.vel_eq, snap.tracers_eq, snap.profile_dyn,
+            tile_detail, params.detail, origin=(x0, y0), full_size=(w, h),
+            heroes=snap.heroes,
+            polar=PolarRoute(
+                snap.vel_n, snap.vel_s, snap.tracers_n, snap.tracers_s,
+                snap.patch_rho_max,
+            ),
+        )
+    sim.deriver.derive(
+        snap.tracers_eq, snap.tracers_n, snap.tracers_s,
+        snap.patch_rho_max, snap.blend_band,
+        tile_color, tile_height, params.appearance,
+        detail_tex=tile_detail if use_detail else None,
+        detail_intensity=params.detail.intensity,
+        origin=(x0, y0), full_size=(w, h),
+        lanes=snap.lanes, warp=snap.warp,
+        emission_out=tile_emission,
+        emission=params.emission if tile_emission is not None else None,
+        seed=params.seed,
+        profile_dyn=snap.profile_dyn,
+        profile_stamp=snap.profile_stamp,
+    )
+
+
 def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Progress]:
     """sim: engine.Simulation (duck-typed; export sits below engine in the
     layer order, so the engine object arrives as a parameter, never an import)."""
@@ -72,33 +117,12 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
 
     try:
         started = time.perf_counter()
-        use_detail = params.detail.intensity > 0.0
         for i, (x0, y0) in enumerate(tiles):
             tw = min(TILE, w - x0)
             th = min(TILE, h - y0)
-            if use_detail:
-                sim.detail_synth.synthesize(
-                    params.seed, snap.vel_eq, snap.tracers_eq, snap.profile_dyn,
-                    tile_detail, params.detail, origin=(x0, y0), full_size=(w, h),
-                    heroes=snap.heroes,
-                    polar=PolarRoute(
-                        snap.vel_n, snap.vel_s, snap.tracers_n, snap.tracers_s,
-                        snap.patch_rho_max,
-                    ),
-                )
-            sim.deriver.derive(
-                snap.tracers_eq, snap.tracers_n, snap.tracers_s,
-                snap.patch_rho_max, snap.blend_band,
-                tile_color, tile_height, params.appearance,
-                detail_tex=tile_detail if use_detail else None,
-                detail_intensity=params.detail.intensity,
-                origin=(x0, y0), full_size=(w, h),
-                lanes=snap.lanes, warp=snap.warp,
-                emission_out=tile_emission,
-                emission=params.emission if emission_on else None,
-                seed=params.seed,
-                profile_dyn=snap.profile_dyn,
-                profile_stamp=snap.profile_stamp,
+            _derive_tile(
+                sim, snap, params, x0, y0, w, h,
+                tile_color, tile_height, tile_detail, tile_emission,
             )
             color = gpu.read_texture(tile_color)[:th, :tw, :3]
             height = gpu.read_texture(tile_height)[:th, :tw, 0]
