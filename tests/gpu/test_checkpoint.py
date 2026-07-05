@@ -46,20 +46,22 @@ def test_mid_outbreak_checkpoint_restores_registry_exactly(gpu, tmp_path):
     un-drifted longitude. The registry is now serialized."""
     from gasgiant.sim.events import KIND_OUTBREAK
 
-    sim = None
-    for seed in (3, 5, 7, 11, 13):
-        p = PlanetParams(seed=seed)
-        p.sim.resolution = 512
-        p.sim.dev_steps = 100
-        p.storms.outbreak_count = 1
-        cand = Simulation(p, gpu)
-        sched = cand.solver.events
-        if sched and sched.outbreaks and sched.outbreaks[0].step <= 60:
-            sim = cand
-            break
-    assert sim is not None, "no seed produced an early outbreak"
+    p = PlanetParams(seed=3)
+    p.sim.resolution = 512
+    p.sim.dev_steps = 100
+    p.storms.outbreak_count = 1
+    # Pin the eruption near step0 = 0.3 * dev_steps = 30. The former seed scan
+    # (3,5,7,11,13 hunting for step <= 60) broke whenever band/schedule changes
+    # shifted the draws; the W6 phase pin makes the premise deterministic. The
+    # train's knots erupt at step0 plus a small per-knot stagger + jitter (max
+    # +8), NOT exactly step0, so bound the whole train rather than pin knot 0.
+    p.storms.outbreak_phase = 0.3
+    sim = Simulation(p, gpu)
+    sched = sim.solver.events
+    assert sched and sched.outbreaks
+    assert max(ob.step for ob in sched.outbreaks) < 60
 
-    sim.solver.step(70)  # outbreak alive: age in (10, 70], LIFETIME=160
+    sim.solver.step(70)  # whole train alive: max age ~40, well inside LIFETIME
     live_kinds = [v.kind for v in sim.solver.vortices.vortices]
     assert KIND_OUTBREAK in live_kinds  # premise: we are mid-outbreak
 
