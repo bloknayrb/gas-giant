@@ -1,5 +1,11 @@
 # Field-Driven Detail Placement Implementation Plan
 
+> **⚠️ SUPERSEDED (2026-07-07).** This plan was executed (strain-driven placement,
+> commits `0d67929..83c02b8`) and then reverted the same day: visual calibration
+> found strain-selective density read patchy, so the feature became **uniform
+> detail coverage** (`detail.spread`). See the banner in the paired spec and
+> `docs/roadmap.md`. Kept as an execution record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Drive detail-FX *placement* from local flow (eddy strain `|∇v|` + vorticity) instead of latitude LUTs, as a default-off byte-identical `FIELD_DRIVE` shader variant.

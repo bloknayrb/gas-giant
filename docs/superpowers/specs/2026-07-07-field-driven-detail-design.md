@@ -1,6 +1,16 @@
 # Field-driven detail placement — design & implementation plan
 
-*Date: 2026-07-07. Status: REV 3 (post round-2 adversarial verification).
+> **⚠️ SUPERSEDED (2026-07-07, same day) — strain-driven PLACEMENT was built then
+> DROPPED in visual calibration.** The strain-selective density (concentrate
+> texture on high-strain shear/rims, clear quiet interiors) read PATCHY to the
+> user: "details exist in certain places but not others… want it everywhere
+> balanced or nowhere." The shipped feature is instead **uniform detail coverage**
+> (`detail.spread`): apply the flow-folded detail-FX texture at EVEN density
+> across latitude. The strain engine described below (activity pass, eddy/row-mean
+> reduction, snapshot/export plumbing) was DELETED. This doc is kept as the design
+> record of the superseded approach; see `docs/roadmap.md` for the verdict.
+
+*Date: 2026-07-07. Status: REV 3 (post round-2 adversarial verification) — SUPERSEDED.
 Author: Claude (with bloknayrb).*
 
 ## Round-2 verification outcomes folded in (traceability)
