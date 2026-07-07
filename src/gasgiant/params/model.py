@@ -51,7 +51,7 @@ def pfield(
     ui: str = "",
     adv: bool = False,
     fx: bool = False,
-    field_drive: bool = False,
+    spread: bool = False,
     description: str = "",
     factory: Any = None,
 ) -> Any:
@@ -67,15 +67,16 @@ def pfield(
     variant: render/detail.py derives its variant-selection predicate AND its
     build-time uniform tripwire (u_<field-name> must exist in the compiled fx
     program) from this flag, so a new fx lever cannot silently miss either sync
-    point (the A2-6/A2-1 hand-list hazard). Stored only when True, like rand --
-    it never affects the randomize draw order."""
+    point (the A2-6/A2-1 hand-list hazard). ``spread=True`` is the analogous flag
+    for the SPREAD (uniform-detail-coverage) variant. Both are stored only when
+    True, like rand -- they never affect the randomize draw order."""
     extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
     if rand is not None:
         extra["rand"] = list(rand)
     if fx:
         extra["fx"] = True
-    if field_drive:
-        extra["field_drive"] = True
+    if spread:
+        extra["spread"] = True
     if factory is not None:
         return Field(
             default_factory=factory, ge=lo, le=hi, description=description, json_schema_extra=extra
@@ -836,28 +837,16 @@ class DetailParams(_Params):
                     "route is on (cyclone-cluster/plain poles). 0 = off "
                     "(byte-identical)",
     )
-    field_drive: float = pfield(
+    spread: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
-        field_drive=True,
-        description="Place detail-FX texture by LOCAL FLOW (eddy strain "
-                    "|grad v|) instead of the latitude band LUT: at full drive "
-                    "folds land on jet edges/vortex rims/fold zones and quiescent "
-                    "interiors clear, so band structure emerges from the flow. "
-                    "0 = pure latitude gating (byte-identical). Vorticity presets "
-                    "first",
-    )
-    field_scale: float = pfield(
-        1.0, tier=Tier.POST, lo=0.25, hi=4.0, adv=True, ui="Detail",
-        description="Normalization scale k in strain/(k*mean): raise to require "
-                    "stronger-than-average strain before texture appears (cleaner "
-                    "interiors), lower to spread texture onto weaker structure. "
-                    "Sample-time only; not a variant selector",
-    )
-    field_vort_influence: float = pfield(
-        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
-        description="Add lace inside vortex cores (high |vorticity|, low strain) "
-                    "where the strain driver alone leaves them bare. Only bites "
-                    "when field_drive>0; not a variant selector",
+        spread=True,
+        description="Uniform detail coverage across latitude: 0 = band-gated "
+                    "(belts textured, zones calmer, the default look, "
+                    "byte-identical), >0 = the flow-folded detail-FX texture "
+                    "(belt/zone/mottle folds + filaments) applied at EVEN density "
+                    "everywhere at this level, so there are no detail-starved "
+                    "zones or stamped latitude bands. Still flow-folded (not flat "
+                    "noise). Pole-faded. ~0.36 is a balanced value",
     )
 
 

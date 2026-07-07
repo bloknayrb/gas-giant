@@ -94,18 +94,12 @@ uniform vec3 u_offset_mottle;     // subseed("detail-mottle")
 uniform float u_polar_filaments;
 #endif
 
-#ifdef FIELD_DRIVE
-// Field-driven placement: drive the detail-FX gates from LOCAL FLOW (eddy
-// strain / vorticity from the activity pass) instead of the latitude band LUT.
-// Stripped at the preprocessor level when undefined, so the default program
-// text is byte-identical by construction.
-uniform sampler2D u_activity;   // RG32F raw strain(.r)/vort(.g), sim res, mipped
-uniform sampler2D u_rowmean;    // per-row mean strain LUT (.r), indexed by lat
-uniform float u_field_drive;    // 0..1 latitude->strain placement blend
-uniform float u_field_scale;    // k in strain/(k*mean)
-uniform float u_field_vort;     // vortex-core lace influence
-uniform float u_mean_eddy;      // masked mean eddy strain (self-disable gate)
-uniform float u_mean_vort;      // masked mean |vort|
+#ifdef SPREAD
+// Uniform detail coverage: apply the flow-folded detail-FX texture at EVEN
+// density across latitude instead of the band-gated LUT (belts textured, zones
+// starved). u_spread sets the coverage level. Stripped at the preprocessor
+// level when undefined, so the default program text is byte-identical.
+uniform float u_spread;
 #endif
 const float PI = 3.14159265358979;
 const int SUBSTEPS = 6;
@@ -264,38 +258,18 @@ void main() {
         tr.b = mix(tr.b, t2P, routeW);
     }
 
-#ifdef FIELD_DRIVE
-    // Field-driven placement axis: normalize EDDY strain (strain - row mean) by
-    // the masked mean with an absolute floor, then partition it into cell/lace/
-    // fold flavors keyed to strain LEVEL (not latitude). The whole effect self-
-    // disables where the field is genuinely quiet (smoothstep on the eddy mean)
-    // and fades at the poles (1-routeW). fold_place/fd_cell/fd_lace/shear_drv
-    // feed the per-site blends below; drive_eff is the latitude<->flow mix.
-    const float FD_A = 0.35, FD_M = 0.75, FD_D = 1.30;
-    const float FD_S_REF = 0.02, FD_W_REF = 0.02;
-    const float FD_MEAN_LO = 0.01, FD_MEAN_HI = 0.05, FD_SHEAR_HI = 1.5;
-    const float FD_FILL_W = 0.5, FD_FILL_LOD = 2.0;
-    float fd_latV = clamp((0.5 * PI - ll.y) / PI, 0.0, 1.0);
-    float fdS     = texture(u_activity, eqUV(ll)).r;
-    float fdSfill = textureLod(u_activity, eqUV(ll), FD_FILL_LOD).r;
-    float fdW     = texture(u_activity, eqUV(ll)).g;
-    float fdRow   = texture(u_rowmean, vec2(fd_latV, 0.5)).r;
-    float fdSe    = max(fdS     - fdRow, 0.0);
-    float fdSfe   = max(fdSfill - fdRow, 0.0);
-    float fdME    = max(u_mean_eddy, 1e-6);
-    float strain_n = fdSe  / max(u_field_scale * fdME, FD_S_REF);
-    float fill_n   = fdSfe / max(u_field_scale * fdME, FD_S_REF);
-    float wn       = abs(fdW) / max(u_field_scale * u_mean_vort, FD_W_REF);
-    float drive_eff = u_field_drive
-                    * smoothstep(FD_MEAN_LO, FD_MEAN_HI, fdME)
-                    * (1.0 - routeW);
-    float place    = max(strain_n, FD_FILL_W * fill_n);
-    float fd_cell  = 1.0 - smoothstep(FD_A, FD_M, place);
-    float fd_lace  = smoothstep(FD_A, FD_M, place) * (1.0 - smoothstep(FD_M, FD_D, place));
-    float fd_fold  = smoothstep(FD_M, FD_D, place);
-    fd_lace += u_field_vort * wn * (1.0 - fd_fold);
-    float shear_drv = smoothstep(0.0, FD_SHEAR_HI, place);
-    float fold_place = fd_fold;
+#ifdef SPREAD
+    // Uniform coverage: replace the latitude-gated belt/shear/cell/mottle weights
+    // with the even level u_spread (pole-faded via drive_eff = 1 - routeW), so
+    // the backtrace-folded detail lands at balanced density EVERYWHERE -- no
+    // detail-starved zones, no stamped latitude bands. The per-site blends below
+    // interpolate each gate toward these uniform weights by drive_eff.
+    float drive_eff  = 1.0 - routeW;
+    float U          = u_spread;
+    float fd_cell    = U;
+    float fd_lace    = U;
+    float fold_place = U;
+    float shear_drv  = U;
     float belt_place = mix(belt, fold_place, drive_eff);
 #endif
     // Convective cells: bright cell interiors with dark lanes (1 - F1 ridged).
@@ -304,7 +278,7 @@ void main() {
 
     // Masks: filaments where the flow is busy and the tracer is fresh;
     // cells where it is quiet and bright (zone interiors).
-#ifdef FIELD_DRIVE
+#ifdef SPREAD
     float fd_sh = mix(shearN, shear_drv, drive_eff);
     w_streak = clamp(0.2 + 0.8 * (fd_sh + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
              * (1.0 + 1.4 * hero);
@@ -357,7 +331,7 @@ void main() {
         float wavelength_px = float(u_full_size.x)
                             / max(u_striation_freq * 4.0 * stretch_est, 1.0);
         float atten = smoothstep(1.5, 3.0, wavelength_px);
-#ifdef FIELD_DRIVE
+#ifdef SPREAD
         float w_stria = u_striation_amount * (0.3 + 0.7 * max(belt_place, routeW * 0.5))
                       * (0.25 + 0.75 * speedN) * atten;
 #else
@@ -378,7 +352,7 @@ void main() {
     // BACKTRACED position folds with the flow exactly like the filaments
     // do, so the patches read flow-structured, not airbrushed-on. Gated by
     // the intermittency field so violent patches abut calm runs.
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
     if (u_belt_texture > 0.0 && routeW < 1.0 && max(belt, fold_place * drive_eff) > 0.02) {
 #else
     if (u_belt_texture > 0.0 && routeW < 1.0 && belt > 0.02) {
@@ -390,7 +364,7 @@ void main() {
         // Gain note: derive applies the field at intensity*0.55, so a
         // ref-like +-20-30% belt luminance swing needs d driven hard; the
         // final [0,1] clamp bounds it and fbm rarely saturates.
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
         d += 0.78 * u_belt_texture * fold * belt_place * gate * (1.0 - routeW) * calm;
 #else
         d += 0.78 * u_belt_texture * fold * belt * gate * (1.0 - routeW) * calm;
@@ -401,7 +375,7 @@ void main() {
     // (iterated, not a single longer hop) folds mid-frequency noise below the
     // sim grid scale, so belt texture densifies at matched scale. Same belt/
     // route gating as the coarse fold.
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
     if (u_belt_texture_fine > 0.0 && routeW < 1.0 && max(belt, fold_place * drive_eff) > 0.02) {
 #else
     if (u_belt_texture_fine > 0.0 && routeW < 1.0 && belt > 0.02) {
@@ -410,7 +384,7 @@ void main() {
         vec2 s2 = backtraceLL(u_vel, 0, s1, u_stretch * TAU_BASE * 1.2);
         float fold2 = fbm(spherePt(s2) * (u_freq * 0.85) + u_offset_gate.zxy,
                           3, 2.0, 0.5);
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
         d += 0.62 * u_belt_texture_fine * fold2 * belt_place * gate * (1.0 - routeW) * calm;
 #else
         d += 0.62 * u_belt_texture_fine * fold2 * belt * gate * (1.0 - routeW) * calm;
@@ -424,7 +398,7 @@ void main() {
     // calmer than the belts (lower gain) but not flat. Same backtrace-fold
     // mechanism as belt_texture so it folds WITH the flow, not airbrushed-on.
     // Guarded => byte-identical when off.
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
     float zone_place = mix(1.0 - belt, fd_cell, drive_eff);
     if (u_zone_texture > 0.0 && routeW < 1.0 && zone_place > 0.02) {
 #else
@@ -433,7 +407,7 @@ void main() {
         vec2 srcZ = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 1.4);
         float foldZ = fbm(spherePt(srcZ) * (u_freq * 0.42) + u_offset_mottle.yxz + 41.0,
                           4, 2.0, 0.5);
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
         d += 0.55 * u_zone_texture * foldZ * zone_place * gate * (1.0 - routeW);
 #else
         d += 0.55 * u_zone_texture * foldZ * (1.0 - belt) * gate * (1.0 - routeW);
@@ -448,7 +422,7 @@ void main() {
     if (u_mottle > 0.0) {
         float aw = smoothstep(0.52, 0.70, abs(ll.y))
                  * (1.0 - smoothstep(1.10, 1.22, abs(ll.y)));
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
         // Replace the hard 30-63 deg latitude window with the flow-driven lace
         // share at full drive; re-key the early-out so off-band high strain is
         // not skipped.
@@ -464,7 +438,7 @@ void main() {
             float dots = clamp(0.30 - worleyF1(pm * (u_freq * 1.1)
                                                + u_offset_mottle.zxy), 0.0, 1.0) * 2.0;
             float lace = fbm(pm * (u_freq * 0.5) + u_offset_mottle.yzx, 3, 2.0, 0.5);
-#if defined(FIELD_DRIVE)
+#if defined(SPREAD)
             d += u_mottle * aw_eff * (0.30 * granule - 0.22 * dots + 0.18 * lace);
 #else
             d += u_mottle * aw * (0.30 * granule - 0.22 * dots + 0.18 * lace);

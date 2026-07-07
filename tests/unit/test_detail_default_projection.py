@@ -1,6 +1,6 @@
 """GPU-free drift guard for the default (no-defines) detail.comp program.
 
-The FIELD_DRIVE variant wraps several base-path lines in ``#ifdef FIELD_DRIVE /
+The SPREAD variant wraps several base-path lines in ``#ifdef SPREAD /
 #else / #endif`` with the ``#else`` arm a VERBATIM copy of today's line. The GPU
 routing byte-identity test proves the default OUTPUT is unchanged *now*; this
 unit test locks it cheaply in CI (no GL context) going forward by evaluating the
@@ -78,8 +78,8 @@ def test_default_program_projection_is_stable():
 
 
 def test_variant_only_symbols_absent_from_default_projection():
-    """Semantic check: the default projection must strip BOTH the FIELD_DRIVE
-    block (u_field_drive/u_activity) and the DETAIL_FX block (u_belt_texture)."""
+    """Semantic check: the default projection must strip BOTH the SPREAD block
+    (u_spread) and the DETAIL_FX block (u_belt_texture/u_mottle)."""
     proj = _no_defines_projection()
-    for sym in ("u_field_drive", "u_activity", "u_rowmean", "u_belt_texture", "u_mottle"):
+    for sym in ("u_spread", "u_belt_texture", "u_mottle"):
         assert sym not in proj, f"{sym} leaked into the default (no-defines) program"

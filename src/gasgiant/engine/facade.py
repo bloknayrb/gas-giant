@@ -43,16 +43,6 @@ class Simulation:
         self.gpu = gpu if gpu is not None else GpuContext.headless()
         self.deriver = MapDeriver(self.gpu)
         self.detail_synth = DetailSynth(self.gpu)
-        from gasgiant.render.activity import ActivitySynth
-
-        self.activity_synth = ActivitySynth(self.gpu)
-        # Field-driven detail placement: facade-owned activity texture + means,
-        # rebuilt whenever _derive runs the detail synth (velocity re-bakes every
-        # sim step, and _derive only runs on _post_dirty/_tracers_changed, so the
-        # activity stays exactly as fresh as the detail it feeds). None until a
-        # field_drive>0 derive. Released + nulled in _release_sim.
-        self._activity: moderngl.Texture | None = None
-        self._activity_means = None  # render.activity.ActivityMeans | None
         self._preview_color: moderngl.Texture | None = None
         self._preview_height: moderngl.Texture | None = None
         # Emission preview owns its OWN scratch color/height + emission textures
@@ -121,14 +111,6 @@ class Simulation:
         self.profile_dyn.release()
         self.profile_stamp.release()
         self.profile_omega.release()
-        # Field-drive activity is sized to the sim velocity, which RESTART can
-        # resize -> release AND null (the next enabled derive rebuilds it).
-        if self._activity is not None:
-            self._activity.release()
-            self._activity = None
-        if self._activity_means is not None:
-            self._activity_means.release()
-            self._activity_means = None
 
     def _init_baroclinic(self) -> None:
         """Build/reuse the baroclinic source driver when enabled. Caches on
@@ -373,28 +355,9 @@ class Simulation:
         detail_tex = None
         if p.detail.intensity > 0.0:
             from gasgiant.engine.snapshot import hero_centers
-            from gasgiant.render.activity import new_activity_texture
-            from gasgiant.render.detail import PolarRoute, field_drive_enabled
+            from gasgiant.render.detail import PolarRoute
 
             detail_tex = self._get_detail_tex(color_tex.size)
-            activity = None
-            means = None
-            if field_drive_enabled(p.detail):
-                vsize = s.equirect.vel_tex.size
-                if self._activity is None or self._activity.size != vsize:
-                    if self._activity is not None:
-                        self._activity.release()
-                    self._activity = new_activity_texture(self.gpu, vsize)
-                # Rebuild every enabled derive: velocity re-bakes on every sim
-                # step, so a cached activity would drift out of sync with the
-                # developing flow (the only reuse would be a pure-POST edit on an
-                # unstepped sim, and re-running the pass then is cheap).
-                if self._activity_means is not None:
-                    self._activity_means.release()
-                self._activity_means = self.activity_synth.build(
-                    s.equirect.vel_tex, self._activity
-                )
-                activity, means = self._activity, self._activity_means
             self.detail_synth.synthesize(
                 p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
                 self.profile_dyn, detail_tex, p.detail,
@@ -403,7 +366,6 @@ class Simulation:
                     s.north.vel_tex, s.south.vel_tex,
                     s.north.tracers.cur, s.south.tracers.cur, RHO_MAX,
                 ),
-                activity=activity, means=means,
             )
         self.deriver.derive(
             s.equirect.tracers.cur,

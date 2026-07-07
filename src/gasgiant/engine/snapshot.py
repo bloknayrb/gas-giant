@@ -59,11 +59,6 @@ class ExportSnapshot:
     # Analytic lane lines and the meander warp they ride (derive-time).
     lanes: list[tuple[float, float]] = None  # type: ignore[assignment]
     warp: tuple[tuple[float, float, float], float, float] = ((0.0, 0.0, 0.0), 0.0, 3.0)
-    # Field-driven detail placement: the activity texture (strain/vort) + its
-    # reduction means, built from THIS snapshot's velocity so tiles agree. Both
-    # None when field_drive is off (no cost for a disabled feature).
-    activity_eq: moderngl.Texture = None  # type: ignore[assignment]
-    activity_means: object = None  # render.activity.ActivityMeans | None
 
     @classmethod
     def capture(cls, sim) -> ExportSnapshot:  # sim: engine.Simulation
@@ -71,26 +66,12 @@ class ExportSnapshot:
         s = sim.solver
         from gasgiant.sim.solver import BLEND_BAND, RHO_MAX
 
-        # One equirect-velocity clone, reused for the frozen tiles AND (when
-        # field_drive is on) the activity pass, so the placement matches the
-        # tiles exactly. Gated build => no cost/alloc for a disabled feature.
-        vel_eq = gpu.clone_texture(s.equirect.vel_tex)
-        activity_eq = None
-        activity_means = None
-        from gasgiant.render.detail import field_drive_enabled
-
-        if field_drive_enabled(sim.params.detail):
-            from gasgiant.render.activity import ActivitySynth, new_activity_texture
-
-            activity_eq = new_activity_texture(gpu, vel_eq.size)
-            activity_means = ActivitySynth(gpu).build(vel_eq, activity_eq)
-
         return cls(
             params=sim.params.model_copy(deep=True),
             tracers_eq=gpu.clone_texture(s.equirect.tracers.cur),
             tracers_n=gpu.clone_texture(s.north.tracers.cur),
             tracers_s=gpu.clone_texture(s.south.tracers.cur),
-            vel_eq=vel_eq,
+            vel_eq=gpu.clone_texture(s.equirect.vel_tex),
             vel_n=gpu.clone_texture(s.north.vel_tex),
             vel_s=gpu.clone_texture(s.south.vel_tex),
             profile_dyn=gpu.clone_texture(sim.profile_dyn),
@@ -100,8 +81,6 @@ class ExportSnapshot:
             heroes=hero_centers(sim.vortices),
             lanes=list(sim.lanes),
             warp=(s.warp_offset, sim.params.bands.warp_amount, sim.params.bands.warp_freq),
-            activity_eq=activity_eq,
-            activity_means=activity_means,
         )
 
     def release(self) -> None:
@@ -109,7 +88,3 @@ class ExportSnapshot:
                     self.vel_eq, self.vel_n, self.vel_s,
                     self.profile_dyn, self.profile_stamp):
             tex.release()
-        if self.activity_eq is not None:
-            self.activity_eq.release()
-        if self.activity_means is not None:
-            self.activity_means.release()

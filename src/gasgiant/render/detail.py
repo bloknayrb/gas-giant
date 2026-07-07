@@ -16,8 +16,6 @@ from gasgiant.params.seeds import subseed
 if TYPE_CHECKING:
     import moderngl
 
-    from gasgiant.render.activity import ActivityMeans
-
 _KERNELS = "gasgiant.render.kernels"
 _GROUP = 16
 
@@ -43,26 +41,23 @@ def _fx_param_names() -> tuple[str, ...]:
 _FX_PARAMS: tuple[str, ...] = _fx_param_names()
 
 
-def _field_drive_param_names() -> tuple[str, ...]:
-    """FIELD_DRIVE selector lever(s) from pfield ``field_drive=True`` metadata --
-    ONLY ``field_drive`` (M5): ``field_scale``/``field_vort_influence`` are
-    sample-time tunables that do nothing at drive=0, so they are not variant
-    selectors (a wasted variant otherwise)."""
+def _spread_param_names() -> tuple[str, ...]:
+    """SPREAD selector lever(s) from pfield ``spread=True`` metadata."""
     return tuple(
         name
         for name, info in DetailParams.model_fields.items()
         if isinstance(info.json_schema_extra, dict)
-        and info.json_schema_extra.get("field_drive")
+        and info.json_schema_extra.get("spread")
     )
 
 
-_FIELD_DRIVE_PARAMS: tuple[str, ...] = _field_drive_param_names()
+_SPREAD_PARAMS: tuple[str, ...] = _spread_param_names()
 
 
-def field_drive_enabled(params: DetailParams) -> bool:
-    """True when ``field_drive>0`` -> select the FIELD_DRIVE program variant.
-    Exact zero keeps the non-variant program (byte-identical by construction)."""
-    return any(getattr(params, name) > 0.0 for name in _FIELD_DRIVE_PARAMS)
+def spread_enabled(params: DetailParams) -> bool:
+    """True when ``spread>0`` -> select the SPREAD program variant (uniform detail
+    coverage). Exact zero keeps the non-variant program (byte-identical)."""
+    return any(getattr(params, name) > 0.0 for name in _SPREAD_PARAMS)
 
 
 def detail_fx_enabled(params: DetailParams) -> bool:
@@ -99,31 +94,15 @@ def _absent(prog, uniform_name: str) -> bool:
     return False
 
 
-# FIELD_DRIVE placement uniforms present in EVERY field_drive program (they feed
-# the base-path w_streak/w_cell re-gate). Absence => a silently no-op'd effect.
-_FIELD_DRIVE_UNIFORMS = (
-    "u_field_drive", "u_activity", "u_rowmean", "u_mean_eddy", "u_field_scale",
-)
-# The vortex core-fill (u_field_vort / u_mean_vort) feeds ONLY fd_lace, whose
-# sole consumer is the DETAIL_FX mottle site -- so in a FIELD_DRIVE-only program
-# (DETAIL_FX off) the compiler legitimately strips them. Require them only when
-# DETAIL_FX is also compiled in.
-_FIELD_DRIVE_FX_UNIFORMS = ("u_field_vort", "u_mean_vort")
-
-
-def _assert_field_drive_uniforms(prog, fx: bool) -> None:
-    """Tripwire mirroring _assert_fx_uniforms: the FIELD_DRIVE variant must
-    expose its placement uniforms, else the KeyError-suppressing ``_set`` (and
-    the sampler binds) would silently no-op the effect while reporting success.
-    ``fx`` selects whether the DETAIL_FX-only vort-fill uniforms are required."""
-    required = _FIELD_DRIVE_UNIFORMS + (_FIELD_DRIVE_FX_UNIFORMS if fx else ())
-    missing = [u for u in required if _absent(prog, u)]
-    if missing:
+def _assert_spread_uniforms(prog) -> None:
+    """Tripwire mirroring _assert_fx_uniforms: the SPREAD variant must expose
+    ``u_spread`` (the uniform-coverage level), else the KeyError-suppressing
+    ``_set`` would silently no-op the whole effect while reporting success."""
+    if _absent(prog, "u_spread"):
         raise RuntimeError(
-            f"detail.comp FIELD_DRIVE variant (fx={fx}) is missing uniform(s) "
-            f"{missing}: the placement would silently no-op. Either a "
-            f"declaration was dropped/renamed or the compiler optimized the "
-            f"effect out."
+            "detail.comp SPREAD variant is missing u_spread: the uniform-coverage "
+            "blend would silently no-op. The declaration/effect block was dropped "
+            "or the compiler optimized it out."
         )
 
 
@@ -147,19 +126,19 @@ class DetailSynth:
         self._progs: dict[tuple[bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(fx=False)
 
-    def _program(self, fx: bool, field_drive: bool = False) -> moderngl.ComputeShader:
-        key = (fx, field_drive)
+    def _program(self, fx: bool, spread: bool = False) -> moderngl.ComputeShader:
+        key = (fx, spread)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if fx:
                 defines["DETAIL_FX"] = "1"
-            if field_drive:
-                defines["FIELD_DRIVE"] = "1"
+            if spread:
+                defines["SPREAD"] = "1"
             prog = self.gpu.compute(_KERNELS, "detail.comp", defines=defines or None)
             if fx:
                 _assert_fx_uniforms(prog)  # loud at build, never a silent no-op
-            if field_drive:
-                _assert_field_drive_uniforms(prog, fx=fx)
+            if spread:
+                _assert_spread_uniforms(prog)
             self._progs[key] = prog
         return self._progs[key]
 
@@ -175,8 +154,6 @@ class DetailSynth:
         full_size: tuple[int, int] | None = None,
         heroes: list[tuple[float, float, float, float, float, float]] | None = None,
         polar: PolarRoute | None = None,
-        activity: moderngl.Texture | None = None,
-        means: ActivityMeans | None = None,
     ) -> None:
         """heroes: up to 3 (x, y, z, r_core, spin, aspect) hero-storm centers; the
         detail amplitude and winding time grow inside them, and the
@@ -186,8 +163,8 @@ class DetailSynth:
         route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
         fx_on = detail_fx_enabled(params)  # derived from pfield fx metadata
-        fd_on = field_drive_enabled(params)  # FIELD_DRIVE variant selector
-        prog = self._program(fx=fx_on, field_drive=fd_on)
+        spread_on = spread_enabled(params)  # SPREAD variant selector
+        prog = self._program(fx=fx_on, spread=spread_on)
         size = out_tex.size
         if fx_on:
             _set(prog, "u_intermittency", params.intermittency)
@@ -232,20 +209,8 @@ class DetailSynth:
             tracers_tex.use(location=6)
             prog["u_tracers_s"].value = 6
             prog["u_rho_max"].value = 1.0
-        if fd_on:
-            if activity is None or means is None:
-                raise ValueError(
-                    "field_drive>0 but no activity/means supplied to synthesize"
-                )
-            activity.use(location=7)
-            prog["u_activity"].value = 7
-            means.rowmean_tex.use(location=8)
-            prog["u_rowmean"].value = 8
-            _set(prog, "u_field_drive", params.field_drive)
-            _set(prog, "u_field_scale", params.field_scale)
-            _set(prog, "u_field_vort", params.field_vort_influence)
-            _set(prog, "u_mean_eddy", means.mean_eddy)
-            _set(prog, "u_mean_vort", means.mean_vort)
+        if spread_on:
+            _set(prog, "u_spread", params.spread)
         prog["u_origin"].value = origin
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)
