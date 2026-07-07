@@ -147,6 +147,34 @@ def test_snapshot_builds_activity_only_when_field_drive_on(gpu):
     snap_on.release()  # must not raise (releases activity_eq + means)
 
 
+def test_export_tiled_matches_full_at_field_drive(gpu):
+    """Tiled export (per-tile origin/full_size) must equal a single-tile render
+    at field_drive>0: activity is sampled by absolute lon/lat, so it is
+    seam-safe across tile boundaries."""
+    from gasgiant.export.exporter import _derive_tile
+
+    sim = _warm_sim(gpu, res=512)
+    p2 = sim.params.model_copy(deep=True)
+    p2.detail.field_drive = 1.0
+    sim.update_params(p2)
+    sim.run_to_completion()
+    snap = sim.create_snapshot()
+    w, h = 256, 128
+    full_c = gpu.texture2d((w, h), 4, "f4")
+    full_hh = gpu.texture2d((w, h), 1, "f4")
+    full_d = gpu.texture2d((w, h), 1, "f4", linear=True)
+    _derive_tile(sim, snap, snap.params, 0, 0, w, h, full_c, full_hh, full_d, None)
+    full = gpu.read_texture(full_c).copy()
+    # a top-half tile of the same full map
+    tile_c = gpu.texture2d((w, h // 2), 4, "f4")
+    tile_hh = gpu.texture2d((w, h // 2), 1, "f4")
+    tile_d = gpu.texture2d((w, h // 2), 1, "f4", linear=True)
+    _derive_tile(sim, snap, snap.params, 0, 0, w, h, tile_c, tile_hh, tile_d, None)
+    top = gpu.read_texture(tile_c)[: h // 2].copy()
+    np.testing.assert_allclose(full[: h // 2], top, atol=1e-3)
+    snap.release()
+
+
 def test_field_drive_forced_variant_near_default_with_fx(gpu):
     """The (DETAIL_FX + FIELD_DRIVE) program: forced tiny drive ~ the DETAIL_FX
     default. Exercises the BOTH-variant vort tripwire path."""

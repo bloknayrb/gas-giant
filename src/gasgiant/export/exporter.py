@@ -71,6 +71,7 @@ def _derive_tile(
                 snap.vel_n, snap.vel_s, snap.tracers_n, snap.tracers_s,
                 snap.patch_rho_max,
             ),
+            activity=snap.activity_eq, means=snap.activity_means,
         )
     sim.deriver.derive(
         snap.tracers_eq, snap.tracers_n, snap.tracers_s,
