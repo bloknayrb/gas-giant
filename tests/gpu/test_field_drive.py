@@ -100,7 +100,7 @@ def test_field_drive_forced_variant_is_near_default(gpu):
     means.release()
 
 
-def _warm_sim(gpu):
+def _warm_sim(gpu, res=None):
     import json
     import pathlib
 
@@ -111,6 +111,9 @@ def _warm_sim(gpu):
         pathlib.Path("src/gasgiant/presets/gas_giant_warm.json").read_text()
     )
     params = load_preset_doc(doc, "test")
+    if res is not None:  # smaller sim for fast structural tests
+        params = params.model_copy(deep=True)
+        params.sim.resolution = res
     return Simulation(params, gpu=gpu)
 
 
@@ -125,6 +128,23 @@ def test_facade_preview_field_drive_builds_and_differs(gpu):
     fd_color, _ = sim.ensure_preview(256)
     fd = gpu.read_texture(fd_color)
     assert not np.allclose(base, fd, atol=1e-2), "field_drive=1 did not change preview"
+
+
+def test_snapshot_builds_activity_only_when_field_drive_on(gpu):
+    sim = _warm_sim(gpu, res=512)
+    sim.run_to_completion()
+    snap_off = sim.create_snapshot()
+    assert snap_off.activity_eq is None
+    assert snap_off.activity_means is None
+    snap_off.release()
+
+    p2 = sim.params.model_copy(deep=True)
+    p2.detail.field_drive = 1.0
+    sim.update_params(p2)
+    snap_on = sim.create_snapshot()
+    assert snap_on.activity_eq is not None
+    assert snap_on.activity_means is not None
+    snap_on.release()  # must not raise (releases activity_eq + means)
 
 
 def test_field_drive_forced_variant_near_default_with_fx(gpu):
