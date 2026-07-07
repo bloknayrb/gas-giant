@@ -214,7 +214,7 @@ intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
 
 **Program variants.** Optional shader features are preprocessor-gated and
 cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX) —
-up to four programs — and detail.comp per DETAIL_FX. The DETAIL_FX variant
+up to four programs — and detail.comp per (DETAIL_FX, FIELD_DRIVE). The DETAIL_FX variant
 is selected whenever **any detail-FX lever is nonzero**; the lever set is
 not hand-enumerated but derived from the `fx=True` pfield flag in
 `params/model.py` (`render/detail.py::detail_fx_enabled`), which also
@@ -237,6 +237,24 @@ detail tracer and shear/speed, blended with Worley convective cells in quiet
 zones. Poleward of 66–72° the backtrace routes through the polar patch
 velocities (feather mixes noise values, never positions), so the caps carry
 real texture instead of fading to neutral (v1.1).
+
+**Field-driven placement** (`detail.field_drive`, default-off, opt-in
+`FIELD_DRIVE` variant) drives *where* the detail-FX flavors land from the local
+flow instead of the latitude LUT. A sim-res activity pass
+(`render/activity.py` + `activity.comp`) computes raw strain `|∇v|` and
+vorticity from the baked equirect velocity; a CPU readback reduces it to a
+per-latitude-row mean (for **eddy** strain = strain − row-mean) and two
+masked-band global means. At detail sample time the eddy strain is normalized
+against the mean with an absolute floor and partitioned into cell/lace/fold
+flavors keyed to strain *level*, then each latitude gate is blended toward the
+flow-driven placement by `field_drive`; the effect self-disables where the field
+is genuinely quiet and fades at the poles. The reduction is numpy (identical in
+the preview and export paths ⇒ preview==export); the activity texture is
+facade-owned in preview and `ExportSnapshot`-scoped in export (built per frame,
+gated on `field_drive>0` ⇒ zero cost when off). Character is unchanged — this is
+placement only; it does NOT advect a tracer (distinct from the falsified
+frozen-field dye line). Kinematic activity is byte-exact; vorticity within the
+SOR noise floors. Rollout is vorticity-presets-first, gated on visual sign-off.
 
 ## Checkpoints
 

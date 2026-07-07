@@ -1196,6 +1196,36 @@ Convective cell (closed-cell/popcorn) texture in quiet zones
 <td align="center"><img src="img/sliders/detail__cellular_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.9</sub></td><td align="center"><img src="img/sliders/detail__cellular_amount__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
+### field drive
+
+`detail.field_drive` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Place detail-FX texture by LOCAL FLOW (eddy strain |grad v|) instead of the latitude band LUT: at full drive folds land on jet edges/vortex rims/fold zones and quiescent interiors clear, so band structure emerges from the flow. 0 = pure latitude gating (byte-identical). Vorticity presets first
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### field scale
+
+`detail.field_scale` &mdash; range **0.25 to 4**, default **1**, tier `post`.
+
+Normalization scale k in strain/(k*mean): raise to require stronger-than-average strain before texture appears (cleaner interiors), lower to spread texture onto weaker structure. Sample-time only; not a variant selector
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.25<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+</tr></table>
+
+### field vort influence
+
+`detail.field_vort_influence` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Add lace inside vortex cores (high |vorticity|, low strain) where the strain driver alone leaves them bare. Only bites when field_drive>0; not a variant selector
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
 ### flow phases
 
 `detail.flow_phases` &mdash; range **1 to 4**, default **3**, tier `post`.
