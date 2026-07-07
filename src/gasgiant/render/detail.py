@@ -41,6 +41,28 @@ def _fx_param_names() -> tuple[str, ...]:
 _FX_PARAMS: tuple[str, ...] = _fx_param_names()
 
 
+def _field_drive_param_names() -> tuple[str, ...]:
+    """FIELD_DRIVE selector lever(s) from pfield ``field_drive=True`` metadata --
+    ONLY ``field_drive`` (M5): ``field_scale``/``field_vort_influence`` are
+    sample-time tunables that do nothing at drive=0, so they are not variant
+    selectors (a wasted variant otherwise)."""
+    return tuple(
+        name
+        for name, info in DetailParams.model_fields.items()
+        if isinstance(info.json_schema_extra, dict)
+        and info.json_schema_extra.get("field_drive")
+    )
+
+
+_FIELD_DRIVE_PARAMS: tuple[str, ...] = _field_drive_param_names()
+
+
+def field_drive_enabled(params: DetailParams) -> bool:
+    """True when ``field_drive>0`` -> select the FIELD_DRIVE program variant.
+    Exact zero keeps the non-variant program (byte-identical by construction)."""
+    return any(getattr(params, name) > 0.0 for name in _FIELD_DRIVE_PARAMS)
+
+
 def detail_fx_enabled(params: DetailParams) -> bool:
     """True when any fx-flagged lever is active -> select the DETAIL_FX program
     variant. Exact-zero on every fx lever keeps the pre-FX program (its text is

@@ -51,6 +51,7 @@ def pfield(
     ui: str = "",
     adv: bool = False,
     fx: bool = False,
+    field_drive: bool = False,
     description: str = "",
     factory: Any = None,
 ) -> Any:
@@ -73,6 +74,8 @@ def pfield(
         extra["rand"] = list(rand)
     if fx:
         extra["fx"] = True
+    if field_drive:
+        extra["field_drive"] = True
     if factory is not None:
         return Field(
             default_factory=factory, ge=lo, le=hi, description=description, json_schema_extra=extra
@@ -832,6 +835,29 @@ class DetailParams(_Params):
                     "winds with the cap vortices; only active when the polar "
                     "route is on (cyclone-cluster/plain poles). 0 = off "
                     "(byte-identical)",
+    )
+    field_drive: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
+        field_drive=True,
+        description="Place detail-FX texture by LOCAL FLOW (eddy strain "
+                    "|grad v|) instead of the latitude band LUT: at full drive "
+                    "folds land on jet edges/vortex rims/fold zones and quiescent "
+                    "interiors clear, so band structure emerges from the flow. "
+                    "0 = pure latitude gating (byte-identical). Vorticity presets "
+                    "first",
+    )
+    field_scale: float = pfield(
+        1.0, tier=Tier.POST, lo=0.25, hi=4.0, adv=True, ui="Detail",
+        description="Normalization scale k in strain/(k*mean): raise to require "
+                    "stronger-than-average strain before texture appears (cleaner "
+                    "interiors), lower to spread texture onto weaker structure. "
+                    "Sample-time only; not a variant selector",
+    )
+    field_vort_influence: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
+        description="Add lace inside vortex cores (high |vorticity|, low strain) "
+                    "where the strain driver alone leaves them bare. Only bites "
+                    "when field_drive>0; not a variant selector",
     )
 
 
