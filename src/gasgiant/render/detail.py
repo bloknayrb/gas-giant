@@ -41,6 +41,25 @@ def _fx_param_names() -> tuple[str, ...]:
 _FX_PARAMS: tuple[str, ...] = _fx_param_names()
 
 
+def _spread_param_names() -> tuple[str, ...]:
+    """SPREAD selector lever(s) from pfield ``spread=True`` metadata."""
+    return tuple(
+        name
+        for name, info in DetailParams.model_fields.items()
+        if isinstance(info.json_schema_extra, dict)
+        and info.json_schema_extra.get("spread")
+    )
+
+
+_SPREAD_PARAMS: tuple[str, ...] = _spread_param_names()
+
+
+def spread_enabled(params: DetailParams) -> bool:
+    """True when ``spread>0`` -> select the SPREAD program variant (uniform detail
+    coverage). Exact zero keeps the non-variant program (byte-identical)."""
+    return any(getattr(params, name) > 0.0 for name in _SPREAD_PARAMS)
+
+
 def detail_fx_enabled(params: DetailParams) -> bool:
     """True when any fx-flagged lever is active -> select the DETAIL_FX program
     variant. Exact-zero on every fx lever keeps the pre-FX program (its text is
@@ -75,6 +94,18 @@ def _absent(prog, uniform_name: str) -> bool:
     return False
 
 
+def _assert_spread_uniforms(prog) -> None:
+    """Tripwire mirroring _assert_fx_uniforms: the SPREAD variant must expose
+    ``u_spread`` (the uniform-coverage level), else the KeyError-suppressing
+    ``_set`` would silently no-op the whole effect while reporting success."""
+    if _absent(prog, "u_spread"):
+        raise RuntimeError(
+            "detail.comp SPREAD variant is missing u_spread: the uniform-coverage "
+            "blend would silently no-op. The declaration/effect block was dropped "
+            "or the compiler optimized it out."
+        )
+
+
 @dataclass
 class PolarRoute:
     """Patch velocity + tracer textures for routed polar backtraces."""
@@ -92,17 +123,24 @@ class DetailSynth:
         # Default program eagerly (its text is the pre-FX kernel, so neutral
         # defaults stay byte-identical by construction); the DETAIL_FX
         # variant compiles lazily on first selection (mirrors MapDeriver).
-        self._progs: dict[bool, moderngl.ComputeShader] = {}
+        self._progs: dict[tuple[bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(fx=False)
 
-    def _program(self, fx: bool) -> moderngl.ComputeShader:
-        if fx not in self._progs:
-            defines = {"DETAIL_FX": "1"} if fx else None
-            prog = self.gpu.compute(_KERNELS, "detail.comp", defines=defines)
+    def _program(self, fx: bool, spread: bool = False) -> moderngl.ComputeShader:
+        key = (fx, spread)
+        if key not in self._progs:
+            defines: dict[str, str] = {}
+            if fx:
+                defines["DETAIL_FX"] = "1"
+            if spread:
+                defines["SPREAD"] = "1"
+            prog = self.gpu.compute(_KERNELS, "detail.comp", defines=defines or None)
             if fx:
                 _assert_fx_uniforms(prog)  # loud at build, never a silent no-op
-            self._progs[fx] = prog
-        return self._progs[fx]
+            if spread:
+                _assert_spread_uniforms(prog)
+            self._progs[key] = prog
+        return self._progs[key]
 
     def synthesize(
         self,
@@ -125,7 +163,8 @@ class DetailSynth:
         route through the patch charts instead of fading to neutral."""
         rng = subseed(seed, "detail-synth")
         fx_on = detail_fx_enabled(params)  # derived from pfield fx metadata
-        prog = self._program(fx=fx_on)
+        spread_on = spread_enabled(params)  # SPREAD variant selector
+        prog = self._program(fx=fx_on, spread=spread_on)
         size = out_tex.size
         if fx_on:
             _set(prog, "u_intermittency", params.intermittency)
@@ -170,6 +209,8 @@ class DetailSynth:
             tracers_tex.use(location=6)
             prog["u_tracers_s"].value = 6
             prog["u_rho_max"].value = 1.0
+        if spread_on:
+            _set(prog, "u_spread", params.spread)
         prog["u_origin"].value = origin
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)

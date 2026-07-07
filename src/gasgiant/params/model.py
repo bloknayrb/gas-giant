@@ -51,6 +51,7 @@ def pfield(
     ui: str = "",
     adv: bool = False,
     fx: bool = False,
+    spread: bool = False,
     description: str = "",
     factory: Any = None,
 ) -> Any:
@@ -66,13 +67,16 @@ def pfield(
     variant: render/detail.py derives its variant-selection predicate AND its
     build-time uniform tripwire (u_<field-name> must exist in the compiled fx
     program) from this flag, so a new fx lever cannot silently miss either sync
-    point (the A2-6/A2-1 hand-list hazard). Stored only when True, like rand --
-    it never affects the randomize draw order."""
+    point (the A2-6/A2-1 hand-list hazard). ``spread=True`` is the analogous flag
+    for the SPREAD (uniform-detail-coverage) variant. Both are stored only when
+    True, like rand -- they never affect the randomize draw order."""
     extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
     if rand is not None:
         extra["rand"] = list(rand)
     if fx:
         extra["fx"] = True
+    if spread:
+        extra["spread"] = True
     if factory is not None:
         return Field(
             default_factory=factory, ge=lo, le=hi, description=description, json_schema_extra=extra
@@ -832,6 +836,17 @@ class DetailParams(_Params):
                     "winds with the cap vortices; only active when the polar "
                     "route is on (cyclone-cluster/plain poles). 0 = off "
                     "(byte-identical)",
+    )
+    spread: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
+        spread=True,
+        description="Uniform detail coverage across latitude: 0 = band-gated "
+                    "(belts textured, zones calmer, the default look, "
+                    "byte-identical), >0 = the flow-folded detail-FX texture "
+                    "(belt/zone/mottle folds + filaments) applied at EVEN density "
+                    "everywhere at this level, so there are no detail-starved "
+                    "zones or stamped latitude bands. Still flow-folded (not flat "
+                    "noise). Pole-faded. ~0.36 is a balanced value",
     )
 
 

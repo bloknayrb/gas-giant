@@ -7,7 +7,7 @@
     "name": "gas_giant_warm",
     "sim": {
       "resolution": 4096,
-      "dev_steps": 1256,
+      "dev_steps": 700,
       "dt_scale": 1.0
     },
     "solver": {
@@ -23,7 +23,7 @@
       "vort_inject_mask": "shear",
       "vort_drag": 0.0,
       "vort_eddy_drag": 0.0,
-      "vort_psi_drag": 0.5,
+      "vort_psi_drag": 0.06,
       "baroclinic": {
         "enabled": false,
         "gain": 2.0,
@@ -43,6 +43,8 @@
       "hue_jitter": 0.04,
       "variance_amount": 0.18,
       "faded_sector": 0.55,
+      "belt_fade": 0.0,
+      "faded_band_index": null,
       "contrast_envelope": 0.6,
       "lane_density": 0.0,
       "edge_diversity": 0.55,
@@ -101,13 +103,13 @@
       "polar_decay": 0.648
     },
     "turbulence": {
-      "intensity": 1.6,
+      "intensity": 1.3,
       "shear_coupling": 0.7,
       "belt_boost": 1.0,
       "scale": 6.0,
       "evolution_rate": 0.012,
       "relax_tau": 2000.0,
-      "replenish_rate": 0.45,
+      "replenish_rate": 0.35,
       "kh_amplitude": 0.6,
       "kh_wavenumber": 24,
       "belt_replenish": 0.0,
@@ -115,32 +117,47 @@
     },
     "storms": {
       "hero_count": 1,
-      "hero_radius": 0.13,
-      "hero_strength": 1.7,
+      "hero_radius": 0.05,
+      "hero_strength": 1.9,
       "hero_latitude": -22.5,
       "rim_contrast": 2.0,
       "hero_aspect": 2.2,
-      "hero_mottle": 0.35,
-      "hero_tint_var": 0.35,
+      "hero_mottle": 0.7,
+      "hero_tint_var": 0.4,
+      "hero_rim_tint": 0.85,
+      "hero_rim_warp": 0.65,
+      "hero_wake_detail": 0.8,
       "hero_solid_core": 1.0,
+      "wake_turbulence": 1.593,
+      "hero_tint": 0.9,
+      "hero_brightness": 0.05,
+      "hero_companions": 0,
       "oval_density": 3.0,
       "oval_solid_core": 0.0,
+      "accent_count": 0,
+      "accent_latitude": null,
+      "accent_tint": 0.9,
+      "accent_brightness": 0.12,
+      "accent_radius": 0.05,
       "barge_density": 2.989,
       "pearls_count": 14,
-      "wake_turbulence": 1.593,
-      "outbreak_count": 1,
-      "outbreak_strength": 1.0,
+      "outbreak_count": 2,
+      "outbreak_strength": 1.1,
+      "outbreak_latitude": null,
+      "outbreak_phase": null,
+      "outbreak_lat_min": 0.2,
       "small_density": 3.0,
       "stamp_contrast": 2.4,
+      "stamp_tint_contrast": null,
       "merge_rate": 0.219,
       "merge_debris": 2.0
     },
     "waves": {
-      "festoon_strength": 2.6,
+      "festoon_strength": 1.6,
       "festoon_wavenumber": 20,
       "hotspot_depth": 1.0,
-      "ribbon_strength": 2.4,
-      "ribbon_wavenumber": 30
+      "ribbon_strength": 0.0,
+      "ribbon_wavenumber": 12
     },
     "poles": {
       "north": {
@@ -817,17 +834,17 @@
         {
           "pos": 0.72,
           "color": [
-            0.4,
-            0.26,
-            0.17
+            0.46,
+            0.3,
+            0.2
           ]
         },
         {
           "pos": 1.0,
           "color": [
             0.79,
-            0.44,
-            0.27
+            0.45,
+            0.3
           ]
         }
       ],
@@ -837,19 +854,21 @@
         0.78,
         0.62
       ],
-      "contrast": 1.05,
+      "contrast": 0.8,
       "saturation": 1.0,
       "gamma": 1.0,
       "chroma_scale": 1.0,
       "chroma_variance": 0.45,
-      "hue_variance": 0.18,
+      "hue_variance": 0.3,
+      "chroma_aging": 0.35,
       "polar_tint_color": [
         0.36,
         0.46,
         0.61
       ],
       "polar_tint_strength": 0.68,
-      "polar_tint_start_lat": 56.0
+      "polar_tint_start_lat": 56.0,
+      "polar_canvas_value": 0.85
     },
     "detail": {
       "intensity": 0.95,
@@ -861,11 +880,15 @@
       "striation_frequency": 160.0,
       "polar_stipple": 0.8,
       "intermittency": 0.65,
+      "hero_calm": 0.75,
       "hero_spiral": 0.55,
       "hero_collar_wrap": 0.5,
-      "belt_texture": 1.9,
-      "belt_texture_fine": 2.2,
-      "mottle": 1.1
+      "zone_texture": 1.0,
+      "belt_texture": 1.2,
+      "belt_texture_fine": 1.4,
+      "mottle": 1.1,
+      "polar_filaments": 1.3,
+      "spread": 0.36
     },
     "emission": {
       "thermal_strength": 0.35,

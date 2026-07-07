@@ -1306,6 +1306,16 @@ Bright granular storm speckle (popcorn) poleward of ~55 deg (the band-to-mottle 
 <td align="center"><img src="img/sliders/detail__polar_stipple__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.8</sub></td><td align="center"><img src="img/sliders/detail__polar_stipple__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
+### spread
+
+`detail.spread` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Uniform detail coverage across latitude: 0 = band-gated (belts textured, zones calmer, the default look, byte-identical), >0 = the flow-folded detail-FX texture (belt/zone/mottle folds + filaments) applied at EVEN density everywhere at this level, so there are no detail-starved zones or stamped latitude bands. Still flow-folded (not flat noise). Pole-faded. ~0.36 is a balanced value
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.25</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
 ### striation amount
 
 `detail.striation_amount` &mdash; range **0 to 1.5**, default **0**, tier `post`.

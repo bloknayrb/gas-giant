@@ -47,7 +47,9 @@ PRESET_DELTA = {
         # arrive via jupiter_palette() so jupiter_like tracks the Cassini match too.
         "detail": {"belt_texture": 1.2, "belt_texture_fine": 1.4, "mottle": 1.1,
                    "cellular_amount": 0.9, "striation_amount": 1.0,
-                   "polar_filaments": 1.3},   # Juno folded-filamentary cap lace
+                   "polar_filaments": 1.3,    # Juno folded-filamentary cap lace
+                   "spread": 0.25},   # uniform coverage: replace the kinematic
+                   # grain with even flow-folded detail (calibrated 2026-07-07)
 
         "turbulence": {"replenish_rate": 0.35},          # zone-detail starvation fix
         "storms": {"stamp_contrast": 2.0, "rim_contrast": 2.0, "oval_density": 3.0,

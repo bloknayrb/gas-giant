@@ -47,6 +47,11 @@ def main():
     })
     p.storms = p.storms.model_copy(update={"hero_radius": 0.05})
 
+    # Uniform detail coverage: apply the flow-folded detail-FX texture at EVEN
+    # density across latitude instead of leaving zones detail-starved. 0.36 was
+    # the calibrated value (user sign-off 2026-07-07) — even, fluid, not patchy.
+    p.detail = p.detail.model_copy(update={"spread": 0.36})
+
     # The frost fix: high-contrast warm palette, uniform across latitude rows
     # (color follows T0 structure, not a per-latitude stamp). chroma_scale 1.0 —
     # the palette already carries the hue, no Oklab re-cast.
