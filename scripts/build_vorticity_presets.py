@@ -264,6 +264,9 @@ def modernize() -> None:
     p.storms = p.storms.model_copy(update={**STORMS_HERO, **STORMS_FIELD})
     p.turbulence = p.turbulence.model_copy(update=TURBULENCE_RICH)
     p.detail = p.detail.model_copy(update=DETAIL_RICH)
+    # Uniform detail coverage: fill the smooth white zones with even flow-folded
+    # curls instead of leaving them detail-starved (calibrated 2026-07-07).
+    p.detail = p.detail.model_copy(update={"spread": 0.30})
     p.waves = p.waves.model_copy(update=WAVES_RICH)
     p.appearance = jupiter_palette(p)  # frost fix
 
