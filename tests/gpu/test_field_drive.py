@@ -100,6 +100,33 @@ def test_field_drive_forced_variant_is_near_default(gpu):
     means.release()
 
 
+def _warm_sim(gpu):
+    import json
+    import pathlib
+
+    from gasgiant.engine.facade import Simulation
+    from gasgiant.params.presets import load_preset_doc
+
+    doc = json.loads(
+        pathlib.Path("src/gasgiant/presets/gas_giant_warm.json").read_text()
+    )
+    params = load_preset_doc(doc, "test")
+    return Simulation(params, gpu=gpu)
+
+
+def test_facade_preview_field_drive_builds_and_differs(gpu):
+    sim = _warm_sim(gpu)
+    sim.run_to_completion()
+    base_color, _ = sim.ensure_preview(256)
+    base = gpu.read_texture(base_color).copy()
+    p2 = sim.params.model_copy(deep=True)
+    p2.detail.field_drive = 1.0  # POST edit -> re-derive
+    sim.update_params(p2)
+    fd_color, _ = sim.ensure_preview(256)
+    fd = gpu.read_texture(fd_color)
+    assert not np.allclose(base, fd, atol=1e-2), "field_drive=1 did not change preview"
+
+
 def test_field_drive_forced_variant_near_default_with_fx(gpu):
     """The (DETAIL_FX + FIELD_DRIVE) program: forced tiny drive ~ the DETAIL_FX
     default. Exercises the BOTH-variant vort tripwire path."""
