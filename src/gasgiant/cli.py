@@ -225,10 +225,16 @@ def _export(args: argparse.Namespace) -> int:
             except (PresetError, ValueError) as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 2
-            # A ramp keeps the SAME developed world: force the target's seed to
-            # the base seed so the ramp is about look, not world (validate_ramp
-            # still guards the job API for programmatic callers).
+            # A ramp keeps the SAME developed world: align the target with the
+            # base's world-defining knobs (seed + the CLI-overridable RESTART/
+            # structural fields dev_steps and width) so a ramp between variants
+            # of one preset "just works" and is about LOOK, not world. Any
+            # remaining RESTART diff (e.g. a different band layout) is still
+            # rejected by validate_ramp below. (validate_ramp also guards the
+            # job API for programmatic callers.)
             ramp_to = ramp_to.model_copy(update={"seed": params.seed})
+            ramp_to.sim.dev_steps = params.sim.dev_steps
+            ramp_to.export.width = params.export.width
             try:
                 validate_ramp(params, ramp_to)
             except RampError as exc:
