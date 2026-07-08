@@ -492,6 +492,16 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
         return "color"
     if isinstance(value, str):
         return "str"
+    # Annotation-keyed list-of-model editor (storms.cast). Placed BEFORE the
+    # value-based list checks so the EMPTY default ([], no value[0] to sniff)
+    # still classifies. The palette/stops lists are also list[BaseModel] but
+    # have bespoke value-shape editors below, so they are excluded here.
+    if get_origin(ann) is list:
+        args = get_args(ann)
+        if len(args) == 1 and isinstance(args[0], type) and issubclass(args[0], BaseModel):
+            from gasgiant.params.model import GradientStop, PaletteRow
+            if args[0] not in (GradientStop, PaletteRow):
+                return "model_list"
     if isinstance(value, list) and value and isinstance(value[0], dict) and "pos" in value[0]:
         return "stops"
     if isinstance(value, list) and value and isinstance(value[0], dict) and "stops" in value[0]:
@@ -636,6 +646,8 @@ def _draw_leaf(
         changed, committed = _draw_stops(label, value)
     elif kind == "palette_rows":
         changed, committed = _draw_palette_rows(label, value)
+    elif kind == "model_list":
+        changed, committed = _draw_cast_list(label, value)
     elif kind == "optional_float":
         changed, committed = _draw_optional_float(name, label, doc, lo, hi)
     elif kind == "optional_int":
@@ -829,6 +841,71 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
                 "stops": [{**s, "color": tuple(s["color"])} for s in last["stops"]],
             }
         )
+        changed = True
+        committed = True
+    return changed, committed
+
+
+def _draw_cast_list(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]:
+    """Editor for the art-directed cast list (``storms.cast``): one row per
+    StormOverride with a kind combo, position/size/strength/aspect sliders, and
+    optional tint/brightness overrides (a checkbox toggles None = kind default
+    vs an explicit value). Add/remove rows; the list may be empty. Returns
+    ``(changed, committed)`` with the same semantics as ``_draw_palette_rows``
+    (per-sub-widget release OR a synthetic commit on a structural mutation --
+    plain buttons never raise the imgui end-of-edit signal)."""
+    from gasgiant.params.model import CastKind, StormOverride
+
+    changed = False
+    committed = False
+    kinds = [k.value for k in CastKind]
+    imgui.text(label)
+    remove_index = None
+    for i, row in enumerate(rows):
+        imgui.push_id(2000 + i)
+        imgui.separator_text(f"storm {i + 1}")
+        cur = kinds.index(row["kind"]) if row["kind"] in kinds else 0
+        c, idx = imgui.combo("kind", cur, kinds)
+        if c:
+            row["kind"] = kinds[idx]
+            changed = True
+        committed |= imgui.is_item_deactivated_after_edit()
+        for key, lo, hi, lbl in (
+            ("lat_deg", -68.0, 68.0, "latitude"),
+            ("lon_deg", -180.0, 180.0, "longitude"),
+            ("radius", 0.01, 0.15, "radius"),
+            ("strength_scale", 0.0, 3.0, "strength"),
+            ("aspect", 1.0, 3.0, "aspect"),
+        ):
+            cc, v = imgui.slider_float(lbl, float(row[key]), lo, hi)
+            if cc:
+                row[key] = v
+                changed = True
+            committed |= imgui.is_item_deactivated_after_edit()
+        for key, lo, hi in (("tint", -1.0, 1.0), ("brightness", -0.5, 0.5)):
+            enabled = row[key] is not None
+            ec, want = imgui.checkbox(f"set {key}##{key}", enabled)
+            if ec and want != enabled:
+                row[key] = 0.0 if want else None
+                changed = committed = True
+            imgui.same_line()
+            if row[key] is not None:
+                sc, sv = imgui.slider_float(key, float(row[key]), lo, hi)
+                if sc:
+                    row[key] = sv
+                    changed = True
+                committed |= imgui.is_item_deactivated_after_edit()
+            else:
+                imgui.text_disabled(f"{key}: kind default")
+        if imgui.small_button("remove storm"):
+            remove_index = i
+        imgui.pop_id()
+    if remove_index is not None:
+        rows.pop(remove_index)
+        changed = True
+        committed = True
+    if imgui.small_button(f"add storm##{label}"):
+        rows.append(StormOverride().model_dump())
         changed = True
         committed = True
     return changed, committed

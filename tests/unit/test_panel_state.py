@@ -389,7 +389,7 @@ def test_storms_fields_grouped_into_named_subsections():
 
     expected_groups = {
         "Hero", "Ovals", "Accents", "Barges", "Pearls", "Outbreaks",
-        "Small storms", "Mergers",
+        "Small storms", "Mergers", "Cast",
     }
     seen_groups = {
         info.json_schema_extra.get("ui")

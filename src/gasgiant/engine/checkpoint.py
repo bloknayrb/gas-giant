@@ -38,7 +38,11 @@ if TYPE_CHECKING:
 # developed under different generation; registry gains wake_lat_off and the
 # previously-unserialized aspect (restored heroes silently reset to round on
 # aspect!=1 presets before this).
-GENERATION_VERSION = 6
+# 7 = storm cast list (origin-marked vortices): the registry gains a CPU-side
+# origin marker ("seeded"/"cast"); cast storms are exempt from the population
+# cap and runtime mergers, so a resumed checkpoint must restore which entries
+# were cast for the merger/trim exemptions to hold.
+GENERATION_VERSION = 7
 
 # Registry scalar fields serialized per vortex. float64: the "restored
 # registry is identical" guarantee is exact-round-trip, and pack_ssbo computes
@@ -61,6 +65,11 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
     }
     reg["reg_cooldown"] = np.array([v.cooldown for v in vortices], dtype=np.int32)
     reg["reg_ttl"] = np.array([v.ttl for v in vortices], dtype=np.int32)
+    # Provenance marker (int-coded): 1 = cast-list storm, 0 = seeded. Restored
+    # so the merger/trim cast exemptions survive a checkpoint round-trip.
+    reg["reg_origin"] = np.array(
+        [1 if v.origin == "cast" else 0 for v in vortices], dtype=np.int32
+    )
     outbreak_links = np.full(len(s.events.outbreaks) if s.events else 0, -1, dtype=np.int32)
     if s.events is not None:
         index_of = {id(v): i for i, v in enumerate(vortices)}
@@ -131,11 +140,13 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
     cols = {name: data[f"reg_{name}"] for name in _REG_FIELDS}
     cooldown = data["reg_cooldown"] if "reg_cooldown" in data else np.zeros(n, np.int32)
     ttl = data["reg_ttl"] if "reg_ttl" in data else np.full(n, -1, np.int32)
+    origin_arr = data["reg_origin"] if "reg_origin" in data else np.zeros(n, np.int32)
     s.vortices.vortices = [
         Vortex(
             **{name: float(cols[name][i]) for name in _REG_FIELDS},
             cooldown=int(cooldown[i]),
             ttl=int(ttl[i]),
+            origin=("cast" if int(origin_arr[i]) == 1 else "seeded"),
         )
         for i in range(n)
     ]

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gasgiant.params.model import PolesParams, StormsParams, hero_latitude_cap
+from gasgiant.params.model import CastKind, PolesParams, StormsParams, hero_latitude_cap
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
@@ -91,6 +91,11 @@ class Vortex:
     # CPU-only: remaining lifetime of transient entries (merger debris);
     # -1 = immortal (every ordinary vortex).
     ttl: int = -1
+    # CPU-only provenance marker (never packed into the SSBO -- adding it to
+    # pack_ssbo would change the byte stream): "seeded" for the RNG populations,
+    # "cast" for art-directed cast-list storms. Cast storms are exempt from the
+    # population cap and runtime mergers so a director's storm survives the run.
+    origin: str = "seeded"
 
 
 @dataclass
@@ -252,7 +257,16 @@ def resolve_mergers(
 
     peer = peer_kind[:, None] & peer_kind[None, :] & (kind[:, None] == kind[None, :])
     absorb = (kind[:, None] == KIND_HERO) & (kind[None, :] == KIND_OVAL)
-    eligible = (peer | absorb | absorb.T) & live[:, None] & live[None, :]
+    # Cast-list storms are art direction: exempt from runtime mergers on BOTH
+    # axes so a director's storm neither merges away nor absorbs a neighbor. All
+    # True (byte-identical) when there are no cast entries, so the seeded-only
+    # merger behavior is unchanged.
+    not_cast = np.array([v.origin != "cast" for v in vs])
+    eligible = (
+        (peer | absorb | absorb.T)
+        & live[:, None] & live[None, :]
+        & not_cast[:, None] & not_cast[None, :]
+    )
     same_sign = (s[:, None] * s[None, :]) > 0.0
     no_cool = (cool[:, None] == 0) & (cool[None, :] == 0)
     capture = MERGE_CAPTURE_COEF * rate * (r[:, None] + r[None, :])
@@ -575,10 +589,29 @@ def generate_vortices(
     if storms.hero_companions > 0:
         _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
                              storms.hero_companions)
-    # Atomic trim, mirroring the merger-pair rule: drop the newest entries
-    # (accents/companions), never a pre-existing storm.
-    while len(reg.vortices) > MAX_VORTICES:
-        reg.vortices.pop()
+    # Cast list (art-directed storms): stamped LAST, after the cap and every
+    # seeded population, so they are byte-identical no-ops when the list is
+    # empty and never perturb a seeded draw when present.
+    if storms.cast:
+        _add_cast(reg, profiles, storms, dt, dev_steps)
+    # Kind-aware atomic trim: cast-list storms (origin=="cast") are art
+    # direction and are NEVER trimmed; drop the NEWEST non-cast entry first
+    # (accents/companions). With zero cast entries every entry is non-cast, so
+    # this pops from the end exactly like the old `reg.vortices.pop()` loop --
+    # byte-identical. If the cast alone exceeds the cap there is nothing legal
+    # to drop, so raise rather than silently mangling the population.
+    if len(reg.vortices) > MAX_VORTICES:
+        n_cast = sum(1 for v in reg.vortices if v.origin == "cast")
+        if n_cast > MAX_VORTICES:
+            raise ValueError(
+                f"the cast list contributes {n_cast} storms but the vortex cap "
+                f"is {MAX_VORTICES}; reduce storms.cast."
+            )
+        while len(reg.vortices) > MAX_VORTICES:
+            for i in range(len(reg.vortices) - 1, -1, -1):
+                if reg.vortices[i].origin != "cast":
+                    reg.vortices.pop(i)
+                    break
     return reg
 
 
@@ -665,6 +698,58 @@ def _add_hero_companions(
             )
 
 
+def _add_cast(
+    reg: VortexRegistry,
+    profiles: LatProfiles,
+    storms: StormsParams,
+    dt: float | None,
+    dev_steps: int,
+) -> None:
+    """Stamp the art-directed cast-list storms. DETERMINISTIC -- no RNG draws --
+    so toggling, reordering, or editing the cast never perturbs any seeded
+    population (an empty cast is a strict no-op). Each entry names its RENDERED
+    longitude, drift-compensated over the dev run like the T1 pins. Cast storms
+    carry origin="cast", which exempts them from the population cap (the
+    kind-aware trim) and from runtime mergers (resolve_mergers). Appearance
+    falls back to the per-kind seeded defaults (copied from the seeded blocks in
+    generate_vortices) when tint/brightness are None."""
+    for entry in storms.cast:
+        lat = float(np.deg2rad(entry.lat_deg))
+        lon = drift_compensated_lon(profiles, lat, entry.lon_deg, dt, dev_steps)
+        sign = _ambient_sign(profiles, lat)
+        kind = entry.kind
+        # (KIND_* const, base strength law, default tint, default brightness).
+        # barge's base is negative so it OPPOSES the ambient shear sign, matching
+        # the seeded brown-barge convention (s = -ambient_sign * 0.006).
+        if kind == CastKind.HERO:
+            k, base, d_tint, d_bright = (
+                KIND_HERO, 0.045 * storms.hero_strength,
+                storms.hero_tint, storms.hero_brightness,
+            )
+        elif kind == CastKind.OVAL:
+            k, base, d_tint, d_bright = KIND_OVAL, 0.012 * (entry.radius / 0.03), 0.1, 0.22
+        elif kind == CastKind.BARGE:
+            k, base, d_tint, d_bright = KIND_BARGE, -0.006, 0.35, -0.28
+        else:  # CastKind.PEARL
+            k, base, d_tint, d_bright = KIND_PEARL, 0.008, 0.05, 0.25
+        s = sign * base * entry.strength_scale
+        tint = entry.tint if entry.tint is not None else d_tint
+        brightness = entry.brightness if entry.brightness is not None else d_bright
+        # Cast heroes get the GRS wake convention (WNW, biased equatorward); the
+        # other kinds carry no wake (wake_dir 0). Every kind honors entry.aspect.
+        wake_dir = -1.0 if kind == CastKind.HERO else 0.0
+        wake_lat_off = (
+            0.5 * entry.radius * (1.0 if lat < 0.0 else -1.0)
+            if kind == CastKind.HERO else 0.0
+        )
+        reg.vortices.append(
+            Vortex(lat, lon, entry.radius, s, k,
+                   tint=tint, brightness=brightness,
+                   wake_dir=wake_dir, wake_lat_off=wake_lat_off,
+                   aspect=entry.aspect, origin="cast")
+        )
+
+
 def _seed_convergent_pairs(
     reg: VortexRegistry,
     rng: np.random.Generator,
@@ -679,7 +764,12 @@ def _seed_convergent_pairs(
     longitude gap so capture happens near that step. A fixed gap range cannot
     work — du/dphi at zone centers is ~1-2, an order short of closing a
     Poisson-disc gap in 500 steps. Targets alternate early/late so finished
-    maps show both matured products and a still-live debris collar."""
+    maps show both matured products and a still-live debris collar.
+
+    No cast handling here: this runs BEFORE _add_cast in generate_vortices, so
+    the registry holds no origin=="cast" entries yet -- convergent pairs never
+    pick a cast storm as a host, and the cast exemption lives only in the
+    runtime resolve_mergers path."""
     pair_index = 0
     for center, width in zones:
         if rng.uniform() >= 0.5 * merge_rate:

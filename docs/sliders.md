@@ -66,6 +66,14 @@ Internal pacing of the baroclinic storm generator — leave at default (baroclin
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### enabled
+
+`solver.baroclinic.enabled` &mdash; toggle (on/off), default **`False`**, tier `restart`.
+
+Inject the evolving baroclinic vorticity source into the vorticity solver (adds physically-grounded mid-latitude storms; requires solver type=vorticity). Off = plain v1.6. No rand: randomize() must never silently enable it.
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
+
 ### gain
 
 `solver.baroclinic.gain` &mdash; range **0 to 8**, default **2**, tier `restart`.
@@ -623,6 +631,14 @@ Brown-barge cyclone population multiplier (belts)
 <table><tr>
 <td align="center"><img src="img/sliders/storms__barge_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2.989</sub></td><td align="center"><img src="img/sliders/storms__barge_density__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
+
+### cast
+
+`storms.cast` &mdash; list editor, default **empty list**, tier `restart`.
+
+Cast list: storms placed by hand (kind + rendered position + size + optional color). Each entry is stamped verbatim after the seeded populations, exempt from the population cap and runtime mergers, so a director's storm survives the whole run where it was placed. Empty (the default) = no cast, byte-identical to the seeded-only field. Capped at 16 entries
+
+_List of hand-placed sub-records edited in a dedicated GUI panel &mdash; documented as text; no rendered example._
 
 ### hero aspect
 

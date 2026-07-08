@@ -390,6 +390,84 @@ def hero_latitude_cap(hero_radius: float) -> float:
     return 63.0 - 206.3 * hero_radius
 
 
+class CastKind(StrEnum):
+    """The storm archetype a cast entry stamps. Each maps to a KIND_* constant
+    plus a per-kind base strength law and sign convention in the generator
+    (``sim/vortices.py::_add_cast``)."""
+    HERO = "hero"     # GRS-class giant anticyclone (wake + solid-core capable)
+    OVAL = "oval"     # white-oval anticyclone
+    BARGE = "barge"   # brown-barge cyclone (opposes the ambient shear sign)
+    PEARL = "pearl"   # small bright string-of-pearls oval
+
+
+class StormOverride(_Params):
+    """One art-directed storm placed by hand (the 'cast list'): kind, rendered
+    position, size, and an optional appearance override. Strict (unknown keys
+    error, like every other params group). Cast entries are DETERMINISTIC (no
+    RNG, no ``rand`` metadata) -- they are placed verbatim after the seeded
+    populations and are exempt from the population cap and runtime mergers, so
+    a director's storm survives the whole development run where the artist put
+    it. ``lat_deg``/``lon_deg`` name the RENDERED (end-of-dev-run) position:
+    the generator inverse-compensates the zonal drift (like the T1 pins) so the
+    storm lands on target when the snapshot is taken."""
+
+    kind: CastKind = pfield(
+        CastKind.OVAL, tier=Tier.RESTART, ui="Cast",
+        description="Which storm archetype to stamp: a GRS-class hero "
+                    "anticyclone, a white oval, a brown-barge cyclone, or a "
+                    "small pearl. The kind selects the base velocity law, the "
+                    "rotation sign, and the default appearance",
+    )
+    lat_deg: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-68.0, hi=68.0, ui="Cast",
+        description="Rendered latitude of the storm (degrees, north positive). "
+                    "The effective range is radius-coupled (see the cast "
+                    "validator) so the stamp stays clear of the 63 deg "
+                    "storm-free exchange band, same rule as the hero pin",
+    )
+    lon_deg: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-180.0, hi=180.0, ui="Cast",
+        description="Rendered longitude of the storm at the final snapshot "
+                    "(degrees, -180..180). Drift-compensated at generation "
+                    "(like the T1 longitude pins): the generator inverse-"
+                    "compensates the eastward zonal drift over the development "
+                    "run so the storm lands where you asked",
+    )
+    radius: float = pfield(
+        0.03, tier=Tier.RESTART, lo=0.01, hi=0.15, ui="Cast",
+        description="Core radius, radians of arc (1 rad = 57.3 deg; default "
+                    "0.03 rad is about 1.7 deg). Larger radii tighten the "
+                    "latitude cap (the stamp must stay clear of the exchange "
+                    "band)",
+    )
+    strength_scale: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, ui="Cast",
+        description="Multiplier on the per-kind base vorticity law: hero "
+                    "0.045*hero_strength, oval 0.012*(radius/0.03), barge "
+                    "-0.006, pearl 0.008. 1.0 = the kind's default strength; "
+                    "0 = a color-only stamp with no circulation",
+    )
+    tint: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-1.0, hi=1.0, ui="Cast",
+        description="Storm tint (T3): positive = warm/red end of the "
+                    "storm_tints gradient, negative = cool. None = the kind "
+                    "default (hero: hero_tint; oval 0.1; barge 0.35; pearl "
+                    "0.05). Applied verbatim (bypasses stamp_contrast)",
+    )
+    brightness: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-0.5, hi=0.5, ui="Cast",
+        description="Storm brightness (T0); negative = a dark storm. None = "
+                    "the kind default (hero: hero_brightness; oval 0.22; barge "
+                    "-0.28; pearl 0.25). Applied verbatim (bypasses "
+                    "stamp_contrast)",
+    )
+    aspect: float = pfield(
+        1.0, tier=Tier.RESTART, lo=1.0, hi=3.0, ui="Cast",
+        description="lon:lat elongation of the stamp (1.0 = round). Stretches "
+                    "the iso-contours along longitude, like hero_aspect",
+    )
+
+
 class StormsParams(_Params):
     """Field declaration order matches the panel's Hero / Ovals / Accents /
     Barges / Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
@@ -709,6 +787,35 @@ class StormsParams(_Params):
         description="Brightness of the transient turbulent collar a fresh "
                     "merger leaves behind (inert while merge_rate is 0)",
     )
+
+    # -- Cast (art-directed storms) ----------------------------------------
+    cast: list[StormOverride] = pfield(
+        factory=list, tier=Tier.RESTART, adv=True, ui="Cast",
+        description="Cast list: storms placed by hand (kind + rendered "
+                    "position + size + optional color). Each entry is stamped "
+                    "verbatim after the seeded populations, exempt from the "
+                    "population cap and runtime mergers, so a director's storm "
+                    "survives the whole run where it was placed. Empty (the "
+                    "default) = no cast, byte-identical to the seeded-only "
+                    "field. Capped at 16 entries",
+    )
+
+    @model_validator(mode="after")
+    def _validate_cast(self) -> StormsParams:
+        if len(self.cast) > 16:
+            raise ValueError(
+                f"storms.cast has {len(self.cast)} entries; the cap is 16"
+            )
+        for i, entry in enumerate(self.cast):
+            cap = hero_latitude_cap(entry.radius)
+            if abs(entry.lat_deg) > cap:
+                raise ValueError(
+                    f"storms.cast[{i}].lat_deg={entry.lat_deg} exceeds the "
+                    f"radius-coupled limit +-{cap:.1f} deg "
+                    f"(radius={entry.radius}); the stamp would smear into the "
+                    f"63 deg storm-free exchange band. Lower lat_deg or radius."
+                )
+        return self
 
     @model_validator(mode="after")
     def _validate_hero_latitude(self) -> StormsParams:
