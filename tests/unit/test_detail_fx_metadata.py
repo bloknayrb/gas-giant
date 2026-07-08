@@ -37,6 +37,8 @@ EXPECTED_FX_LEVERS = {
     "zone_texture",
     "mottle",
     "polar_filaments",
+    "cirrus_fibers",
+    "streak_mute",
 }
 
 

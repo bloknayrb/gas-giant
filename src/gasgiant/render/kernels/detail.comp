@@ -92,6 +92,26 @@ uniform vec3 u_offset_mottle;     // subseed("detail-mottle")
 // Polar folded-filamentary region: ridged, multi-octave, flow-folded lace at
 // the caps. Only meaningful with the polar route on (valid patch velocity).
 uniform float u_polar_filaments;
+// Combed-fiber cirrus over the ELONGATED bright-cloud stamps (companion/
+// accent streaks, Neptune's methane-cirrus class). Stamping strands into the
+// tracer was FALSIFIED (rotation winds them into hooks, hyperviscosity
+// smears them — docs/roadmap.md), so they are synthesized here,
+// post-advection. NOT the vortex SSBO — a small CPU list of drifted
+// bright-cloud ellipses, the u_heroes mechanism.
+uniform float u_cirrus_fibers;
+uniform float u_cirrus_fiber_freq;  // strands across the streak half-width
+uniform vec3 u_offset_cirrus;       // subseed("detail-cirrus")
+uniform int u_cloud_count;
+uniform vec4 u_clouds[12];          // xyz = drifted center, w = r_core
+uniform float u_cloud_aspect[12];
+// (t0_stamp, t1_stamp, polar_fade, 0) latitude LUT: the band-color baseline
+// the T0-excess cloud mask is measured against.
+uniform sampler2D u_profile_stamp;
+// Mute the WHOLE filament-streak accumulator (base + intermittency gate +
+// belt floor): the base streak has a speed/shear floor and no zero lever, so
+// smooth laminar planets enabling detail.intensity only for cirrus_fibers
+// would gain planet-wide flow-grain. 0 => *1.0, byte-identical.
+uniform float u_streak_mute;
 #endif
 
 #ifdef SPREAD
@@ -315,6 +335,10 @@ void main() {
     // Additive, NO clamp: w_streak legitimately exceeds 1 near heroes (the
     // 1+1.4*hero factor) and clamping would change the default behavior.
     w_streak += u_belt_texture * 0.45 * belt * gate * (1.0 - routeW);
+    // After the belt floor, so the mute kills the WHOLE accumulator no matter
+    // which of its contributors are active (a multiply before the += would
+    // let the floor re-inflate it).
+    w_streak *= (1.0 - u_streak_mute);
 #endif
 
     // Calm the band-aligned filament weight inside the hero (vortex-aligned
@@ -553,6 +577,86 @@ void main() {
         // (gates were creeping up monotonically with dev_steps).
         float lace = clamp(ridge - 0.13, -0.5, 0.42);
         d += u_polar_filaments * routeW * 2.8 * lace;
+    }
+
+    // Combed-fiber cirrus: multi-strand parallel sheared filaments inside the
+    // elongated bright-cloud streaks. Mask = dilated analytic ellipse at the
+    // DRIFTED cloud center (geometric confinement: no false positives on
+    // bright band cells) INTERSECTED with the T0 excess over the band-stamp
+    // baseline (pins fibers to the rendered cloud material, which lags and
+    // hooks relative to the analytic center — the anti-"sticker" half).
+    // Strands = thresholded anisotropic fbm in a FLOW-ORIENTED cloud frame,
+    // high frequency across-flow / low along-flow (the stamp's ~7:1 combing
+    // recipe at render resolution), carve-dominant: dark inter-strand lanes
+    // do the work, the streak itself supplies the brightness. Guarded =>
+    // byte-identical when off; q >= 2.2 early-out adds exactly 0.0 outside.
+    if (u_cirrus_fibers > 0.0 && u_cloud_count > 0 && routeW < 1.0) {
+        // ONE short flow-backtrace shared by all clouds — longer folds shred
+        // thin threads into grain (the belt_texture_fine / FFR lesson).
+        vec2 srcC = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 0.7);
+        vec3 pcC = spherePt(srcC);
+        // Local flow direction: strands comb along the actual wind, so each
+        // feature's own swirl curves them slightly (a fixed east-west comb
+        // reads mechanical). Near-zero flow falls back to east-west.
+        float ang = (dot(vel, vel) > 1e-6) ? atan(vel.y, vel.x) : 0.0;
+        float ca = cos(ang);
+        float sa = sin(ang);
+        // T0 excess over the 1-D band stamp baseline. The baseline is
+        // latitude-only (band variance / faded sector live in the tracer,
+        // not the LUT), so the lo threshold carries margin.
+        float t0base = texture(u_profile_stamp,
+                               vec2(clamp((0.5 * PI - ll.y) / PI, 0.0, 1.0), 0.5)).r;
+        float excess = smoothstep(0.03, 0.14, tr.r - t0base);
+        if (excess > 0.0) {
+            float fib = 0.0;
+            for (int i = 0; i < u_cloud_count; ++i) {
+                vec3 c = u_clouds[i].xyz;
+                if (dot(pc, c) <= 0.0) continue;      // near-hemisphere gate
+                float rc = max(u_clouds[i].w, 1e-4);
+                float asp = max(u_cloud_aspect[i], 1.0);
+                vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
+                float ewl = length(ew);
+                if (ewl < 1e-4) continue;             // degenerate polar guard
+                vec3 e1 = ew / ewl;                   // east at the cloud center
+                vec3 e2 = cross(c, e1);               // north at the cloud center
+                // Window in the stamp's east-west metric, dilated 1.5x
+                // along-streak (sheared fiber tails run past the soft lobe),
+                // at the UN-backtraced point so the mask stays pinned over
+                // the streak; only the strand TEXTURE is flow-warped.
+                float q = length(vec2(dot(pc, e1) / (1.5 * asp), dot(pc, e2))) / rc;
+                if (q >= 2.2) continue;               // exact-zero outside
+                float win = exp(-0.8 * q * q);
+                // Pixel-resolvability guard (the striation atten, per-cloud):
+                // across-flow strand spacing ~ rc/freq radians; fade the
+                // whole contribution as it nears the output pixel so
+                // unresolvable strands soften instead of aliasing.
+                float wl_px = rc / u_cirrus_fiber_freq
+                            * float(u_full_size.x) / (2.0 * PI);
+                float atten = smoothstep(1.5, 3.0, wl_px);
+                if (atten <= 0.0) continue;
+                // Flow-oriented strand frame at the BACKTRACED point.
+                vec3 f1 = ca * e1 + sa * e2;          // along-flow
+                vec3 f2 = ca * e2 - sa * e1;          // across-flow
+                float along = dot(pcC, f1) / rc;
+                float across = dot(pcC, f2) / rc;
+                // Anisotropic strand noise, ~7:1 along:across, decorrelated
+                // per cloud (float(i)*3.7) so companions are not clone stamps.
+                float f = fbm(vec3(along * u_cirrus_fiber_freq * 0.14,
+                                   across * u_cirrus_fiber_freq,
+                                   float(i) * 3.7) + u_offset_cirrus, 3, 2.0, 0.5);
+                // Ragged termination + per-strand brightness variation: a
+                // low-frequency along-dominant modulation, NOT the mask edge.
+                float rag = fbm(vec3(along * 1.4, across * 4.0,
+                                     11.0 + float(i) * 3.7) + u_offset_cirrus.zxy,
+                                2, 2.0, 0.5);
+                float strand = smoothstep(-0.10, 0.50, f) - 0.5;   // signed
+                strand *= (strand > 0.0) ? 0.55 : 1.0;             // carve-dominant
+                fib += win * atten * strand
+                     * (0.35 + 0.65 * smoothstep(-0.35, 0.30, rag));
+            }
+            d += 0.9 * u_cirrus_fibers * (1.0 - routeW) * excess
+               * clamp(fib, -1.0, 1.0);
+        }
     }
 #endif
 
