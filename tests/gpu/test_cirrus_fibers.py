@@ -80,7 +80,7 @@ def _cloud_windows(sim, shape) -> np.ndarray:
         ew = np.cross([0.0, 1.0, 0.0], c)
         e1 = ew / np.linalg.norm(ew)
         e2 = np.cross(c, e1)
-        d1 = (px * e1[0] + py * e1[1] + pz * e1[2]) / (1.5 * max(asp, 1.0))
+        d1 = (px * e1[0] + py * e1[1] + pz * e1[2]) / (1.8 * max(asp, 1.0))
         d2 = px * e2[0] + py * e2[1] + pz * e2[2]
         q = np.hypot(d1, d2) / max(rc, 1e-4)
         near = (px * c[0] + py * c[1] + pz * c[2]) > 0.0

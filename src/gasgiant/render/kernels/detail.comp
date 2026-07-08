@@ -595,10 +595,17 @@ void main() {
         // thin threads into grain (the belt_texture_fine / FFR lesson).
         vec2 srcC = backtraceLL(u_vel, 0, ll, u_stretch * TAU_BASE * 0.7);
         vec3 pcC = spherePt(srcC);
-        // Local flow direction: strands comb along the actual wind, so each
-        // feature's own swirl curves them slightly (a fixed east-west comb
-        // reads mechanical). Near-zero flow falls back to east-west.
-        float ang = (dot(vel, vel) > 1e-6) ? atan(vel.y, vel.x) : 0.0;
+        // Strand ORIENTATION: fold the local flow angle to a LINE orientation
+        // (mod pi, so east/west flow comb the same) and soften it x0.5 toward
+        // zonal. The raw per-pixel flow angle rotates a full turn around each
+        // cloud's own vortex, which combed the strands into closed concentric
+        // loops — the review's "fingerprint whorl" kill. Folded + softened,
+        // strands stay open quasi-zonal filaments with a gentle shear fan.
+        float ang = 0.0;
+        if (dot(vel, vel) > 1e-6) {
+            float a2 = 2.0 * atan(vel.y, vel.x);
+            ang = 0.25 * atan(sin(a2), cos(a2));
+        }
         float ca = cos(ang);
         float sa = sin(ang);
         // T0 excess over the 1-D band stamp baseline. The baseline is
@@ -608,7 +615,13 @@ void main() {
                                vec2(clamp((0.5 * PI - ll.y) / PI, 0.0, 1.0), 0.5)).r;
         float excess = smoothstep(0.03, 0.14, tr.r - t0base);
         if (excess > 0.0) {
-            float fib = 0.0;
+            // Dominance-weighted blend (win^2-normalized) instead of a plain
+            // sum: where two clouds overlap, the nearer cloud's strand field
+            // dominates rather than interfering — additive superposition of
+            // two comb patterns produced a herringbone moiré under review.
+            float num = 0.0;
+            float den = 0.0;
+            float win_max = 0.0;
             for (int i = 0; i < u_cloud_count; ++i) {
                 vec3 c = u_clouds[i].xyz;
                 if (dot(pc, c) <= 0.0) continue;      // near-hemisphere gate
@@ -619,19 +632,23 @@ void main() {
                 if (ewl < 1e-4) continue;             // degenerate polar guard
                 vec3 e1 = ew / ewl;                   // east at the cloud center
                 vec3 e2 = cross(c, e1);               // north at the cloud center
-                // Window in the stamp's east-west metric, dilated 1.5x
-                // along-streak (sheared fiber tails run past the soft lobe),
-                // at the UN-backtraced point so the mask stays pinned over
-                // the streak; only the strand TEXTURE is flow-warped.
-                float q = length(vec2(dot(pc, e1) / (1.5 * asp), dot(pc, e2))) / rc;
+                // Window in the stamp's east-west metric, dilated 1.8x
+                // along-streak (fiber tails trail past the soft lobe rather
+                // than stopping at a sticker edge), at the UN-backtraced
+                // point so the mask stays pinned over the streak; only the
+                // strand TEXTURE is flow-warped.
+                float q = length(vec2(dot(pc, e1) / (1.8 * asp), dot(pc, e2))) / rc;
                 if (q >= 2.2) continue;               // exact-zero outside
                 float win = exp(-0.8 * q * q);
+                // Per-cloud frequency jitter (golden-ratio spread, ±25%):
+                // identical wavelength across clouds was the clone-stamp tell.
+                float freq_i = u_cirrus_fiber_freq
+                             * (0.75 + 0.5 * fract(float(i) * 0.618034));
                 // Pixel-resolvability guard (the striation atten, per-cloud):
                 // across-flow strand spacing ~ rc/freq radians; fade the
                 // whole contribution as it nears the output pixel so
                 // unresolvable strands soften instead of aliasing.
-                float wl_px = rc / u_cirrus_fiber_freq
-                            * float(u_full_size.x) / (2.0 * PI);
+                float wl_px = rc / freq_i * float(u_full_size.x) / (2.0 * PI);
                 float atten = smoothstep(1.5, 3.0, wl_px);
                 if (atten <= 0.0) continue;
                 // Flow-oriented strand frame at the BACKTRACED point.
@@ -639,23 +656,39 @@ void main() {
                 vec3 f2 = ca * e2 - sa * e1;          // across-flow
                 float along = dot(pcC, f1) / rc;
                 float across = dot(pcC, f2) / rc;
-                // Anisotropic strand noise, ~7:1 along:across, decorrelated
-                // per cloud (float(i)*3.7) so companions are not clone stamps.
-                float f = fbm(vec3(along * u_cirrus_fiber_freq * 0.14,
-                                   across * u_cirrus_fiber_freq,
-                                   float(i) * 3.7) + u_offset_cirrus, 3, 2.0, 0.5);
-                // Ragged termination + per-strand brightness variation: a
-                // low-frequency along-dominant modulation, NOT the mask edge.
+                // Ragged termination + per-strand brightness variation: an
+                // amplitude modulation, NOT the mask edge.
                 float rag = fbm(vec3(along * 1.4, across * 4.0,
                                      11.0 + float(i) * 3.7) + u_offset_cirrus.zxy,
                                 2, 2.0, 0.5);
+                // Wavelength domain-warp: must be LOWER frequency than the
+                // strand spacing or it shreds strands into dots (a first cut
+                // reused the finer rag field here and did exactly that) —
+                // this one just drifts/waves the comb so no single frequency
+                // survives.
+                float wav = fbm(vec3(along * 0.7, across * 0.7,
+                                     5.0 + float(i) * 3.7) + u_offset_cirrus.yzx,
+                                2, 2.0, 0.5);
+                // Anisotropic strand noise, ~7:1 along:across, decorrelated
+                // per cloud (float(i)*3.7).
+                float f = fbm(vec3(along * freq_i * 0.14,
+                                   (across + 1.0 * wav) * freq_i,
+                                   float(i) * 3.7) + u_offset_cirrus, 3, 2.0, 0.5);
+                // BRIGHT-dominant polarity: real Neptune strands are bright
+                // filaments over the darker deck; the first (carve-dominant)
+                // cut read as grooves engraved into the cloud.
                 float strand = smoothstep(-0.10, 0.50, f) - 0.5;   // signed
-                strand *= (strand > 0.0) ? 0.55 : 1.0;             // carve-dominant
-                fib += win * atten * strand
+                strand *= (strand > 0.0) ? 1.0 : 0.45;
+                float wgt = win * win;
+                num += wgt * atten * strand
                      * (0.35 + 0.65 * smoothstep(-0.35, 0.30, rag));
+                den += wgt;
+                win_max = max(win_max, win);
             }
-            d += 0.9 * u_cirrus_fibers * (1.0 - routeW) * excess
-               * clamp(fib, -1.0, 1.0);
+            if (den > 1e-5) {
+                d += 0.9 * u_cirrus_fibers * (1.0 - routeW) * excess * win_max
+                   * clamp(num / den, -1.0, 1.0);
+            }
         }
     }
 #endif
