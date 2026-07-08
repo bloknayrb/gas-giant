@@ -56,6 +56,7 @@ def _make_app(active=None):
     app._pending_overwrite = None
     app._pending_delete = None
     app._preset_cache = []
+    app._thumb_params = {}
     app.panel_state = panels.PanelState()
     app.toasts = main.Toasts()
     return app

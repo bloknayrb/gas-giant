@@ -30,6 +30,7 @@ from pydantic import ValidationError
 
 from gasgiant.app.panels import _TIER_GLYPHS, PanelState, draw_params_panel
 from gasgiant.app.sphere_preview import SpherePreview
+from gasgiant.app.thumbnails import ThumbnailManager
 from gasgiant.app.viewport import (
     EquirectViewport,
     lonlat_to_screen,
@@ -130,6 +131,10 @@ class UndoRecord(NamedTuple):
 
 PREVIEW_WIDTH = 2048
 SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
+
+# T6: pixel size of a preset thumbnail as drawn in the combo (2:1, like the map).
+THUMB_DISPLAY_W = 88.0
+THUMB_DISPLAY_H = THUMB_DISPLAY_W / 2.0
 
 # Export-resolution presets for the combo next to the Export button. Widths are
 # within ExportParams.width's (512, 16384) bounds; height is always width // 2.
@@ -495,6 +500,8 @@ class StudioApp:
         self.sim: Simulation | None = None
         self.viewport: EquirectViewport | None = None
         self.sphere: SpherePreview | None = None
+        # T6 preset thumbnails: built in init_gl once the GL context exists.
+        self._thumbs: ThumbnailManager | None = None
         self.params = self._load_session_or_default()
         # Working copy the panel edits each frame. Distinct from self.params
         # (the committed/engine state): a heavy (velocity/restart) edit lives in
@@ -525,6 +532,10 @@ class StudioApp:
         # Cached merged (factory + user) dropdown list; refreshed on save/load and
         # by the explicit "Refresh presets" button, never re-enumerated per frame.
         self._preset_cache: list[tuple[str, str]] = available_presets()
+        # T6: (name, source) -> loaded PlanetParams (or None if it failed to
+        # load), so the combo can request/show a thumbnail without re-parsing the
+        # preset JSON every frame. Cleared on Refresh presets.
+        self._thumb_params: dict[tuple[str, PresetSource], PlanetParams | None] = {}
         # T15 epoch recipes: cached (stem, label, description) once — recipes are
         # immutable package data, so this never re-enumerates per frame.
         self._recipe_cache: list[tuple[str, str, str]] = _load_recipe_menu()
@@ -661,11 +672,14 @@ class StudioApp:
         self.sim = sim
         self.viewport = viewport
         self.sphere = sphere
+        self._thumbs = ThumbnailManager(gpu)
         log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
         self._last_export_dir = _load_last_export_dir()  # prefs need a live runner
 
     def shutdown(self) -> None:
         self._save_session()
+        if self._thumbs is not None:
+            self._thumbs.release()
 
     def _load_session_or_default(self) -> PlanetParams:
         """Restore the last session if present, else the default preset. Sets
@@ -758,6 +772,28 @@ class StudioApp:
 
     def _refresh_presets(self) -> None:
         self._preset_cache = available_presets()
+        self._thumb_params.clear()  # a re-enumerated user preset may have changed
+
+    def _thumb_params_for(
+        self, name: str, source: PresetSource
+    ) -> PlanetParams | None:
+        """Load (and cache) the params for a combo entry so its thumbnail can be
+        requested/shown without re-parsing the JSON each frame. A load failure
+        caches None so the corrupt preset is skipped (never re-tried per frame)
+        and never crashes the combo -- loading it is what surfaces the error."""
+        key = (name, source)
+        if key in self._thumb_params:
+            return self._thumb_params[key]
+        try:
+            params = (
+                load_user_preset(name)
+                if source == PresetSource.USER
+                else load_factory_preset(name)
+            )
+        except (PresetError, OSError, ValueError):
+            params = None
+        self._thumb_params[key] = params
+        return params
 
     def _load_preset_entry(self, name: str, source: PresetSource) -> None:
         """Load a factory/user preset by (name, source) through the shared
@@ -1320,6 +1356,20 @@ class StudioApp:
         if imgui.begin_combo("##preset", self._active_label()):
             for name, source in self._preset_cache:
                 label = f"user/{name}" if source == PresetSource.USER else name
+                # T6: a small thumbnail to the left of each entry. Requesting it
+                # only while the combo is open means we never render a preview for
+                # a preset nobody looked at; get_texture returns None (placeholder
+                # box) until the tick-sliced render finishes and caches it.
+                tp = self._thumb_params_for(name, source)
+                if tp is not None and self._thumbs is not None:
+                    self._thumbs.request(tp)
+                    tex = self._thumbs.get_texture(tp)
+                    size = imgui.ImVec2(THUMB_DISPLAY_W, THUMB_DISPLAY_H)
+                    if tex is not None:
+                        imgui.image(imgui.ImTextureRef(tex.glo), size)
+                    else:
+                        imgui.dummy(size)  # placeholder box while it renders
+                    imgui.same_line()
                 if imgui.selectable(label, False)[0]:
                     self._load_preset_entry(name, source)
             imgui.end_combo()
@@ -2451,6 +2501,11 @@ class StudioApp:
         self.frame_perf.begin()
         self._poll_dialog()
         self._run_export_slice()
+        # T6: advance the in-flight preset thumbnail one tick-slice per frame
+        # (never blocks). Paused during export so it can't steal GL-thread time
+        # from the tiled render in flight.
+        if self._thumbs is not None and self._export is None:
+            self._thumbs.advance()
         self._check_baroclinic_status()
         self._frame_count += 1
         if self._smoke_frames and self._frame_count >= self._smoke_frames:

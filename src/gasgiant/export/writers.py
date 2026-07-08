@@ -34,6 +34,22 @@ def write_png16_rgb_u16(path: Path, rgb_u16: np.ndarray, compression: int = 2) -
         raise OSError(f"cv2.imwrite failed for {path}")
 
 
+def write_png8_rgb(path: Path, rgb: np.ndarray, compression: int = 2) -> None:
+    """(H, W, 3+) float32 0..1 -> 8-bit sRGB PNG. Values are clipped; only the
+    first three channels are written (an rgba color map drops its alpha). Used by
+    the contact-sheet tool and the GUI preset thumbnails -- 8-bit is plenty for a
+    small preview and keeps the cache cheap. BGR write order matches the other
+    writers (OpenCV convention)."""
+    if rgb.ndim != 3 or rgb.shape[2] < 3:
+        raise ValueError(f"expected (H, W, 3+) array, got {rgb.shape}")
+    u8 = np.clip(rgb[..., :3], 0.0, 1.0)
+    u8 = (u8 * 255.0 + 0.5).astype(np.uint8)
+    bgr = u8[..., ::-1]  # OpenCV writes BGR order
+    ok = cv2.imwrite(str(path), bgr, [cv2.IMWRITE_PNG_COMPRESSION, int(compression)])
+    if not ok:
+        raise OSError(f"cv2.imwrite failed for {path}")
+
+
 def write_png16_gray(path: Path, gray: np.ndarray, compression: int = 2) -> None:
     """(H, W) float32 0..1 -> 16-bit grayscale PNG."""
     if gray.ndim != 2:

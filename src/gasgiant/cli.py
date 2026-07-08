@@ -76,6 +76,29 @@ def main(argv: list[str] | None = None) -> int:
     ckpt.add_argument("--seed", type=int, default=None, help="override the preset seed")
     ckpt.add_argument("--out", type=Path, required=True, help="output checkpoint .npz path")
 
+    sht = sub.add_parser(
+        "sheet",
+        help="render a seed contact sheet: one small color map per seed in a grid",
+    )
+    sht.add_argument("--preset", default=None, help="factory preset name or .json path")
+    sht.add_argument(
+        "--recipe", default=None,
+        help="epoch recipe to overlay (same precedence as export's --recipe)",
+    )
+    sht.add_argument("--seeds", default=None,
+                     help="explicit seed list, comma- or space-separated (e.g. \"1,2,3\")")
+    sht.add_argument("--count", type=int, default=None,
+                     help="number of consecutive seeds to render (with --seed0)")
+    sht.add_argument("--seed0", type=int, default=None,
+                     help="first seed for --count (default 0)")
+    sht.add_argument("--res", type=int, default=256,
+                     help="per-cell equirect width in pixels (2:1 cells; default 256)")
+    sht.add_argument("--dev-steps", type=int, default=None,
+                     help="override the preset's development step count (faster previews)")
+    sht.add_argument("--cols", type=int, default=None,
+                     help="grid columns (default: ceil(sqrt(N)) for a square-ish sheet)")
+    sht.add_argument("--out", type=Path, required=True, help="output contact-sheet .png path")
+
     val = sub.add_parser("validate", help="run seam/pole checks on an exported map set")
     val.add_argument("mapset", type=Path)
 
@@ -104,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         return _checkpoint(args)
     if args.command == "palette-fit":
         return _palette_fit(args)
+    if args.command == "sheet":
+        return _sheet(args)
     return _validate(args)
 
 
@@ -312,6 +337,91 @@ def _palette_fit(args: argparse.Namespace) -> int:
     params.appearance.palette_rows = palette_rows_from_fit(doc["palette_rows"])
     save_preset(params, args.out)
     print(f"fit {len(doc['palette_rows'])} palette rows from {args.image} -> {args.out}")
+    return 0
+
+
+def _resolve_seeds(args: argparse.Namespace) -> tuple[list[int] | None, int]:
+    """Resolve the seed list for `gasgiant sheet` from either an explicit
+    --seeds list or --count/--seed0. Returns ``(seeds, 0)`` on success or
+    ``(None, 2)`` on a user error (message printed). --seeds wins when both
+    are given."""
+    if args.seeds is not None:
+        try:
+            seeds = [int(tok) for tok in args.seeds.replace(",", " ").split()]
+        except ValueError:
+            print("error: --seeds must be a comma/space-separated list of integers",
+                  file=sys.stderr)
+            return None, 2
+        if not seeds:
+            print("error: --seeds is empty", file=sys.stderr)
+            return None, 2
+        return seeds, 0
+    if args.count is not None:
+        if args.count < 1:
+            print("error: --count must be >= 1", file=sys.stderr)
+            return None, 2
+        s0 = args.seed0 if args.seed0 is not None else 0
+        return list(range(s0, s0 + args.count)), 0
+    print("error: provide --seeds \"1,2,3\" or --count N [--seed0 K]", file=sys.stderr)
+    return None, 2
+
+
+def _sheet(args: argparse.Namespace) -> int:
+    """Render a seed contact sheet: reuse ONE Simulation across all seeds
+    (no per-seed GPU leak), re-seeding it per iteration, and tile the color
+    maps into a grid PNG."""
+    from gasgiant.engine import Simulation
+    from gasgiant.export.sheet import run_sheet
+    from gasgiant.params.presets import (
+        PresetError,
+        apply_overlay,
+        load_recipe,
+        resolve_preset,
+    )
+
+    if args.res < 2 or args.res % 2 != 0:
+        print("error: --res must be a positive even number (2:1 maps)", file=sys.stderr)
+        return 2
+    if args.cols is not None and args.cols < 1:
+        print("error: --cols must be >= 1", file=sys.stderr)
+        return 2
+
+    overlay: dict | None = None
+    base_name = args.preset
+    if args.recipe is not None:
+        try:
+            recipe_base, overlay, _meta = load_recipe(args.recipe)
+        except PresetError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if base_name is None:
+            base_name = recipe_base
+    if base_name is None:
+        base_name = "gas_giant_warm"
+    try:
+        params = resolve_preset(base_name)
+        if overlay is not None:
+            params = apply_overlay(params, overlay)
+    except (PresetError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if params.mask.file is not None and not Path(params.mask.file).is_file():
+        print(f"error: mask file not found: {params.mask.file}", file=sys.stderr)
+        return 2
+
+    seeds, err = _resolve_seeds(args)
+    if seeds is None:
+        return err
+
+    out = args.out if args.out.suffix else args.out.with_suffix(".png")
+    started = time.perf_counter()
+    run_sheet(
+        Simulation, params, seeds, out,
+        width=args.res, dev_steps=args.dev_steps, cols=args.cols,
+    )
+    elapsed = time.perf_counter() - started
+    print(f"wrote {len(seeds)}-seed contact sheet ({args.res}px cells) to {out} "
+          f"in {elapsed:.1f}s")
     return 0
 
 
