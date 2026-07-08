@@ -178,6 +178,30 @@ before proposing work in these areas.
   vortex-merger physics — without it, injected polar vortices merge into a smooth
   cap instead of holding a discrete configuration. Research-grade; not scheduled.
   See `docs/realism.md` (polar rows of the source-fidelity audit).
+- **Render-side "detail dye" advected through the FROZEN baked velocity —
+  FALSIFIED by analysis (2026-07-06).** Proposal was to fix the render detail's
+  artificial look (latitude-locked masks + fBm-reads-as-noise) by seeding a scalar
+  dye and advecting it M steps through the final baked velocity (± curl-noise
+  enrichment), making the folded dye the primary visible detail. Three adversarial
+  reviewers converged on a kill: a **frozen 2-D velocity field is integrable** (ψ is
+  its Hamiltonian, zero Lyapunov exponent), so a passive dye advected through it —
+  2 steps or 40 — **cannot chaotically fold**; it only reveals folds already frozen
+  in and stretches into streamline stripes / spiral wind-up. Adding frozen
+  curl-noise keeps the field steady → iterated domain-warped fBm = the "superimposed
+  distorted noise" the look complaint is about, relocated into the velocity. This is
+  the **F17 wall** (raising sim resolution moved folded-filament structure 0.9%) — a
+  *dynamics* wall, not a resolution wall. `detail.comp` is ALREADY frozen-field
+  backtrace-fold, and its own comments record that longer folds shred into grain
+  (L460-462); `belt_texture_fine` is already a deliberately-short 2-hop version.
+  Architecture also killed it independently: a fixed 4K dye is required for
+  preview==export but detail is a POST-tier re-derive (20-40-step advection per
+  slider drag breaks the edit loop), and a 4K dye upsampled to 16K is *softer* than
+  today's `f(lon,lat)` analytic pass, which already resolves at full output res. And
+  it re-enters the **emergent-color replenishment dilemma** (uniform replenish
+  homogenizes / washed-out; banded replenish re-imports the very latitude masks it
+  set out to retire). Do not re-propose any frozen-field render-time advection of a
+  detail field.
+
 - **Uniform detail coverage (`detail.spread`) — SHIPPED default-off (2026-07-07).**
   Fixes both the original "detail-starved zones + stamped latitude bands"
   complaint AND its would-be cure: applies the flow-folded detail-FX texture at
@@ -198,3 +222,29 @@ before proposing work in these areas.
   - Neither this nor the strain attempt changes noise *character*; the character
     redesign (decouple tracer-res, advect a high-res passive tracer through the
     EVOLVING field) remains parked (W13/W14).
+## Research direction (unstarted): detail CHARACTER = sim-advected high-res tracer
+
+The render detail's fBm reads as noise because fluid folded-filament morphology is a
+**dynamics** property, and no frozen-field render trick produces it (see the
+FALSIFIED entry above; F17). The genuinely viable path, identified 2026-07-06 and
+**parked behind the W13/W14 remediation tail**: the sim's tracers (T0–T3) are
+advected through the **evolving** velocity every dev step — time-dependent advection,
+which *does* chaotically fold (this is why the vorticity solver manufactures folds:
+orientation coherence kinematic 0.14 → vorticity 0.384 → reference 0.62). The
+untested lever is to **decouple tracer resolution from dynamics resolution**: keep the
+velocity/vorticity solve at its current moderate grid (F17 says finer dynamics doesn't
+help), but advect a **high-resolution passive detail tracer** through that upsampled
+evolving field, so the 1024-grid strain folds a ~4K scalar into real 4K-scale
+filaments. The render pass samples that tracer as its primary structure; a thin
+high-frequency `f(ll)` grain layer *oriented/gated by the tracer's local gradient*
+restores crispness at 16K (the advected tracer alone is fluid-soft above its own res).
+Procedural noise retreats to seeding/forcing — the honest form of the project's
+"sim-advected procedural" thesis. **Crux gate before any subsystem build** (project
+discipline, cf. m2-adv): carry ONE extra high-res tracer through the existing solver
+on a `gas_giant_warm` run and measure whether its folded structure crosses the F17
+orientation-coherence bar toward 0.384/0.62 (current render noise = the ~0.14
+control). Go/no-go on that number before committing the multi-session build. Separable
+companion win (independent of this, low-risk, stateless): fix the detail *placement*
+complaint by driving the amplitude masks from local 2-D sim fields (vorticity/strain/
+tracer-gradient) instead of the 1-D latitude LUT — the `intermittency` term already
+advects a 2-D mask, so the machinery exists.
