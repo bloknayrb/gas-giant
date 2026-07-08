@@ -29,7 +29,12 @@ from pydantic import ValidationError
 
 from gasgiant.app.panels import _TIER_GLYPHS, PanelState, draw_params_panel
 from gasgiant.app.sphere_preview import SpherePreview
-from gasgiant.app.viewport import EquirectViewport
+from gasgiant.app.viewport import (
+    EquirectViewport,
+    lonlat_to_screen,
+    nearest_cast_index,
+    screen_to_lonlat,
+)
 from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
 from gasgiant.engine.invalidation import diff_tiers
@@ -37,7 +42,13 @@ from gasgiant.export.exporter import export_job
 from gasgiant.export.manifest import MANIFEST_FILENAME
 from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
-from gasgiant.params.model import PlanetParams, Tier
+from gasgiant.params.model import (
+    CastKind,
+    PlanetParams,
+    StormOverride,
+    Tier,
+    hero_latitude_cap,
+)
 from gasgiant.params.presets import (
     USER_PRESET_DIR,
     PresetError,
@@ -524,6 +535,15 @@ class StudioApp:
         # A2-2: last observed Simulation.baroclinic_status, so the per-frame
         # check toasts exactly once per transition INTO 'degraded'.
         self._baro_status_seen = "off"
+        # T4: click-to-place / drag-to-move storm tool. Mode is a small state
+        # machine over the equirect viewport: "none" = tool off, "place" =
+        # armed for click-to-place, "drag" = a marker is being dragged (its live
+        # position tracks the cursor; the texture only re-develops on release).
+        self._storm_tool_mode = "none"
+        self._storm_tool_kind = CastKind.OVAL.value  # placement archetype
+        self._storm_tool_radius = 0.03  # placement radius (StormOverride default)
+        self._drag_index: int | None = None  # cast index being dragged
+        self._drag_lonlat: tuple[float, float] | None = None  # live cursor lon/lat
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -1393,7 +1413,185 @@ class StudioApp:
         if step_now and self.sim.tick(self._steps_per_frame):
             self.viewport.mark_stale()
         self.viewport.draw(self.sim, PREVIEW_WIDTH)
+        # T4: marker overlay + place/drag tool. These use the window draw list /
+        # imgui widgets, so they must run inside this (the Equirect window)
+        # callback, right after the image was blitted and its rect captured. The
+        # guard keeps draw_equirect a pure tick/blit body when driven headlessly
+        # (no image -> image_rect_min is None -> no imgui calls), preserving the
+        # invariant its playback tests rely on.
+        if self.viewport.image_rect_min is not None:
+            self.viewport.draw_markers(
+                self.params.storms.cast,
+                drag_index=self._drag_index,
+                drag_lonlat=self._drag_lonlat,
+            )
+            self._draw_storm_tool_ui()
+            self._handle_storm_tool()
         self.render_perf.end()
+
+    # -- T4: click-to-place / drag-to-move storms --------------------------------
+
+    def _draw_storm_tool_ui(self) -> None:
+        """Tool block under the equirect image: a 'Place storm' toggle plus a
+        kind combo and radius slider while armed, with an honest caption about
+        the restart-tier rebuild on placement/drag-release."""
+        exporting = self._export is not None
+        tool_on = self._storm_tool_mode != "none"
+        imgui.begin_disabled(exporting)
+        if imgui.button("Place storm: ON" if tool_on else "Place storm"):
+            self._storm_tool_mode = "none" if tool_on else "place"
+            self._drag_index = None
+            self._drag_lonlat = None
+        imgui.end_disabled()
+        if not tool_on:
+            return
+        imgui.same_line()
+        imgui.set_next_item_width(110.0)
+        kinds = [k.value for k in CastKind]
+        cur = kinds.index(self._storm_tool_kind) if self._storm_tool_kind in kinds else 0
+        changed, idx = imgui.combo("kind##placetool", cur, kinds)
+        if changed:
+            self._storm_tool_kind = kinds[idx]
+        imgui.same_line()
+        imgui.set_next_item_width(150.0)
+        rchanged, rv = imgui.slider_float(
+            "radius##placetool", self._storm_tool_radius, 0.01, 0.15
+        )
+        if rchanged:
+            self._storm_tool_radius = rv
+        n = len(self.params.storms.cast)
+        if self._storm_tool_mode == "drag":
+            imgui.text_colored(
+                imgui.ImVec4(1.0, 0.8, 0.3, 1.0),
+                "marker moves live; the planet re-develops on release (restart-tier)",
+            )
+        else:
+            imgui.text_disabled(
+                f"click the map to place a storm ({n}/16); drag a marker to move it "
+                "(re-develops on placement/release)"
+            )
+
+    def _handle_storm_tool(self) -> None:
+        """Per-frame mouse handling for the storm tool. Hit-tests the stored
+        image rect manually (imgui.is_item_clicked can't be used after the tool
+        widgets), gated by is_window_hovered + rect containment so clicks on the
+        panels never place storms. Placement/drag-release both commit exactly
+        once through the discrete-action idiom (one restart-tier rebuild)."""
+        vp = self.viewport
+        if vp is None or vp.image_rect_min is None or vp.image_rect_max is None:
+            return
+        rmin, rmax = vp.image_rect_min, vp.image_rect_max
+        mouse = imgui.get_mouse_pos()
+        mx, my = mouse.x, mouse.y
+        inside = rmin[0] <= mx <= rmax[0] and rmin[1] <= my <= rmax[1]
+        lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+        tool_on = self._storm_tool_mode != "none"
+
+        if not tool_on:
+            # Subtle hint when hovering the planet with the tool off (cheap:
+            # no adopt-seeded, that's deferred).
+            if inside and imgui.is_window_hovered():
+                imgui.set_tooltip("add a cast storm here to direct the seeded storms")
+            return
+
+        if self._export is not None:
+            # Never commit mid-export; abandon any in-flight drag.
+            self._drag_index = None
+            self._drag_lonlat = None
+            if self._storm_tool_mode == "drag":
+                self._storm_tool_mode = "place"
+            return
+
+        if self._storm_tool_mode == "drag":
+            self._drag_lonlat = (lon, lat)  # marker follows the cursor, no commit
+            if not imgui.is_mouse_down(imgui.MouseButton_.left):
+                idx = self._drag_index
+                self._storm_tool_mode = "place"
+                self._drag_index = None
+                self._drag_lonlat = None
+                if idx is not None:
+                    self._commit_cast_move(idx, lon, lat)
+            return
+
+        # place mode: a click either grabs a nearby marker (drag) or places one.
+        if inside and imgui.is_window_hovered() and imgui.is_mouse_clicked(
+            imgui.MouseButton_.left
+        ):
+            idx = self._marker_under_cursor(mx, my, rmin, rmax)
+            if idx is not None:
+                self._storm_tool_mode = "drag"
+                self._drag_index = idx
+                self._drag_lonlat = (lon, lat)
+            else:
+                self._place_storm_at(lon, lat)
+
+    def _marker_under_cursor(
+        self, mx: float, my: float, rmin, rmax, threshold: float = 14.0
+    ) -> int | None:
+        """Cast index whose marker is within ``threshold`` pixels of the cursor,
+        or None. Uses the wrap-aware nearest_cast_index to pick a candidate, then
+        confirms in pixel space (checking the +-360 wrapped screen positions so a
+        dateline marker is grabbable from either edge)."""
+        cast = self.params.storms.cast
+        if not cast:
+            return None
+        lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+        idx = nearest_cast_index(lon, lat, cast)
+        if idx is None:
+            return None
+        entry = cast[idx]
+        for lon_v in (entry.lon_deg, entry.lon_deg - 360.0, entry.lon_deg + 360.0):
+            sx, sy = lonlat_to_screen(lon_v, entry.lat_deg, rmin, rmax)
+            if (sx - mx) ** 2 + (sy - my) ** 2 <= threshold * threshold:
+                return idx
+        return None
+
+    def _place_storm_at(self, lon_deg: float, lat_deg: float) -> None:
+        """Append a cast storm at (clamped) lon/lat via the discrete-action
+        commit idiom (push_history -> commit -> reset_working_copy). No-op (with
+        a toast) when the 16-entry cap is reached or an export is in flight."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export
+        if len(self.params.storms.cast) >= 16:
+            self.toasts.info("cast list is full (16 storms)")
+            return
+        radius = self._storm_tool_radius
+        cap = hero_latitude_cap(radius)
+        lat = max(-cap, min(cap, lat_deg))
+        lon = max(-180.0, min(180.0, lon_deg))
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        new.storms.cast.append(
+            StormOverride(
+                kind=CastKind(self._storm_tool_kind),
+                lat_deg=lat,
+                lon_deg=lon,
+                radius=radius,
+            )
+        )
+        self._commit(new)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"placed {self._storm_tool_kind} at lon {lon:.1f}, lat {lat:.1f}")
+
+    def _commit_cast_move(self, index: int, lon_deg: float, lat_deg: float) -> None:
+        """Write a dragged marker's final position into cast[index] via one
+        discrete-action commit (one restart-tier rebuild). Lat is clamped to the
+        entry's radius-coupled cap; lon to +-180."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export
+        cast = self.params.storms.cast
+        if not (0 <= index < len(cast)):
+            return
+        radius = cast[index].radius
+        cap = hero_latitude_cap(radius)
+        lat = max(-cap, min(cap, lat_deg))
+        lon = max(-180.0, min(180.0, lon_deg))
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        new.storms.cast[index].lat_deg = lat
+        new.storms.cast[index].lon_deg = lon
+        self._commit(new)
+        self._reset_working_copy()  # discrete action wins over pending edit
 
     def draw_sphere(self) -> None:
         if self.sim is None:  # init_gl failed; the runner is already exiting

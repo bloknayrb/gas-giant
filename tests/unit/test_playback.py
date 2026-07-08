@@ -58,12 +58,19 @@ class FakeViewport:
     def __init__(self) -> None:
         self.stale = 0
         self.draw_calls = 0
+        # T4: draw_equirect skips its storm-tool block when no image rect was
+        # captured, keeping this headless path a pure tick/blit body.
+        self.image_rect_min = None
+        self.image_rect_max = None
 
     def mark_stale(self) -> None:
         self.stale += 1
 
     def draw(self, sim, width) -> None:  # noqa: ARG002 - matches EquirectViewport.draw
         self.draw_calls += 1
+
+    def draw_markers(self, cast, **kwargs) -> None:  # noqa: ARG002 - matches EquirectViewport
+        pass
 
 
 def _make_app(*, playing: bool, steps_per_frame: int, single_step: bool, target: int = 100) -> StudioApp:

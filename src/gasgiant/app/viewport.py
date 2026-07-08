@@ -30,6 +30,87 @@ CHANNELS = (
 
 _EMISSION_CHANNEL = 2
 
+# ---------------------------------------------------------------------------
+# Pure equirect <-> screen mapping helpers (T4: click-to-place / drag storms).
+# The displayed preview is an equirect map: x spans longitude -180..+180
+# left->right, y spans latitude +90..-90 top->bottom. `rect_min`/`rect_max` are
+# the (x, y) pixel corners of the on-screen image item (imgui.get_item_rect_*).
+# These are pure and side-effect free so main.py's tool wiring is unit-testable
+# without a GL context or a live imgui frame.
+# ---------------------------------------------------------------------------
+
+
+def screen_to_lonlat(
+    mx: float,
+    my: float,
+    rect_min: tuple[float, float],
+    rect_max: tuple[float, float],
+) -> tuple[float, float]:
+    """Map a mouse pixel inside the displayed equirect image to ``(lon, lat)``
+    degrees. The result is clamped to lon -180..+180 / lat -90..+90, so a click
+    outside the rect maps to the nearest valid edge point."""
+    x0, y0 = rect_min
+    x1, y1 = rect_max
+    w = x1 - x0
+    h = y1 - y0
+    fx = 0.0 if w == 0 else (mx - x0) / w
+    fy = 0.0 if h == 0 else (my - y0) / h
+    fx = min(1.0, max(0.0, fx))
+    fy = min(1.0, max(0.0, fy))
+    lon = -180.0 + fx * 360.0
+    lat = 90.0 - fy * 180.0
+    return lon, lat
+
+
+def lonlat_to_screen(
+    lon_deg: float,
+    lat_deg: float,
+    rect_min: tuple[float, float],
+    rect_max: tuple[float, float],
+) -> tuple[float, float]:
+    """Inverse of ``screen_to_lonlat`` (for drawing markers). NOT clamped: a
+    wrapped duplicate longitude (entry lon +-360) maps outside the rect on
+    purpose so the caller can clip it and show the dateline wrap."""
+    x0, y0 = rect_min
+    x1, y1 = rect_max
+    fx = (lon_deg + 180.0) / 360.0
+    fy = (90.0 - lat_deg) / 180.0
+    sx = x0 + fx * (x1 - x0)
+    sy = y0 + fy * (y1 - y0)
+    return sx, sy
+
+
+def nearest_cast_index(lon_deg, lat_deg, cast, max_deg=None):
+    """Index of the cast entry nearest ``(lon_deg, lat_deg)`` using a wrap-aware
+    longitude metric (shortest arc across the +-180 dateline) combined with the
+    latitude delta. ``cast`` is a list of objects carrying ``.lat_deg``/
+    ``.lon_deg``. Returns None if ``cast`` is empty or, when ``max_deg`` is
+    given, nothing lies within ``max_deg`` of the point."""
+    best_i = None
+    best_d = None
+    for i, entry in enumerate(cast):
+        dlon = abs(((lon_deg - entry.lon_deg + 180.0) % 360.0) - 180.0)
+        dlat = abs(lat_deg - entry.lat_deg)
+        d = (dlon * dlon + dlat * dlat) ** 0.5
+        if best_d is None or d < best_d:
+            best_d = d
+            best_i = i
+    if best_i is None:
+        return None
+    if max_deg is not None and best_d > max_deg:
+        return None
+    return best_i
+
+
+# Per-kind marker (fill color rgb, glyph). Kinds are CastKind values.
+_KIND_MARKER: dict[str, tuple[tuple[float, float, float], str]] = {
+    "hero": ((0.95, 0.42, 0.24), "H"),
+    "oval": ((0.96, 0.90, 0.70), "O"),
+    "barge": ((0.72, 0.46, 0.30), "B"),
+    "pearl": ((0.88, 0.94, 1.00), "P"),
+}
+_MARKER_RADIUS = 6.0
+
 # view_transform.frag's aurora-composite channel selector (B4-3): the Emission
 # channel switches to it whenever aurora is on, so the aurora sliders have live
 # preview feedback instead of a blind export/Blender loop.
@@ -73,6 +154,11 @@ class EquirectViewport:
         self._display: moderngl.Texture | None = None
         self._fbo: moderngl.Framebuffer | None = None
         self._stale = True
+        # (x, y) pixel corners of the on-screen equirect image, captured after
+        # imgui.image() each frame so main.py can hit-test the storm tool. None
+        # whenever no image was drawn this frame (e.g. emission disabled).
+        self.image_rect_min: tuple[float, float] | None = None
+        self.image_rect_max: tuple[float, float] | None = None
 
     def mark_stale(self) -> None:
         self._stale = True
@@ -88,6 +174,10 @@ class EquirectViewport:
         self._stale = True
 
     def draw(self, sim: Simulation, preview_width: int) -> None:
+        # Reset each frame: an early return (emission disabled) leaves no image,
+        # so the tool must not hit-test against a stale rect.
+        self.image_rect_min = None
+        self.image_rect_max = None
         src, rerendered = sim.ensure_preview(preview_width)
         if rerendered:
             self._stale = True
@@ -142,3 +232,58 @@ class EquirectViewport:
             h = avail.y
             w = h * 2.0
         imgui.image(imgui.ImTextureRef(self._display.glo), imgui.ImVec2(w, h))
+        rmin = imgui.get_item_rect_min()
+        rmax = imgui.get_item_rect_max()
+        self.image_rect_min = (rmin.x, rmin.y)
+        self.image_rect_max = (rmax.x, rmax.y)
+
+    def draw_markers(self, cast, *, drag_index=None, drag_lonlat=None) -> None:
+        """Overlay a marker (color-coded circle + kind glyph) at each cast
+        entry's rendered position using the window draw list. Must be called in
+        the same imgui window as ``draw`` (right after it). Near the +-180 edges
+        the wrapped duplicates (lon +-360) are drawn too and clipped to the image
+        rect, so a dateline-straddling storm shows on both sides. The entry being
+        dragged is drawn at ``drag_lonlat`` (its live cursor position) and
+        highlighted."""
+        if self.image_rect_min is None or self.image_rect_max is None:
+            return
+        rmin = self.image_rect_min
+        rmax = self.image_rect_max
+        draw_list = imgui.get_window_draw_list()
+        draw_list.push_clip_rect(
+            imgui.ImVec2(*rmin), imgui.ImVec2(*rmax), True
+        )
+        # margin so a glyph whose center is just off the edge still paints its
+        # visible (wrapped) half inside the rect.
+        left = rmin[0] - _MARKER_RADIUS - 2.0
+        right = rmax[0] + _MARKER_RADIUS + 2.0
+        for i, entry in enumerate(cast):
+            if drag_index == i and drag_lonlat is not None:
+                lon, lat = drag_lonlat
+            else:
+                lon, lat = entry.lon_deg, entry.lat_deg
+            color, glyph = _KIND_MARKER.get(str(entry.kind), ((1.0, 1.0, 1.0), "?"))
+            highlighted = drag_index == i
+            for lon_variant in (lon, lon - 360.0, lon + 360.0):
+                sx, sy = lonlat_to_screen(lon_variant, lat, rmin, rmax)
+                if left <= sx <= right:
+                    self._draw_marker(draw_list, sx, sy, color, glyph, highlighted)
+        draw_list.pop_clip_rect()
+
+    @staticmethod
+    def _draw_marker(draw_list, sx, sy, color, glyph, highlighted) -> None:
+        center = imgui.ImVec2(sx, sy)
+        fill = imgui.get_color_u32(imgui.ImVec4(color[0], color[1], color[2], 0.9))
+        outline = imgui.get_color_u32(
+            imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+            if highlighted
+            else imgui.ImVec4(0.0, 0.0, 0.0, 0.85)
+        )
+        r = _MARKER_RADIUS + (1.5 if highlighted else 0.0)
+        draw_list.add_circle_filled(center, r, fill, 16)
+        draw_list.add_circle(center, r, outline, 16, 2.0 if highlighted else 1.5)
+        text_col = imgui.get_color_u32(imgui.ImVec4(0.05, 0.05, 0.05, 1.0))
+        ts = imgui.calc_text_size(glyph)
+        draw_list.add_text(
+            imgui.ImVec2(sx - ts.x * 0.5, sy - ts.y * 0.5), text_col, glyph
+        )
