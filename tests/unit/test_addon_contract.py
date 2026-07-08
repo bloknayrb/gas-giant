@@ -109,6 +109,38 @@ def test_vendored_reader_resolves_flow_with_convention(tmp_path):
     assert doc["maps"]["flow"]["convention"] == "rg_east_north_texel_per_step"
 
 
+def test_vendored_reader_resolves_rings_with_extent(tmp_path):
+    """T16: the additive `rings` map (channels 4 + a `convention` string) plus the
+    physical.ring_*_km fields resolve through the tolerant vendored reader with no
+    warnings; ring_extent() returns the exported span for the annulus builder."""
+    reader = _load_vendored_reader()
+    manifest = build_manifest(
+        name="contract",
+        seed=42,
+        resolution=(2048, 1024),
+        maps={
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "rings": {
+                "file": "rings.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "convention": "radial_inner_to_outer_alpha_coverage",
+            },
+        },
+        physical={
+            "radius_km": 60268.0, "height_scale": 0.004, "height_midlevel": 0.5,
+            "ring_inner_km": 74500.0, "ring_outer_km": 136780.0,
+        },
+        preset_doc=to_preset_doc(PlanetParams()),
+    )
+    write_manifest(tmp_path, manifest)
+    (tmp_path / "color.png").write_bytes(b"")
+    (tmp_path / "rings.exr").write_bytes(b"")
+    doc = reader.read_mapset(tmp_path)
+    assert doc["_warnings"] == []
+    assert reader.map_path(doc, "rings").name == "rings.exr"
+    assert reader.ring_extent(doc) == (74500.0, 136780.0)
+
+
 def test_vendored_reader_emission_absent_is_none(tmp_path):
     reader = _load_vendored_reader()
     doc = reader.read_mapset(_write_mapset(tmp_path))

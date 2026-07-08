@@ -433,7 +433,20 @@
     "physical": {
       "radius_km": 58232.0,
       "height_scale": 0.004,
-      "height_midlevel": 0.5
+      "height_midlevel": 0.5,
+      "ring_inner_km": 74500.0,
+      "ring_outer_km": 136780.0
+    },
+    "rings": {
+      "enabled": true,
+      "opacity": 1.0,
+      "brightness": 1.0,
+      "tint_color": [
+        0.86,
+        0.83,
+        0.78
+      ],
+      "fine_grain": 0.15
     },
     "export": {
       "width": 2048,

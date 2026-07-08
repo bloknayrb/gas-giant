@@ -57,8 +57,12 @@ PRESET_DELTA = {
         "waves": {"festoon_strength": 2.6},
     },
     # Pale, smooth Saturn: a whisper of belt structure; keep it pale.
+    # Ships the T16 ring system (Blender-only): rings.enabled with the default
+    # Saturn C..A span (physical.ring_inner_km / ring_outer_km). Rings are a
+    # SEPARATE exported map, so this does NOT touch color/height (p05 unaffected).
     "saturn_pale": {
         "detail": {"intensity": 0.3, "belt_texture": 0.5, "mottle": 0.35},
+        "rings": {"enabled": True},
     },
     # Cold, smooth ice giant: a whisper; keep it bland and blue.
     "ice_giant": {

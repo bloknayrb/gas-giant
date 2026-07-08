@@ -30,6 +30,7 @@ from gasgiant.export.manifest import (
     read_manifest,
     write_manifest,
 )
+from gasgiant.export.rings import ring_strip
 from gasgiant.export.video import encode_video_job
 from gasgiant.export.writers import (
     read_exr_gray,
@@ -147,6 +148,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
 
     emission_on = params.emission.enabled
     flow_on = params.export.flow_map
+    rings_on = params.rings.enabled
     color_full = np.empty((h, w, 3), dtype=np.uint16)
     height_full = np.empty((h, w), dtype=np.float32)
     emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
@@ -210,6 +212,12 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
             )
         if flow_on:
             futures.append(pool.submit(write_exr_rgba, out_dir / "flow.exr", flow_full))
+        if rings_on:
+            # Rings are a CPU-only radial strip (no GL); build then encode. A
+            # separate exported map -- the color/height/emission path above is
+            # untouched, so a rings-enabled export is byte-identical there.
+            rings_strip = ring_strip(params)
+            futures.append(pool.submit(write_exr_rgba, out_dir / "rings.exr", rings_strip))
         while not all(f.done() for f in futures):
             yield Progress(len(tiles) + 1, total, "encoding")
             time.sleep(0.01)
@@ -243,16 +251,28 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 "colorspace": "non-color", "channels": 4,
                 "convention": "rg_east_north_texel_per_step",
             }
+        if rings_on:
+            # RGBA radial strip: axis 0 (long) = radius inner->outer, A = coverage.
+            # The importer builds an annulus from physical.ring_inner_km/outer_km.
+            maps["rings"] = {
+                "file": "rings.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "convention": "radial_inner_to_outer_alpha_coverage",
+            }
+        physical = {
+            "radius_km": params.physical.radius_km,
+            "height_scale": params.physical.height_scale,
+            "height_midlevel": params.physical.height_midlevel,
+        }
+        if rings_on:
+            physical["ring_inner_km"] = params.physical.ring_inner_km
+            physical["ring_outer_km"] = params.physical.ring_outer_km
         manifest = build_manifest(
             name=params.name,
             seed=params.seed,
             resolution=(w, h),
             maps=maps,
-            physical={
-                "radius_km": params.physical.radius_km,
-                "height_scale": params.physical.height_scale,
-                "height_midlevel": params.physical.height_midlevel,
-            },
+            physical=physical,
             preset_doc=to_preset_doc(params),
             atmosphere_hint={"rim_color": [0.55, 0.65, 1.0], "rim_strength": 0.4},
         )
@@ -276,7 +296,8 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
             # picked a folder containing their own data), after the pool
             # drained so there are no Windows open-handle races.
             for name in (
-                "color.png", "height.exr", "emission.exr", "flow.exr", MANIFEST_FILENAME
+                "color.png", "height.exr", "emission.exr", "flow.exr",
+                "rings.exr", MANIFEST_FILENAME,
             ):
                 (out_dir / name).unlink(missing_ok=True)
             log.info("export cancelled; partial output removed")
@@ -526,7 +547,8 @@ def export_sequence_job(
                 with contextlib.suppress(OSError):  # user data in frames/: leave it
                     frames_dir.rmdir()
             for name in (
-                "color.png", "height.exr", "emission.exr", "flow.exr", MANIFEST_FILENAME
+                "color.png", "height.exr", "emission.exr", "flow.exr",
+                "rings.exr", MANIFEST_FILENAME,
             ):
                 (out_dir / name).unlink(missing_ok=True)
             log.info("sequence export cancelled; partial output removed")

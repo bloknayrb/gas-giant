@@ -1504,6 +1504,58 @@ class PhysicalParams(_Params):
         description="Height-map value mapped to the mid cloud deck (Blender importer "
                     "reference level)",
     )
+    ring_inner_km: float = pfield(
+        74500.0, tier=Tier.POST, lo=1000.0, hi=1000000.0, adv=True, ui="Physical",
+        description="Inner radius of the ring system in kilometers, measured from the "
+                    "planet center (default = Saturn's C-ring inner edge). Only meaningful "
+                    "when rings are enabled; passed through to the Blender importer, which "
+                    "builds an annulus from ring_inner_km..ring_outer_km",
+    )
+    ring_outer_km: float = pfield(
+        136780.0, tier=Tier.POST, lo=1000.0, hi=1000000.0, adv=True, ui="Physical",
+        description="Outer radius of the ring system in kilometers (default = Saturn's "
+                    "A-ring outer edge). Only meaningful when rings are enabled",
+    )
+
+
+class RingsParams(_Params):
+    """Saturn-style ring system. DEFAULT OFF and a Blender-only product feature:
+    rings are exported as a separate ``rings.exr`` radial strip and rebuilt as an
+    annulus by the importer -- they are NOT part of the equirect map set and are
+    invisible in the GUI preview. Because rings are a separate map, enabling them
+    never touches the color/height/emission output (p05 render hash is unaffected).
+
+    The radial optical-depth profile is a BOUNDED, hardcoded table modelling the
+    real Saturn C/B/Cassini-division/A structure (see export/rings.py); the knobs
+    here scale coverage/brightness/tint and add seeded fine grain. The radial
+    EXTENT is set by physical.ring_inner_km / ring_outer_km."""
+
+    enabled: bool = pfield(
+        False, tier=Tier.POST, adv=True, ui="Rings",
+        description="Export a ring texture strip (rings.exr) and, in Blender, build a "
+                    "Saturn-style annulus from it. Blender-only -- invisible in the GUI "
+                    "equirect preview. Off by default: the default export file-set "
+                    "(color + height) is unchanged. No rand",
+    )
+    opacity: float = pfield(
+        1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Rings",
+        description="Multiplier on the ring alpha (coverage) derived from the optical-"
+                    "depth table. 1.0 = physically-derived Beer-Lambert coverage",
+    )
+    brightness: float = pfield(
+        1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Rings",
+        description="Multiplier on the ice reflectance (ring RGB brightness)",
+    )
+    tint_color: tuple[float, float, float] = pfield(
+        (0.86, 0.83, 0.78), tier=Tier.POST, adv=True, ui="Rings",
+        description="Slightly warm ice tint (linear RGB) applied to the ring particles",
+    )
+    fine_grain: float = pfield(
+        0.15, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Rings",
+        description="Amount of seeded fine-grain ringlet variation added on top of the "
+                    "bounded optical-depth table (0 = the smooth table only). Uses the "
+                    "master seed's 'rings' substream, so it is deterministic",
+    )
 
 
 class ExportParams(_Params):
@@ -1548,6 +1600,7 @@ class PlanetParams(_Params):
     mask: MaskParams = Field(default_factory=MaskParams)
     emission: EmissionParams = Field(default_factory=EmissionParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
+    rings: RingsParams = Field(default_factory=RingsParams)
     export: ExportParams = Field(default_factory=ExportParams)
 
     def to_json(self, indent: int = 2) -> str:

@@ -11,6 +11,8 @@ shell — identical math, large files.
 
 from __future__ import annotations
 
+import math
+
 import bpy
 
 from . import compat
@@ -118,6 +120,94 @@ def build_aurora_shell(
     compat.set_transparent_render_method(mat)
     shell.data.materials.append(mat)
     return shell
+
+
+def _annulus_mesh(
+    name: str, inner: float, outer: float, segments: int
+) -> bpy.types.Object:
+    """A flat ring (annulus) in the planet's equatorial plane (XY, spin axis Z),
+    built vertex-by-vertex so the UVs map radius -> V (the ring strip's long
+    axis) and angle -> U. ``segments`` quads go around; two radial rings (inner,
+    outer) close them."""
+    verts: list[tuple[float, float, float]] = []
+    uvs: list[tuple[float, float]] = []  # per-loop, filled alongside faces
+    faces: list[tuple[int, int, int, int]] = []
+
+    for i in range(segments):
+        ang = 2.0 * math.pi * i / segments
+        c, s = math.cos(ang), math.sin(ang)
+        verts.append((inner * c, inner * s, 0.0))  # 2*i   : inner
+        verts.append((outer * c, outer * s, 0.0))  # 2*i+1 : outer
+
+    for i in range(segments):
+        j = (i + 1) % segments
+        a, b = 2 * i, 2 * i + 1        # this spoke: inner, outer
+        c, d = 2 * j, 2 * j + 1        # next spoke: inner, outer
+        faces.append((a, b, d, c))
+        u0, u1 = i / segments, (i + 1) / segments
+        # loop order matches the face vertex order (a, b, d, c):
+        # V = 0 at inner radius, 1 at outer radius.
+        uvs.extend([(u0, 0.0), (u0, 1.0), (u1, 1.0), (u1, 0.0)])
+
+    mesh = bpy.data.meshes.new(f"{name}_mesh")
+    mesh.from_pydata(verts, [], [f for f in faces])
+    mesh.update()
+    uv_layer = mesh.uv_layers.new(name="UVMap")
+    for loop_idx, uv in enumerate(uvs):
+        uv_layer.data[loop_idx].uv = uv
+
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    return obj
+
+
+def build_ring_annulus(
+    name: str,
+    ring_img: bpy.types.Image,
+    inner_radius: float,
+    outer_radius: float,
+    *,
+    segments: int = 192,
+) -> bpy.types.Object:
+    """A flat Saturn-style ring annulus sampling the ``rings.exr`` radial strip.
+
+    The strip's alpha channel is coverage: transparent gaps (Cassini division,
+    Encke) let light through, so with ``use_transparent_shadow`` the ring casts
+    its structured shadow onto the planet in Cycles. RGB is the lit ice colour.
+    Radius (mesh UV V) maps to the strip's long axis; U wraps tangentially."""
+    ring = _annulus_mesh(name, inner_radius, outer_radius, segments)
+
+    mat = bpy.data.materials.new(f"{name}_material")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nodes, links = nt.nodes, nt.links
+    bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
+    output = next(n for n in nodes if n.type == "OUTPUT_MATERIAL")
+
+    tex = _new(nodes, "ShaderNodeTexImage", -400, 0)
+    tex.image = ring_img
+    tex.extension = "CLIP"  # outside the annulus UV: transparent, not tiled
+    compat.set_colorspace(ring_img, "non-color")
+    compat.set_channel_packed(ring_img)  # alpha is coverage data, not premul
+
+    base_color = compat.find_input(bsdf, "Base Color")
+    if base_color is not None:
+        links.new(tex.outputs["Color"], base_color)
+    alpha_in = compat.find_input(bsdf, "Alpha")
+    if alpha_in is not None:
+        links.new(tex.outputs["Alpha"], alpha_in)
+    rough = compat.find_input(bsdf, "Roughness")
+    if rough is not None:
+        rough.default_value = 0.9
+    spec = compat.find_input(bsdf, "Specular IOR Level", "Specular")
+    if spec is not None:
+        spec.default_value = 0.1
+    links.new(bsdf.outputs[0], output.inputs["Surface"])
+
+    compat.set_transparent_render_method(mat)
+    compat.set_transparent_shadow(mat)
+    ring.data.materials.append(mat)
+    return ring
 
 
 def build_rim_atmosphere(

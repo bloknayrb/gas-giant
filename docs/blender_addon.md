@@ -54,6 +54,33 @@ coverage). Options:
   is not sun-gated: dayside-negligible at default strength, not
   dayside-clean. For lit-only shots simply export with strengths 0.
 
+## Rings (Saturn)
+
+Rings are a **Blender-only** product feature and are **default off**. They are
+**invisible in the GUI equirect preview** — a planet's rings live in 3-D space,
+not on its surface texture, so there is nothing to show in the 2:1 preview. Turn
+them on with `rings.enabled` (the `saturn_pale` preset ships enabled) and export.
+
+- The exporter writes a separate `rings.exr` — a 2048×64 RGBA **radial strip**
+  (axis 0 = radius inner→outer, RGB = lit ice colour, **A = coverage**). The
+  radial profile comes from a bounded, hardcoded optical-depth table modelling
+  the real Saturn C / B / Cassini-division / A structure (plus seeded fine-grain
+  ringlets from the master seed). Because rings are a *separate map*, enabling
+  them never touches the colour / height / emission output.
+- On import, if the manifest carries a `rings` map the add-on builds a flat
+  **annulus** in the planet's equatorial plane, sized from
+  `physical.ring_inner_km`…`ring_outer_km` (scaled by the planet radius) and
+  **parented to the rig empty**, so it tilts and spins with the planet. Its
+  material samples the strip with radius→V; the alpha channel drives Principled
+  transparency (the *Build rings* checkbox toggles this).
+- **Shadows.** The alpha'd gaps (the Cassini division, the Encke gap) let light
+  through, so in **Cycles** the ring casts its structured shadow onto the planet
+  for free via `Material.use_transparent_shadow`. **EEVEE-Next** (4.2+) removed
+  the `shadow_method` enum; alpha'd shadowing there comes from the *BLENDED*
+  surface method. Legacy EEVEE (≤4.1) uses `shadow_method = 'CLIP'`. All three
+  are handled per `bpy.app.version` in `compat.set_transparent_shadow` (each
+  write `hasattr`-guarded).
+
 ## Animated sequences
 
 If the map set was exported with a `frames` block (the animation export), the
@@ -79,6 +106,8 @@ importer loads the colour map — and the height / emission maps when
 `compat.py` is the only file that branches on `bpy.app.version`. Verified
 live against Blender 5.1.2 (and written to the 4.2 LTS API for the rest):
 the 5.x `displacement_method` enum (`BOTH`), the 5.x adaptive-subdivision
-move onto the Subsurf modifier, the removed `feature_set` property, and
-colorspace-name fallbacks for custom OCIO configs. Nodes are created by
-type and sockets resolved through alias lists, never display-name lookups.
+move onto the Subsurf modifier, the removed `feature_set` property, the
+ring's transparent-shadow toggle (Cycles `use_transparent_shadow` vs the
+removed EEVEE-Next `shadow_method`), and colorspace-name fallbacks for custom
+OCIO configs. Nodes are created by type and sockets resolved through alias
+lists, never display-name lookups.

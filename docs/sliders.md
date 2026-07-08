@@ -22,6 +22,7 @@ What every slider in the live-preview GUI (`uv run gasgiant-studio`) actually do
 - [Emission](#emission)
 - [Physical](#physical)
 - [Export](#export)
+- [Rings](#rings)
 
 
 ## Sim
@@ -1576,6 +1577,26 @@ Planet equatorial radius in kilometers, passed through to the Blender importer f
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### ring inner km
+
+`physical.ring_inner_km` &mdash; range **1000 to 1e+06**, default **74500**, tier `post`.
+
+Inner radius of the ring system in kilometers, measured from the planet center (default = Saturn's C-ring inner edge). Only meaningful when rings are enabled; passed through to the Blender importer, which builds an annulus from ring_inner_km..ring_outer_km
+
+<table><tr>
+<td align="center"><sub>low &middot; 1000<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 74500</sub></td><td align="center"><sub>high &middot; 1e+06<br>(not rendered)</sub></td>
+</tr></table>
+
+### ring outer km
+
+`physical.ring_outer_km` &mdash; range **1000 to 1e+06**, default **136780**, tier `post`.
+
+Outer radius of the ring system in kilometers (default = Saturn's A-ring outer edge). Only meaningful when rings are enabled
+
+<table><tr>
+<td align="center"><sub>low &middot; 1000<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 136780</sub></td><td align="center"><sub>high &middot; 1e+06<br>(not rendered)</sub></td>
+</tr></table>
+
 
 ## Export
 
@@ -1602,4 +1623,45 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 Equirect map width in pixels; height is width/2
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+
+## Rings
+
+### brightness
+
+`rings.brightness` &mdash; range **0 to 2**, default **1**, tier `post`.
+
+Multiplier on the ice reflectance (ring RGB brightness)
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
+
+### enabled
+
+`rings.enabled` &mdash; toggle (on/off), default **`False`**, tier `post`.
+
+Export a ring texture strip (rings.exr) and, in Blender, build a Saturn-style annulus from it. Blender-only -- invisible in the GUI equirect preview. Off by default: the default export file-set (color + height) is unchanged. No rand
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
+
+### fine grain
+
+`rings.fine_grain` &mdash; range **0 to 1**, default **0.15**, tier `post`.
+
+Amount of seeded fine-grain ringlet variation added on top of the bounded optical-depth table (0 = the smooth table only). Uses the master seed's 'rings' substream, so it is deterministic
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### opacity
+
+`rings.opacity` &mdash; range **0 to 2**, default **1**, tier `post`.
+
+Multiplier on the ring alpha (coverage) derived from the optical-depth table. 1.0 = physically-derived Beer-Lambert coverage
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
 

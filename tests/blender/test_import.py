@@ -87,6 +87,41 @@ def write_sequence_fixture(root: Path, *, count: int = 3, steps_per_frame: int =
     return root
 
 
+def write_rings_fixture(root: Path) -> Path:
+    """Create a tiny fake exported map set carrying a T16 `rings` map + the
+    physical ring_*_km extent. Pure stdlib (the rings.exr is placeholder bytes;
+    Blender's EXR loader is not exercised for pixels here -- the assertion is
+    that a ring OBJECT is created and parented to the rig). Returns ``root``."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    _tiny_png(root / "color.png")
+    _tiny_png(root / "height.png")
+    (root / "rings.exr").write_bytes(b"")  # placeholder; loaded but not pixel-checked
+    manifest = {
+        "schema_version": 1,
+        "generator": {"name": "gasgiant", "version": "test"},
+        "name": "ringfix",
+        "seed": 5,
+        "projection": "equirectangular",
+        "resolution": [4, 2],
+        "physical": {
+            "radius_km": 60268.0, "height_scale": 0.004, "height_midlevel": 0.5,
+            "ring_inner_km": 74500.0, "ring_outer_km": 136780.0,
+        },
+        "maps": {
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "height": {"file": "height.png", "format": "png16", "colorspace": "non-color"},
+            "rings": {
+                "file": "rings.exr", "format": "exr32f", "colorspace": "non-color",
+                "channels": 4, "convention": "radial_inner_to_outer_alpha_coverage",
+            },
+        },
+        "preset": {},
+    }
+    (root / "mapset.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return root
+
+
 def main() -> dict:
     import bpy
 
@@ -239,6 +274,30 @@ def main() -> dict:
     if height_seq_nodes:
         checks["sequence_height_source"] = height_seq_nodes[0].image.source == "SEQUENCE"
         checks["sequence_height_offset"] = height_seq_nodes[0].image_user.frame_offset == -1
+
+    # Rings import (T16): a map set with a `rings` map builds a flat annulus
+    # object parented to the rig empty, with a material sampling the ring image.
+    ring_dir = Path(tempfile.mkdtemp(prefix="gg_ring_"))
+    write_rings_fixture(ring_dir)
+    result = bpy.ops.import_scene.gasgiant(
+        filepath=str(ring_dir / "mapset.json"), atmosphere_mode="NONE",
+    )
+    checks["rings_import_finished"] = result == {"FINISHED"}
+    ring_obj = next((o for o in bpy.data.objects if o.name.endswith("_rings")), None)
+    checks["rings_object_created"] = ring_obj is not None
+    if ring_obj is not None:
+        checks["rings_parented_to_rig"] = (
+            ring_obj.parent is not None and ring_obj.parent.type == "EMPTY"
+        )
+        checks["rings_has_material"] = bool(ring_obj.data.materials)
+        checks["rings_has_faces"] = len(ring_obj.data.polygons) > 0
+        if ring_obj.data.materials:
+            rnodes = ring_obj.data.materials[0].node_tree.nodes
+            checks["rings_samples_image"] = any(
+                n.type == "TEX_IMAGE" and n.image
+                and Path(n.image.filepath).name.lower() == "rings.exr"
+                for n in rnodes
+            )
 
     return checks
 

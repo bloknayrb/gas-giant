@@ -82,6 +82,25 @@ def map_path(doc: dict, name: str) -> Path | None:
     return Path(doc["_dir"]) / entry["file"]
 
 
+def ring_extent(doc: dict) -> tuple[float, float] | None:
+    """(ring_inner_km, ring_outer_km) from the physical block, or None when the
+    map set carries no ``rings`` map. Tolerant: a rings map without the physical
+    radii falls back to Saturn's C..A span so the importer can still build the
+    annulus."""
+    if "rings" not in doc.get("maps", {}):
+        return None
+    physical = doc.get("physical", {})
+    inner = physical.get("ring_inner_km", 74500.0)
+    outer = physical.get("ring_outer_km", 136780.0)
+    try:
+        inner, outer = float(inner), float(outer)
+    except (TypeError, ValueError):
+        return (74500.0, 136780.0)
+    if not (outer > inner > 0.0):
+        return (74500.0, 136780.0)
+    return (inner, outer)
+
+
 def frames_block(doc: dict) -> dict | None:
     """The optional animation ``frames`` block (T7), or None for a still set.
 

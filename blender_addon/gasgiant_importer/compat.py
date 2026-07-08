@@ -124,3 +124,23 @@ def set_transparent_render_method(mat: bpy.types.Material) -> None:
 def set_view_transform_agx(scene: bpy.types.Scene) -> None:
     with contextlib.suppress(TypeError):  # custom OCIO config: leave as-is
         scene.view_settings.view_transform = "AgX"
+
+
+def set_transparent_shadow(mat: bpy.types.Material) -> None:
+    """Let an alpha-cut material (the ring annulus) cast a SHADOW through its
+    empty gaps -- the Cassini division must let light onto the planet.
+
+    Blender API drift (this file is the only place allowed to branch on it):
+    - Cycles (4.2 + 5.x): ``Material.use_transparent_shadow`` (bool) -- alpha
+      modulates the shadow ray. Default True, set explicitly for clarity.
+    - EEVEE-Next (4.2+): the ``shadow_method`` enum was REMOVED; alpha'd shadow
+      comes from the BLENDED surface method (already set by
+      set_transparent_render_method) plus per-material ``use_transparent_shadow``
+      when present. There is nothing else to toggle.
+    - Legacy EEVEE (<=4.1): ``Material.shadow_method`` = 'CLIP' / 'HASHED'.
+    Each write is hasattr-guarded so a missing property degrades to an opaque
+    shadow rather than a hard failure."""
+    if hasattr(mat, "use_transparent_shadow"):
+        mat.use_transparent_shadow = True
+    if hasattr(mat, "shadow_method"):  # legacy EEVEE only
+        mat.shadow_method = "CLIP"

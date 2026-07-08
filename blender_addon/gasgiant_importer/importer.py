@@ -76,6 +76,12 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         "transparent shell at ~1.03 R instead of the cloud surface — the "
         "real aurora sits ~1000 km up. Dayside-negligible, not sun-gated",
     )
+    build_rings: BoolProperty(
+        name="Build rings", default=True,
+        description="If the map set carries a ring strip (rings.exr), build a flat "
+        "Saturn-style annulus in the equatorial plane from ring_inner_km..ring_outer_km. "
+        "Rings are a Blender-only feature (invisible in the GUI preview)",
+    )
     longitude_offset: FloatProperty(
         name="Longitude offset", subtype="ANGLE", default=0.0,
         description="Rotate the planet so the feature you care about faces the camera",
@@ -180,6 +186,23 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
                 clearance=clearance,
             )
             aurora.parent = rig
+
+        # Rings (T16): a flat annulus sampling the rings.exr radial strip, in the
+        # planet's equatorial plane and parented to the rig so it tilts/spins with
+        # the planet. Blender-only -- there is no equirect ring data.
+        ring_extent = manifest_schema.ring_extent(doc)
+        if self.build_rings and ring_extent is not None:
+            ring_path = manifest_schema.map_path(doc, "rings")
+            ring_img = bpy.data.images.load(str(ring_path), check_existing=True)
+            inner_km, outer_km = ring_extent
+            # Scale km -> Blender units by the planet's own radius (radius_km).
+            radius_km = physical.get("radius_km", 69911.0)
+            scale = self.radius / radius_km
+            ring = atmosphere.build_ring_annulus(
+                f"{doc['name']}_rings", ring_img,
+                inner_km * scale, outer_km * scale,
+            )
+            ring.parent = rig
 
         if self.use_displacement:
             compat.enable_adaptive_subdivision(planet, context.scene)
