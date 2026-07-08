@@ -41,6 +41,13 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--steps-per-frame", type=int, default=None,
                      help="sim steps advanced between sequence frames "
                           "(required with --frames)")
+    exp.add_argument("--ramp-to", default=None,
+                     help="param RAMP target: a factory preset name or .json "
+                          "path whose look the sequence interpolates TO over the "
+                          "frames (frame 0 = the base look, last frame = this "
+                          "target). Requires --frames. The target's seed is "
+                          "forced to the base seed (a ramp keeps the same "
+                          "developed world); a RESTART-tier diff is rejected")
     exp.add_argument("--all-maps", action="store_true",
                      help="with --frames: also write height (and emission, when "
                           "enabled) per frame into frames/, not just color")
@@ -173,6 +180,9 @@ def _export(args: argparse.Namespace) -> int:
     if args.frames is not None and (args.frames < 1 or args.steps_per_frame < 1):
         print("error: --frames and --steps-per-frame must be >= 1", file=sys.stderr)
         return 2
+    if args.ramp_to is not None and args.frames is None:
+        print("error: --ramp-to requires --frames/--steps-per-frame", file=sys.stderr)
+        return 2
 
     # --resume and --preset/--recipe are mutually exclusive: one builds a fresh
     # run from a preset, the other reloads a saved run. --preset defaults None,
@@ -205,9 +215,28 @@ def _export(args: argparse.Namespace) -> int:
         if args.video and not _ffmpeg_available():
             print("error: --video needs ffmpeg on PATH (not found)", file=sys.stderr)
             return 2
+        ramp_to = None
+        if args.ramp_to is not None:
+            from gasgiant.params.interp import RampError, validate_ramp
+            from gasgiant.params.presets import PresetError, resolve_preset
+
+            try:
+                ramp_to = resolve_preset(args.ramp_to)
+            except (PresetError, ValueError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            # A ramp keeps the SAME developed world: force the target's seed to
+            # the base seed so the ramp is about look, not world (validate_ramp
+            # still guards the job API for programmatic callers).
+            ramp_to = ramp_to.model_copy(update={"seed": params.seed})
+            try:
+                validate_ramp(params, ramp_to)
+            except RampError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
         run_export_sequence(
             sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame,
-            all_maps=args.all_maps, video=args.video, fps=args.fps,
+            all_maps=args.all_maps, video=args.video, fps=args.fps, ramp_to=ramp_to,
         )
     else:
         run_export(sim, args.out)

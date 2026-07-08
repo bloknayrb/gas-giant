@@ -272,7 +272,7 @@ def _reap(f: Future) -> bool:
 def export_sequence_job(
     sim: Any, out_dir: Path, frames: int, steps_per_frame: int,
     width: int | None = None, *, all_maps: bool = False,
-    video: bool = False, fps: int = 24,
+    video: bool = False, fps: int = 24, ramp_to: Any | None = None,
 ) -> Iterator[Progress]:
     """Animated sequence export.
 
@@ -283,6 +283,18 @@ def export_sequence_job(
     ``Progress`` PER TILE (not once per frame) and pushes each finished frame's
     encode onto a bounded thread pool, so a single frame's render+encode never
     blocks the generator for seconds — the GUI stays responsive.
+
+    ``ramp_to`` (a ``PlanetParams``) turns this into a PARAM RAMP: the look
+    interpolates from the base state (t=0, frame 0) to ``ramp_to`` (t=1, the
+    last frame). Each frame ``fi`` re-applies ``lerp_params(base, ramp_to, t)``
+    with ``t = fi/(frames-1)`` before advancing the sim. Applying a VELOCITY-tier
+    diff every frame would clobber the ``extend_run`` frame clock (the facade's
+    ``_extra_steps`` reset), so the update goes through
+    ``update_params(preserve_target=True)`` -- the velocity field still rebuilds,
+    but the development target is left for ``extend_run`` to advance by exactly
+    ``steps_per_frame``. ``validate_ramp`` runs ONCE up front (fail fast): a
+    RESTART-tier or seed diff cannot be ramped mid-sequence. The non-ramp path
+    (``ramp_to is None``) is unchanged.
 
     ``all_maps`` additionally writes ``frames/height_NNNN.png`` (16-bit gray)
     and, when ``emission.enabled``, ``frames/emission_NNNN.exr`` per frame; the
@@ -307,6 +319,13 @@ def export_sequence_job(
         raise ValueError(f"frames must be >= 1, got {frames}")
     if steps_per_frame < 1:
         raise ValueError(f"steps_per_frame must be >= 1, got {steps_per_frame}")
+
+    base_params = sim.params
+    if ramp_to is not None:
+        # Fail fast BEFORE any GL/dev work: a RESTART-tier or seed diff can't ramp.
+        from gasgiant.params.interp import validate_ramp
+
+        validate_ramp(base_params, ramp_to)
 
     frames_dir = out_dir / "frames"
     written: list[Path] = []
@@ -364,6 +383,14 @@ def export_sequence_job(
         emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
 
         for fi in range(1, frames):
+            if ramp_to is not None:
+                from gasgiant.params.interp import lerp_params
+
+                # t spans 0 (frame 0 = base) .. 1 (last frame = ramp_to). Apply the
+                # lerped look, then advance EXACTLY steps_per_frame: preserve_target
+                # keeps the VELOCITY-tier reset from clobbering the extend_run clock.
+                t = fi / (frames - 1)
+                sim.update_params(lerp_params(base_params, ramp_to, t), preserve_target=True)
             sim.extend_run(steps_per_frame)
             snap = sim.create_snapshot()
             try:
@@ -470,11 +497,11 @@ def export_sequence_job(
 def run_export_sequence(
     sim: Any, out_dir: Path, frames: int, steps_per_frame: int,
     width: int | None = None, *, all_maps: bool = False,
-    video: bool = False, fps: int = 24,
+    video: bool = False, fps: int = 24, ramp_to: Any | None = None,
 ) -> None:
     """Drain the sequence job synchronously (CLI / tests)."""
     for _ in export_sequence_job(
         sim, out_dir, frames, steps_per_frame, width,
-        all_maps=all_maps, video=video, fps=fps,
+        all_maps=all_maps, video=video, fps=fps, ramp_to=ramp_to,
     ):
         pass

@@ -28,3 +28,10 @@ def test_steps_per_frame_must_be_positive(tmp_path):
         "--out", str(tmp_path / "x"),
     ])
     assert rc == 2
+
+
+def test_ramp_to_requires_frames(tmp_path):
+    rc = main([
+        "export", "--ramp-to", "saturn_pale", "--out", str(tmp_path / "x"),
+    ])
+    assert rc == 2

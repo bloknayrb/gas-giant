@@ -311,7 +311,17 @@ class Simulation:
 
     # -- parameters ---------------------------------------------------------------
 
-    def update_params(self, new_params: PlanetParams) -> set[Tier]:
+    def update_params(
+        self, new_params: PlanetParams, *, preserve_target: bool = False
+    ) -> set[Tier]:
+        """Apply a params diff at the cheapest sufficient tier.
+
+        ``preserve_target=True`` skips ONLY the VELOCITY-tier ``_extra_steps``
+        reset, leaving the current development target/step-clock untouched while
+        still rebuilding the velocity field (profiles + ``apply_velocity_params``).
+        The ramp sequence export needs this: it re-applies lerped params EVERY
+        frame, and the default reset would clobber the ``extend_run`` frame clock
+        (advancing ``_ADAPT_STEPS`` on frame 1 and zero steps thereafter)."""
         old_mask_file = self.params.mask.file
         tiers = diff_tiers(self.params, new_params)
         self.params = new_params
@@ -329,7 +339,8 @@ class Simulation:
             self.solver.params = new_params
             self.solver.set_profiles(self.profiles)
             self.solver.apply_velocity_params()
-            self._extra_steps = _ADAPT_STEPS if self.is_developed else 0
+            if not preserve_target:
+                self._extra_steps = _ADAPT_STEPS if self.is_developed else 0
             self._post_dirty = True
             self._emission_preview_dirty = True
         elif tiers:  # POST

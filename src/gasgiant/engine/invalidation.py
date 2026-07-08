@@ -1,7 +1,10 @@
-"""Parameter-diff -> invalidation tiers.
+"""Parameter-diff -> invalidation tiers (engine-layer re-export).
 
-Compares two validated parameter trees and reports which tiers of work the
-change requires. The engine dispatches the cheapest sufficient recompute:
+The tier-walk itself moved DOWN to ``gasgiant.params.tiers`` (params layer) so a
+params-layer consumer -- the ramp validator in ``params.interp`` -- can use it
+without importing this engine-layer module. This module re-exports the same
+objects so every existing ``from gasgiant.engine.invalidation import diff_tiers``
+(facade, app, and the test suite) keeps working unchanged.
 
 - POST     re-derive maps from existing tracers (instant)
 - VELOCITY rebuild the velocity field, sim continues under the new field
@@ -10,41 +13,18 @@ change requires. The engine dispatches the cheapest sufficient recompute:
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from gasgiant.params.tiers import (
+    diff_tier_paths,
+    diff_tiers,
+    needs_repost,
+    needs_restart,
+    needs_velocity_rebuild,
+)
 
-from gasgiant.params.model import PlanetParams, Tier
-
-
-def diff_tiers(old: PlanetParams, new: PlanetParams) -> set[Tier]:
-    """The set of tiers touched by changed fields (empty set: nothing changed)."""
-    tiers: set[Tier] = set()
-    _walk(type(old), old, new, tiers)
-    return tiers
-
-
-def _walk(model: type[BaseModel], old: BaseModel, new: BaseModel, tiers: set[Tier]) -> None:
-    for name, info in model.model_fields.items():
-        old_value = getattr(old, name)
-        new_value = getattr(new, name)
-        ann = info.annotation
-        if isinstance(ann, type) and issubclass(ann, BaseModel):
-            _walk(ann, old_value, new_value, tiers)
-            continue
-        if old_value == new_value:
-            continue
-        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
-        tier = extra.get("tier")
-        if tier is not None:
-            tiers.add(Tier(tier))
-
-
-def needs_restart(tiers: set[Tier]) -> bool:
-    return Tier.RESTART in tiers
-
-
-def needs_velocity_rebuild(tiers: set[Tier]) -> bool:
-    return Tier.VELOCITY in tiers or Tier.RESTART in tiers
-
-
-def needs_repost(tiers: set[Tier]) -> bool:
-    return bool(tiers)
+__all__ = [
+    "diff_tier_paths",
+    "diff_tiers",
+    "needs_repost",
+    "needs_restart",
+    "needs_velocity_rebuild",
+]
