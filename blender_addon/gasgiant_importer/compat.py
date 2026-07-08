@@ -83,6 +83,36 @@ def find_input(node: bpy.types.Node, *names: str) -> bpy.types.NodeSocket | None
     return None
 
 
+def configure_image_sequence(tex_node: bpy.types.Node, *, frame_duration: int) -> None:
+    """Turn a TEX_IMAGE node into an animated image sequence.
+
+    Blender resolves the on-disk picture number from the scene frame as::
+
+        picture_number = scene_frame - frame_start + 1 + frame_offset
+
+    Our exporter writes 0000-based frame files (``frame_0000.png`` ...), so at
+    scene frame 1 we want picture 0000: ``frame_start = 1`` and the load-bearing
+    ``frame_offset = -1``. ``frame_duration`` is the number of frames in the run.
+
+    The ``image_user`` sub-struct and its ``use_auto_refresh`` / ``use_cyclic``
+    booleans are stable across 4.2 LTS and 5.x, but each is written under a
+    ``hasattr`` guard so a future rename degrades to a still frame rather than a
+    hard failure (this file is the only place allowed to know API drift)."""
+    image = getattr(tex_node, "image", None)
+    if image is not None:
+        image.source = "SEQUENCE"
+    user = getattr(tex_node, "image_user", None)
+    if user is None:
+        return
+    user.frame_duration = frame_duration
+    user.frame_start = 1
+    user.frame_offset = -1
+    if hasattr(user, "use_auto_refresh"):
+        user.use_auto_refresh = True
+    if hasattr(user, "use_cyclic"):
+        user.use_cyclic = True
+
+
 def set_transparent_render_method(mat: bpy.types.Material) -> None:
     """EEVEE transparency: 4.2+ EEVEE-Next uses surface_render_method."""
     if hasattr(mat, "surface_render_method"):

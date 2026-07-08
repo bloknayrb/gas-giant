@@ -151,3 +151,47 @@ def test_vendored_reader_accepts_all_maps_frames_block(tmp_path):
     # the frames block travels through untouched (readers may use it or ignore it)
     assert doc["frames"]["maps"]["emission"][2] == "frames/emission_0002.exr"
     assert doc["frames"]["video"] == "sequence.mp4"
+
+
+def test_vendored_reader_frame_helpers_resolve_sequence_paths(tmp_path):
+    """T9: the reader's frame-path helpers pick the frame-0 file of each animated
+    map from real exporter output (color from frames.files, height/emission from
+    frames.maps), so the importer can load the sequence head."""
+    reader = _load_vendored_reader()
+    manifest = build_manifest(
+        name="contract",
+        seed=42,
+        resolution=(2048, 1024),
+        maps={
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "height": {"file": "height.exr", "format": "exr32f", "colorspace": "non-color"},
+        },
+        physical={"radius_km": 69911.0, "height_scale": 0.004, "height_midlevel": 0.5},
+        preset_doc=to_preset_doc(PlanetParams()),
+    )
+    attach_frames(
+        manifest, count=5, steps_per_frame=8,
+        files=[f"frames/frame_{i:04d}.png" for i in range(5)],
+        maps={
+            "height": [f"frames/height_{i:04d}.png" for i in range(5)],
+            "emission": [f"frames/emission_{i:04d}.exr" for i in range(5)],
+        },
+    )
+    write_manifest(tmp_path, manifest)
+    (tmp_path / "color.png").write_bytes(b"")
+    (tmp_path / "height.exr").write_bytes(b"")
+    doc = reader.read_mapset(tmp_path)
+
+    assert reader.frame_count(doc) == 5
+    assert reader.frame_zero_path(doc, "color").name == "frame_0000.png"
+    assert reader.frame_zero_path(doc, "height").name == "height_0000.png"
+    assert reader.frame_zero_path(doc, "emission").name == "emission_0000.exr"
+
+
+def test_vendored_reader_frame_helpers_none_without_frames(tmp_path):
+    """A still map set (no frames block) reports no sequence."""
+    reader = _load_vendored_reader()
+    doc = reader.read_mapset(_write_mapset(tmp_path))
+    assert reader.frames_block(doc) is None
+    assert reader.frame_count(doc) == 0
+    assert reader.frame_zero_path(doc, "color") is None

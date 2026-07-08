@@ -96,9 +96,17 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         for warning in doc["_warnings"]:
             self.report({"WARNING"}, warning)
 
-        color_path = manifest_schema.map_path(doc, "color")
-        height_path = manifest_schema.map_path(doc, "height")
-        emission_path = manifest_schema.map_path(doc, "emission")
+        # Animation: when the manifest carries a T7 `frames` block, a map is
+        # imported as a SEQUENCE pointed at its frame-0 file; without one (or for
+        # a map absent from `frames.maps`) the still map is used, unchanged.
+        frame_count = manifest_schema.frame_count(doc)
+        color_seq = manifest_schema.frame_zero_path(doc, "color")
+        height_seq = manifest_schema.frame_zero_path(doc, "height")
+        emission_seq = manifest_schema.frame_zero_path(doc, "emission")
+
+        color_path = color_seq or manifest_schema.map_path(doc, "color")
+        height_path = height_seq or manifest_schema.map_path(doc, "height")
+        emission_path = emission_seq or manifest_schema.map_path(doc, "emission")
         color_img = bpy.data.images.load(str(color_path), check_existing=True)
         height_img = (
             bpy.data.images.load(str(height_path), check_existing=True)
@@ -136,7 +144,7 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         planet.rotation_euler = (0.0, 0.0, self.longitude_offset)
         planet.parent = rig
 
-        mat = material.build_planet_material(
+        built = material.build_planet_material(
             f"{doc['name']}_surface",
             color_img,
             height_img,
@@ -152,7 +160,17 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
             aurora_color=aurora_color,
             aurora_on_surface=not self.aurora_shell,
         )
-        planet.data.materials.append(mat)
+        planet.data.materials.append(built.material)
+
+        # Sequence wiring: reconfigure each animated texture node's image_user.
+        # See compat.configure_image_sequence for the frame_start/offset formula
+        # (frame_offset = -1 maps scene frame 1 -> 0000-based picture 0).
+        if color_seq is not None:
+            compat.configure_image_sequence(built.color_node, frame_duration=frame_count)
+        if height_seq is not None and built.height_node is not None:
+            compat.configure_image_sequence(built.height_node, frame_duration=frame_count)
+        if emission_seq is not None and built.emission_node is not None:
+            compat.configure_image_sequence(built.emission_node, frame_duration=frame_count)
 
         if emission_img is not None and self.aurora_shell:
             aurora = atmosphere.build_aurora_shell(

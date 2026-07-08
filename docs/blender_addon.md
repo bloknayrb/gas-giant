@@ -2,7 +2,7 @@
 
 ## Install
 
-1. Build the zip: `uv run python scripts/build_addon.py` → `dist/gasgiant_importer-1.0.0.zip`
+1. Build the zip: `uv run python scripts/build_addon.py` → `dist/gasgiant_importer-1.1.0.zip`
 2. Drag the zip into a Blender 4.2+ window (or *Preferences → Get
    Extensions → Install from Disk*).
 
@@ -53,6 +53,26 @@ coverage). Options:
   surface; it stands off the limb like the real thing. The shell emission
   is not sun-gated: dayside-negligible at default strength, not
   dayside-clean. For lit-only shots simply export with strengths 0.
+
+## Animated sequences
+
+If the map set was exported with a `frames` block (the animation export), the
+importer loads the colour map — and the height / emission maps when
+`frames.maps` lists them — as an **image sequence** instead of a still:
+
+- The frame-0 file (`frames/frame_0000.png`, `frames/height_0000.png`,
+  `frames/emission_0000.exr`) is loaded and its `image.source` set to
+  `SEQUENCE`; Blender discovers the remaining frames from the `_%04d`
+  numbering.
+- On each texture node's `image_user`: `frame_duration = frames.count`,
+  `frame_start = 1`, and `frame_offset = -1`, with `use_auto_refresh` and
+  `use_cyclic` on. Blender maps the scene frame to the on-disk picture number
+  as `picture_number = scene_frame − frame_start + 1 + frame_offset`; our
+  frames are 0000-based, so `frame_offset = -1` puts picture 0000 on scene
+  frame 1 (the load-bearing off-by-one).
+- Scrub the timeline (or render an animation) and the planet's clouds advect;
+  auto-refresh keeps the viewport in sync. A map absent from `frames.maps`
+  (and any map set with no `frames` block) imports as a still, unchanged.
 
 ## Version compatibility
 

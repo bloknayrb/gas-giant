@@ -17,10 +17,26 @@ Hard rules (these are what survived Blender 4.0/5.0 API breakage):
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import bpy
 
 from . import compat
+
+
+class PlanetMaterial(NamedTuple):
+    """The built material plus handles to its image-texture nodes.
+
+    The importer needs the texture-node handles to reconfigure them for an
+    animated sequence (``image.source = 'SEQUENCE'`` + ``image_user`` fields);
+    they are otherwise created internally and unreachable. ``height_node`` /
+    ``emission_node`` are ``None`` when the corresponding map is absent.
+    """
+
+    material: bpy.types.Material
+    color_node: bpy.types.Node
+    height_node: bpy.types.Node | None
+    emission_node: bpy.types.Node | None
 
 
 def _new(nodes: bpy.types.Nodes, type_name: str, x: float, y: float) -> bpy.types.Node:
@@ -87,7 +103,7 @@ def build_planet_material(
     emission_strength: float = 1.0,
     aurora_color: tuple[float, float, float] = (0.85, 0.35, 0.60),
     aurora_on_surface: bool = True,
-) -> bpy.types.Material:
+) -> PlanetMaterial:
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -137,6 +153,9 @@ def build_planet_material(
             links.new(color_src, dark.inputs["A"])
             dark.inputs["B"].default_value = (0.35, 0.35, 0.38, 1.0)
             color_src = dark.outputs["Result"]
+
+    tex_height: bpy.types.Node | None = None
+    tex_em: bpy.types.Node | None = None
 
     base_color = compat.find_input(bsdf, "Base Color")
     links.new(color_src, base_color)
@@ -211,4 +230,4 @@ def build_planet_material(
             links.new(add_sh.outputs[0], output.inputs["Surface"])
 
     compat.set_displacement_method(mat, use_displacement)
-    return mat
+    return PlanetMaterial(mat, tex_color, tex_height, tex_em)

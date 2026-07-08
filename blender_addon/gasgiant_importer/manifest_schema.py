@@ -80,3 +80,37 @@ def map_path(doc: dict, name: str) -> Path | None:
     if entry is None:
         return None
     return Path(doc["_dir"]) / entry["file"]
+
+
+def frames_block(doc: dict) -> dict | None:
+    """The optional animation ``frames`` block (T7), or None for a still set.
+
+    Tolerant: any non-mapping or empty value reads as "no sequence"."""
+    frames = doc.get("frames")
+    return frames if isinstance(frames, dict) and frames.get("files") else None
+
+
+def frame_count(doc: dict) -> int:
+    """Number of frames in the sequence (0 if this is a still map set)."""
+    frames = frames_block(doc)
+    if frames is None:
+        return 0
+    return int(frames.get("count", len(frames.get("files", []))))
+
+
+def frame_zero_path(doc: dict, name: str) -> Path | None:
+    """Absolute path to frame 0 of map ``name`` (``color`` uses ``frames.files``;
+    other maps use ``frames.maps[name]``), or None when this map is not animated.
+
+    Blender only needs the frame-0 file loaded with ``image.source='SEQUENCE'``;
+    it discovers the rest from the ``_%04d`` numbering in the filename."""
+    frames = frames_block(doc)
+    if frames is None:
+        return None
+    if name == "color":
+        files = frames.get("files") or []
+    else:
+        files = (frames.get("maps") or {}).get(name) or []
+    if not files:
+        return None
+    return Path(doc["_dir"]) / files[0]
