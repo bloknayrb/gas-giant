@@ -71,6 +71,8 @@ def _derive_tile(
                 snap.vel_n, snap.vel_s, snap.tracers_n, snap.tracers_s,
                 snap.patch_rho_max,
             ),
+            clouds=snap.clouds,
+            profile_stamp=snap.profile_stamp,
         )
     sim.deriver.derive(
         snap.tracers_eq, snap.tracers_n, snap.tracers_s,

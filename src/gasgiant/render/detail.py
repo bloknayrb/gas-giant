@@ -154,13 +154,20 @@ class DetailSynth:
         full_size: tuple[int, int] | None = None,
         heroes: list[tuple[float, float, float, float, float, float]] | None = None,
         polar: PolarRoute | None = None,
+        clouds: list[tuple[float, float, float, float, float]] | None = None,
+        profile_stamp: moderngl.Texture | None = None,
     ) -> None:
         """heroes: up to 3 (x, y, z, r_core, spin, aspect) hero-storm centers; the
         detail amplitude and winding time grow inside them, and the
         DETAIL_FX spiral lanes wind in the spin (= sign(strength)) sense.
         6-tuples carry aspect; shorter tuples default aspect 1.0.
         polar: patch velocity/tracer textures — when given, polar backtraces
-        route through the patch charts instead of fading to neutral."""
+        route through the patch charts instead of fading to neutral.
+        clouds: up to 12 (x, y, z, r_core, aspect) elongated bright-cloud
+        centers (engine.snapshot.bright_cloud_centers); the DETAIL_FX
+        cirrus-fiber synthesis runs inside them. profile_stamp: the
+        (t0, t1, fade) latitude LUT — REQUIRED when cirrus_fibers > 0 and
+        clouds are given (the T0-excess half of the fiber mask)."""
         rng = subseed(seed, "detail-synth")
         fx_on = detail_fx_enabled(params)  # derived from pfield fx metadata
         spread_on = spread_enabled(params)  # SPREAD variant selector
@@ -186,6 +193,29 @@ class DetailSynth:
                 spins[i] = h[4] if len(h) > 4 else 1.0
             with contextlib.suppress(KeyError):
                 prog["u_hero_spin"].write(spins.tobytes())
+            _set(prog, "u_streak_mute", params.streak_mute)
+            _set(prog, "u_cirrus_fibers", params.cirrus_fibers)
+            rng_cirrus = subseed(seed, "detail-cirrus")
+            _set(prog, "u_offset_cirrus", tuple(rng_cirrus.uniform(-100.0, 100.0, 3)))
+            cloud_list = (clouds or [])[:12]
+            if params.cirrus_fibers > 0.0 and cloud_list and profile_stamp is None:
+                raise ValueError(
+                    "cirrus_fibers > 0 with bright clouds requires profile_stamp "
+                    "(the T0-excess half of the fiber mask)"
+                )
+            cpacked = np.zeros((12, 4), dtype=np.float32)
+            caspects = np.ones(12, dtype=np.float32)
+            for i, cl in enumerate(cloud_list):
+                cpacked[i] = cl[:4]
+                caspects[i] = cl[4] if len(cl) > 4 else 1.0
+            _set(prog, "u_cloud_count", len(cloud_list))
+            with contextlib.suppress(KeyError):
+                prog["u_clouds"].write(cpacked.tobytes())
+            with contextlib.suppress(KeyError):
+                prog["u_cloud_aspect"].write(caspects.tobytes())
+            if profile_stamp is not None and not _absent(prog, "u_profile_stamp"):
+                profile_stamp.use(location=7)
+                prog["u_profile_stamp"].value = 7
         if polar is not None:
             prog["u_polar_route"].value = 1
             polar.vel_n.use(location=3)
@@ -238,6 +268,9 @@ class DetailSynth:
         prog["u_striation_freq"].value = params.striation_frequency
         prog["u_polar_stipple"].value = params.polar_stipple
         _set(prog, "u_hero_calm", params.hero_calm)
+        # Non-fx (its non-zero default must never select the FX variant), so
+        # it is uploaded OUTSIDE the fx_on block, like u_hero_calm.
+        _set(prog, "u_cirrus_fiber_freq", params.cirrus_fiber_freq)
         prog["u_offset"].value = tuple(rng.uniform(-100.0, 100.0, 3))
         out_tex.bind_to_image(0, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP

@@ -864,6 +864,39 @@ class DetailParams(_Params):
                     "zones or stamped latitude bands. Still flow-folded (not flat "
                     "noise). Pole-faded. ~0.36 is a balanced value",
     )
+    cirrus_fibers: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail", fx=True,
+        description="Render-time combed-fiber synthesis over the ELONGATED "
+                    "bright-cloud stamps (companion/accent storms with "
+                    "aspect > 1, the Neptune methane-cirrus class): carves "
+                    "dark inter-strand lanes + gentle bright ridges into each "
+                    "streak, flow-oriented and flow-warped. Stamping fibers "
+                    "into the tracer was falsified (they smear over the dev "
+                    "run; docs/roadmap.md) — this synthesizes them "
+                    "post-advection. Requires detail.intensity > 0. No rand: "
+                    "a draw here would reshuffle every later randomize draw. "
+                    "0 = off (byte-identical)",
+    )
+    cirrus_fiber_freq: float = pfield(
+        6.0, tier=Tier.POST, lo=2.0, hi=24.0, log=True, ui="Detail",
+        description="Strand density of the cirrus fibers: strands across "
+                    "each bright-cloud streak half-width. Amplitude is "
+                    "attenuated when strands approach the output pixel size "
+                    "(spacing ~ cloud_radius/freq radians), so high values "
+                    "need high export resolution. Inert unless "
+                    "cirrus_fibers > 0",
+    )
+    streak_mute: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail", fx=True,
+        description="Suppress the WHOLE filament-streak accumulator (the "
+                    "ungated base flow-streak + its intermittency gate + the "
+                    "belt_texture filament floor; the SPREAD streak too, if "
+                    "spread > 0). The base streak has a speed/shear floor and "
+                    "no zero lever of its own, so smooth laminar planets that "
+                    "enable detail.intensity only for cirrus_fibers would gain "
+                    "planet-wide flow-grain without this. No rand (draw-order "
+                    "safe). 0 = full streak (byte-identical)",
+    )
 
 
 class SolverType(StrEnum):

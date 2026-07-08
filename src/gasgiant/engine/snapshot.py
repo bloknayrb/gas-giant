@@ -40,6 +40,36 @@ def hero_centers(
     return out
 
 
+MAX_BRIGHT_CLOUDS = 12
+
+
+def bright_cloud_centers(
+    registry: VortexRegistry,
+) -> list[tuple[float, float, float, float, float]]:
+    """(x, y, z, r_core, aspect) of each ELONGATED bright cloud at its current
+    drifted position — the companion/accent streaks the stamp renders through
+    its collar-free soft-streak branch (asp > 1). The predicate mirrors that
+    branch's condition, so exactly the features drawn as bright cirrus streaks
+    get render-time fibers: non-hero, aspect > 1, positive brightness. Round
+    storms, dark heroes, merger debris, and outbreak plumes (all aspect 1.0)
+    are excluded. Capped at MAX_BRIGHT_CLOUDS in registry order (worst-case
+    population is 3 heroes x 3 companions + 2 accents = 11)."""
+    from gasgiant.sim.vortices import KIND_HERO
+
+    out = []
+    for v in registry.vortices:
+        if v.kind == KIND_HERO or v.aspect <= 1.0 or v.brightness <= 0.0:
+            continue
+        cl = math.cos(v.lat)
+        out.append((
+            cl * math.cos(v.lon), math.sin(v.lat), cl * math.sin(v.lon),
+            v.r_core, v.aspect,
+        ))
+        if len(out) >= MAX_BRIGHT_CLOUDS:
+            break
+    return out
+
+
 @dataclass
 class ExportSnapshot:
     params: PlanetParams
@@ -56,6 +86,9 @@ class ExportSnapshot:
     # Hero-storm centers at their drifted positions, (x, y, z, r_core, spin, aspect)
     # each: the detail pass amplifies/winds filaments inside them.
     heroes: list[tuple[float, float, float, float, float, float]] = None  # type: ignore[assignment]
+    # Elongated bright-cloud centers (x, y, z, r_core, aspect) at their drifted
+    # positions: the detail pass synthesizes cirrus fibers over them.
+    clouds: list[tuple[float, float, float, float, float]] = None  # type: ignore[assignment]
     # Analytic lane lines and the meander warp they ride (derive-time).
     lanes: list[tuple[float, float]] = None  # type: ignore[assignment]
     warp: tuple[tuple[float, float, float], float, float] = ((0.0, 0.0, 0.0), 0.0, 3.0)
@@ -79,6 +112,7 @@ class ExportSnapshot:
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
             heroes=hero_centers(sim.vortices),
+            clouds=bright_cloud_centers(sim.vortices),
             lanes=list(sim.lanes),
             warp=(s.warp_offset, sim.params.bands.warp_amount, sim.params.bands.warp_freq),
         )
