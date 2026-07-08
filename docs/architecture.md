@@ -214,7 +214,7 @@ intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
 
 **Program variants.** Optional shader features are preprocessor-gated and
 cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX) —
-up to four programs — and detail.comp per DETAIL_FX. The DETAIL_FX variant
+up to four programs — and detail.comp per (DETAIL_FX, SPREAD). The DETAIL_FX variant
 is selected whenever **any detail-FX lever is nonzero**; the lever set is
 not hand-enumerated but derived from the `fx=True` pfield flag in
 `params/model.py` (`render/detail.py::detail_fx_enabled`), which also
@@ -237,6 +237,24 @@ detail tracer and shear/speed, blended with Worley convective cells in quiet
 zones. Poleward of 66–72° the backtrace routes through the polar patch
 velocities (feather mixes noise values, never positions), so the caps carry
 real texture instead of fading to neutral (v1.1).
+
+**Uniform detail coverage** (`detail.spread`, default-off, opt-in `SPREAD`
+variant) applies the flow-folded detail-FX texture at EVEN density across
+latitude instead of the band-gated LUT (belts textured, zones detail-starved).
+`spread` is a single POST-tier level: `0` = today's band-gated look
+(byte-identical, non-variant program); `>0` = every latitude gate
+(belt/zone/mottle-window, the filament/cell weights) is interpolated toward the
+uniform coverage level `u_spread` (pole-faded via `1 − routeW`), so there are no
+detail-starved zones or stamped latitude bands. The backtrace sites still fold
+the texture with the local flow, so it reads even *and* fluid, not flat noise.
+Preprocessor-gated with verbatim `#else` arms ⇒ default output byte-identical
+(p05 gate + a GPU-free no-defines projection hash guard both green). Character is
+unchanged — this places *existing* flow-folded detail evenly; it does NOT advect
+a tracer (distinct from the falsified frozen-field dye line and its parked
+tracer-res redesign). *(An earlier strain-driven placement engine — an activity
+pass computing local strain to concentrate texture on shear/rims — was built and
+then dropped in calibration: strain-*selective* density read patchy; even
+coverage won. See `docs/roadmap.md`.)*
 
 ## Checkpoints
 

@@ -202,6 +202,26 @@ before proposing work in these areas.
   set out to retire). Do not re-propose any frozen-field render-time advection of a
   detail field.
 
+- **Uniform detail coverage (`detail.spread`) — SHIPPED default-off (2026-07-07).**
+  Fixes both the original "detail-starved zones + stamped latitude bands"
+  complaint AND its would-be cure: applies the flow-folded detail-FX texture at
+  EVEN density across latitude (single POST lever; 0 = band-gated byte-identical,
+  >0 = uniform coverage at that level, pole-faded). Still flow-folded (the
+  backtrace sites), so even ≠ flat. Opt-in `SPREAD` variant, p05 gate green.
+  - **Superseded design — strain-driven PLACEMENT (built then dropped in
+    calibration, 2026-07-07).** First attempt drove *where* detail lands from a
+    local 2-D sim field (eddy strain `|∇v|` + vorticity via an activity pass +
+    CPU row-mean reduction), concentrating texture on jet edges / vortex rims /
+    fold zones. FALSIFIED by visual calibration: strain-*selective* density read
+    PATCHY ("details exist in certain places but not others, doesn't read well —
+    want it everywhere balanced or nowhere"). Even coverage won; the strain
+    engine (activity.comp/activity.py + snapshot/export plumbing) was deleted.
+    LESSON: for a gas giant, EVEN texture density reads better than selectivity —
+    by latitude OR by flow. Design record (now superseded):
+    `docs/superpowers/specs/2026-07-07-field-driven-detail-design.md`.
+  - Neither this nor the strain attempt changes noise *character*; the character
+    redesign (decouple tracer-res, advect a high-res passive tracer through the
+    EVOLVING field) remains parked (W13/W14).
 ## Research direction (unstarted): detail CHARACTER = sim-advected high-res tracer
 
 The render detail's fBm reads as noise because fluid folded-filament morphology is a
