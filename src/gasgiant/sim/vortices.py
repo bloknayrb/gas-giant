@@ -142,6 +142,25 @@ class VortexRegistry:
                 v.lon = float((v.lon + d + np.pi) % (2 * np.pi) - np.pi)
 
 
+def drift_compensated_lon(
+    profiles: LatProfiles,
+    lat: float,
+    target_deg: float,
+    dt: float | None,
+    n_steps: int,
+) -> float:
+    """Seed longitude that lands at ``target_deg`` (degrees) after ``n_steps``
+    of zonal drift, wrapped to (-pi, pi]. Inverse-compensation of the closed-form
+    drift VortexRegistry.drift applies every step: total longitude drift at a
+    fixed latitude = zonal_rate(lat) * dt * n_steps, so the seed is the target
+    minus that. With ``dt is None`` or ``n_steps <= 0`` there is no dev run to
+    compensate for -- seed the target directly."""
+    target = float(np.deg2rad(target_deg))
+    if dt is not None and n_steps > 0:
+        target -= float(zonal_rate(profiles, np.array([lat]))[0]) * dt * n_steps
+    return float((target + np.pi) % (2.0 * np.pi) - np.pi)
+
+
 def zonal_rate(profiles: LatProfiles, lats: np.ndarray) -> np.ndarray:
     """d(lon)/dt of the zonal drift at the given latitudes — THE drift formula,
     shared by drift(), the merger converging gate, and seeded-pair placement
@@ -437,8 +456,15 @@ def generate_vortices(
         # Wake trails WNW (review F06): westward, biased half a core radius
         # toward the equator. Not jet-derived — the ambient jet is eastward
         # across the entire hero band, so sampling it put the wake due east.
+        # Consume the seeded longitude draw unconditionally (RNG-stream
+        # position must not depend on the pin), then override for a pin.
+        lon = float(rng.uniform(-np.pi, np.pi))
+        if storms.hero_longitude is not None:
+            lon = drift_compensated_lon(
+                profiles, lat, storms.hero_longitude, dt, dev_steps
+            )
         reg.vortices.append(
-            Vortex(lat, float(rng.uniform(-np.pi, np.pi)), r, s, KIND_HERO,
+            Vortex(lat, lon, r, s, KIND_HERO,
                    tint=storms.hero_tint, brightness=storms.hero_brightness,
                    wake_dir=-1.0,
                    wake_lat_off=0.5 * r * (1.0 if lat < 0.0 else -1.0),
@@ -544,7 +570,8 @@ def generate_vortices(
     # pairs) so every pre-existing population is byte-identical when they are
     # off — and untouched even when they are on.
     if storms.accent_count > 0:
-        _add_accent_ovals(reg, subseed(seed, "accent-ovals"), zones, profiles, storms)
+        _add_accent_ovals(reg, subseed(seed, "accent-ovals"), zones, profiles, storms,
+                          dt, dev_steps)
     if storms.hero_companions > 0:
         _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
                              storms.hero_companions)
@@ -561,6 +588,8 @@ def _add_accent_ovals(
     zones: list[tuple[float, float]],
     profiles: LatProfiles,
     storms: StormsParams,
+    dt: float | None = None,
+    dev_steps: int = 0,
 ) -> None:
     """Accent ovals (review A01 — the Oval BA unlock): KIND_OVAL storms whose
     tint/brightness are EXPLICIT params rather than the kind constants, so a
@@ -585,7 +614,20 @@ def _add_accent_ovals(
         lat = float(np.clip(center, -cap, cap))
     r = storms.accent_radius
     s = _ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
-    for lon in _poisson_lons(rng, storms.accent_count, min_sep=0.6):
+    # Consume the seeded Poisson-disc draw unconditionally (RNG-stream position
+    # must not depend on the pin). When pinned, override every accent longitude
+    # to the drift-compensated target, offset a fixed min_sep step per accent so
+    # a count=2 pair stays separated at the snapshot.
+    min_sep = 0.6
+    lons = _poisson_lons(rng, storms.accent_count, min_sep=min_sep)
+    pin_base = (
+        drift_compensated_lon(profiles, lat, storms.accent_longitude, dt, dev_steps)
+        if storms.accent_longitude is not None
+        else None
+    )
+    for k, lon in enumerate(lons):
+        if pin_base is not None:
+            lon = float((pin_base + k * min_sep + np.pi) % (2.0 * np.pi) - np.pi)
         reg.vortices.append(
             Vortex(lat, lon, r, s, KIND_OVAL,
                    tint=storms.accent_tint, brightness=storms.accent_brightness)

@@ -19,7 +19,13 @@ import numpy as np
 from gasgiant.params.model import PlanetParams
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
-from gasgiant.sim.vortices import MAX_VORTEX_LAT, Vortex, VortexRegistry
+from gasgiant.sim.profiles import LatProfiles
+from gasgiant.sim.vortices import (
+    MAX_VORTEX_LAT,
+    Vortex,
+    VortexRegistry,
+    drift_compensated_lon,
+)
 
 KIND_OUTBREAK = 6.0
 # ---------------------------------------------------------------------------
@@ -71,7 +77,13 @@ class EventSchedule:
     strength: float = 1.0
 
     @classmethod
-    def generate(cls, params: PlanetParams, bands: BandLayout) -> EventSchedule:
+    def generate(
+        cls,
+        params: PlanetParams,
+        bands: BandLayout,
+        profiles: LatProfiles | None = None,
+        dt: float | None = None,
+    ) -> EventSchedule:
         rng = subseed(params.seed, "events")
         sched = cls(strength=params.storms.outbreak_strength)
         count = params.storms.outbreak_count
@@ -117,7 +129,24 @@ class EventSchedule:
             )
             if pin is not None:
                 center = float(np.deg2rad(pin))
+            # Consume the seeded longitude draw unconditionally (RNG-stream
+            # position must not depend on the pin), then override for a pin.
             base_lon = float(rng.uniform(-np.pi, np.pi))
+            if params.storms.outbreak_longitude is not None:
+                # Best-effort drift compensation: the plume knots carry no
+                # circulation (zero-strength registry entries), but the sim
+                # velocity advects their stamps at ~the zonal rate for their
+                # post-eruption life. Inverse-compensate that drift over the
+                # REMAINING (dev_steps - step0) steps at the eruption latitude
+                # so the head lands at the requested rendered longitude. Only
+                # the head is precise -- the belt shear folds the tail into a
+                # streak (a recorded caveat). With no profiles/dt (default
+                # call), seed the target directly, no compensation.
+                remaining = params.sim.dev_steps - step0
+                base_lon = drift_compensated_lon(
+                    profiles, center, params.storms.outbreak_longitude,
+                    dt if profiles is not None else None, remaining,
+                )
             # A TRAIN strung DOWNSTREAM along the belt: a head knot plus a chain
             # offset in longitude with a tight latitude bracket and a size
             # falloff, so each eruption reads as a cluster (not one blob). The

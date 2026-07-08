@@ -71,9 +71,10 @@ class Simulation:
         p = self.params
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(p.seed, self.bands, p.bands, p.jets)
+        dt = compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed)
         self.vortices = generate_vortices(
             p.seed, self.bands, self.profiles, p.storms, p.poles,
-            dt=compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed),
+            dt=dt,
             dev_steps=p.sim.dev_steps,
         )
         self.lanes = select_lanes(p.seed, self.bands, p.bands.lane_density)
@@ -85,7 +86,7 @@ class Simulation:
         self.solver = Solver(
             self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp,
             wave_lats=select_wave_latitudes(self.bands, self.profiles),
-            events=EventSchedule.generate(p, self.bands),
+            events=EventSchedule.generate(p, self.bands, self.profiles, dt),
             profile_omega_tex=self.profile_omega,
         )
         self.solver.init_tracers()

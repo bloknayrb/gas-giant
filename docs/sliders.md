@@ -586,6 +586,14 @@ Pin accent ovals to this latitude (degrees). None = seeded zone placement. Like 
 
 _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
+### accent longitude
+
+`storms.accent_longitude` &mdash; optional; pin range **-180 to 180**, default **None (auto)**, tier `restart`.
+
+Pin the accent ovals' RENDERED longitude (degrees, -180..180). Unpinned (None) = seeded Poisson-disc placement. The value is the end-of-run longitude of the FIRST accent: the generator inverse-compensates the shared zonal drift so it lands where you asked, and a count=2 pair is offset a fixed step (0.6 rad) downstream of it. Accents that get caught in a merger deviate (a recorded caveat)
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
 ### accent radius
 
 `storms.accent_radius` &mdash; range **0.02 to 0.12**, default **0.05**, tier `restart`.
@@ -661,6 +669,14 @@ Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating brigh
 `storms.hero_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
 
 Pin the hero storm to this latitude (degrees; the 'pin' checkbox toggles it). Unpinned (None) = seeded tropical-zone placement. The effective range is further limited by hero_radius (see validator) so the stamp stays clear of the 63 deg exchange band
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
+### hero longitude
+
+`storms.hero_longitude` &mdash; optional; pin range **-180 to 180**, default **None (auto)**, tier `restart`.
+
+Pin the hero storm's RENDERED longitude (degrees, -180..180; the 'pin' checkbox toggles it). Unpinned (None) = seeded placement. The value is the end-of-run longitude, not the seed: the generator inverse-compensates the storm's eastward zonal drift over the whole development run so the spot lands where you asked when the snapshot is taken. A hero that merges with or absorbs another storm deviates (a recorded caveat)
 
 _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
@@ -799,6 +815,14 @@ Minimum |latitude| for AUTO outbreak-belt selection, radians of latitude (1 rad 
 `storms.outbreak_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
 
 Pin convective outbreaks to this latitude (degrees; the 'pin' checkbox toggles it) -- the 2010 Saturn Great White Spot erupted at ~35 N, the 1990 event on the equator. None = seeded placement in a dark belt. A pin bypasses the belt-candidate selection entirely (including the outbreak_lat_min floor), so equatorial eruptions work
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
+### outbreak longitude
+
+`storms.outbreak_longitude` &mdash; optional; pin range **-180 to 180**, default **None (auto)**, tier `restart`.
+
+Pin the outbreak train's RENDERED longitude (degrees, -180..180; the 'pin' checkbox toggles it). Unpinned (None) = seeded placement. The value is where the eruption head sits at the final snapshot: since the plume knots carry no circulation, the sim velocity advects them at roughly the zonal rate, so the generator inverse-compensates that drift over the post-eruption life (best-effort -- the belt shear folds the tail into a streak, so only the head lands precisely)
 
 _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 

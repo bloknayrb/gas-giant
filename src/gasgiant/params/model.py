@@ -432,6 +432,17 @@ class StormsParams(_Params):
                     "hero_radius (see validator) so the stamp stays clear of the "
                     "63 deg exchange band",
     )
+    hero_longitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-180.0, hi=180.0, adv=True, ui="Hero",
+        description="Pin the hero storm's RENDERED longitude (degrees, "
+                    "-180..180; the 'pin' checkbox toggles it). Unpinned (None) "
+                    "= seeded placement. The value is the end-of-run longitude, "
+                    "not the seed: the generator inverse-compensates the storm's "
+                    "eastward zonal drift over the whole development run so the "
+                    "spot lands where you asked when the snapshot is taken. A "
+                    "hero that merges with or absorbs another storm deviates "
+                    "(a recorded caveat)",
+    )
     rim_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True, ui="Hero",
         description="Scales the hero storm's dark perimeter ring + bright collar "
@@ -573,6 +584,16 @@ class StormsParams(_Params):
                     "radius-coupled (see validator) so the stamp stays clear of "
                     "the 63 deg storm-free exchange band",
     )
+    accent_longitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-180.0, hi=180.0, adv=True, ui="Accents",
+        description="Pin the accent ovals' RENDERED longitude (degrees, "
+                    "-180..180). Unpinned (None) = seeded Poisson-disc "
+                    "placement. The value is the end-of-run longitude of the "
+                    "FIRST accent: the generator inverse-compensates the shared "
+                    "zonal drift so it lands where you asked, and a count=2 pair "
+                    "is offset a fixed step (0.6 rad) downstream of it. Accents "
+                    "that get caught in a merger deviate (a recorded caveat)",
+    )
     accent_tint: float = pfield(
         0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Accents",
         description="Accent oval tint (T3): positive = warm/red end of the "
@@ -623,6 +644,18 @@ class StormsParams(_Params):
                     "None = seeded placement in a dark belt. A pin bypasses "
                     "the belt-candidate selection entirely (including the "
                     "outbreak_lat_min floor), so equatorial eruptions work",
+    )
+    outbreak_longitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-180.0, hi=180.0, adv=True, ui="Outbreaks",
+        description="Pin the outbreak train's RENDERED longitude (degrees, "
+                    "-180..180; the 'pin' checkbox toggles it). Unpinned (None) "
+                    "= seeded placement. The value is where the eruption head "
+                    "sits at the final snapshot: since the plume knots carry no "
+                    "circulation, the sim velocity advects them at roughly the "
+                    "zonal rate, so the generator inverse-compensates that drift "
+                    "over the post-eruption life (best-effort -- the belt shear "
+                    "folds the tail into a streak, so only the head lands "
+                    "precisely)",
     )
     outbreak_phase: float | None = pfield(
         None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Outbreaks",
