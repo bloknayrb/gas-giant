@@ -565,7 +565,7 @@ Extra turbulence where jet shear is strong
 Accent oval east-west elongation (lon:lat); 1.0 = round. Stretches the bright accent stamp into a wispy cirrus streak (Neptune bright-cloud / Scooter class) via the same generic aspect path as hero_aspect. 1.0 = round (byte-identical)
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__accent_aspect__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
 ### accent brightness
@@ -633,7 +633,7 @@ Brown-barge cyclone population multiplier (belts)
 East-west elongation (lon:lat) of the bright companion clouds; 1.0 = round. Stretches each KIND_PEARL companion into a wispy cirrus streak beside the hero (real Neptune's GDS companion clouds are sheared streaks, not round dots), via the same generic aspect path as hero_aspect. 1.0 = round (byte-identical)
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 5<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__companion_aspect__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
 ### hero aspect
