@@ -16,7 +16,15 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     exp = sub.add_parser("export", help="render a map set headlessly")
-    exp.add_argument("--preset", default="jupiter_like", help="factory preset name or .json path")
+    exp.add_argument("--preset", default=None, help="factory preset name or .json path")
+    exp.add_argument(
+        "--recipe", default=None,
+        help="epoch recipe to overlay (e.g. faded_seb, ochre_ez): a small "
+             "parameter overlay reproducing a documented historical atmosphere "
+             "state. Precedence: with --preset, the overlay is applied on top of "
+             "that preset; without --preset, the recipe's own base preset is used. "
+             "Default base (neither given) is jupiter_like",
+    )
     exp.add_argument("--res", type=int, default=None, help="equirect width in pixels (2:1 maps)")
     exp.add_argument("--dev-steps", type=int, default=None,
                      help="override the preset's development step count")
@@ -62,7 +70,12 @@ def main(argv: list[str] | None = None) -> int:
 def _export(args: argparse.Namespace) -> int:
     from gasgiant.engine import Simulation
     from gasgiant.export.exporter import run_export, run_export_sequence
-    from gasgiant.params.presets import PresetError, resolve_preset
+    from gasgiant.params.presets import (
+        PresetError,
+        apply_overlay,
+        load_recipe,
+        resolve_preset,
+    )
 
     if (args.frames is None) != (args.steps_per_frame is None):
         print("error: --frames and --steps-per-frame must be given together",
@@ -72,9 +85,27 @@ def _export(args: argparse.Namespace) -> int:
         print("error: --frames and --steps-per-frame must be >= 1", file=sys.stderr)
         return 2
 
+    # Resolve the base preset, then (if --recipe) overlay the epoch recipe.
+    # --preset wins the base choice; without it the recipe's own base is used;
+    # with neither, the historical jupiter_like default holds.
+    overlay: dict | None = None
+    base_name = args.preset
+    if args.recipe is not None:
+        try:
+            recipe_base, overlay, _meta = load_recipe(args.recipe)
+        except PresetError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if base_name is None:
+            base_name = recipe_base
+    if base_name is None:
+        base_name = "jupiter_like"
+
     try:
-        params = resolve_preset(args.preset)
-    except PresetError as exc:
+        params = resolve_preset(base_name)
+        if overlay is not None:
+            params = apply_overlay(params, overlay)
+    except (PresetError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

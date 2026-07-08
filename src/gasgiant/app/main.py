@@ -55,16 +55,35 @@ from gasgiant.params.presets import (
     USER_PRESET_DIR,
     PresetError,
     PresetSource,
+    apply_overlay,
     available_presets,
+    available_recipes,
     import_preset,
     load_factory_preset,
     load_preset,
+    load_recipe,
     load_user_preset,
     save_preset,
 )
 from gasgiant.params.randomize import randomize
 
 log = logging.getLogger(__name__)
+
+
+def _load_recipe_menu() -> list[tuple[str, str, str]]:
+    """(stem, display-label, description) for each packaged epoch recipe, read
+    once at startup. A malformed recipe is skipped (logged) rather than crashing
+    the menu -- it still fails loudly if actually selected (``load_recipe``)."""
+    entries: list[tuple[str, str, str]] = []
+    for stem in available_recipes():
+        try:
+            _base, _overlay, meta = load_recipe(stem)
+        except (PresetError, OSError, ValueError):
+            log.warning("skipping unreadable recipe %r in the Scenarios menu", stem)
+            continue
+        entries.append((stem, meta.get("name") or stem, meta.get("description") or ""))
+    return entries
+
 
 class DialogKind(StrEnum):
     """Which native file dialog ``self._dialog`` is currently awaiting. A
@@ -502,6 +521,9 @@ class StudioApp:
         # Cached merged (factory + user) dropdown list; refreshed on save/load and
         # by the explicit "Refresh presets" button, never re-enumerated per frame.
         self._preset_cache: list[tuple[str, str]] = available_presets()
+        # T15 epoch recipes: cached (stem, label, description) once — recipes are
+        # immutable package data, so this never re-enumerates per frame.
+        self._recipe_cache: list[tuple[str, str, str]] = _load_recipe_menu()
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
         self._recomputing = False  # a heavy commit reset the dev run; show progress
@@ -736,6 +758,29 @@ class StudioApp:
         self._reset_working_copy()  # discrete action wins over pending edit
         label = f"user/{name}" if source == PresetSource.USER else name
         self.toasts.info(f"preset: {label}")
+        self._toast_param_warnings(params)
+
+    def _load_recipe_entry(self, name: str) -> None:
+        """T15: apply an epoch recipe -- load its base factory preset, deep-merge
+        the recipe overlay via ``apply_overlay``, and commit through the same
+        push-history -> commit -> set-identity -> reset path as a preset load, so
+        it is fully undoable. The result is a transient identity ``recipe/<name>``
+        (FILE source -- like a loaded file, it isn't in the saved dropdown).
+        Failures toast and leave state untouched."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export (see draw_controls)
+        try:
+            base, overlay, meta = load_recipe(name)
+            params = apply_overlay(load_factory_preset(base), overlay)
+        except (PresetError, OSError, ValueError) as exc:
+            self.toasts.error(str(exc))
+            return
+        if self.params != params:
+            self._push_history(self.params)
+        self._commit(params)
+        self._set_identity((f"recipe/{name}", PresetSource.FILE), params)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"scenario: {meta.get('name') or name}")
         self._toast_param_warnings(params)
 
     def _toast_param_warnings(self, params: PlanetParams) -> None:
@@ -1220,6 +1265,24 @@ class StudioApp:
                 "fit the per-latitude palette rows from a cylindrical true-color "
                 "reference photo (values are baked in; undoable)"
             )
+
+        # T15: epoch recipes ("Scenarios") -- documented historical atmosphere
+        # states expressed as small overlays on a base preset. Selecting one
+        # loads the base, applies the overlay, and commits undoably.
+        if self._recipe_cache:
+            imgui.set_next_item_width(160.0)
+            if imgui.begin_combo("##scenario", "Scenarios..."):
+                for stem, label, desc in self._recipe_cache:
+                    if imgui.selectable(label, False)[0]:
+                        self._load_recipe_entry(stem)
+                    if desc and imgui.is_item_hovered():
+                        imgui.set_tooltip(desc)
+                imgui.end_combo()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "apply an epoch recipe: a documented historical atmosphere "
+                    "state overlaid on its base preset (undoable)"
+                )
 
         # B1-8: contextual overwrite/delete row, shown only while a USER
         # preset is active (factory presets are package data; a FILE identity

@@ -21,6 +21,10 @@ from gasgiant.params.migrations import CURRENT_PRESET_FORMAT, migrate
 from gasgiant.params.model import PlanetParams
 
 _FACTORY_PACKAGE = "gasgiant.presets"
+# Epoch recipes (T15) live as raw-overlay JSONs in a subdir of the factory
+# preset package, so they ship as package data by the same mechanism (hatchling
+# includes every tracked file under the package tree).
+_RECIPE_SUBDIR = "recipes"
 
 # User presets live alongside the session file under ~/.gasgiant (matching
 # SESSION_PATH in app.main). Kept in the params layer (no GUI import) so the CLI
@@ -238,6 +242,80 @@ def resolve_preset(name_or_path: str) -> PlanetParams:
     if p.suffix == ".json" and p.exists():
         return load_preset(p)
     return load_factory_preset(name_or_path)
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """Recursive dict-merge: where BOTH sides map a key to a dict, RECURSE into
+    them; otherwise the overlay leaf REPLACES the base value. Returns a new dict
+    (the inputs are left untouched). This is the crux of ``apply_overlay`` -- a
+    shallow ``dict.update`` would drop a whole nested group (and reset its
+    untouched siblings to their model defaults) whenever the overlay touches a
+    single leaf of that group."""
+    out = dict(base)
+    for key, value in overlay.items():
+        existing = out.get(key)
+        if isinstance(value, dict) and isinstance(existing, dict):
+            out[key] = _deep_merge(existing, value)
+        else:
+            out[key] = value
+    return out
+
+
+def apply_overlay(params: PlanetParams, overlay: dict) -> PlanetParams:
+    """Deep-merge a recipe ``overlay`` onto ``params`` and re-validate.
+
+    The overlay is a sparse nested dict naming only the fields it changes. It is
+    recursively merged into ``params.model_dump()`` (siblings of any group the
+    overlay enters are preserved -- see ``_deep_merge``), then the merged dict is
+    re-validated through the strict model. Strict validation is deliberate: a
+    typo'd or unknown overlay key raises (``ValidationError``) rather than
+    silently falling back to a default, exactly like a hand-edited preset. The
+    result is a fresh ``PlanetParams``; ``params`` is not mutated."""
+    return PlanetParams.model_validate(_deep_merge(params.model_dump(), overlay))
+
+
+def _recipe_dir():
+    return resources.files(_FACTORY_PACKAGE) / _RECIPE_SUBDIR
+
+
+def available_recipes() -> list[str]:
+    """Filename stems of the packaged epoch-recipe JSONs. Mirrors
+    ``factory_preset_names`` (enumerate-only; never opens a file), so a malformed
+    recipe still lists and only errors when actually loaded via ``load_recipe``."""
+    d = _recipe_dir()
+    if not d.is_dir():
+        return []
+    return sorted(p.name.removesuffix(".json") for p in d.iterdir() if p.name.endswith(".json"))
+
+
+def load_recipe(name: str) -> tuple[str, dict, dict]:
+    """Load the packaged epoch recipe ``name``. Returns
+    ``(base_preset_name, overlay_dict, meta)``.
+
+    A recipe file is a RAW overlay (NOT a preset envelope): a JSON object with
+    ``base`` (the factory preset the overlay is designed for), ``overlay`` (the
+    sparse nested dict of fields to merge), and optional ``name``/``description``
+    metadata. ``meta`` is ``{"name": ..., "description": ...}`` (name falls back
+    to the file stem, description to ""). Raises ``PresetError`` on an unknown
+    recipe or a structurally-invalid file."""
+    ref = _recipe_dir() / f"{name}.json"
+    if not ref.is_file():
+        known = ", ".join(available_recipes())
+        raise PresetError(f"unknown recipe {name!r} (available: {known})")
+    try:
+        doc = json.loads(ref.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PresetError(f"recipe:{name}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise PresetError(f"recipe:{name}: not a recipe object")
+    base = doc.get("base")
+    if not isinstance(base, str) or not base:
+        raise PresetError(f"recipe:{name}: missing/invalid 'base' preset name")
+    overlay = doc.get("overlay")
+    if not isinstance(overlay, dict):
+        raise PresetError(f"recipe:{name}: missing/invalid 'overlay' object")
+    meta = {"name": doc.get("name") or name, "description": doc.get("description") or ""}
+    return base, overlay, meta
 
 
 def _summarize(exc: ValidationError) -> str:

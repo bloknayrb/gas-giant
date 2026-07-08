@@ -1,0 +1,11 @@
+{
+  "name": "Ochre EZ",
+  "description": "Jupiter 2018-19 equatorial haze: the normally white Equatorial Zone (band 5) discolors to an ochre/tan haze. The fade points at the zone, blending it down-palette toward its belt neighbors, which the warm equatorial palette rows render as ochre tans. Base: jupiter_vorticity.",
+  "base": "jupiter_vorticity",
+  "overlay": {
+    "bands": {
+      "belt_fade": 0.6,
+      "faded_band_index": 5
+    }
+  }
+}
