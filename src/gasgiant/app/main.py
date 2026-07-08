@@ -23,6 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
 
+import numpy as np
 from imgui_bundle import hello_imgui, imgui
 from imgui_bundle import portable_file_dialogs as pfd
 from pydantic import ValidationError
@@ -35,6 +36,7 @@ from gasgiant.app.viewport import (
     nearest_cast_index,
     screen_to_lonlat,
 )
+from gasgiant.core import brush
 from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
 from gasgiant.engine.invalidation import diff_tiers
@@ -139,6 +141,12 @@ SPEED_OPTIONS: list[tuple[int, str]] = [
 # ~4x per-step gap (not chunking) is where the first-launch minutes actually
 # are. tick() is chunk-invariant (see Simulation.tick) either way.
 DEFAULT_STEPS_PER_FRAME = 2
+
+# T12 in-GUI mask brush: cap live mask re-uploads (and the POST re-derive they
+# trigger) to ~30 Hz while dragging, so a fast stroke doesn't re-derive the
+# preview every single frame. Gated by accumulated imgui io.delta_time on the
+# single GL thread -- never a blocking sleep.
+PAINT_UPLOAD_INTERVAL = 1.0 / 30.0
 
 
 # -- B1-2: friendly GL-failure message ---------------------------------------
@@ -544,6 +552,25 @@ class StudioApp:
         self._storm_tool_radius = 0.03  # placement radius (StormOverride default)
         self._drag_index: int | None = None  # cast index being dragged
         self._drag_lonlat: tuple[float, float] | None = None  # live cursor lon/lat
+        # T12: in-GUI mask brush. The "paint" tool mode shares T4's single
+        # _storm_tool_mode state machine (so paint and Place-storm can't both be
+        # armed). _paint_buffer is the CPU-side single-channel equirect mask,
+        # lazily allocated on first stamp; it is uploaded via facade.set_mask and
+        # re-derived (POST) on a throttle. _paint_base holds a mask adopted from a
+        # loaded preset (the canvas painting continues from) so an Undo-stroke
+        # rebuild replays onto it rather than wiping it. _paint_strokes is a
+        # stroke-replay history SEPARATE from the params undo stack: the mask is
+        # sidecar pixel data, not a params-field value, so entangling it with
+        # _push_history (which snapshots PlanetParams) would be a category error.
+        self._paint_buffer: np.ndarray | None = None
+        self._paint_base: np.ndarray | None = None
+        self._paint_strokes: list[tuple[float, float, float, float, bool]] = []
+        self._paint_radius_deg = 12.0
+        self._paint_strength = 0.5
+        self._paint_erase = False
+        self._paint_dirty = False  # buffer changed since the last mask upload
+        self._paint_was_down = False  # left button was painting last frame
+        self._paint_upload_accum = PAINT_UPLOAD_INTERVAL  # so the first stamp uploads at once
         # T5: A/B compare + ROI export-res inspector. _snapshot_a is an
         # app-OWNED clone of the color preview (released on retake / never leaked);
         # the ROI tile is likewise app-owned (released on close/retake).
@@ -882,6 +909,29 @@ class StudioApp:
             return
         self._pending_overwrite = entry
 
+    def _params_for_save(self, dest_dir: Path, stem: str) -> PlanetParams:
+        """Params to hand ``save_preset``. With a painted mask buffer present,
+        write it as a 16-bit grayscale sidecar (``<stem>_mask.png``) next to the
+        preset and return a copy whose ``mask.file`` points at it, so T11's
+        relativize/sidecar path stores just the portable filename. Without a
+        painted buffer this is ``self.params`` unchanged (a preset that already
+        references an imported mask keeps flowing through T11's copy path)."""
+        # getattr guards the partial StudioApp instances some tests build via
+        # __new__ (they never touch the paint tool, so the attrs may be absent).
+        buf = getattr(self, "_paint_buffer", None)
+        strokes = getattr(self, "_paint_strokes", None)
+        base = getattr(self, "_paint_base", None)
+        painted = buf is not None and (bool(strokes) or base is not None)
+        if not painted:
+            return self.params
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        from gasgiant.export.writers import write_png16_gray
+        png = dest_dir / f"{stem}_mask.png"
+        write_png16_gray(png, buf)
+        out = self.params.model_copy(deep=True)
+        out.mask.file = str(png.resolve())
+        return out
+
     def _overwrite_active_preset(self) -> None:
         """Confirmed overwrite: save the current params over the active user
         preset's file and adopt them as the new pristine baseline (clears the
@@ -892,7 +942,7 @@ class StudioApp:
             return
         name, path = entry
         try:
-            save_preset(self.params, path)
+            save_preset(self._params_for_save(path.parent, path.stem), path)
         except OSError as exc:
             self.toasts.error(str(exc))
             return
@@ -1070,7 +1120,7 @@ class StudioApp:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
                     path = path.with_suffix(".json")
-                save_preset(self.params, path)
+                save_preset(self._params_for_save(path.parent, path.stem), path)
                 # The just-saved preset is the new active/pristine baseline (so
                 # dirty resets); refresh so a save into USER_PRESET_DIR appears.
                 source = PresetSource.USER if path.parent == USER_PRESET_DIR else PresetSource.FILE
@@ -1446,7 +1496,14 @@ class StudioApp:
                     drag_lonlat=self._drag_lonlat,
                 )
                 self._draw_storm_tool_ui()
-                self._handle_storm_tool()
+                self._draw_paint_tool_ui()
+                # The two tools share one mode machine; dispatch the mouse layer
+                # to whichever is armed (paint takes over place/drag when on).
+                if self._storm_tool_mode == "paint":
+                    self._handle_paint_tool()
+                    self._draw_brush_cursor()
+                else:
+                    self._handle_storm_tool()
         self.render_perf.end()
 
     # -- T4: click-to-place / drag-to-move storms --------------------------------
@@ -1456,7 +1513,9 @@ class StudioApp:
         kind combo and radius slider while armed, with an honest caption about
         the restart-tier rebuild on placement/drag-release."""
         exporting = self._export is not None
-        tool_on = self._storm_tool_mode != "none"
+        # "paint" is a sibling mode in the same state machine (T12); it is not a
+        # storm-tool-on state, so the Place-storm toggle keys off place/drag only.
+        tool_on = self._storm_tool_mode in ("place", "drag")
         imgui.begin_disabled(exporting)
         if imgui.button("Place storm: ON" if tool_on else "Place storm"):
             self._storm_tool_mode = "none" if tool_on else "place"
@@ -1612,6 +1671,201 @@ class StudioApp:
         new.storms.cast[index].lon_deg = lon
         self._commit(new)
         self._reset_working_copy()  # discrete action wins over pending edit
+
+    # -- T12: in-GUI mask brush --------------------------------------------------
+
+    def _ensure_paint_buffer(self) -> np.ndarray:
+        """Lazily allocate the CPU paint buffer (a zeroed 2:1 equirect) so nothing
+        is spent until the user actually paints."""
+        if self._paint_buffer is None:
+            self._paint_buffer = brush.new_buffer()
+        return self._paint_buffer
+
+    def _adopt_mask_into_buffer(self) -> None:
+        """When the paint tool opens, seed the canvas from the currently-loaded
+        mask (``params.mask.file``) so painting continues from it rather than a
+        blank sheet. Best-effort: a missing/invalid file just leaves the existing
+        buffer. Skipped once the user has local strokes (their work wins). The
+        adopted image is kept as ``_paint_base`` so an Undo-stroke rebuild replays
+        onto it instead of wiping it back to zero."""
+        if self._paint_strokes or self._paint_buffer is not None:
+            return
+        f = self.params.mask.file
+        if not f:
+            return
+        from gasgiant.export.writers import decode_image
+        try:
+            arr = decode_image(Path(f))
+        except (OSError, ValueError) as exc:
+            log.warning("could not adopt mask into paint buffer: %s", exc)
+            return
+        arr = np.ascontiguousarray(arr.astype(np.float32))
+        self._paint_base = arr.copy()
+        self._paint_buffer = arr.copy()
+
+    def _paint_stamp(self, lon_deg: float, lat_deg: float) -> None:
+        """Apply one brush stamp to the buffer and record it in the stroke-replay
+        history. Marks the buffer dirty for the throttled upload."""
+        buf = self._ensure_paint_buffer()
+        s = (
+            float(lon_deg), float(lat_deg), float(self._paint_radius_deg),
+            float(self._paint_strength), bool(self._paint_erase),
+        )
+        brush.stamp(buf, *s)
+        self._paint_strokes.append(s)
+        self._paint_dirty = True
+
+    def _rebuild_paint_buffer(self) -> None:
+        """Replay the remaining strokes from the adopted base (or zero) after an
+        Undo-stroke, then upload the result immediately (a discrete action, so it
+        bypasses the drag throttle). Clears the mask entirely when nothing is left
+        to replay and no base was adopted."""
+        buf = self._ensure_paint_buffer()
+        buf[:] = self._paint_base if self._paint_base is not None else 0.0
+        for s in self._paint_strokes:
+            brush.stamp(buf, *s)
+        if self._paint_strokes or self._paint_base is not None:
+            self.sim.set_mask(buf)
+        else:
+            self.sim.set_mask(None)
+        self._paint_dirty = False
+        self.viewport.mark_stale()
+
+    def _undo_paint_stroke(self) -> None:
+        """Pop the most recent stamp and rebuild the buffer from the remaining
+        strokes. Deliberately NOT wired to the params undo stack: mask pixels are
+        sidecar data, not a PlanetParams field, so Ctrl+Z must not touch them."""
+        if not self._paint_strokes:
+            return
+        self._paint_strokes.pop()
+        self._rebuild_paint_buffer()
+
+    def _clear_paint_mask(self) -> None:
+        """Zero the buffer, drop every stroke and any adopted base, and clear the
+        live mask (``set_mask(None)``) so the planet returns to its no-mask look."""
+        self._paint_strokes.clear()
+        self._paint_base = None
+        if self._paint_buffer is not None:
+            self._paint_buffer[:] = 0.0
+        self._paint_dirty = False
+        self.sim.set_mask(None)
+        self.viewport.mark_stale()
+
+    def _maybe_upload_mask(self, force: bool) -> None:
+        """Throttled mask upload + POST re-derive. Accumulates imgui frame time
+        and uploads at most every ``PAINT_UPLOAD_INTERVAL`` (~30 Hz) while a
+        stroke is in progress, or immediately on ``force`` (the mouse-up that ends
+        a stroke) so the final pixels are never left unshown. set_mask marks the
+        facade's POST/emission previews dirty; mark_stale makes the viewport's
+        next ``ensure_preview`` re-derive."""
+        self._paint_upload_accum += imgui.get_io().delta_time
+        if not self._paint_dirty:
+            return
+        if force or self._paint_upload_accum >= PAINT_UPLOAD_INTERVAL:
+            self.sim.set_mask(self._ensure_paint_buffer())
+            self.viewport.mark_stale()
+            self._paint_dirty = False
+            self._paint_upload_accum = 0.0
+
+    def _draw_paint_tool_ui(self) -> None:
+        """Tool block under the equirect image: a 'Paint mask' toggle plus brush
+        controls (radius, strength, erase), Undo-stroke and Clear-mask buttons
+        while armed. Paint is inert on the final image until a Mask gain > 0 (all
+        default 0); the caption says so."""
+        exporting = self._export is not None
+        paint_on = self._storm_tool_mode == "paint"
+        imgui.begin_disabled(exporting)
+        if imgui.button("Paint mask: ON" if paint_on else "Paint mask"):
+            if paint_on:
+                self._storm_tool_mode = "none"
+            else:
+                self._storm_tool_mode = "paint"
+                self._drag_index = None
+                self._drag_lonlat = None
+                self._adopt_mask_into_buffer()
+        imgui.end_disabled()
+        if not paint_on:
+            return
+        imgui.same_line()
+        imgui.set_next_item_width(150.0)
+        rchanged, rv = imgui.slider_float(
+            "radius (deg)##paint", self._paint_radius_deg, 2.0, 60.0
+        )
+        if rchanged:
+            self._paint_radius_deg = rv
+        imgui.same_line()
+        imgui.set_next_item_width(120.0)
+        schanged, sv = imgui.slider_float(
+            "strength##paint", self._paint_strength, 0.0, 1.0
+        )
+        if schanged:
+            self._paint_strength = sv
+        imgui.same_line()
+        echanged, ev = imgui.checkbox("erase##paint", self._paint_erase)
+        if echanged:
+            self._paint_erase = ev
+        if imgui.button("Undo stroke##paint"):
+            self._undo_paint_stroke()
+        imgui.same_line()
+        if imgui.button("Clear mask##paint"):
+            self._clear_paint_mask()
+        imgui.same_line()
+        n = len(self._paint_strokes)
+        gains_on = (
+            self.params.mask.band_fade > 0.0
+            or self.params.mask.emission_gain > 0.0
+            or self.params.mask.detail_gain > 0.0
+        )
+        note = "" if gains_on else " — set a Mask gain (>0) to see it act"
+        imgui.text_disabled(f"drag on the map to paint ({n} strokes){note}")
+
+    def _handle_paint_tool(self) -> None:
+        """Per-frame mouse handling for the paint tool. Shares T4's mouse layer
+        (the stored image rect + screen_to_lonlat). While the left button is held
+        inside the image, each frame stamps the buffer at the cursor; the upload
+        is throttled and forced once on release. Held off entirely during an
+        export (a POST re-derive mid-export would corrupt the in-flight run)."""
+        vp = self.viewport
+        if vp is None or vp.image_rect_min is None or vp.image_rect_max is None:
+            return
+        if self._export is not None:
+            self._paint_was_down = False
+            return
+        rmin, rmax = vp.image_rect_min, vp.image_rect_max
+        mouse = imgui.get_mouse_pos()
+        mx, my = mouse.x, mouse.y
+        inside = rmin[0] <= mx <= rmax[0] and rmin[1] <= my <= rmax[1]
+        down = imgui.is_mouse_down(imgui.MouseButton_.left)
+        painting = down and inside and imgui.is_window_hovered()
+        if painting:
+            lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+            self._paint_stamp(lon, lat)
+        released = self._paint_was_down and not down
+        self._maybe_upload_mask(force=released)
+        self._paint_was_down = painting
+
+    def _draw_brush_cursor(self) -> None:
+        """Draw the brush-radius circle at the cursor via the window draw list
+        (T4's draw-list idiom). Uses the meridional deg->pixel scale so the ring
+        reads as the brush's angular size. Only inside the captured image rect."""
+        vp = self.viewport
+        if vp is None or vp.image_rect_min is None or vp.image_rect_max is None:
+            return
+        rmin, rmax = vp.image_rect_min, vp.image_rect_max
+        mouse = imgui.get_mouse_pos()
+        mx, my = mouse.x, mouse.y
+        if not (rmin[0] <= mx <= rmax[0] and rmin[1] <= my <= rmax[1]):
+            return
+        px_per_deg = (rmax[1] - rmin[1]) / 180.0
+        r = max(2.0, self._paint_radius_deg * px_per_deg)
+        draw_list = imgui.get_window_draw_list()
+        draw_list.push_clip_rect(imgui.ImVec2(*rmin), imgui.ImVec2(*rmax), True)
+        col = imgui.get_color_u32(
+            imgui.ImVec4(1.0, 0.4, 0.4, 0.95) if self._paint_erase
+            else imgui.ImVec4(0.4, 0.9, 1.0, 0.95)
+        )
+        draw_list.add_circle(imgui.ImVec2(mx, my), r, col, 32, 2.0)
+        draw_list.pop_clip_rect()
 
     # -- T5: A/B compare + ROI export-res inspector ------------------------------
 
