@@ -58,6 +58,7 @@ class Simulation:
         # params.mask.file. None = no mask. Owned by the facade; re-synced on a
         # mask-file change and cloned into export snapshots.
         self._mask_tex: moderngl.Texture | None = None
+        self._mask_cpu: np.ndarray | None = None  # app-painted mask (no file backing)
         self._post_dirty = True
         self._tracers_changed = True
         self._extra_steps = 0
@@ -277,16 +278,29 @@ class Simulation:
         live mask texture, or clear it with ``arr=None``. Replacing releases the
         previous texture. The mask is a POST input consumed per-derive; setting
         it marks the color/emission previews dirty. repeat_x (longitude wrap) is
-        the texture2d default -- no repeat kwarg exists."""
+        the texture2d default -- no repeat kwarg exists.
+
+        An explicitly-set mask (the GUI paint tool -- no ``params.mask.file``
+        backing) is retained on the CPU so a RESTART-tier rebuild, which
+        releases every GL resource, restores it instead of silently wiping it;
+        ``set_mask(None)`` is an explicit clear and forgets it."""
+        self._mask_cpu = self._upload_mask(arr)
+
+    def _upload_mask(self, arr: np.ndarray | None) -> np.ndarray | None:
+        """Upload/clear the mask texture WITHOUT claiming app ownership (the
+        file-sync path uses this so a file-derived mask never masquerades as a
+        painted one). Returns the contiguous float32 copy that was uploaded."""
         if self._mask_tex is not None:
             self._mask_tex.release()
             self._mask_tex = None
+        a = None
         if arr is not None:
             a = np.ascontiguousarray(arr.astype(np.float32))
             h, w = a.shape[:2]
             self._mask_tex = self.gpu.texture2d((w, h), 1, "f4", data=a, linear=True)
         self._post_dirty = True
         self._emission_preview_dirty = True
+        return a
 
     def _sync_mask(self) -> None:
         """Re-resolve the mask texture from ``params.mask.file`` (an ABSOLUTE
@@ -299,15 +313,19 @@ class Simulation:
 
         f = self.params.mask.file
         if not f:
-            self.set_mask(None)
+            # No file backing: restore an app-painted mask if one was set (a
+            # RESTART rebuild released its texture; the CPU copy survives),
+            # otherwise clear. Never forget the painted copy here -- only an
+            # explicit set_mask(None) does that.
+            self._upload_mask(self._mask_cpu)
             return
         try:
             arr = decode_image(Path(f))
         except (OSError, ValueError) as exc:
             log.warning("mask disabled: %s", exc)
-            self.set_mask(None)
+            self._upload_mask(None)
             return
-        self.set_mask(arr)
+        self._upload_mask(arr)
 
     # -- parameters ---------------------------------------------------------------
 

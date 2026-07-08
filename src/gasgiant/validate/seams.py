@@ -367,6 +367,7 @@ def validate_mapset(mapset_dir: Path) -> Report:
 
     maps: dict[str, np.ndarray] = {}
     flow_names: set[str] = set()
+    finite_only: dict[str, np.ndarray] = {}
     for name, entry in manifest["maps"].items():
         path = mapset_dir / entry["file"]
         if entry["format"] == "png16":
@@ -378,6 +379,12 @@ def validate_mapset(mapset_dir: Path) -> Report:
                 # check_pole_speed). Must precede the channels>=3 emission branch.
                 maps[name] = read_exr_rgba(path)[..., :2]
                 flow_names.add(name)
+            elif name == "rings":
+                # Rings strip (T16): a RADIAL optical-depth profile, not a
+                # sphere map. Wrap/pole/band-continuity assumptions don't hold
+                # -- ringlet/gap edges are tangentially-uniform jumps, the
+                # exact signature the seam checks flag -- so finiteness only.
+                finite_only[name] = read_exr_rgba(path)
             elif entry.get("channels", 1) >= 3:
                 # Emission-class HDR map. Sparse radiance-10+ cores make the
                 # raw wrap statistic flaky, so continuity runs in log space;
@@ -388,4 +395,7 @@ def validate_mapset(mapset_dir: Path) -> Report:
                 maps[f"{name}_alpha"] = arr[..., 3]
             else:
                 maps[name] = read_exr_gray(path)
-    return validate_arrays(maps, flow_names=flow_names)
+    report = validate_arrays(maps, flow_names=flow_names)
+    for name, arr in finite_only.items():
+        check_finite(arr, name, report)
+    return report

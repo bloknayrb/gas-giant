@@ -145,3 +145,22 @@ def test_validate_ramp_accepts_velocity_only():
     b = PlanetParams(seed=0)
     b.jets.strength = 2.0  # VELOCITY
     validate_ramp(a, b)  # no raise
+
+
+def test_validate_ramp_fails_fast_on_non_interpolable_leaf():
+    """A non-interpolable POST-tier diff (e.g. the two presets' differing
+    `name` strings) must be rejected UP FRONT by validate_ramp -- not surface
+    as a RampError at frame 1 of a sequence export, after frame 0 was already
+    fully rendered, written, and (on the failure path) deleted again."""
+    a = PlanetParams(seed=0, name="alpha")
+    b = PlanetParams(seed=0, name="beta")
+    with pytest.raises(RampError, match="name"):
+        validate_ramp(a, b)
+
+
+def test_validate_ramp_fails_fast_on_optional_pin_appearing():
+    a = PlanetParams(seed=0)  # storms.hero_latitude None
+    b = PlanetParams(seed=0)
+    b.storms.hero_latitude = 30.0
+    with pytest.raises(RampError, match="hero_latitude"):
+        validate_ramp(a, b)

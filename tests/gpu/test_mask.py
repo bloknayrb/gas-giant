@@ -181,3 +181,34 @@ def test_mask_fields_are_post_tier():
     b.mask.detail_gain = 0.3
     b.mask.file = "brush.png"
     assert diff_tiers(a, b) == {Tier.POST}
+
+
+# -- painted-mask retention across a RESTART rebuild ----------------------------
+
+
+def test_painted_mask_survives_restart_rebuild(gpu):
+    """A GUI-painted mask has NO params.mask.file backing (strokes are app
+    sidecar data): a RESTART-tier edit rebuilds every GL resource, and the
+    facade must restore the explicitly-set mask from its retained CPU copy
+    instead of silently wiping it via the file-driven sync."""
+    sim = Simulation(_params(band_fade=0.8), gpu)
+    unmasked = sim.render_maps(256)["color"]
+    sim.set_mask(_uniform_mask(256, 128, 1.0))
+    masked = sim.render_maps(256)["color"]
+    assert not np.array_equal(unmasked, masked)  # premise: the mask acts
+
+    p = sim.params.model_copy(deep=True)
+    p.seed = 5  # RESTART tier: full rebuild
+    sim.update_params(p)
+    assert sim._mask_tex is not None  # restored, not wiped
+    after = sim.render_maps(256)["color"]
+
+    control = Simulation(sim.params.model_copy(deep=True), gpu)
+    control_none = control.render_maps(256)["color"]
+    assert not np.array_equal(after, control_none)  # mask still applied
+
+    sim.set_mask(None)  # explicit clear FORGETS the painted mask
+    p2 = sim.params.model_copy(deep=True)
+    p2.seed = 6
+    sim.update_params(p2)
+    assert sim._mask_tex is None

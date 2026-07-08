@@ -201,12 +201,14 @@ class _FakeSim:
     def __init__(self, params: PlanetParams) -> None:
         self.params = params
         self._mask_tex = None
+        self._mask_cpu = None
         self._post_dirty = False
         self._emission_preview_dirty = False
 
     from gasgiant.engine.facade import Simulation as _S
     set_mask = _S.set_mask
     _sync_mask = _S._sync_mask
+    _upload_mask = _S._upload_mask
     del _S
 
 

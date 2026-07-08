@@ -458,12 +458,17 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
         snap.release()
         if not completed:
             # Cancellation: remove only the files WE write (the user may have
-            # picked a folder containing their own data), after the pool
-            # drained so there are no Windows open-handle races.
-            for name in (
-                "color.png", "height.exr", "emission.exr", "flow.exr",
-                "rings.exr", MANIFEST_FILENAME,
-            ):
+            # picked a folder containing their own data — e.g. a rings.exr from
+            # an earlier rings-enabled export), after the pool drained so there
+            # are no Windows open-handle races.
+            names = ["color.png", "height.exr", MANIFEST_FILENAME]
+            if emission_on:
+                names.append("emission.exr")
+            if flow_on:
+                names.append("flow.exr")
+            if rings_on:
+                names.append("rings.exr")
+            for name in names:
                 (out_dir / name).unlink(missing_ok=True)
             log.info("export cancelled; partial output removed")
 
@@ -543,6 +548,14 @@ def export_sequence_job(
         raise ValueError(f"steps_per_frame must be >= 1, got {steps_per_frame}")
 
     base_params = sim.params
+    if str(base_params.export.projection) == PROJECTION_CUBE:
+        # Fail fast BEFORE any dev/GL work: frame 0 would take the cube path
+        # (six face files, no color.png), so the frames/ phase has nothing to
+        # copy or sequence.
+        raise ValueError(
+            "sequence export requires export.projection 'equirect'; "
+            "a cube-map set has no color.png to sequence"
+        )
     if ramp_to is not None:
         # Fail fast BEFORE any GL/dev work: a RESTART-tier or seed diff can't ramp.
         from gasgiant.params.interp import validate_ramp
@@ -711,10 +724,14 @@ def export_sequence_job(
             if frames_dir.is_dir():
                 with contextlib.suppress(OSError):  # user data in frames/: leave it
                     frames_dir.rmdir()
-            for name in (
-                "color.png", "height.exr", "emission.exr", "flow.exr",
-                "rings.exr", MANIFEST_FILENAME,
-            ):
+            names = ["color.png", "height.exr", MANIFEST_FILENAME]
+            if base_params.emission.enabled:
+                names.append("emission.exr")
+            if base_params.export.flow_map:
+                names.append("flow.exr")
+            if base_params.rings.enabled:
+                names.append("rings.exr")
+            for name in names:
                 (out_dir / name).unlink(missing_ok=True)
             log.info("sequence export cancelled; partial output removed")
 

@@ -17,12 +17,15 @@ from gasgiant.params.model import PlanetParams
 pytestmark = pytest.mark.gpu
 
 
-def _params(width: int = 256, dev_steps: int = 12, emission: bool = True) -> PlanetParams:
+def _params(width: int = 512, dev_steps: int = 12, emission: bool = True) -> PlanetParams:
     p = PlanetParams(seed=7)
-    p.sim.resolution = 256
+    p.sim.resolution = 512  # the model's lower bound (256 fails validation)
     p.sim.dev_steps = dev_steps
     p.export.width = width
-    p.emission.enabled = emission
+    # emission.enabled is a derived property (any strength > 0)
+    p.emission.thermal_strength = 0.6 if emission else 0.0
+    p.emission.lightning_strength = 0.0
+    p.emission.aurora_strength = 0.0
     return p
 
 
@@ -54,7 +57,7 @@ def test_all_maps_sequence_writes_full_file_set(gpu, tmp_path):
     from gasgiant.export.writers import read_png16
 
     h0 = read_png16(frames / "height_0000.png")
-    assert h0.ndim == 2 and h0.shape == (128, 256)
+    assert h0.ndim == 2 and h0.shape == (256, 512)
 
 
 def test_all_maps_without_emission_writes_no_emission_frames(gpu, tmp_path):

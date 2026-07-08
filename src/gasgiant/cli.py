@@ -219,6 +219,11 @@ def _export(args: argparse.Namespace) -> int:
 
     started = time.perf_counter()
     if args.resume is not None:
+        if args.seed is not None or args.dev_steps is not None:
+            print("error: --seed/--dev-steps define the developed run and cannot "
+                  "be applied to a resumed checkpoint; re-run `gasgiant checkpoint`",
+                  file=sys.stderr)
+            return 2
         if not args.resume.is_file():
             print(f"error: checkpoint not found: {args.resume}", file=sys.stderr)
             return 2
@@ -229,6 +234,15 @@ def _export(args: argparse.Namespace) -> int:
         except (ValueError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
+        if args.res is not None or args.name is not None:
+            # --res (export width) and --name (manifest label) are POST-tier:
+            # they re-derive maps without touching the resumed dev state.
+            new_params = sim.params.model_copy(deep=True)
+            if args.res is not None:
+                new_params.export.width = args.res
+            if args.name is not None:
+                new_params.name = args.name
+            sim.update_params(new_params)
         params = sim.params
     else:
         params, err = _resolve_params_from_args(args, default_preset="jupiter_like")
@@ -258,6 +272,7 @@ def _export(args: argparse.Namespace) -> int:
             # rejected by validate_ramp below. (validate_ramp also guards the
             # job API for programmatic callers.)
             ramp_to = ramp_to.model_copy(update={"seed": params.seed})
+            ramp_to.name = params.name  # cosmetic label; differs between presets
             ramp_to.sim.dev_steps = params.sim.dev_steps
             ramp_to.export.width = params.export.width
             try:
@@ -293,7 +308,10 @@ def _checkpoint(args: argparse.Namespace) -> int:
     started = time.perf_counter()
     sim = Simulation(params)
     sim.run_to_completion()
-    out = args.out if args.out.suffix else args.out.with_suffix(".npz")
+    # np.savez_compressed appends ".npz" to any name not already ending in it;
+    # normalize HERE so the printed path is the file actually written and
+    # `gasgiant export --resume <printed path>` always finds it.
+    out = args.out if args.out.suffix == ".npz" else args.out.with_name(args.out.name + ".npz")
     save_checkpoint(sim, out)
     elapsed = time.perf_counter() - started
     print(f"saved checkpoint at step {sim.steps_done} to {out} in {elapsed:.1f}s")

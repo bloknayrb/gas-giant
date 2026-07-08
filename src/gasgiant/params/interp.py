@@ -133,3 +133,8 @@ def validate_ramp(a: PlanetParams, b: PlanetParams) -> None:
             "(RESTART-tier fields, including seed) and cannot be interpolated "
             "mid-sequence: " + ", ".join(offenders)
         )
+    # Dry-run a NON-ENDPOINT lerp so any non-interpolable leaf — a differing
+    # bool/enum/str, an optional pin set on one side only, a reshaped
+    # stop-list — raises HERE (fail fast), not at frame 1 of a sequence export
+    # after frame 0 was already fully rendered and written.
+    _lerp_node(a.model_dump(), b.model_dump(), 0.5, "")

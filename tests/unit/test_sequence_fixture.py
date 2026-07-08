@@ -89,3 +89,22 @@ def test_still_mapset_has_no_frames(tmp_path):
     assert reader.frames_block(doc) is None
     assert reader.frame_count(doc) == 0
     assert reader.frame_zero_path(doc, "color") is None
+
+
+def test_fixture_exrs_are_real_loadable_exrs(tmp_path):
+    """Blender really does ``bpy.data.images.load`` the emission/rings fixture
+    EXRs (frame 0 of the sequence; the rings strip), and it raises on a
+    zero-byte placeholder — so the fixtures must be VALID EXR files. Pin that
+    with the repo's own EXR reader."""
+    import numpy as np
+
+    from gasgiant.export.writers import read_exr_rgba
+
+    blender_test = _load_from_path("blender_import_fixture", BLENDER_TEST)
+    root = blender_test.write_sequence_fixture(tmp_path / "seq")
+    arr = read_exr_rgba(root / "frames" / "emission_0000.exr")
+    assert arr.dtype == np.float32 and arr.ndim == 3 and arr.shape[2] == 4
+
+    ring_root = blender_test.write_rings_fixture(tmp_path / "rings")
+    arr = read_exr_rgba(ring_root / "rings.exr")
+    assert arr.dtype == np.float32 and arr.ndim == 3 and arr.shape[2] == 4

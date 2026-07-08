@@ -40,6 +40,45 @@ def _tiny_png(path: Path, width: int = 2, height: int = 1) -> None:
     path.write_bytes(sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", idat) + _chunk(b"IEND", b""))
 
 
+def _tiny_exr(path: Path, width: int = 2, height: int = 1) -> None:
+    """Write a minimal VALID uncompressed RGBA float32 EXR (all zeros). The
+    importer really does ``bpy.data.images.load`` the emission/rings fixtures,
+    and Blender raises ``RuntimeError: Cannot read ...`` on a zero-byte
+    placeholder — the file needs a real header even though no fixture pixel is
+    ever inspected. Pure stdlib struct, mirroring ``_tiny_png``."""
+
+    def _attr(name: bytes, typ: bytes, data: bytes) -> bytes:
+        return name + b"\x00" + typ + b"\x00" + struct.pack("<I", len(data)) + data
+
+    chan = b""
+    for name in (b"A", b"B", b"G", b"R"):  # alphabetical, as the format requires
+        # per channel: pixelType (2 = FLOAT), pLinear + 3 reserved, x/ySampling
+        chan += name + b"\x00" + struct.pack("<iBBBBii", 2, 0, 0, 0, 0, 1, 1)
+    chan += b"\x00"
+    box = struct.pack("<4i", 0, 0, width - 1, height - 1)
+    header = (
+        _attr(b"channels", b"chlist", chan)
+        + _attr(b"compression", b"compression", b"\x00")  # NONE: 1 chunk/scanline
+        + _attr(b"dataWindow", b"box2i", box)
+        + _attr(b"displayWindow", b"box2i", box)
+        + _attr(b"lineOrder", b"lineOrder", b"\x00")  # INCREASING_Y
+        + _attr(b"pixelAspectRatio", b"float", struct.pack("<f", 1.0))
+        + _attr(b"screenWindowCenter", b"v2f", struct.pack("<2f", 0.0, 0.0))
+        + _attr(b"screenWindowWidth", b"float", struct.pack("<f", 1.0))
+        + b"\x00"  # end of header
+    )
+    magic = struct.pack("<i", 20000630) + struct.pack("<i", 2)  # magic + version 2
+    row_bytes = 4 * width * 4  # 4 float32 channels per pixel
+    data_start = len(magic) + len(header) + 8 * height  # after the offset table
+    table = b"".join(
+        struct.pack("<Q", data_start + y * (8 + row_bytes)) for y in range(height)
+    )
+    chunks = b"".join(
+        struct.pack("<ii", y, row_bytes) + b"\x00" * row_bytes for y in range(height)
+    )
+    path.write_bytes(magic + header + table + chunks)
+
+
 def write_sequence_fixture(root: Path, *, count: int = 3, steps_per_frame: int = 8) -> Path:
     """Create a tiny fake exported map set WITH a T7 `frames` block: still color/
     height maps plus per-frame color/height PNG sequences and an emission EXR
@@ -59,7 +98,7 @@ def write_sequence_fixture(root: Path, *, count: int = 3, steps_per_frame: int =
         _tiny_png(root / hf)
         height_files.append(hf)
         ef = f"frames/emission_{i:04d}.exr"
-        (root / ef).write_bytes(b"")  # placeholder; never pixel-inspected
+        _tiny_exr(root / ef)  # loaded by bpy (frame 0), never pixel-inspected
         emission_files.append(ef)
     manifest = {
         "schema_version": 1,
@@ -96,7 +135,7 @@ def write_rings_fixture(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     _tiny_png(root / "color.png")
     _tiny_png(root / "height.png")
-    (root / "rings.exr").write_bytes(b"")  # placeholder; loaded but not pixel-checked
+    _tiny_exr(root / "rings.exr")  # loaded by bpy, not pixel-checked
     manifest = {
         "schema_version": 1,
         "generator": {"name": "gasgiant", "version": "test"},

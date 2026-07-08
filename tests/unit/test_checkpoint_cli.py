@@ -72,3 +72,22 @@ def test_checkpoint_subcommand_requires_out(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["checkpoint", "--preset", "jupiter_like"])
     assert exc.value.code == 2
+
+
+def test_export_resume_rejects_seed_and_dev_steps(tmp_path, capsys):
+    """--seed/--dev-steps define the DEVELOPED run; silently ignoring them on
+    --resume would export something other than what the user asked for. Pure
+    arg validation -- runs before the checkpoint is even opened."""
+    rc = main([
+        "export", "--resume", str(tmp_path / "state.npz"),
+        "--seed", "5", "--out", str(tmp_path / "out"),
+    ])
+    assert rc == 2
+    assert "resumed checkpoint" in capsys.readouterr().err
+
+    rc = main([
+        "export", "--resume", str(tmp_path / "state.npz"),
+        "--dev-steps", "100", "--out", str(tmp_path / "out"),
+    ])
+    assert rc == 2
+    assert "resumed checkpoint" in capsys.readouterr().err
