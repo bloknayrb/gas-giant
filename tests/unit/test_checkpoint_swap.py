@@ -123,7 +123,7 @@ def test_load_state_load_failure_leaves_state_untouched(monkeypatch) -> None:
     old_sim = app.sim
 
     def _boom(path, gpu=None):  # noqa: ARG001
-        raise ValueError("checkpoint generation_version 1 != 7; Re-create the checkpoint.")
+        raise ValueError("checkpoint generation_version 1 != 8; Re-create the checkpoint.")
 
     monkeypatch.setattr(main, "load_checkpoint", _boom)
     app._load_state(Path("/tmp/stale.npz"))

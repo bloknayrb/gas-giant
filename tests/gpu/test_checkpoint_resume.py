@@ -32,7 +32,7 @@ def _kinematic_params() -> PlanetParams:
     p = PlanetParams(seed=91)
     p.sim.resolution = 512
     p.sim.dev_steps = 40
-    p.export.width = 256
+    p.export.width = 512  # 512 is the ExportParams.width minimum
     return p
 
 
@@ -82,7 +82,7 @@ def test_vorticity_resume_export_matches_within_sor_floor(gpu, tmp_path):
         p.solver.type = SolverType.VORTICITY
         p.sim.resolution = 512
         p.sim.dev_steps = 40
-        p.export.width = 256
+        p.export.width = 512  # 512 is the ExportParams.width minimum
         return p
 
     direct = Simulation(_vort_params(), gpu)
