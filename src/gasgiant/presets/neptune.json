@@ -131,14 +131,14 @@
       "wake_turbulence": 1.593,
       "hero_tint": -0.9,
       "hero_brightness": -0.3,
-      "hero_companions": 2,
+      "hero_companions": 3,
       "oval_density": 0.0,
       "oval_solid_core": 0.0,
-      "accent_count": 0,
+      "accent_count": 2,
       "accent_latitude": null,
-      "accent_tint": 0.9,
-      "accent_brightness": 0.12,
-      "accent_radius": 0.05,
+      "accent_tint": 1.0,
+      "accent_brightness": 0.5,
+      "accent_radius": 0.06,
       "barge_density": 0.0,
       "pearls_count": 0,
       "outbreak_count": 1,
@@ -156,8 +156,8 @@
       "festoon_strength": 0.0,
       "festoon_wavenumber": 20,
       "hotspot_depth": 1.0,
-      "ribbon_strength": 2.4,
-      "ribbon_wavenumber": 30
+      "ribbon_strength": 0.0,
+      "ribbon_wavenumber": 12
     },
     "poles": {
       "north": {
@@ -183,33 +183,33 @@
             {
               "pos": 0.0,
               "color": [
-                0.06,
-                0.14,
-                0.36
+                0.1,
+                0.2,
+                0.45
               ]
             },
             {
               "pos": 0.4,
               "color": [
-                0.12,
-                0.28,
-                0.58
+                0.18,
+                0.36,
+                0.68
               ]
             },
             {
               "pos": 0.75,
               "color": [
-                0.28,
-                0.48,
-                0.74
+                0.34,
+                0.56,
+                0.82
               ]
             },
             {
               "pos": 1.0,
               "color": [
-                0.58,
-                0.74,
-                0.9
+                0.66,
+                0.82,
+                0.96
               ]
             }
           ]

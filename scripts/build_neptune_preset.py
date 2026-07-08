@@ -12,10 +12,10 @@ starts from gas_giant_warm's proven vorticity engine and:
   * removes the planet-girdling Jupiter storm field (oval/barge/pearl/small -> 0) and the
     festoons, leaving only the dark GDS hero + 2 bright companion clouds;
   * collapses to a few soft low-contrast bands (count 22 -> 7, value_contrast 1.7 -> 0.55)
-    with a Saturn-style ribbon meander (2.4 @ wn 30) giving the band edges Neptune's gentle
-    waviness;
+    with SMOOTH boundaries (no festoons, no ribbon) -- Voyager 2 shows no sharp band edge;
   * calms turbulence + strips the heavy Jupiter belt-texture detail;
-  * a deep saturated methane-blue palette, bluish haze, no polar tint/canvas.
+  * a bright vivid methane cobalt-azure palette (matched to the Voyager reference), bluish
+    haze, no polar tint/canvas, plus 2 bright blue-white accent clouds (Scooter class).
 
 The dark GDS hero is the reversed-LUT lever from W5 per-storm color: hero_tint -0.9 /
 hero_brightness -0.3 over hero_solid_core (a coherent oval, not a whirlpool), with the
@@ -38,13 +38,14 @@ from gasgiant.params.presets import load_factory_preset, load_preset, save_prese
 
 PRESETS_DIR = Path("src/gasgiant/presets")
 
-# Deep saturated methane blue: deep navy belt gaps -> azure -> light azure bright clouds.
-# The top end stays off pure white so the bright companion clouds read as blue-white.
+# Bright vivid methane cobalt-azure, matched to the Voyager 2 full-disk reference (the disk
+# is a luminous cobalt, NOT a dark navy). Deep cobalt gaps -> vivid azure -> pale blue-white
+# bright clouds; the top stays off pure white so bright clouds read blue-white.
 DEEP_BLUE = [
-    (0.00, (0.06, 0.14, 0.36)),
-    (0.40, (0.12, 0.28, 0.58)),
-    (0.75, (0.28, 0.48, 0.74)),
-    (1.00, (0.58, 0.74, 0.90)),
+    (0.00, (0.10, 0.20, 0.45)),
+    (0.40, (0.18, 0.36, 0.68)),
+    (0.75, (0.34, 0.56, 0.82)),
+    (1.00, (0.66, 0.82, 0.96)),
 ]
 
 # Storm-tint LUT (indexed by the storm T3 tracer): a blue ramp so the dark GDS core and the
@@ -83,7 +84,7 @@ BANDS = {
 STORMS_HERO = {
     "hero_tint": -0.9,        # reversed LUT -> dark spot
     "hero_brightness": -0.3,
-    "hero_companions": 2,     # bright companion clouds
+    "hero_companions": 3,     # bright companion clouds (Voyager GDS hugs its edge w/ bright cirrus)
     "hero_radius": 0.13,
     "hero_strength": 1.7,
     "hero_mottle": 0.35,
@@ -93,7 +94,11 @@ STORMS_HERO = {
     "hero_wake_detail": 0.0,  # no turbulent trailing wake
 }
 
-# Remove the planet-girdling Jupiter storm field -- only the hero + companions remain.
+# Remove the planet-girdling Jupiter storm field -- only the hero + companions remain, plus
+# 2 bright blue-white ACCENT clouds (Neptune's discrete bright methane patches: the "Scooter"
+# + a companion streak). accent_tint 1.0 picks the storm_tint bright end (blue-white),
+# accent_brightness maxed; auto-placed in zones (accent_latitude=null). NOT a Jupiter field
+# (2 discrete accents, not density ~3 ovals/barges/pearls).
 STORMS_FIELD = {
     "oval_density": 0.0,
     "barge_density": 0.0,
@@ -101,6 +106,10 @@ STORMS_FIELD = {
     "small_density": 0.0,
     "outbreak_count": 1,
     "outbreak_strength": 1.0,
+    "accent_count": 2,
+    "accent_tint": 1.0,
+    "accent_brightness": 0.5,
+    "accent_radius": 0.06,
 }
 
 TURBULENCE = {
@@ -109,12 +118,12 @@ TURBULENCE = {
     "replenish_rate": 0.45,
 }
 
-# No festoons (a Jupiter tell); a Saturn-style ribbon meander gives the band edges Neptune's
-# gentle waviness instead.
+# No festoons, and no ribbon either: real Neptune's band boundaries are SMOOTH soft gradients
+# (Voyager 2 shows no sharp band edge anywhere). The demo's ribbon 2.4 read as a mechanical
+# sawtooth scallop -- exactly the "reads mechanical" failure the W14 F14 disposition flagged.
 WAVES = {
     "festoon_strength": 0.0,
-    "ribbon_strength": 2.4,
-    "ribbon_wavenumber": 30,
+    "ribbon_strength": 0.0,
 }
 
 # Deep methane-blue look: bluish haze, no polar tint/canvas (the Juno dark cap is a Jupiter
@@ -172,11 +181,13 @@ def build() -> None:
     reloaded = load_preset(out)
     assert reloaded.solver.vort_inject == 0.15
     assert reloaded.storms.hero_tint == -0.9
-    assert reloaded.storms.hero_companions == 2
+    assert reloaded.storms.hero_companions == 3
     assert reloaded.storms.oval_density == 0.0
+    assert reloaded.storms.accent_count == 2
+    assert reloaded.waves.ribbon_strength == 0.0
     assert reloaded.bands.count == 7
     assert len(reloaded.appearance.palette_rows) == 1
-    assert list(reloaded.appearance.palette_rows[0].stops[0].color) == [0.06, 0.14, 0.36]
+    assert list(reloaded.appearance.palette_rows[0].stops[0].color) == [0.10, 0.20, 0.45]
     print(f"wrote + verified {out}", flush=True)
 
 
