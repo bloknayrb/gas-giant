@@ -152,6 +152,15 @@ def _export_cube_job(
     detail_gain term still applies (it reads the equirect tracer at the correct
     direction). Flow/rings maps (equirect-space conventions) are also not part of
     the cube set. The cube job owns ``snap``'s release."""
+    # A cube export silently drops flow/rings (equirect-space conventions) and
+    # the synthesized detail layer -- warn so an artist who enabled those on a
+    # cube export isn't surprised by their absence (docs record it, but nothing
+    # else user-facing does).
+    if params.export.flow_map or params.rings.enabled:
+        log.warning(
+            "cube projection omits the flow map and rings (equirect-space "
+            "features); export a separate equirect map set for those."
+        )
     face_size = _cube_face_size(width)
     emission_on = params.emission.enabled
     tiles = [

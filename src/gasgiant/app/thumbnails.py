@@ -156,6 +156,11 @@ class ThumbnailManager:
             try:
                 tp = params.model_copy(deep=True)
                 tp.sim.dev_steps = min(tp.sim.dev_steps, self.dev_steps)
+                # Clamp the DYNAMICS grid too, not just the dev budget: a
+                # high-res preset (sim.resolution up to 8192) would otherwise run
+                # its whole solve at full grid for an ~88px thumbnail. THUMB_RES
+                # is plenty for a thumbnail and keeps the per-frame tick cheap.
+                tp.sim.resolution = min(tp.sim.resolution, THUMB_RES)
                 self._sim = Simulation(tp, self.gpu)
             except Exception:  # noqa: BLE001 - one bad preset shouldn't kill the queue
                 log.exception("thumbnail sim build failed for %s", key)

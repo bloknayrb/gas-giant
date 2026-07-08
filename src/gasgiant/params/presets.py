@@ -63,10 +63,17 @@ def _relativized_for_save(params: PlanetParams, dest_dir: Path) -> PlanetParams:
     src = Path(f)
     out = params.model_copy(deep=True)
     dest = dest_dir / src.name
-    if src.is_file() and src.resolve() != dest.resolve():
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dest)
-    out.mask.file = src.name  # sits next to the saved JSON -> portable
+    if src.is_file():
+        if src.resolve() != dest.resolve():
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+        out.mask.file = src.name  # sits next to the saved JSON -> portable
+    else:
+        # Source mask is missing: we cannot create the sidecar, so DON'T rewrite
+        # to a dangling sidecar name (that would discard the fixable original
+        # path). Keep the original path -- on load it re-resolves and, if still
+        # missing, the facade warns and disables the mask (T11).
+        out.mask.file = f
     return out
 
 

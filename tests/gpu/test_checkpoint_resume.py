@@ -98,10 +98,16 @@ def test_vorticity_resume_export_matches_within_sor_floor(gpu, tmp_path):
 
     resumed = load_checkpoint(path, gpu)
     resumed_maps = resumed.render_maps()
-    # Byte-exact against the source it was saved from (restore + deterministic derive).
-    np.testing.assert_array_equal(
-        resumed_maps["color"], src_maps["color"],
-        err_msg="vorticity resume->render must reproduce the saved sim's render exactly",
+    # Against the source it was saved from: the restore is byte-exact and the
+    # developed-run derive does no further solve, so this is byte-identical by
+    # construction -- but CLAUDE.md categorically bans byte-exact assertions on
+    # vorticity output (GL session-context LSB noise can perturb even a pure
+    # re-derive on some machines), so we assert within the documented floor.
+    # The byte-exactness of the RESTORE mechanism itself is proven by the
+    # kinematic test above, which exercises the same load_checkpoint path.
+    np.testing.assert_allclose(
+        resumed_maps["color"], src_maps["color"], atol=_VORT_SOR_ATOL,
+        err_msg="vorticity resume->render must reproduce the saved sim's render within the floor",
     )
     # Within the SOR noise floor against an independent direct render.
     np.testing.assert_allclose(

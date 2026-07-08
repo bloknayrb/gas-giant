@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import copy
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 import annotated_types
@@ -75,12 +74,18 @@ class PanelState:
       next time it draws the search box, via ``imgui.set_keyboard_focus_here()``
       called immediately before the input widget, then clears the flag so the
       focus request fires exactly once.
+    - ``mask_browse_requested`` -- the ``mask.file`` Browse... button sets this;
+      ``StudioApp.draw_controls`` consumes it after the panel walk to open the
+      native file picker through the app's non-blocking ``_dialog``/
+      ``_poll_dialog`` slot (a synchronous ``pfd...result()`` here would freeze
+      the GL thread, and any in-flight export, until the dialog closed).
     """
 
     search: str = ""
     show_advanced: bool = False
     locked: set[str] = dataclasses.field(default_factory=set)
     focus_search_requested: bool = False
+    mask_browse_requested: bool = False
 
 
 _DEFAULTS_BASELINE: dict[str, Any] | None = None
@@ -655,7 +660,7 @@ def _draw_leaf(
     elif kind == "model_list":
         changed, committed = _draw_cast_list(label, value)
     elif kind == "optional_str":
-        changed, committed = _draw_optional_str(name, label, doc)
+        changed, committed = _draw_optional_str(name, label, doc, state)
     elif kind == "optional_float":
         changed, committed = _draw_optional_float(name, label, doc, lo, hi)
     elif kind == "optional_int":
@@ -702,15 +707,16 @@ def _draw_leaf(
 
 
 def _draw_optional_str(
-    name: str, label: str, doc: dict[str, Any]
+    name: str, label: str, doc: dict[str, Any], state: PanelState
 ) -> tuple[bool, bool]:
     """Text entry + ``Browse...`` button for an optional string path
     (``mask.file``). Editing writes the (absolute) path into the draft; an empty
-    string clears it to None (no mask). The Browse button opens the native file
-    picker and commits the chosen ABSOLUTE path. Returns ``(changed, committed)``
-    like the other composite editors."""
-    from imgui_bundle import portable_file_dialogs as pfd
-
+    string clears it to None (no mask). The Browse button only RAISES
+    ``state.mask_browse_requested`` -- the app opens the native picker through
+    its non-blocking ``_dialog``/``_poll_dialog`` slot and writes the chosen
+    ABSOLUTE path back into the draft (opening the picker synchronously here
+    would freeze the GL thread, and any in-flight export, until it closed).
+    Returns ``(changed, committed)`` like the other composite editors."""
     changed = committed = False
     current = doc[name] or ""
     c, text = imgui.input_text(label, current)
@@ -720,13 +726,7 @@ def _draw_optional_str(
     committed = committed or imgui.is_item_deactivated_after_edit()
     imgui.same_line()
     if imgui.button(f"Browse...##{name}"):
-        picked = pfd.open_file(
-            "Select mask image", "",
-            ["PNG images", "*.png", "All files", "*"],
-        ).result()
-        if picked:
-            doc[name] = str(Path(picked[0]).resolve())
-            changed = committed = True
+        state.mask_browse_requested = True
     return changed, committed
 
 

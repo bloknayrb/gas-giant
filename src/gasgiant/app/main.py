@@ -99,6 +99,7 @@ class DialogKind(StrEnum):
     PALETTE_FIT = "palette_fit"
     SAVE_STATE = "save_state"  # T3: save the dev run as a resumable checkpoint
     LOAD_STATE = "load_state"  # T3: resume a saved checkpoint (swaps the sim)
+    MASK_BROWSE = "mask_browse"  # mask.file picker (routed off the GL thread)
 
 
 @dataclass
@@ -1258,7 +1259,7 @@ class StudioApp:
         if (
             kind in (
                 DialogKind.LOAD, DialogKind.IMPORT, DialogKind.PALETTE_FIT,
-                DialogKind.LOAD_STATE, DialogKind.SAVE_STATE,
+                DialogKind.LOAD_STATE, DialogKind.SAVE_STATE, DialogKind.MASK_BROWSE,
             )
             and self._export is not None
         ):
@@ -1299,6 +1300,12 @@ class StudioApp:
                 self._toast_param_warnings(imported)
             elif kind == DialogKind.PALETTE_FIT:
                 self._apply_palette_fit(Path(result[0]))
+            elif kind == DialogKind.MASK_BROWSE:
+                # Write the chosen ABSOLUTE mask path into the draft and commit
+                # through the standard edit pipeline (mask.file is POST-tier).
+                draft = self._live.model_dump()
+                draft["mask"]["file"] = str(Path(result[0]).resolve())
+                self._process_edit(draft, any_changed=True, any_committed=True)
             elif kind == DialogKind.SAVE_STATE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".npz":
@@ -1509,6 +1516,21 @@ class StudioApp:
         imgui.separator()
         draft, any_changed, any_committed = draw_params_panel(self._live, self.panel_state)
         self._process_edit(draft, any_changed, any_committed)
+        # The mask.file Browse... button only raises this flag (it must not open
+        # a dialog synchronously on the GL thread). Consume it here and open the
+        # picker through the same non-blocking _dialog/_poll_dialog slot every
+        # other file dialog uses; drop the request if the slot is busy or an
+        # export is in flight (the user can click again).
+        if self.panel_state.mask_browse_requested:
+            self.panel_state.mask_browse_requested = False
+            if self._dialog is None and self._export is None:
+                self._dialog = (
+                    DialogKind.MASK_BROWSE,
+                    pfd.open_file(
+                        "Select mask image", "",
+                        ["PNG images", "*.png", "All files", "*"],
+                    ),
+                )
 
     def _draw_seed_header_control(self) -> None:
         """Seed editor in the controls header, next to Randomize/Reroll (UX

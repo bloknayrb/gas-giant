@@ -234,3 +234,60 @@ def test_leaf_kind_maps_optional_str():
     panels = pytest.importorskip("gasgiant.app.panels")
     info = MaskParams.model_fields["file"]
     assert panels.leaf_kind("file", info, None) == "optional_str"
+
+
+def test_save_preset_missing_mask_preserves_original_path(tmp_path):
+    """When the source mask is MISSING, save must NOT rewrite mask.file to a
+    dangling sidecar name that was never created (that discards the fixable
+    original path). The original path is kept; on load it re-resolves and, if
+    still missing, the facade warns + disables."""
+    preset_dir = tmp_path / "out"
+    preset_dir.mkdir()
+    gone = (tmp_path / "assets" / "gone.png").resolve()  # never created
+    p = PlanetParams()
+    p.mask.file = str(gone)
+    path = preset_dir / "look.json"
+    save_preset(p, path)
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    # The original absolute path is preserved, NOT a bare "gone.png" sidecar
+    # that does not exist next to the preset.
+    assert saved["params"]["mask"]["file"] == str(gone)
+    assert not (preset_dir / "gone.png").exists()
+
+
+@pytest.fixture
+def imgui_ctx():
+    imgui = pytest.importorskip("imgui_bundle.imgui")
+    ctx = imgui.create_context()
+    io = imgui.get_io()
+    io.display_size = imgui.ImVec2(800.0, 600.0)
+    io.delta_time = 1.0 / 60.0
+    io.set_ini_filename(None)
+    io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+    yield imgui
+    imgui.destroy_context(ctx)
+
+
+def test_optional_str_browse_only_raises_request_flag(imgui_ctx, monkeypatch):
+    """The Browse... button must NOT open a dialog synchronously (that freezes
+    the GL thread); it only raises state.mask_browse_requested for the app to
+    service through its non-blocking _dialog/_poll_dialog slot."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+    # Force the Browse button "clicked", leave the text field unchanged.
+    monkeypatch.setattr(panels.imgui, "button", lambda label: True)
+    monkeypatch.setattr(panels.imgui, "input_text", lambda label, v: (False, v))
+    monkeypatch.setattr(panels.imgui, "same_line", lambda *a, **k: None)
+    monkeypatch.setattr(panels.imgui, "is_item_deactivated_after_edit", lambda: False)
+
+    state = panels.PanelState()
+    doc = {"file": None}
+    imgui.new_frame()
+    imgui.begin("browse_test", None, 0)
+    panels._draw_optional_str("file", "mask file", doc, state)
+    imgui.end()
+    imgui.end_frame()
+
+    assert state.mask_browse_requested is True
+    assert doc["file"] is None  # widget didn't block or mutate the path itself
