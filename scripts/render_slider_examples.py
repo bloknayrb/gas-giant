@@ -82,6 +82,8 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
             return "optional_float"
         if len(inner) == 1 and inner[0] is int:
             return "optional_int"
+        if len(inner) == 1 and inner[0] is str:
+            return "optional_str"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -94,6 +96,14 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
         return "color"
     if isinstance(value, str):
         return "str"
+    # Annotation-keyed list-of-model editor (storms.cast); classifies the EMPTY
+    # default. Palette/stops lists are excluded (bespoke value-shape editors).
+    if get_origin(ann) is list:
+        args = get_args(ann)
+        if len(args) == 1 and isinstance(args[0], type) and issubclass(args[0], BaseModel):
+            from gasgiant.params.model import GradientStop, PaletteRow
+            if args[0] not in (GradientStop, PaletteRow):
+                return "model_list"
     if isinstance(value, list) and value and isinstance(value[0], dict) and "pos" in value[0]:
         return "stops"
     if isinstance(value, list) and value and isinstance(value[0], dict) and "stops" in value[0]:
@@ -126,7 +136,7 @@ SLIDER_INPUT_INT_LIMIT = 1_000_000
 # GUI group order (matches the collapsing headers top to bottom).
 GROUP_ORDER = [
     "Sim", "Solver", "Bands", "Jets", "Turbulence", "Storms",
-    "Waves", "Poles", "Appearance", "Detail", "Emission", "Physical", "Export",
+    "Waves", "Poles", "Appearance", "Detail", "Mask", "Emission", "Physical", "Export",
 ]
 
 # Groups whose sliders only do anything under the vorticity solver.
@@ -186,6 +196,12 @@ class Slider:
     # a fair lo/preset/hi image row, and pinned extremes can be
     # validator-coupled to sibling fields).
     optional: bool = False
+    # Non-numeric widgets documented as text (never rendered): bool checkboxes
+    # and list-of-model editors (storms.cast). ``text_widget`` selects the
+    # markdown blurb; ``text_default`` is the default-value repr shown.
+    text_only: bool = False
+    text_widget: str = ""       # "bool" | "model_list"
+    text_default: str = ""
 
 
 def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
@@ -229,6 +245,40 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
                 visual=False, optional=True,
             ))
             continue
+        if kind == "optional_str":
+            # Optional string path (mask.file): text-entry + Browse button in the
+            # GUI. Text-only entry, no images (a path can't anchor a lo/hi row).
+            out.append(Slider(
+                path=path, group=group or "Global", label=name.replace("_", " "),
+                lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
+                tier=str(extra.get("tier", "")),
+                description=info.description or "",
+                visual=False, text_only=True, text_widget="path",
+                text_default="None",
+            ))
+            continue
+        if kind == "model_list":
+            # List-of-model editor (storms.cast): text-only entry, no images.
+            out.append(Slider(
+                path=path, group=group or "Global", label=name.replace("_", " "),
+                lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
+                tier=str(extra.get("tier", "")),
+                description=info.description or "",
+                visual=False, text_only=True, text_widget="model_list",
+                text_default="empty list",
+            ))
+            continue
+        if kind == "bool":
+            # Boolean toggle (GUI checkbox): text-only entry, no images.
+            out.append(Slider(
+                path=path, group=group or "Global", label=name.replace("_", " "),
+                lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
+                tier=str(extra.get("tier", "")),
+                description=info.description or "",
+                visual=False, text_only=True, text_widget="bool",
+                text_default=str(value),
+            ))
+            continue
         if kind not in ("int", "float"):
             continue
         lo, hi = _bounds(info)
@@ -270,8 +320,9 @@ def enumerate_sliders() -> list[Slider]:
     # labels and the lo/hi dedup are correct. Emission keeps None (demo baseline).
     preset_cache: dict[str, dict[str, Any]] = {}
     for s in sliders:
-        if s.channel == "emission" or s.enum_values is not None or s.optional:
-            continue  # emission uses a demo baseline; enums/optionals are text-only
+        if (s.channel == "emission" or s.enum_values is not None or s.optional
+                or s.text_only):
+            continue  # emission uses a demo baseline; enums/optionals/text are text-only
         dump = preset_cache.get(s.baseline)
         if dump is None:
             dump = _baseline_params(s.baseline).model_dump()
@@ -540,6 +591,37 @@ def build_markdown(sliders: list[Slider]) -> str:
                     "_Choice field (GUI dropdown) &mdash; documented as text; "
                     "no rendered example._\n")
                 continue
+            if s.text_only:
+                if s.text_widget == "bool":
+                    meta = (
+                        f"`{s.path}` &mdash; toggle (on/off), default "
+                        f"**`{s.text_default}`**, tier `{s.tier}`")
+                elif s.text_widget == "path":
+                    meta = (
+                        f"`{s.path}` &mdash; file path, default "
+                        f"**{s.text_default}**, tier `{s.tier}`")
+                else:  # model_list
+                    meta = (
+                        f"`{s.path}` &mdash; list editor, default "
+                        f"**{s.text_default}**, tier `{s.tier}`")
+                lines.append(meta + ".\n")
+                if s.description:
+                    lines.append(f"{s.description}\n")
+                if s.text_widget == "bool":
+                    lines.append(
+                        "_Boolean toggle (GUI checkbox) &mdash; documented as "
+                        "text; no rendered example._\n")
+                elif s.text_widget == "path":
+                    lines.append(
+                        "_File-path field: the GUI shows a text entry + **Browse...** "
+                        "button (empty = None). Documented as text; no rendered "
+                        "example._\n")
+                else:
+                    lines.append(
+                        "_List of hand-placed sub-records edited in a dedicated "
+                        "GUI panel &mdash; documented as text; no rendered "
+                        "example._\n")
+                continue
             if s.optional:
                 meta = (
                     f"`{s.path}` &mdash; optional; pin range "
@@ -670,6 +752,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  {s.path:36s} {_fmt(s.lo, s.is_int):>8} .. "
                           f"{_fmt(s.hi, s.is_int):<8} def=None     "
                           f"{s.tier}  [optional]")
+                    continue
+                if s.text_only:
+                    print(f"  {s.path:36s} def={s.text_default:<12} "
+                          f"{s.tier}  [{s.text_widget}]")
                     continue
                 flag = "" if s.visual else "  [non-visual]"
                 base = "" if s.baseline == "kinematic" else f"  [{s.baseline}]"

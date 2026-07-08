@@ -240,7 +240,24 @@ before proposing work in these areas.
   - Neither this nor the strain attempt changes noise *character*; the character
     redesign (decouple tracer-res, advect a high-res passive tracer through the
     EVOLVING field) remains parked (W13/W14).
-## Research direction (unstarted): detail CHARACTER = sim-advected high-res tracer
+## Research direction (SPIKED — CONDITIONAL GO, 2026-07-08): detail CHARACTER = sim-advected high-res tracer
+
+> **Status update (2026-07-08, T18 crux spike).** No longer unstarted: the
+> pre-registered crux gate below was run (`scripts/spike_detail_character.py`,
+> measurement-only, ships nothing to the render path) and returned
+> **CONDITIONAL GO** — see `docs/superpowers/specs/2026-07-08-detail-character-spike-verdict.md`.
+> Advecting a high-res passive tracer through the evolving vorticity field
+> **does** manufacture oriented filamentary structure: a strain-attributable,
+> orientation-controlled **×3.7** separation from isotropic noise (advected
+> 0.314 vs control 0.085), with rot90 collapsing it (0.314→0.265) — the
+> mechanism is real, NOT an emergent-color / q-target dead end. The absolute
+> **0.384** GO number is INCONCLUSIVE only because software GL cannot run the
+> native fidelity the bar was calibrated at: the proxy ran the dynamics grid
+> 16× coarse (256 vs 4096) and coherence rose monotonically with both
+> resolution and development, so 0.31 is a **lower bound**. **Remaining gate**
+> before the multi-session subsystem build: ONE native-GPU run of the same
+> spike at dynamics 1024–2048 / 700 steps / tracer 4× confirming advected
+> coher ≥ 0.384 (re-run the harness unchanged). The design premise below stands.
 
 The render detail's fBm reads as noise because fluid folded-filament morphology is a
 **dynamics** property, and no frozen-field render trick produces it (see the

@@ -23,35 +23,70 @@ from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
 
+import numpy as np
 from imgui_bundle import hello_imgui, imgui
 from imgui_bundle import portable_file_dialogs as pfd
 from pydantic import ValidationError
 
 from gasgiant.app.panels import _TIER_GLYPHS, PanelState, draw_params_panel
 from gasgiant.app.sphere_preview import SpherePreview
-from gasgiant.app.viewport import EquirectViewport
+from gasgiant.app.thumbnails import ThumbnailManager
+from gasgiant.app.viewport import (
+    EquirectViewport,
+    lonlat_to_screen,
+    nearest_cast_index,
+    screen_to_lonlat,
+)
+from gasgiant.core import brush
 from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
+from gasgiant.engine.checkpoint import load_checkpoint, save_checkpoint
 from gasgiant.engine.invalidation import diff_tiers
-from gasgiant.export.exporter import export_job
+from gasgiant.export.exporter import export_job, export_sequence_job
 from gasgiant.export.manifest import MANIFEST_FILENAME
+from gasgiant.export.video import ffmpeg_available
 from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
-from gasgiant.params.model import PlanetParams, Tier
+from gasgiant.params.model import (
+    CastKind,
+    PlanetParams,
+    StormOverride,
+    Tier,
+    hero_latitude_cap,
+)
 from gasgiant.params.presets import (
     USER_PRESET_DIR,
     PresetError,
     PresetSource,
+    apply_overlay,
     available_presets,
+    available_recipes,
     import_preset,
     load_factory_preset,
     load_preset,
+    load_recipe,
     load_user_preset,
     save_preset,
 )
 from gasgiant.params.randomize import randomize
 
 log = logging.getLogger(__name__)
+
+
+def _load_recipe_menu() -> list[tuple[str, str, str]]:
+    """(stem, display-label, description) for each packaged epoch recipe, read
+    once at startup. A malformed recipe is skipped (logged) rather than crashing
+    the menu -- it still fails loudly if actually selected (``load_recipe``)."""
+    entries: list[tuple[str, str, str]] = []
+    for stem in available_recipes():
+        try:
+            _base, _overlay, meta = load_recipe(stem)
+        except (PresetError, OSError, ValueError):
+            log.warning("skipping unreadable recipe %r in the Scenarios menu", stem)
+            continue
+        entries.append((stem, meta.get("name") or stem, meta.get("description") or ""))
+    return entries
+
 
 class DialogKind(StrEnum):
     """Which native file dialog ``self._dialog`` is currently awaiting. A
@@ -61,6 +96,10 @@ class DialogKind(StrEnum):
     SAVE = "save"
     EXPORT = "export"
     IMPORT = "import"
+    PALETTE_FIT = "palette_fit"
+    SAVE_STATE = "save_state"  # T3: save the dev run as a resumable checkpoint
+    LOAD_STATE = "load_state"  # T3: resume a saved checkpoint (swaps the sim)
+    MASK_BROWSE = "mask_browse"  # mask.file picker (routed off the GL thread)
 
 
 @dataclass
@@ -93,6 +132,10 @@ class UndoRecord(NamedTuple):
 
 PREVIEW_WIDTH = 2048
 SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
+
+# T6: pixel size of a preset thumbnail as drawn in the combo (2:1, like the map).
+THUMB_DISPLAY_W = 88.0
+THUMB_DISPLAY_H = THUMB_DISPLAY_W / 2.0
 
 # Export-resolution presets for the combo next to the Export button. Widths are
 # within ExportParams.width's (512, 16384) bounds; height is always width // 2.
@@ -128,6 +171,12 @@ SPEED_OPTIONS: list[tuple[int, str]] = [
 # ~4x per-step gap (not chunking) is where the first-launch minutes actually
 # are. tick() is chunk-invariant (see Simulation.tick) either way.
 DEFAULT_STEPS_PER_FRAME = 2
+
+# T12 in-GUI mask brush: cap live mask re-uploads (and the POST re-derive they
+# trigger) to ~30 Hz while dragging, so a fast stroke doesn't re-derive the
+# preview every single frame. Gated by accumulated imgui io.delta_time on the
+# single GL thread -- never a blocking sleep.
+PAINT_UPLOAD_INTERVAL = 1.0 / 30.0
 
 
 # -- B1-2: friendly GL-failure message ---------------------------------------
@@ -452,6 +501,8 @@ class StudioApp:
         self.sim: Simulation | None = None
         self.viewport: EquirectViewport | None = None
         self.sphere: SpherePreview | None = None
+        # T6 preset thumbnails: built in init_gl once the GL context exists.
+        self._thumbs: ThumbnailManager | None = None
         self.params = self._load_session_or_default()
         # Working copy the panel edits each frame. Distinct from self.params
         # (the committed/engine state): a heavy (velocity/restart) edit lives in
@@ -482,6 +533,13 @@ class StudioApp:
         # Cached merged (factory + user) dropdown list; refreshed on save/load and
         # by the explicit "Refresh presets" button, never re-enumerated per frame.
         self._preset_cache: list[tuple[str, str]] = available_presets()
+        # T6: (name, source) -> loaded PlanetParams (or None if it failed to
+        # load), so the combo can request/show a thumbnail without re-parsing the
+        # preset JSON every frame. Cleared on Refresh presets.
+        self._thumb_params: dict[tuple[str, PresetSource], PlanetParams | None] = {}
+        # T15 epoch recipes: cached (stem, label, description) once — recipes are
+        # immutable package data, so this never re-enumerates per frame.
+        self._recipe_cache: list[tuple[str, str, str]] = _load_recipe_menu()
         self.frame_perf = PerfCounter()
         self.render_perf = PerfCounter()
         self._recomputing = False  # a heavy commit reset the dev run; show progress
@@ -510,6 +568,23 @@ class StudioApp:
         # B1-4: a picked export folder that already contains a map set, held
         # here until the user confirms/cancels the overwrite modal.
         self._pending_export: tuple[Path, list[str]] | None = None
+        # T7: sequence-export settings, edited in the Export modal's Sequence
+        # section. frames == 1 means the plain single-mapset export; > 1 drives
+        # export_sequence_job. all_maps/video are opt-in; fps feeds the ffmpeg
+        # encode. These are session-local app state (not planet params).
+        self._seq_frames = 1
+        self._seq_steps_per_frame = 30
+        self._seq_all_maps = False
+        self._seq_video = False
+        self._seq_fps = 24
+        # T7: whether to restart the dev run once a sequence export finishes
+        # (a sequence advances the LIVE sim forward via extend_run, so the
+        # in-app preview ends at the final frame unless rebuilt).
+        self._restart_dev_after_export = False
+        # T7: set true while a sequence export is in flight, so the completion
+        # handler knows to honor _restart_dev_after_export (a plain single-map
+        # export never advances the sim, so it never restarts).
+        self._export_is_sequence = False
         # B1-8: (name, path) of a user preset awaiting overwrite/delete
         # confirmation in their respective modals.
         self._pending_overwrite: tuple[str, Path] | None = None
@@ -524,6 +599,44 @@ class StudioApp:
         # A2-2: last observed Simulation.baroclinic_status, so the per-frame
         # check toasts exactly once per transition INTO 'degraded'.
         self._baro_status_seen = "off"
+        # T4: click-to-place / drag-to-move storm tool. Mode is a small state
+        # machine over the equirect viewport: "none" = tool off, "place" =
+        # armed for click-to-place, "drag" = a marker is being dragged (its live
+        # position tracks the cursor; the texture only re-develops on release).
+        self._storm_tool_mode = "none"
+        self._storm_tool_kind = CastKind.OVAL.value  # placement archetype
+        self._storm_tool_radius = 0.03  # placement radius (StormOverride default)
+        self._drag_index: int | None = None  # cast index being dragged
+        self._drag_lonlat: tuple[float, float] | None = None  # live cursor lon/lat
+        # T12: in-GUI mask brush. The "paint" tool mode shares T4's single
+        # _storm_tool_mode state machine (so paint and Place-storm can't both be
+        # armed). _paint_buffer is the CPU-side single-channel equirect mask,
+        # lazily allocated on first stamp; it is uploaded via facade.set_mask and
+        # re-derived (POST) on a throttle. _paint_base holds a mask adopted from a
+        # loaded preset (the canvas painting continues from) so an Undo-stroke
+        # rebuild replays onto it rather than wiping it. _paint_strokes is a
+        # stroke-replay history SEPARATE from the params undo stack: the mask is
+        # sidecar pixel data, not a params-field value, so entangling it with
+        # _push_history (which snapshots PlanetParams) would be a category error.
+        self._paint_buffer: np.ndarray | None = None
+        self._paint_base: np.ndarray | None = None
+        self._paint_strokes: list[tuple[float, float, float, float, bool]] = []
+        self._paint_radius_deg = 12.0
+        self._paint_strength = 0.5
+        self._paint_erase = False
+        self._paint_dirty = False  # buffer changed since the last mask upload
+        self._paint_was_down = False  # left button was painting last frame
+        self._paint_upload_accum = PAINT_UPLOAD_INTERVAL  # so the first stamp uploads at once
+        # T5: A/B compare + ROI export-res inspector. _snapshot_a is an
+        # app-OWNED clone of the color preview (released on retake / never leaked);
+        # the ROI tile is likewise app-owned (released on close/retake).
+        self._snapshot_a = None  # moderngl.Texture | None
+        self._compare_mode = "off"  # "off" | "flash" | "split"
+        self._flash_show_a = False  # flash mode: True shows A, False shows live
+        self._show_inspect = False
+        self._inspect_center = (0.5, 0.5)  # normalized (x, y) ROI tile center
+        self._inspect_tile = None  # moderngl.Texture | None (ROI color tile)
+        self._inspect_label = ""
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -560,11 +673,14 @@ class StudioApp:
         self.sim = sim
         self.viewport = viewport
         self.sphere = sphere
+        self._thumbs = ThumbnailManager(gpu)
         log.info("GL ready: %s", self.gpu.ctx.info.get("GL_RENDERER", "?"))
         self._last_export_dir = _load_last_export_dir()  # prefs need a live runner
 
     def shutdown(self) -> None:
         self._save_session()
+        if self._thumbs is not None:
+            self._thumbs.release()
 
     def _load_session_or_default(self) -> PlanetParams:
         """Restore the last session if present, else the default preset. Sets
@@ -608,7 +724,9 @@ class StudioApp:
 
     def _save_session(self) -> None:
         try:
-            save_preset(self.params, SESSION_PATH, name="session")
+            # The session is machine-local state: keep the mask's ABSOLUTE path
+            # (do NOT relativize/copy a sidecar next to session.json).
+            save_preset(self.params, SESSION_PATH, name="session", relativize_mask=False)
         except OSError as exc:
             log.warning("session autosave failed: %s", exc)
 
@@ -655,6 +773,28 @@ class StudioApp:
 
     def _refresh_presets(self) -> None:
         self._preset_cache = available_presets()
+        self._thumb_params.clear()  # a re-enumerated user preset may have changed
+
+    def _thumb_params_for(
+        self, name: str, source: PresetSource
+    ) -> PlanetParams | None:
+        """Load (and cache) the params for a combo entry so its thumbnail can be
+        requested/shown without re-parsing the JSON each frame. A load failure
+        caches None so the corrupt preset is skipped (never re-tried per frame)
+        and never crashes the combo -- loading it is what surfaces the error."""
+        key = (name, source)
+        if key in self._thumb_params:
+            return self._thumb_params[key]
+        try:
+            params = (
+                load_user_preset(name)
+                if source == PresetSource.USER
+                else load_factory_preset(name)
+            )
+        except (PresetError, OSError, ValueError):
+            params = None
+        self._thumb_params[key] = params
+        return params
 
     def _load_preset_entry(self, name: str, source: PresetSource) -> None:
         """Load a factory/user preset by (name, source) through the shared
@@ -676,6 +816,29 @@ class StudioApp:
         self._reset_working_copy()  # discrete action wins over pending edit
         label = f"user/{name}" if source == PresetSource.USER else name
         self.toasts.info(f"preset: {label}")
+        self._toast_param_warnings(params)
+
+    def _load_recipe_entry(self, name: str) -> None:
+        """T15: apply an epoch recipe -- load its base factory preset, deep-merge
+        the recipe overlay via ``apply_overlay``, and commit through the same
+        push-history -> commit -> set-identity -> reset path as a preset load, so
+        it is fully undoable. The result is a transient identity ``recipe/<name>``
+        (FILE source -- like a loaded file, it isn't in the saved dropdown).
+        Failures toast and leave state untouched."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export (see draw_controls)
+        try:
+            base, overlay, meta = load_recipe(name)
+            params = apply_overlay(load_factory_preset(base), overlay)
+        except (PresetError, OSError, ValueError) as exc:
+            self.toasts.error(str(exc))
+            return
+        if self.params != params:
+            self._push_history(self.params)
+        self._commit(params)
+        self._set_identity((f"recipe/{name}", PresetSource.FILE), params)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"scenario: {meta.get('name') or name}")
         self._toast_param_warnings(params)
 
     def _toast_param_warnings(self, params: PlanetParams) -> None:
@@ -850,6 +1013,29 @@ class StudioApp:
             return
         self._pending_overwrite = entry
 
+    def _params_for_save(self, dest_dir: Path, stem: str) -> PlanetParams:
+        """Params to hand ``save_preset``. With a painted mask buffer present,
+        write it as a 16-bit grayscale sidecar (``<stem>_mask.png``) next to the
+        preset and return a copy whose ``mask.file`` points at it, so T11's
+        relativize/sidecar path stores just the portable filename. Without a
+        painted buffer this is ``self.params`` unchanged (a preset that already
+        references an imported mask keeps flowing through T11's copy path)."""
+        # getattr guards the partial StudioApp instances some tests build via
+        # __new__ (they never touch the paint tool, so the attrs may be absent).
+        buf = getattr(self, "_paint_buffer", None)
+        strokes = getattr(self, "_paint_strokes", None)
+        base = getattr(self, "_paint_base", None)
+        painted = buf is not None and (bool(strokes) or base is not None)
+        if not painted:
+            return self.params
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        from gasgiant.export.writers import write_png16_gray
+        png = dest_dir / f"{stem}_mask.png"
+        write_png16_gray(png, buf)
+        out = self.params.model_copy(deep=True)
+        out.mask.file = str(png.resolve())
+        return out
+
     def _overwrite_active_preset(self) -> None:
         """Confirmed overwrite: save the current params over the active user
         preset's file and adopt them as the new pristine baseline (clears the
@@ -860,7 +1046,7 @@ class StudioApp:
             return
         name, path = entry
         try:
-            save_preset(self.params, path)
+            save_preset(self._params_for_save(path.parent, path.stem), path)
         except OSError as exc:
             self.toasts.error(str(exc))
             return
@@ -951,6 +1137,78 @@ class StudioApp:
         default = str(USER_PRESET_DIR / "preset.json")
         self._dialog = (DialogKind.SAVE, pfd.save_file("Save preset", default, ["JSON", "*.json"]))
 
+    # -- checkpoint save/load state (T3) --------------------------------------
+
+    def _open_save_state_dialog(self) -> None:
+        """Open the "Save state..." file dialog. No-op if a dialog is already
+        open (mirrors the button's ``self._dialog is None`` guard)."""
+        if self._dialog is not None:
+            return
+        default = str(Path.home() / "gasgiant_state.npz")
+        self._dialog = (
+            DialogKind.SAVE_STATE,
+            pfd.save_file("Save state", default, ["Checkpoint", "*.npz"]),
+        )
+
+    def _save_state(self, path: Path) -> None:
+        """Save the current dev run as a resumable checkpoint. Gated while an
+        export is in flight (the sim is being stepped by the export job)."""
+        if self._export is not None:
+            return
+        try:
+            save_checkpoint(self.sim, path)
+        except OSError as exc:
+            self.toasts.error(str(exc))
+            return
+        self.toasts.info(f"saved state {path.name} (step {self.sim.steps_done})")
+
+    def _load_state(self, path: Path) -> None:
+        """Resume a saved checkpoint: load it, then swap the app onto it.
+
+        Step 1 of the load-swap: refuse while an export is in flight (swapping
+        the sim out from under the export job would corrupt it). The load itself
+        happens BEFORE any mutation, so a failure (GENERATION_VERSION mismatch,
+        corrupt/renamed file) toasts and leaves the app untouched -- never a
+        half-swap. The actual swap is factored into ``_apply_loaded_checkpoint``."""
+        if self._export is not None:
+            return
+        try:
+            new_sim = load_checkpoint(path, gpu=self.gpu)
+        except (ValueError, OSError) as exc:
+            self.toasts.error(f"load state failed: {exc}")
+            return
+        self._apply_loaded_checkpoint(new_sim, path)
+        self.toasts.info(f"resumed state {path.name} (step {new_sim.steps_done})")
+        self._toast_param_warnings(new_sim.params)
+
+    def _apply_loaded_checkpoint(self, new_sim: Simulation, path: Path) -> None:
+        """Swap the app onto a freshly loaded checkpoint sim (steps 2-7 of the
+        T3 load-swap; step 1 export-refusal and the load itself are the caller's).
+        Ordered and complete so a load never leaves a half-swapped app. Factored
+        out so it is drivable headlessly with a fake sim in tests."""
+        # 2. release the OUTGOING sim's GPU resources (real leak fix -- the old
+        #    partial release path missed preview/detail/mask/palette textures).
+        self.sim.release()
+        # 3. adopt the loaded sim.
+        self.sim = new_sim
+        # 4. adopt its params AND drop any pending working-copy draft (else the
+        #    stale draft would re-commit over the loaded state next frame).
+        self.params = new_sim.params
+        self._reset_working_copy()
+        # 5. clear undo/redo history + the transient status flag (the loaded run
+        #    is a fresh starting point; prior history no longer applies).
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._recomputing = False
+        # 6. reset the preset identity to a transient checkpoint identity + the
+        #    baroclinic toast latch (so the next status transition re-toasts).
+        self._set_identity((f"checkpoint/{path.stem}", PresetSource.FILE), new_sim.params)
+        self._baro_status_seen = "off"
+        # 7. mark the preview dirty so it re-derives from the restored tracers;
+        #    reflect any still-pending dev steps in the recomputing flag.
+        self.viewport.mark_stale()
+        self._recomputing = not new_sim.is_developed
+
     def _handle_shortcuts(self) -> None:
         """Global keyboard shortcuts (Phase 7), registered as hello_imgui's
         ``post_new_frame`` callback -- it runs right after ImGui::NewFrame(),
@@ -998,7 +1256,13 @@ class StudioApp:
         kind, dlg = self._dialog
         if not dlg.ready():
             return
-        if kind in (DialogKind.LOAD, DialogKind.IMPORT) and self._export is not None:
+        if (
+            kind in (
+                DialogKind.LOAD, DialogKind.IMPORT, DialogKind.PALETTE_FIT,
+                DialogKind.LOAD_STATE, DialogKind.SAVE_STATE, DialogKind.MASK_BROWSE,
+            )
+            and self._export is not None
+        ):
             # A file was already picked (dialog opened before the export
             # started, or a race with the disabled-button gate below) but
             # applying it now would commit mid-export. Hold the dialog --
@@ -1034,11 +1298,26 @@ class StudioApp:
                 self._refresh_presets()
                 self.toasts.info(f"imported {path.name} as user/{name}")
                 self._toast_param_warnings(imported)
+            elif kind == DialogKind.PALETTE_FIT:
+                self._apply_palette_fit(Path(result[0]))
+            elif kind == DialogKind.MASK_BROWSE:
+                # Write the chosen ABSOLUTE mask path into the draft and commit
+                # through the standard edit pipeline (mask.file is POST-tier).
+                draft = self._live.model_dump()
+                draft["mask"]["file"] = str(Path(result[0]).resolve())
+                self._process_edit(draft, any_changed=True, any_committed=True)
+            elif kind == DialogKind.SAVE_STATE:
+                path = Path(result if isinstance(result, str) else result[0])
+                if path.suffix != ".npz":
+                    path = path.with_suffix(".npz")
+                self._save_state(path)
+            elif kind == DialogKind.LOAD_STATE:
+                self._load_state(Path(result[0]))
             elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
                     path = path.with_suffix(".json")
-                save_preset(self.params, path)
+                save_preset(self._params_for_save(path.parent, path.stem), path)
                 # The just-saved preset is the new active/pristine baseline (so
                 # dirty resets); refresh so a save into USER_PRESET_DIR appears.
                 source = PresetSource.USER if path.parent == USER_PRESET_DIR else PresetSource.FILE
@@ -1084,6 +1363,20 @@ class StudioApp:
         if imgui.begin_combo("##preset", self._active_label()):
             for name, source in self._preset_cache:
                 label = f"user/{name}" if source == PresetSource.USER else name
+                # T6: a small thumbnail to the left of each entry. Requesting it
+                # only while the combo is open means we never render a preview for
+                # a preset nobody looked at; get_texture returns None (placeholder
+                # box) until the tick-sliced render finishes and caches it.
+                tp = self._thumb_params_for(name, source)
+                if tp is not None and self._thumbs is not None:
+                    self._thumbs.request(tp)
+                    tex = self._thumbs.get_texture(tp)
+                    size = imgui.ImVec2(THUMB_DISPLAY_W, THUMB_DISPLAY_H)
+                    if tex is not None:
+                        imgui.image(imgui.ImTextureRef(tex.glo), size)
+                    else:
+                        imgui.dummy(size)  # placeholder box while it renders
+                    imgui.same_line()
                 if imgui.selectable(label, False)[0]:
                     self._load_preset_entry(name, source)
             imgui.end_combo()
@@ -1115,6 +1408,58 @@ class StudioApp:
         imgui.same_line()
         if imgui.button("Reset to gas_giant_warm"):
             self._load_preset_entry("gas_giant_warm", PresetSource.FACTORY)
+
+        # T3: save/resume the live dev run as a checkpoint (.npz). A checkpoint
+        # captures the exact tracer/vorticity/registry state; Load state swaps
+        # the running sim for the resumed one (byte-identical resume in
+        # kinematic mode).
+        if imgui.button("Save state...") and self._dialog is None:
+            self._open_save_state_dialog()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("save the current dev run as a resumable checkpoint (.npz)")
+        imgui.same_line()
+        if imgui.button("Load state...") and self._dialog is None:
+            self._dialog = (
+                DialogKind.LOAD_STATE,
+                pfd.open_file("Load state", "", ["Checkpoint", "*.npz"]),
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("resume a saved checkpoint (.npz); replaces the current run")
+
+        # T13: fit the latitude palette rows from a reference photo. The fitted
+        # colors are baked into appearance.palette_rows (POST tier, undoable);
+        # no image path is kept on the params.
+        if imgui.button("Fit palette from reference image...") and self._dialog is None:
+            self._dialog = (
+                DialogKind.PALETTE_FIT,
+                pfd.open_file(
+                    "Fit palette from reference image", "",
+                    ["Images", "*.png *.jpg *.jpeg *.tif *.tiff", "All files", "*"],
+                ),
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "fit the per-latitude palette rows from a cylindrical true-color "
+                "reference photo (values are baked in; undoable)"
+            )
+
+        # T15: epoch recipes ("Scenarios") -- documented historical atmosphere
+        # states expressed as small overlays on a base preset. Selecting one
+        # loads the base, applies the overlay, and commits undoably.
+        if self._recipe_cache:
+            imgui.set_next_item_width(160.0)
+            if imgui.begin_combo("##scenario", "Scenarios..."):
+                for stem, label, desc in self._recipe_cache:
+                    if imgui.selectable(label, False)[0]:
+                        self._load_recipe_entry(stem)
+                    if desc and imgui.is_item_hovered():
+                        imgui.set_tooltip(desc)
+                imgui.end_combo()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "apply an epoch recipe: a documented historical atmosphere "
+                    "state overlaid on its base preset (undoable)"
+                )
 
         # B1-8: contextual overwrite/delete row, shown only while a USER
         # preset is active (factory presets are package data; a FILE identity
@@ -1171,6 +1516,21 @@ class StudioApp:
         imgui.separator()
         draft, any_changed, any_committed = draw_params_panel(self._live, self.panel_state)
         self._process_edit(draft, any_changed, any_committed)
+        # The mask.file Browse... button only raises this flag (it must not open
+        # a dialog synchronously on the GL thread). Consume it here and open the
+        # picker through the same non-blocking _dialog/_poll_dialog slot every
+        # other file dialog uses; drop the request if the slot is busy or an
+        # export is in flight (the user can click again).
+        if self.panel_state.mask_browse_requested:
+            self.panel_state.mask_browse_requested = False
+            if self._dialog is None and self._export is None:
+                self._dialog = (
+                    DialogKind.MASK_BROWSE,
+                    pfd.open_file(
+                        "Select mask image", "",
+                        ["PNG images", "*.png", "All files", "*"],
+                    ),
+                )
 
     def _draw_seed_header_control(self) -> None:
         """Seed editor in the controls header, next to Randomize/Reroll (UX
@@ -1305,6 +1665,15 @@ class StudioApp:
         imgui.text("Files written to the chosen folder:")
         for line in _export_file_lines(self.params):
             imgui.bullet_text(line)
+        if self._seq_frames > 1:
+            extra = "color" + (", height" + (", emission" if self.params.emission.enabled
+                                             else "") if self._seq_all_maps else "")
+            imgui.bullet_text(
+                f"frames/ — {self._seq_frames} frames per map ({extra})"
+                + (" + sequence.mp4" if self._seq_video else "")
+            )
+        imgui.separator()
+        self._draw_export_sequence_section()
         imgui.separator()
         if imgui.button("Export...") and self._dialog is None:
             default_dir = str(self._last_export_dir) if self._last_export_dir else ""
@@ -1318,10 +1687,79 @@ class StudioApp:
             imgui.close_current_popup()
         imgui.end_popup()
 
+    def _draw_export_sequence_section(self) -> None:
+        """T7: the Sequence section of the export modal. frames == 1 leaves the
+        plain single-mapset export; > 1 exports an animation. All fields are
+        session-local app state (not planet params, so not undoable). Warns that
+        a sequence advances the LIVE dev run, with an opt-in restart affordance;
+        the video checkbox is disabled (with a tooltip) when ffmpeg is absent."""
+        imgui.text("Sequence (animation)")
+        imgui.set_next_item_width(110.0)
+        changed, value = imgui.input_int("Frames", self._seq_frames)
+        if changed:
+            self._seq_frames = max(1, min(9999, value))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("1 = single map set; >1 exports an animated sequence "
+                              "into frames/ (frame 0 = the map set)")
+        if self._seq_frames <= 1:
+            imgui.text_disabled("single map set (no animation)")
+            return
+        imgui.set_next_item_width(110.0)
+        schanged, sval = imgui.input_int("Steps per frame", self._seq_steps_per_frame)
+        if schanged:
+            self._seq_steps_per_frame = max(1, min(100000, sval))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("sim steps advanced between frames (more = larger motion)")
+        _, self._seq_all_maps = imgui.checkbox("All maps per frame", self._seq_all_maps)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("also write height (and emission, when enabled) per frame, "
+                              "not just color")
+        ffmpeg = ffmpeg_available()
+        imgui.begin_disabled(not ffmpeg)
+        _, self._seq_video = imgui.checkbox("Encode mp4 (ffmpeg)", self._seq_video and ffmpeg)
+        imgui.end_disabled()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "encode the color frames into sequence.mp4 via ffmpeg" if ffmpeg
+                else "ffmpeg not found on PATH — install ffmpeg to enable mp4 encoding"
+            )
+        if self._seq_video and ffmpeg:
+            imgui.same_line()
+            imgui.set_next_item_width(90.0)
+            fchanged, fval = imgui.input_int("fps", self._seq_fps)
+            if fchanged:
+                self._seq_fps = max(1, min(120, fval))
+        # A sequence runs the sim forward (extend_run) — the live dev state is
+        # NOT where it was before export. Warn, and offer to rebuild it after.
+        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.8, 0.3, 1.0))
+        imgui.text_wrapped(
+            "Note: a sequence advances the live development run forward; the "
+            "in-app planet will be at its final frame afterward."
+        )
+        imgui.pop_style_color()
+        _, self._restart_dev_after_export = imgui.checkbox(
+            "Restart dev run after export", self._restart_dev_after_export
+        )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("rebuild the live development run from the current settings "
+                              "once the export finishes, so the preview returns to normal")
+
     def _start_export(self, out: Path) -> None:
         """Kick off the tiled export job into ``out`` (folder already picked
-        and, if it contained a map set, overwrite-confirmed)."""
-        self._export = ExportJob(export_job(self.sim, out), out)
+        and, if it contained a map set, overwrite-confirmed). T7: > 1 frame
+        drives the sequence job; the single-frame path is unchanged."""
+        if self._seq_frames > 1:
+            self._export_is_sequence = True
+            job = export_sequence_job(
+                self.sim, out, self._seq_frames, self._seq_steps_per_frame,
+                all_maps=self._seq_all_maps,
+                video=self._seq_video and ffmpeg_available(),
+                fps=self._seq_fps,
+            )
+        else:
+            self._export_is_sequence = False
+            job = export_job(self.sim, out)
+        self._export = ExportJob(job, out)
 
     def _draw_export_overwrite_confirm(self) -> None:
         """B1-4: confirm modal shown when the picked folder already contains
@@ -1392,8 +1830,567 @@ class StudioApp:
         self._single_step_requested = False
         if step_now and self.sim.tick(self._steps_per_frame):
             self.viewport.mark_stale()
-        self.viewport.draw(self.sim, PREVIEW_WIDTH)
+        self.viewport.draw(
+            self.sim, PREVIEW_WIDTH,
+            compare_mode=self._compare_mode,
+            snapshot_a=self._snapshot_a,
+            flash_show_a=self._flash_show_a,
+        )
+        # imgui-drawing block for the Equirect window. Everything here uses imgui
+        # widgets / the window draw list, so it must run right after the image was
+        # blitted and its rect captured. The guard keeps draw_equirect a pure
+        # tick/blit body when driven headlessly (no image -> image_rect_min is
+        # None -> no imgui calls), preserving the invariant its playback tests
+        # rely on. The T5 A/B compare + ROI controls always draw here; the T4
+        # storm tool additionally needs a hit-testable (non-compare) equirect.
+        if self.viewport.image_rect_min is not None:
+            self._draw_compare_controls()
+            if self.viewport.hit_testable:
+                self.viewport.draw_markers(
+                    self.params.storms.cast,
+                    drag_index=self._drag_index,
+                    drag_lonlat=self._drag_lonlat,
+                )
+                self._draw_storm_tool_ui()
+                self._draw_paint_tool_ui()
+                # The two tools share one mode machine; dispatch the mouse layer
+                # to whichever is armed (paint takes over place/drag when on).
+                if self._storm_tool_mode == "paint":
+                    self._handle_paint_tool()
+                    self._draw_brush_cursor()
+                else:
+                    self._handle_storm_tool()
         self.render_perf.end()
+
+    # -- T4: click-to-place / drag-to-move storms --------------------------------
+
+    def _draw_storm_tool_ui(self) -> None:
+        """Tool block under the equirect image: a 'Place storm' toggle plus a
+        kind combo and radius slider while armed, with an honest caption about
+        the restart-tier rebuild on placement/drag-release."""
+        exporting = self._export is not None
+        # "paint" is a sibling mode in the same state machine (T12); it is not a
+        # storm-tool-on state, so the Place-storm toggle keys off place/drag only.
+        tool_on = self._storm_tool_mode in ("place", "drag")
+        imgui.begin_disabled(exporting)
+        if imgui.button("Place storm: ON" if tool_on else "Place storm"):
+            self._storm_tool_mode = "none" if tool_on else "place"
+            self._drag_index = None
+            self._drag_lonlat = None
+        imgui.end_disabled()
+        if not tool_on:
+            return
+        imgui.same_line()
+        imgui.set_next_item_width(110.0)
+        kinds = [k.value for k in CastKind]
+        cur = kinds.index(self._storm_tool_kind) if self._storm_tool_kind in kinds else 0
+        changed, idx = imgui.combo("kind##placetool", cur, kinds)
+        if changed:
+            self._storm_tool_kind = kinds[idx]
+        imgui.same_line()
+        imgui.set_next_item_width(150.0)
+        rchanged, rv = imgui.slider_float(
+            "radius##placetool", self._storm_tool_radius, 0.01, 0.15
+        )
+        if rchanged:
+            self._storm_tool_radius = rv
+        n = len(self.params.storms.cast)
+        if self._storm_tool_mode == "drag":
+            imgui.text_colored(
+                imgui.ImVec4(1.0, 0.8, 0.3, 1.0),
+                "marker moves live; the planet re-develops on release (restart-tier)",
+            )
+        else:
+            imgui.text_disabled(
+                f"click the map to place a storm ({n}/16); drag a marker to move it "
+                "(re-develops on placement/release)"
+            )
+
+    def _handle_storm_tool(self) -> None:
+        """Per-frame mouse handling for the storm tool. Hit-tests the stored
+        image rect manually (imgui.is_item_clicked can't be used after the tool
+        widgets), gated by is_window_hovered + rect containment so clicks on the
+        panels never place storms. Placement/drag-release both commit exactly
+        once through the discrete-action idiom (one restart-tier rebuild)."""
+        vp = self.viewport
+        if vp is None or vp.image_rect_min is None or vp.image_rect_max is None:
+            return
+        rmin, rmax = vp.image_rect_min, vp.image_rect_max
+        mouse = imgui.get_mouse_pos()
+        mx, my = mouse.x, mouse.y
+        inside = rmin[0] <= mx <= rmax[0] and rmin[1] <= my <= rmax[1]
+        lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+        tool_on = self._storm_tool_mode != "none"
+
+        if not tool_on:
+            # Subtle hint when hovering the planet with the tool off (cheap:
+            # no adopt-seeded, that's deferred).
+            if inside and imgui.is_window_hovered():
+                imgui.set_tooltip("add a cast storm here to direct the seeded storms")
+            return
+
+        if self._export is not None:
+            # Never commit mid-export; abandon any in-flight drag.
+            self._drag_index = None
+            self._drag_lonlat = None
+            if self._storm_tool_mode == "drag":
+                self._storm_tool_mode = "place"
+            return
+
+        if self._storm_tool_mode == "drag":
+            self._drag_lonlat = (lon, lat)  # marker follows the cursor, no commit
+            if not imgui.is_mouse_down(imgui.MouseButton_.left):
+                idx = self._drag_index
+                self._storm_tool_mode = "place"
+                self._drag_index = None
+                self._drag_lonlat = None
+                if idx is not None:
+                    self._commit_cast_move(idx, lon, lat)
+            return
+
+        # place mode: a click either grabs a nearby marker (drag) or places one.
+        if inside and imgui.is_window_hovered() and imgui.is_mouse_clicked(
+            imgui.MouseButton_.left
+        ):
+            idx = self._marker_under_cursor(mx, my, rmin, rmax)
+            if idx is not None:
+                self._storm_tool_mode = "drag"
+                self._drag_index = idx
+                self._drag_lonlat = (lon, lat)
+            else:
+                self._place_storm_at(lon, lat)
+
+    def _marker_under_cursor(
+        self, mx: float, my: float, rmin, rmax, threshold: float = 14.0
+    ) -> int | None:
+        """Cast index whose marker is within ``threshold`` pixels of the cursor,
+        or None. Uses the wrap-aware nearest_cast_index to pick a candidate, then
+        confirms in pixel space (checking the +-360 wrapped screen positions so a
+        dateline marker is grabbable from either edge)."""
+        cast = self.params.storms.cast
+        if not cast:
+            return None
+        lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+        idx = nearest_cast_index(lon, lat, cast)
+        if idx is None:
+            return None
+        entry = cast[idx]
+        for lon_v in (entry.lon_deg, entry.lon_deg - 360.0, entry.lon_deg + 360.0):
+            sx, sy = lonlat_to_screen(lon_v, entry.lat_deg, rmin, rmax)
+            if (sx - mx) ** 2 + (sy - my) ** 2 <= threshold * threshold:
+                return idx
+        return None
+
+    def _place_storm_at(self, lon_deg: float, lat_deg: float) -> None:
+        """Append a cast storm at (clamped) lon/lat via the discrete-action
+        commit idiom (push_history -> commit -> reset_working_copy). No-op (with
+        a toast) when the 16-entry cap is reached or an export is in flight."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export
+        if len(self.params.storms.cast) >= 16:
+            self.toasts.info("cast list is full (16 storms)")
+            return
+        radius = self._storm_tool_radius
+        cap = hero_latitude_cap(radius)
+        lat = max(-cap, min(cap, lat_deg))
+        lon = max(-180.0, min(180.0, lon_deg))
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        new.storms.cast.append(
+            StormOverride(
+                kind=CastKind(self._storm_tool_kind),
+                lat_deg=lat,
+                lon_deg=lon,
+                radius=radius,
+            )
+        )
+        self._commit(new)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"placed {self._storm_tool_kind} at lon {lon:.1f}, lat {lat:.1f}")
+
+    def _commit_cast_move(self, index: int, lon_deg: float, lat_deg: float) -> None:
+        """Write a dragged marker's final position into cast[index] via one
+        discrete-action commit (one restart-tier rebuild). Lat is clamped to the
+        entry's radius-coupled cap; lon to +-180."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export
+        cast = self.params.storms.cast
+        if not (0 <= index < len(cast)):
+            return
+        radius = cast[index].radius
+        cap = hero_latitude_cap(radius)
+        lat = max(-cap, min(cap, lat_deg))
+        lon = max(-180.0, min(180.0, lon_deg))
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        new.storms.cast[index].lat_deg = lat
+        new.storms.cast[index].lon_deg = lon
+        self._commit(new)
+        self._reset_working_copy()  # discrete action wins over pending edit
+
+    # -- T13: palette-from-image ------------------------------------------------
+
+    def _apply_palette_fit(self, path: Path) -> None:
+        """Fit palette rows from a reference image and BAKE them into
+        ``appearance.palette_rows`` via one undoable POST-tier commit. The
+        values are baked in; no image path is stored on the params. Decode +
+        model conversion happen here (the app layer) so ``palette.fit`` stays
+        layer-clean. A bad image just toasts an error and leaves params intact."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export
+        from gasgiant.export.writers import decode_image
+        from gasgiant.palette.fit import calibrate
+        from gasgiant.params.model import palette_rows_from_fit
+        try:
+            img = decode_image(path, color=True)
+        except (OSError, ValueError) as exc:
+            self.toasts.error(f"could not read {path.name}: {exc}")
+            return
+        doc = calibrate(img)
+        rows = palette_rows_from_fit(doc["palette_rows"])
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        new.appearance.palette_rows = rows
+        self._commit(new)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"fit {len(rows)} palette rows from {path.name}")
+
+    # -- T12: in-GUI mask brush --------------------------------------------------
+
+    def _ensure_paint_buffer(self) -> np.ndarray:
+        """Lazily allocate the CPU paint buffer (a zeroed 2:1 equirect) so nothing
+        is spent until the user actually paints."""
+        if self._paint_buffer is None:
+            self._paint_buffer = brush.new_buffer()
+        return self._paint_buffer
+
+    def _adopt_mask_into_buffer(self) -> None:
+        """When the paint tool opens, seed the canvas from the currently-loaded
+        mask (``params.mask.file``) so painting continues from it rather than a
+        blank sheet. Best-effort: a missing/invalid file just leaves the existing
+        buffer. Skipped once the user has local strokes (their work wins). The
+        adopted image is kept as ``_paint_base`` so an Undo-stroke rebuild replays
+        onto it instead of wiping it back to zero."""
+        if self._paint_strokes or self._paint_buffer is not None:
+            return
+        f = self.params.mask.file
+        if not f:
+            return
+        from gasgiant.export.writers import decode_image
+        try:
+            arr = decode_image(Path(f))
+        except (OSError, ValueError) as exc:
+            log.warning("could not adopt mask into paint buffer: %s", exc)
+            return
+        arr = np.ascontiguousarray(arr.astype(np.float32))
+        self._paint_base = arr.copy()
+        self._paint_buffer = arr.copy()
+
+    def _paint_stamp(self, lon_deg: float, lat_deg: float) -> None:
+        """Apply one brush stamp to the buffer and record it in the stroke-replay
+        history. Marks the buffer dirty for the throttled upload."""
+        buf = self._ensure_paint_buffer()
+        s = (
+            float(lon_deg), float(lat_deg), float(self._paint_radius_deg),
+            float(self._paint_strength), bool(self._paint_erase),
+        )
+        brush.stamp(buf, *s)
+        self._paint_strokes.append(s)
+        self._paint_dirty = True
+
+    def _rebuild_paint_buffer(self) -> None:
+        """Replay the remaining strokes from the adopted base (or zero) after an
+        Undo-stroke, then upload the result immediately (a discrete action, so it
+        bypasses the drag throttle). Clears the mask entirely when nothing is left
+        to replay and no base was adopted."""
+        buf = self._ensure_paint_buffer()
+        buf[:] = self._paint_base if self._paint_base is not None else 0.0
+        for s in self._paint_strokes:
+            brush.stamp(buf, *s)
+        if self._paint_strokes or self._paint_base is not None:
+            self.sim.set_mask(buf)
+        else:
+            self.sim.set_mask(None)
+        self._paint_dirty = False
+        self.viewport.mark_stale()
+
+    def _undo_paint_stroke(self) -> None:
+        """Pop the most recent stamp and rebuild the buffer from the remaining
+        strokes. Deliberately NOT wired to the params undo stack: mask pixels are
+        sidecar data, not a PlanetParams field, so Ctrl+Z must not touch them."""
+        if not self._paint_strokes:
+            return
+        self._paint_strokes.pop()
+        self._rebuild_paint_buffer()
+
+    def _clear_paint_mask(self) -> None:
+        """Zero the buffer, drop every stroke and any adopted base, and clear the
+        live mask (``set_mask(None)``) so the planet returns to its no-mask look."""
+        self._paint_strokes.clear()
+        self._paint_base = None
+        if self._paint_buffer is not None:
+            self._paint_buffer[:] = 0.0
+        self._paint_dirty = False
+        self.sim.set_mask(None)
+        self.viewport.mark_stale()
+
+    def _maybe_upload_mask(self, force: bool) -> None:
+        """Throttled mask upload + POST re-derive. Accumulates imgui frame time
+        and uploads at most every ``PAINT_UPLOAD_INTERVAL`` (~30 Hz) while a
+        stroke is in progress, or immediately on ``force`` (the mouse-up that ends
+        a stroke) so the final pixels are never left unshown. set_mask marks the
+        facade's POST/emission previews dirty; mark_stale makes the viewport's
+        next ``ensure_preview`` re-derive."""
+        self._paint_upload_accum += imgui.get_io().delta_time
+        if not self._paint_dirty:
+            return
+        if force or self._paint_upload_accum >= PAINT_UPLOAD_INTERVAL:
+            self.sim.set_mask(self._ensure_paint_buffer())
+            self.viewport.mark_stale()
+            self._paint_dirty = False
+            self._paint_upload_accum = 0.0
+
+    def _draw_paint_tool_ui(self) -> None:
+        """Tool block under the equirect image: a 'Paint mask' toggle plus brush
+        controls (radius, strength, erase), Undo-stroke and Clear-mask buttons
+        while armed. Paint is inert on the final image until a Mask gain > 0 (all
+        default 0); the caption says so."""
+        exporting = self._export is not None
+        paint_on = self._storm_tool_mode == "paint"
+        imgui.begin_disabled(exporting)
+        if imgui.button("Paint mask: ON" if paint_on else "Paint mask"):
+            if paint_on:
+                self._storm_tool_mode = "none"
+            else:
+                self._storm_tool_mode = "paint"
+                self._drag_index = None
+                self._drag_lonlat = None
+                self._adopt_mask_into_buffer()
+        imgui.end_disabled()
+        if not paint_on:
+            return
+        imgui.same_line()
+        imgui.set_next_item_width(150.0)
+        rchanged, rv = imgui.slider_float(
+            "radius (deg)##paint", self._paint_radius_deg, 2.0, 60.0
+        )
+        if rchanged:
+            self._paint_radius_deg = rv
+        imgui.same_line()
+        imgui.set_next_item_width(120.0)
+        schanged, sv = imgui.slider_float(
+            "strength##paint", self._paint_strength, 0.0, 1.0
+        )
+        if schanged:
+            self._paint_strength = sv
+        imgui.same_line()
+        echanged, ev = imgui.checkbox("erase##paint", self._paint_erase)
+        if echanged:
+            self._paint_erase = ev
+        if imgui.button("Undo stroke##paint"):
+            self._undo_paint_stroke()
+        imgui.same_line()
+        if imgui.button("Clear mask##paint"):
+            self._clear_paint_mask()
+        imgui.same_line()
+        n = len(self._paint_strokes)
+        gains_on = (
+            self.params.mask.band_fade > 0.0
+            or self.params.mask.emission_gain > 0.0
+            or self.params.mask.detail_gain > 0.0
+        )
+        note = "" if gains_on else " — set a Mask gain (>0) to see it act"
+        imgui.text_disabled(f"drag on the map to paint ({n} strokes){note}")
+
+    def _handle_paint_tool(self) -> None:
+        """Per-frame mouse handling for the paint tool. Shares T4's mouse layer
+        (the stored image rect + screen_to_lonlat). While the left button is held
+        inside the image, each frame stamps the buffer at the cursor; the upload
+        is throttled and forced once on release. Held off entirely during an
+        export (a POST re-derive mid-export would corrupt the in-flight run)."""
+        vp = self.viewport
+        if vp is None or vp.image_rect_min is None or vp.image_rect_max is None:
+            return
+        if self._export is not None:
+            self._paint_was_down = False
+            return
+        rmin, rmax = vp.image_rect_min, vp.image_rect_max
+        mouse = imgui.get_mouse_pos()
+        mx, my = mouse.x, mouse.y
+        inside = rmin[0] <= mx <= rmax[0] and rmin[1] <= my <= rmax[1]
+        down = imgui.is_mouse_down(imgui.MouseButton_.left)
+        painting = down and inside and imgui.is_window_hovered()
+        if painting:
+            lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+            self._paint_stamp(lon, lat)
+        released = self._paint_was_down and not down
+        self._maybe_upload_mask(force=released)
+        self._paint_was_down = painting
+
+    def _draw_brush_cursor(self) -> None:
+        """Draw the brush-radius circle at the cursor via the window draw list
+        (T4's draw-list idiom). Uses the meridional deg->pixel scale so the ring
+        reads as the brush's angular size. Only inside the captured image rect."""
+        vp = self.viewport
+        if vp is None or vp.image_rect_min is None or vp.image_rect_max is None:
+            return
+        rmin, rmax = vp.image_rect_min, vp.image_rect_max
+        mouse = imgui.get_mouse_pos()
+        mx, my = mouse.x, mouse.y
+        if not (rmin[0] <= mx <= rmax[0] and rmin[1] <= my <= rmax[1]):
+            return
+        px_per_deg = (rmax[1] - rmin[1]) / 180.0
+        r = max(2.0, self._paint_radius_deg * px_per_deg)
+        draw_list = imgui.get_window_draw_list()
+        draw_list.push_clip_rect(imgui.ImVec2(*rmin), imgui.ImVec2(*rmax), True)
+        col = imgui.get_color_u32(
+            imgui.ImVec4(1.0, 0.4, 0.4, 0.95) if self._paint_erase
+            else imgui.ImVec4(0.4, 0.9, 1.0, 0.95)
+        )
+        draw_list.add_circle(imgui.ImVec2(mx, my), r, col, 32, 2.0)
+        draw_list.pop_clip_rect()
+
+    # -- T5: A/B compare + ROI export-res inspector ------------------------------
+
+    def _compare_active(self) -> bool:
+        """Compare draws only when a mode is selected AND snapshot A is held; a
+        mode chosen with no snapshot is an inert no-op (viewport shows live)."""
+        return self._compare_mode != "off" and self._snapshot_a is not None
+
+    def _take_snapshot_a(self) -> None:
+        """Capture the current color preview into snapshot A, RELEASING any
+        previously-held snapshot first (no leak on retake). The app owns the
+        returned clone (facade contract); on failure the old snapshot is kept."""
+        try:
+            new = self.sim.snapshot_preview_color()
+        except RuntimeError as exc:  # no preview yet (shouldn't happen post-first-frame)
+            self.toasts.error(str(exc))
+            return
+        if self._snapshot_a is not None:
+            self._snapshot_a.release()
+        self._snapshot_a = new
+        self.toasts.info("captured snapshot A")
+
+    def _draw_compare_controls(self) -> None:
+        """A/B compare + ROI toolbar under the viewport: take snapshot A, a mode
+        selector (off/flash/split; disabled until A is held), the flash A/live
+        toggle, and the ROI inspector opener (gated during export)."""
+        if imgui.button("Take snapshot A"):
+            self._take_snapshot_a()
+        imgui.same_line()
+        have_a = self._snapshot_a is not None
+        imgui.begin_disabled(not have_a)
+        modes = ["off", "flash", "split"]
+        cur = modes.index(self._compare_mode) if self._compare_mode in modes else 0
+        imgui.set_next_item_width(90.0)
+        changed, idx = imgui.combo("compare##ab", cur, modes)
+        if changed:
+            self._compare_mode = modes[idx]
+        if self._compare_mode == "flash":
+            imgui.same_line()
+            if imgui.button("Show live" if self._flash_show_a else "Show A"):
+                self._flash_show_a = not self._flash_show_a
+        imgui.end_disabled()
+        if not have_a:
+            imgui.same_line()
+            imgui.text_disabled("(take snapshot A to compare)")
+        imgui.same_line()
+        exporting = self._export is not None
+        imgui.begin_disabled(exporting)
+        if imgui.button("Inspect region..."):
+            self._show_inspect = True
+            self._run_inspect()
+        imgui.end_disabled()
+
+    def _run_inspect(self) -> None:
+        """Render ONE export-resolution tile centered on the picked region from a
+        consistent snapshot and hold it for display. GATED while an export is in
+        flight (deriver / detail-synth state is shared -- same guard as every
+        discrete action). Releases the snapshot immediately and the prior tile on
+        retake; the tile is app-owned (released on close). The inspected tile is
+        byte-for-byte the corresponding crop of a full export at the same dims/
+        origin (kinematic mode)."""
+        if self._export is not None:
+            return  # defense-in-depth: never touch the shared deriver mid-export
+        from gasgiant.export.exporter import TILE, derive_tile, roi_tile_origin
+
+        w = self.params.export.width
+        h = w // 2
+        cx, cy = self._inspect_center
+        x0, y0 = roi_tile_origin(cx, cy, w, h, TILE)
+        snap = self.sim.create_snapshot()
+        n_step = self.sim.steps_done
+        m_step = snap.params.sim.dev_steps
+        tile_color = self.gpu.texture2d((TILE, TILE), 4, "f4")
+        tile_height = self.gpu.texture2d((TILE, TILE), 1, "f4")
+        tile_detail = self.gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
+        ok = False
+        try:
+            derive_tile(
+                self.sim, snap, snap.params, x0, y0, w, h,
+                tile_color, tile_height, tile_detail, None,
+            )
+            ok = True
+        finally:
+            tile_height.release()
+            tile_detail.release()
+            snap.release()
+            # FBO hygiene: create_snapshot's clone_texture (and derive) leave an
+            # offscreen FBO bound; rebind the default framebuffer for imgui.
+            self.gpu.ctx.screen.use()
+            if not ok:
+                tile_color.release()
+        if self._inspect_tile is not None:
+            self._inspect_tile.release()
+        self._inspect_tile = tile_color
+        self._inspect_label = (
+            f"tile origin ({x0}, {y0}) at {w}x{h} · as of step {n_step} / {m_step}"
+        )
+
+    def _release_inspect(self) -> None:
+        if self._inspect_tile is not None:
+            self._inspect_tile.release()
+            self._inspect_tile = None
+        self._inspect_label = ""
+
+    def _draw_inspect_window(self) -> None:
+        """The ROI inspector window (drawn from gui_overlays, like Help). Picks a
+        normalized region center, renders one export-resolution tile, and shows
+        it 1:1. Render is gated while an export is in flight."""
+        if not self._show_inspect:
+            return
+        imgui.set_next_window_size(imgui.ImVec2(560.0, 660.0), imgui.Cond_.first_use_ever)
+        opened, self._show_inspect = imgui.begin("ROI inspector", self._show_inspect)
+        if opened:
+            imgui.text_wrapped(
+                "Renders one export-resolution tile so you can check fine detail "
+                "without a full export. Pick a region center, then Render."
+            )
+            cx, cy = self._inspect_center
+            xchg, cx = imgui.slider_float("center x##roi", cx, 0.0, 1.0)
+            ychg, cy = imgui.slider_float("center y##roi", cy, 0.0, 1.0)
+            if xchg or ychg:
+                self._inspect_center = (cx, cy)
+            exporting = self._export is not None
+            imgui.begin_disabled(exporting)
+            if imgui.button("Render region"):
+                self._run_inspect()
+            imgui.end_disabled()
+            if exporting:
+                imgui.same_line()
+                imgui.text_disabled("paused during export")
+            if self._inspect_tile is not None:
+                imgui.separator()
+                imgui.text(self._inspect_label)
+                avail = imgui.get_content_region_avail()
+                side = max(min(avail.x, 512.0), 64.0)
+                imgui.image(
+                    imgui.ImTextureRef(self._inspect_tile.glo),
+                    imgui.ImVec2(side, side),
+                )
+        imgui.end()
+        if not self._show_inspect:  # window just closed via its title-bar X
+            self._release_inspect()
 
     def draw_sphere(self) -> None:
         if self.sim is None:  # init_gl failed; the runner is already exiting
@@ -1473,6 +2470,14 @@ class StudioApp:
             self._last_export_dir = out
             _save_last_export_dir(out)
             self.toasts.info(f"exported to {out} — 'Open folder' in Controls")
+            # T7: a sequence advanced the live dev run; optionally rebuild it so
+            # the preview returns to a fresh development instead of the last frame.
+            if self._export_is_sequence and self._restart_dev_after_export:
+                self.sim.rebuild()
+                self.viewport.mark_stale()
+                self._recomputing = True
+                self.toasts.info("dev run restarted")
+            self._export_is_sequence = False
         except Exception as exc:  # noqa: BLE001 - surface any export failure
             # Record the full traceback (this catch is broad -- a GL error mid
             # derive, an IndexError in the tiler, an OSError on the last tile),
@@ -1480,6 +2485,7 @@ class StudioApp:
             # KeyError etc.) so the toast is never "export failed: " (#7).
             log.exception("export failed")
             self._export = None
+            self._export_is_sequence = False
             detail = str(exc) or type(exc).__name__
             self.toasts.error(f"export failed: {detail}")
         if self._export is None:
@@ -1490,6 +2496,7 @@ class StudioApp:
             return
         self._export.job.close()  # finally-block removes partial output
         self._export = None
+        self._export_is_sequence = False
         self.toasts.info("export cancelled")
         self._flush_pending_edit()  # apply anything the export gate held back
 
@@ -1516,6 +2523,11 @@ class StudioApp:
         self.frame_perf.begin()
         self._poll_dialog()
         self._run_export_slice()
+        # T6: advance the in-flight preset thumbnail one tick-slice per frame
+        # (never blocks). Paused during export so it can't steal GL-thread time
+        # from the tiled render in flight.
+        if self._thumbs is not None and self._export is None:
+            self._thumbs.advance()
         self._check_baroclinic_status()
         self._frame_count += 1
         if self._smoke_frames and self._frame_count >= self._smoke_frames:
@@ -1525,6 +2537,7 @@ class StudioApp:
         self._draw_dev_overlay()
         self.toasts.draw()
         self.draw_help()
+        self._draw_inspect_window()
 
     def _draw_dev_overlay(self) -> None:
         """B1-1: one line over the viewport while the dev run evolves, so the

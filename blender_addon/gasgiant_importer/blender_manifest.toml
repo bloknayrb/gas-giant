@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "gasgiant_importer"
-version = "1.0.0"
+version = "1.2.0"
 name = "Gas Giant Importer"
 tagline = "Import Gas Giant Studio map sets as ready-to-render planets"
 maintainer = "bloknayrb <bloknayrb@gmail.com>"

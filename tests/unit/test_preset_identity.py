@@ -48,6 +48,7 @@ def _make_app(params: PlanetParams | None = None) -> StudioApp:
     app._active_preset = None
     app._pristine = None
     app._preset_cache = []
+    app._thumb_params = {}
     app._dialog = None
     app._export = None
     app.sim = FakeSim(params)

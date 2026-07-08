@@ -17,7 +17,7 @@
     },
     "name": { "type": "string" },
     "seed": { "type": "integer" },
-    "projection": { "const": "equirectangular" },
+    "projection": { "enum": ["equirectangular", "cube"] },
     "resolution": {
       "type": "array",
       "items": { "type": "integer", "minimum": 1 },
@@ -38,9 +38,30 @@
       "required": ["color"],
       "additionalProperties": {
         "type": "object",
-        "required": ["file", "format", "colorspace"],
+        "required": ["format", "colorspace"],
+        "oneOf": [
+          { "required": ["file"], "not": { "required": ["faces"] } },
+          { "required": ["faces"], "not": { "required": ["file"] } }
+        ],
         "properties": {
-          "file": { "type": "string" },
+          "file": {
+            "description": "Equirectangular projection: the single map file (projection=equirectangular). Mutually exclusive with 'faces'.",
+            "type": "string"
+          },
+          "faces": {
+            "description": "Cube projection: the six per-face files keyed by GL cube-map axis (projection=cube, schema_version 2). Mutually exclusive with 'file'.",
+            "type": "object",
+            "required": ["px", "nx", "py", "ny", "pz", "nz"],
+            "additionalProperties": { "type": "string" },
+            "properties": {
+              "px": { "type": "string" },
+              "nx": { "type": "string" },
+              "py": { "type": "string" },
+              "ny": { "type": "string" },
+              "pz": { "type": "string" },
+              "nz": { "type": "string" }
+            }
+          },
           "format": { "enum": ["png16", "exr32f"] },
           "colorspace": { "enum": ["srgb", "non-color"] },
           "channels": { "type": "integer", "minimum": 1, "maximum": 4 },
@@ -70,7 +91,7 @@
     "preset": { "type": "object" },
     "frames": {
       "type": "object",
-      "description": "Optional animation sequence: color-only frames rendered steps_per_frame sim steps apart; frames/frame_0000.png duplicates maps.color. Absent for single-mapset exports.",
+      "description": "Optional animation sequence rendered steps_per_frame sim steps apart; frames/frame_0000.png duplicates maps.color. 'files' is always the color-frame list. The optional 'maps' sub-block lists per-map frame files (height/emission) when the sequence was exported with all-maps; 'video' is a relative mp4 path. Both are additive - tolerant readers ignore them. Absent for single-mapset exports.",
       "required": ["count", "steps_per_frame", "files"],
       "properties": {
         "count": { "type": "integer", "minimum": 1 },
@@ -80,7 +101,17 @@
           "type": "array",
           "items": { "type": "string" },
           "minItems": 1
-        }
+        },
+        "maps": {
+          "type": "object",
+          "description": "Per-map frame file lists (all-maps sequence export); each value parallels 'files' index-for-index.",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        },
+        "video": { "type": "string" }
       }
     }
   }

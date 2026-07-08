@@ -40,78 +40,20 @@ import json
 from pathlib import Path
 
 import cv2
-import numpy as np
 
-from gasgiant.palette.reference import anchor_fit, expand_stop_span, latitude_profile
+# The calibration algorithm now lives in the palette layer (importable from the
+# CLI and GUI); this script is a thin wrapper that decodes the reference,
+# calls it, and writes JSON / merges into a preset.
+from gasgiant.palette.fit import DEFAULT_ANCHORS as _DEFAULT_ANCHORS
+from gasgiant.palette.fit import DEFAULT_WINDOW_DEG as _DEFAULT_WINDOW_DEG
+from gasgiant.palette.fit import calibrate
 
-_DEFAULT_ANCHORS = (-65.0, -40.0, -15.0, 10.0, 40.0, 65.0)
-_DEFAULT_WINDOW_DEG = 9.0  # half-width of the latitude window sampled per anchor
 
-
-def _load_srgb(path: Path) -> np.ndarray:
+def _load_srgb(path: Path) -> cv2.typing.MatLike:
     bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if bgr is None:
         raise SystemExit(f"error: cannot read image {path}")
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-
-
-def _rgb(values: np.ndarray) -> list[float]:
-    return [round(float(v), 4) for v in values]
-
-
-def calibrate(
-    img: np.ndarray,
-    anchors: tuple[float, ...],
-    bins: int,
-    window_deg: float = _DEFAULT_WINDOW_DEG,
-    fit_mode: str = "median",
-    chroma_pct: float = 0.6,
-    stops: int = 3,
-    min_l_span: float = 0.0,
-) -> dict:
-    profile = latitude_profile(img, bins)
-
-    rows = []
-    for anchor in sorted(anchors):
-        if fit_mode == "median" and stops == 3:
-            # Original profile-aggregate fit, byte-stable for default flags.
-            sel = np.abs(profile.lat_deg - anchor) <= window_deg
-            if not sel.any():
-                sel = np.argsort(np.abs(profile.lat_deg - anchor))[:3]
-            fitted = [
-                (0.0, np.median(profile.belt_rgb[sel], axis=0)),
-                (0.5, np.median(profile.median_rgb[sel], axis=0)),
-                (1.0, np.median(profile.zone_rgb[sel], axis=0)),
-            ]
-        else:
-            # Pixel-level fit (chroma-restore needs member pixels, which the
-            # profile aggregates cannot provide; 5-stop uses it too).
-            fitted = anchor_fit(img, anchor, window_deg, fit_mode, chroma_pct, stops)
-        if min_l_span > 0.0:
-            fitted = expand_stop_span(fitted, min_l_span)
-        rows.append(
-            {
-                "latitude": anchor,
-                "stops": [{"pos": pos, "color": _rgb(color)} for pos, color in fitted],
-            }
-        )
-
-    return {
-        "palette_rows": rows,
-        "contrast_envelope": [
-            {"latitude": round(float(lat), 2), "contrast": round(float(c), 4)}
-            for lat, c in zip(profile.lat_deg, profile.contrast, strict=True)
-        ],
-        "latitude_table": [
-            {
-                "latitude": round(float(profile.lat_deg[i]), 2),
-                "zone": _rgb(profile.zone_rgb[i]),
-                "belt": _rgb(profile.belt_rgb[i]),
-                "median": _rgb(profile.median_rgb[i]),
-            }
-            for i in range(len(profile.lat_deg))
-        ],
-    }
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype("float32") / 255.0
 
 
 def main() -> int:
@@ -166,12 +108,13 @@ def main() -> int:
     )
 
     if args.write is not None:
+        from gasgiant.params.model import palette_rows_from_fit
         from gasgiant.params.presets import load_preset, save_preset
 
         params = load_preset(args.write)
         if not hasattr(params.appearance, "palette_rows"):
             raise SystemExit("error: --write requires preset format 2 (appearance.palette_rows)")
-        params.appearance.palette_rows = doc["palette_rows"]  # validated by pydantic on save
+        params.appearance.palette_rows = palette_rows_from_fit(doc["palette_rows"])
         save_preset(params, args.write)
         print(f"wrote palette_rows into {args.write}")
         return 0

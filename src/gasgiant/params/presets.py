@@ -9,6 +9,7 @@ tolerant policy.)
 from __future__ import annotations
 
 import json
+import shutil
 from enum import StrEnum
 from importlib import resources
 from pathlib import Path
@@ -20,6 +21,10 @@ from gasgiant.params.migrations import CURRENT_PRESET_FORMAT, migrate
 from gasgiant.params.model import PlanetParams
 
 _FACTORY_PACKAGE = "gasgiant.presets"
+# Epoch recipes (T15) live as raw-overlay JSONs in a subdir of the factory
+# preset package, so they ship as package data by the same mechanism (hatchling
+# includes every tracked file under the package tree).
+_RECIPE_SUBDIR = "recipes"
 
 # User presets live alongside the session file under ~/.gasgiant (matching
 # SESSION_PATH in app.main). Kept in the params layer (no GUI import) so the CLI
@@ -31,6 +36,47 @@ class PresetError(ValueError):
     pass
 
 
+def resolve_mask_path(params: PlanetParams, base_dir: Path) -> None:
+    """In-place: make ``params.mask.file`` ABSOLUTE by resolving a relative path
+    against ``base_dir`` (a loaded preset's own folder). None stays None; an
+    already-absolute path is normalized. The MODEL never knows its source -- this
+    resolution runs only through the preset/session/CLI I/O boundary, so the
+    in-memory params carry an absolute path the engine can decode directly (a
+    missing file is handled downstream: the CLI errors, the engine warns+disables)."""
+    f = params.mask.file
+    if not f:
+        return
+    p = Path(f)
+    if not p.is_absolute():
+        p = base_dir / p
+    params.mask.file = str(p.resolve())
+
+
+def _relativized_for_save(params: PlanetParams, dest_dir: Path) -> PlanetParams:
+    """Return a copy of ``params`` whose ``mask.file`` is re-relativized to just
+    the sidecar filename next to ``dest_dir`` (a portable saved preset), copying
+    the mask PNG into ``dest_dir`` when it lives elsewhere. None stays None. The
+    original (in-memory, absolute) params are left untouched."""
+    f = params.mask.file
+    if not f:
+        return params
+    src = Path(f)
+    out = params.model_copy(deep=True)
+    dest = dest_dir / src.name
+    if src.is_file():
+        if src.resolve() != dest.resolve():
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+        out.mask.file = src.name  # sits next to the saved JSON -> portable
+    else:
+        # Source mask is missing: we cannot create the sidecar, so DON'T rewrite
+        # to a dangling sidecar name (that would discard the fixable original
+        # path). Keep the original path -- on load it re-resolves and, if still
+        # missing, the facade warns and disables the mask (T11).
+        out.mask.file = f
+    return out
+
+
 def to_preset_doc(params: PlanetParams, name: str | None = None) -> dict:
     return {
         "preset_format": CURRENT_PRESET_FORMAT,
@@ -40,9 +86,19 @@ def to_preset_doc(params: PlanetParams, name: str | None = None) -> dict:
     }
 
 
-def save_preset(params: PlanetParams, path: Path, name: str | None = None) -> None:
+def save_preset(
+    params: PlanetParams, path: Path, name: str | None = None,
+    relativize_mask: bool = True,
+) -> None:
+    """Write ``params`` as a preset envelope at ``path``.
+
+    ``relativize_mask`` (default) re-relativizes ``mask.file`` to a sidecar next
+    to ``path`` and copies the mask PNG there, so a saved preset is portable. The
+    session autosave passes ``relativize_mask=False`` to keep the ABSOLUTE path
+    (the session is machine-local state, not a portable artifact)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(to_preset_doc(params, name), indent=2), encoding="utf-8")
+    doc_params = _relativized_for_save(params, path.parent) if relativize_mask else params
+    path.write_text(json.dumps(to_preset_doc(doc_params, name), indent=2), encoding="utf-8")
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -95,7 +151,11 @@ def load_preset_doc(doc: dict, source: str = "<preset>") -> PlanetParams:
 
 def load_preset(path: Path) -> PlanetParams:
     doc = json.loads(path.read_text(encoding="utf-8"))
-    return load_preset_doc(doc, source=str(path))
+    params = load_preset_doc(doc, source=str(path))
+    # Resolve a relative mask sidecar against the preset's OWN folder so the
+    # in-memory params carry an absolute path (app + CLI file case).
+    resolve_mask_path(params, path.parent)
+    return params
 
 
 def factory_preset_names() -> list[str]:
@@ -189,6 +249,80 @@ def resolve_preset(name_or_path: str) -> PlanetParams:
     if p.suffix == ".json" and p.exists():
         return load_preset(p)
     return load_factory_preset(name_or_path)
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """Recursive dict-merge: where BOTH sides map a key to a dict, RECURSE into
+    them; otherwise the overlay leaf REPLACES the base value. Returns a new dict
+    (the inputs are left untouched). This is the crux of ``apply_overlay`` -- a
+    shallow ``dict.update`` would drop a whole nested group (and reset its
+    untouched siblings to their model defaults) whenever the overlay touches a
+    single leaf of that group."""
+    out = dict(base)
+    for key, value in overlay.items():
+        existing = out.get(key)
+        if isinstance(value, dict) and isinstance(existing, dict):
+            out[key] = _deep_merge(existing, value)
+        else:
+            out[key] = value
+    return out
+
+
+def apply_overlay(params: PlanetParams, overlay: dict) -> PlanetParams:
+    """Deep-merge a recipe ``overlay`` onto ``params`` and re-validate.
+
+    The overlay is a sparse nested dict naming only the fields it changes. It is
+    recursively merged into ``params.model_dump()`` (siblings of any group the
+    overlay enters are preserved -- see ``_deep_merge``), then the merged dict is
+    re-validated through the strict model. Strict validation is deliberate: a
+    typo'd or unknown overlay key raises (``ValidationError``) rather than
+    silently falling back to a default, exactly like a hand-edited preset. The
+    result is a fresh ``PlanetParams``; ``params`` is not mutated."""
+    return PlanetParams.model_validate(_deep_merge(params.model_dump(), overlay))
+
+
+def _recipe_dir():
+    return resources.files(_FACTORY_PACKAGE) / _RECIPE_SUBDIR
+
+
+def available_recipes() -> list[str]:
+    """Filename stems of the packaged epoch-recipe JSONs. Mirrors
+    ``factory_preset_names`` (enumerate-only; never opens a file), so a malformed
+    recipe still lists and only errors when actually loaded via ``load_recipe``."""
+    d = _recipe_dir()
+    if not d.is_dir():
+        return []
+    return sorted(p.name.removesuffix(".json") for p in d.iterdir() if p.name.endswith(".json"))
+
+
+def load_recipe(name: str) -> tuple[str, dict, dict]:
+    """Load the packaged epoch recipe ``name``. Returns
+    ``(base_preset_name, overlay_dict, meta)``.
+
+    A recipe file is a RAW overlay (NOT a preset envelope): a JSON object with
+    ``base`` (the factory preset the overlay is designed for), ``overlay`` (the
+    sparse nested dict of fields to merge), and optional ``name``/``description``
+    metadata. ``meta`` is ``{"name": ..., "description": ...}`` (name falls back
+    to the file stem, description to ""). Raises ``PresetError`` on an unknown
+    recipe or a structurally-invalid file."""
+    ref = _recipe_dir() / f"{name}.json"
+    if not ref.is_file():
+        known = ", ".join(available_recipes())
+        raise PresetError(f"unknown recipe {name!r} (available: {known})")
+    try:
+        doc = json.loads(ref.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PresetError(f"recipe:{name}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise PresetError(f"recipe:{name}: not a recipe object")
+    base = doc.get("base")
+    if not isinstance(base, str) or not base:
+        raise PresetError(f"recipe:{name}: missing/invalid 'base' preset name")
+    overlay = doc.get("overlay")
+    if not isinstance(overlay, dict):
+        raise PresetError(f"recipe:{name}: missing/invalid 'overlay' object")
+    meta = {"name": doc.get("name") or name, "description": doc.get("description") or ""}
+    return base, overlay, meta
 
 
 def _summarize(exc: ValidationError) -> str:

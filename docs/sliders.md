@@ -18,9 +18,11 @@ What every slider in the live-preview GUI (`uv run gasgiant-studio`) actually do
 - [Poles](#poles)
 - [Appearance](#appearance)
 - [Detail](#detail)
+- [Mask](#mask)
 - [Emission](#emission)
 - [Physical](#physical)
 - [Export](#export)
+- [Rings](#rings)
 
 
 ## Sim
@@ -65,6 +67,14 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 Internal pacing of the baroclinic storm generator — leave at default (baroclinic steps per source refresh; fixed cadence, no rand)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+### enabled
+
+`solver.baroclinic.enabled` &mdash; toggle (on/off), default **`False`**, tier `restart`.
+
+Inject the evolving baroclinic vorticity source into the vorticity solver (adds physically-grounded mid-latitude storms; requires solver type=vorticity). Off = plain v1.6. No rand: randomize() must never silently enable it.
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
 ### gain
 
@@ -596,6 +606,14 @@ Pin accent ovals to this latitude (degrees). None = seeded zone placement. Like 
 
 _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
+### accent longitude
+
+`storms.accent_longitude` &mdash; optional; pin range **-180 to 180**, default **None (auto)**, tier `restart`.
+
+Pin the accent ovals' RENDERED longitude (degrees, -180..180). Unpinned (None) = seeded Poisson-disc placement. The value is the end-of-run longitude of the FIRST accent: the generator inverse-compensates the shared zonal drift so it lands where you asked, and a count=2 pair is offset a fixed step (0.6 rad) downstream of it. Accents that get caught in a merger deviate (a recorded caveat)
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
 ### accent radius
 
 `storms.accent_radius` &mdash; range **0.02 to 0.12**, default **0.05**, tier `restart`.
@@ -625,6 +643,14 @@ Brown-barge cyclone population multiplier (belts)
 <table><tr>
 <td align="center"><img src="img/sliders/storms__barge_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2.989</sub></td><td align="center"><img src="img/sliders/storms__barge_density__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
+
+### cast
+
+`storms.cast` &mdash; list editor, default **empty list**, tier `restart`.
+
+Cast list: storms placed by hand (kind + rendered position + size + optional color). Each entry is stamped verbatim after the seeded populations, exempt from the population cap and runtime mergers, so a director's storm survives the whole run where it was placed. Empty (the default) = no cast, byte-identical to the seeded-only field. Capped at 16 entries
+
+_List of hand-placed sub-records edited in a dedicated GUI panel &mdash; documented as text; no rendered example._
 
 ### companion aspect
 
@@ -681,6 +707,14 @@ Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating brigh
 `storms.hero_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
 
 Pin the hero storm to this latitude (degrees; the 'pin' checkbox toggles it). Unpinned (None) = seeded tropical-zone placement. The effective range is further limited by hero_radius (see validator) so the stamp stays clear of the 63 deg exchange band
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
+### hero longitude
+
+`storms.hero_longitude` &mdash; optional; pin range **-180 to 180**, default **None (auto)**, tier `restart`.
+
+Pin the hero storm's RENDERED longitude (degrees, -180..180; the 'pin' checkbox toggles it). Unpinned (None) = seeded placement. The value is the end-of-run longitude, not the seed: the generator inverse-compensates the storm's eastward zonal drift over the whole development run so the spot lands where you asked when the snapshot is taken. A hero that merges with or absorbs another storm deviates (a recorded caveat)
 
 _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
@@ -819,6 +853,14 @@ Minimum |latitude| for AUTO outbreak-belt selection, radians of latitude (1 rad 
 `storms.outbreak_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.
 
 Pin convective outbreaks to this latitude (degrees; the 'pin' checkbox toggles it) -- the 2010 Saturn Great White Spot erupted at ~35 N, the 1990 event on the equator. None = seeded placement in a dark belt. A pin bypasses the belt-candidate selection entirely (including the outbreak_lat_min floor), so equatorial eruptions work
+
+_Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
+
+### outbreak longitude
+
+`storms.outbreak_longitude` &mdash; optional; pin range **-180 to 180**, default **None (auto)**, tier `restart`.
+
+Pin the outbreak train's RENDERED longitude (degrees, -180..180; the 'pin' checkbox toggles it). Unpinned (None) = seeded placement. The value is where the eruption head sits at the final snapshot: since the plume knots carry no circulation, the sim velocity advects them at roughly the zonal rate, so the generator inverse-compensates that drift over the post-eruption life (best-effort -- the belt shear folds the tail into a streak, so only the head lands precisely)
 
 _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps the automatic/seeded behavior, pinned uses the slider value verbatim. Documented as text; no rendered example._
 
@@ -1072,6 +1114,16 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 
 ## Appearance
+
+### band tint strength
+
+`appearance.band_tint_strength` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+How strongly the per-latitude band_tint_stops override the planet color (0 = off, byte-identical; 1 = the tint fully replaces the graded color). Blended in after the post chain and chroma FX so the tint is not re-graded by contrast/saturation
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
 
 ### chroma aging
 
@@ -1397,6 +1449,47 @@ Flow-folded luminance structure inside ZONES (the calm lanes between belts, gate
 </tr></table>
 
 
+## Mask
+
+### band fade
+
+`mask.band_fade` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Fade the busy features (storm tint, polar tint, detail, lanes) back toward the plain band color where the mask is painted -- a way to calm chosen regions to clean bands. Weight is mask * this gain; 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### detail gain
+
+`mask.detail_gain` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Modulate color luminance/detail by the mask, settling painted-dark regions while painted-bright regions stay untouched. Factor is mix(1, mask, this gain); 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### emission gain
+
+`mask.emission_gain` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Modulate the night-side emission map (thermal/lightning glow + aurora) by the mask, dimming the glow where the mask is dark. Factor is mix(1, mask, this gain); 0 = off (byte-identical). Only visible on the Emission map, not Color
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### file
+
+`mask.file` &mdash; file path, default **None**, tier `post`.
+
+Path to a grayscale equirect (2:1) PNG mask that paints WHERE the three Mask targets act (white = full effect, black = none). Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
+
+_File-path field: the GUI shows a text entry + **Browse...** button (empty = None). Documented as text; no rendered example._
+
+
 ## Emission
 
 ### aurora pole offset
@@ -1534,8 +1627,36 @@ Planet equatorial radius in kilometers, passed through to the Blender importer f
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### ring inner km
+
+`physical.ring_inner_km` &mdash; range **1000 to 1e+06**, default **74500**, tier `post`.
+
+Inner radius of the ring system in kilometers, measured from the planet center (default = Saturn's C-ring inner edge). Only meaningful when rings are enabled; passed through to the Blender importer, which builds an annulus from ring_inner_km..ring_outer_km
+
+<table><tr>
+<td align="center"><sub>low &middot; 1000<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 74500</sub></td><td align="center"><sub>high &middot; 1e+06<br>(not rendered)</sub></td>
+</tr></table>
+
+### ring outer km
+
+`physical.ring_outer_km` &mdash; range **1000 to 1e+06**, default **136780**, tier `post`.
+
+Outer radius of the ring system in kilometers (default = Saturn's A-ring outer edge). Only meaningful when rings are enabled
+
+<table><tr>
+<td align="center"><sub>low &middot; 1000<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 136780</sub></td><td align="center"><sub>high &middot; 1e+06<br>(not rendered)</sub></td>
+</tr></table>
+
 
 ## Export
+
+### flow map
+
+`export.flow_map` &mdash; toggle (on/off), default **`False`**, tier `post`.
+
+Also export flow.exr: the sim's per-step velocity field resampled to the equirect grid as an (east, north) flow map (R = eastward, G = northward; B=0, A=1), so Blender / a compositor can drive motion vectors or advected effects. Off by default -- the default export file-set (color + height) is unchanged. No rand.
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
 ### png compression
 
@@ -1545,6 +1666,14 @@ PNG deflate level (low = much faster at 16K)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### projection
+
+`export.projection` &mdash; dropdown, one of `equirect` / `cube`, default **`equirect`**, tier `post`.
+
+Output projection. 'equirect' writes the classic 2:1 equirectangular color/height(/emission) set (the default -- unchanged file-set and manifest). 'cube' instead writes a 6-face cube map (px,nx,py,ny,pz,nz per map) sized width/4 per face, for game engines / real-time renderers that texture a sky-cube or cube-mapped sphere. Cube export bumps the manifest schema to v2 (projection='cube', per-map 'faces' block); older importers that only build equirect geometry reject it cleanly. No rand.
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
+
 ### width
 
 `export.width` &mdash; range **512 to 16384**, default **2048**, tier `post`.
@@ -1552,4 +1681,45 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 Equirect map width in pixels; height is width/2
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+
+## Rings
+
+### brightness
+
+`rings.brightness` &mdash; range **0 to 2**, default **1**, tier `post`.
+
+Multiplier on the ice reflectance (ring RGB brightness)
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
+
+### enabled
+
+`rings.enabled` &mdash; toggle (on/off), default **`False`**, tier `post`.
+
+Export a ring texture strip (rings.exr) and, in Blender, build a Saturn-style annulus from it. Blender-only -- invisible in the GUI equirect preview. Off by default: the default export file-set (color + height) is unchanged. No rand
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
+
+### fine grain
+
+`rings.fine_grain` &mdash; range **0 to 1**, default **0.15**, tier `post`.
+
+Amount of seeded fine-grain ringlet variation added on top of the bounded optical-depth table (0 = the smooth table only). Uses the master seed's 'rings' substream, so it is deterministic
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### opacity
+
+`rings.opacity` &mdash; range **0 to 2**, default **1**, tier `post`.
+
+Multiplier on the ring alpha (coverage) derived from the optical-depth table. 1.0 = physically-derived Beer-Lambert coverage
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
 

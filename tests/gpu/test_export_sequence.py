@@ -145,12 +145,19 @@ def test_sequence_cancellation_cleans_up(gpu, tmp_path):
     keep = out / "users_own_file.txt"
     out.mkdir(parents=True)
     keep.write_text("precious")
+    # Files the job does NOT write on this config (rings/flow are off) but
+    # that a PREVIOUS export into the same folder could have left: cleanup
+    # must not delete them (it removes only the files THIS job writes).
+    foreign_rings = out / "rings.exr"
+    foreign_rings.write_bytes(b"not-ours")
+    foreign_flow = out / "flow.exr"
+    foreign_flow.write_bytes(b"also-not-ours")
 
     job = export_sequence_job(sim, out, frames=4, steps_per_frame=6)
     saw_frame_1 = False
     for prog in job:
-        if prog.message == "frame 1":
-            saw_frame_1 = True  # frame_0001.png written; cancel mid-sequence
+        if prog.message.startswith("frame 1"):
+            saw_frame_1 = True  # rendering frame 1; cancel mid-sequence
             break
     assert saw_frame_1
     job.close()
@@ -160,6 +167,32 @@ def test_sequence_cancellation_cleans_up(gpu, tmp_path):
     frames_dir = out / "frames"
     assert not frames_dir.exists() or not any(frames_dir.iterdir())
     assert keep.read_text() == "precious"  # never touches the user's files
+    assert foreign_rings.read_bytes() == b"not-ours"
+    assert foreign_flow.read_bytes() == b"also-not-ours"
+
+
+def test_sequence_cancellation_with_pending_encodes_cleans_up(gpu, tmp_path):
+    """Cancel AFTER frame 1's encodes were submitted (the first frame-2 tile
+    message): the finally block must drain the pool, then remove the frame
+    files that were written/in flight -- the concurrent-cancel path the
+    off-thread encode pool introduced."""
+    from gasgiant.export.exporter import export_sequence_job
+
+    sim = Simulation(_vort_params(), gpu)
+    out = tmp_path / "seq_pending"
+    job = export_sequence_job(sim, out, frames=4, steps_per_frame=6)
+    saw = False
+    for prog in job:
+        if prog.message.startswith("frame 2 tile"):
+            saw = True  # frame 1's encode futures are submitted (maybe pending)
+            break
+    assert saw
+    job.close()
+
+    assert not (out / "mapset.json").exists()
+    assert not (out / "color.png").exists()
+    frames_dir = out / "frames"
+    assert not frames_dir.exists() or not any(frames_dir.iterdir())
 
 
 def test_sequence_rejects_bad_args(gpu, tmp_path):

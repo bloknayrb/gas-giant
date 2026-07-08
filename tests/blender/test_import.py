@@ -13,11 +13,152 @@ aurora-shell checks. Writes PASS/FAIL JSON to tests/blender/result.json
 from __future__ import annotations
 
 import json
+import struct
 import sys
 import traceback
+import zlib
 from pathlib import Path
 
 RESULT_PATH = Path(__file__).resolve().parent / "result.json"
+
+
+# --- stdlib fixture writer (no bpy / numpy / cv2 — importable + testable GPU-free) ---
+
+def _tiny_png(path: Path, width: int = 2, height: int = 1) -> None:
+    """Write a minimal valid 8-bit RGB PNG (the reader/importer never inspect
+    pixel data, so 2x1 black is enough for both the vendored-reader unit test
+    and Blender's image loader). Pure stdlib zlib + struct."""
+
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # RGB, no interlace
+    raw = (b"\x00" + b"\x00\x00\x00" * width) * height  # per-row filter byte 0
+    idat = zlib.compress(raw)
+    path.write_bytes(sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", idat) + _chunk(b"IEND", b""))
+
+
+def _tiny_exr(path: Path, width: int = 2, height: int = 1) -> None:
+    """Write a minimal VALID uncompressed RGBA float32 EXR (all zeros). The
+    importer really does ``bpy.data.images.load`` the emission/rings fixtures,
+    and Blender raises ``RuntimeError: Cannot read ...`` on a zero-byte
+    placeholder — the file needs a real header even though no fixture pixel is
+    ever inspected. Pure stdlib struct, mirroring ``_tiny_png``."""
+
+    def _attr(name: bytes, typ: bytes, data: bytes) -> bytes:
+        return name + b"\x00" + typ + b"\x00" + struct.pack("<I", len(data)) + data
+
+    chan = b""
+    for name in (b"A", b"B", b"G", b"R"):  # alphabetical, as the format requires
+        # per channel: pixelType (2 = FLOAT), pLinear + 3 reserved, x/ySampling
+        chan += name + b"\x00" + struct.pack("<iBBBBii", 2, 0, 0, 0, 0, 1, 1)
+    chan += b"\x00"
+    box = struct.pack("<4i", 0, 0, width - 1, height - 1)
+    header = (
+        _attr(b"channels", b"chlist", chan)
+        + _attr(b"compression", b"compression", b"\x00")  # NONE: 1 chunk/scanline
+        + _attr(b"dataWindow", b"box2i", box)
+        + _attr(b"displayWindow", b"box2i", box)
+        + _attr(b"lineOrder", b"lineOrder", b"\x00")  # INCREASING_Y
+        + _attr(b"pixelAspectRatio", b"float", struct.pack("<f", 1.0))
+        + _attr(b"screenWindowCenter", b"v2f", struct.pack("<2f", 0.0, 0.0))
+        + _attr(b"screenWindowWidth", b"float", struct.pack("<f", 1.0))
+        + b"\x00"  # end of header
+    )
+    magic = struct.pack("<i", 20000630) + struct.pack("<i", 2)  # magic + version 2
+    row_bytes = 4 * width * 4  # 4 float32 channels per pixel
+    data_start = len(magic) + len(header) + 8 * height  # after the offset table
+    table = b"".join(
+        struct.pack("<Q", data_start + y * (8 + row_bytes)) for y in range(height)
+    )
+    chunks = b"".join(
+        struct.pack("<ii", y, row_bytes) + b"\x00" * row_bytes for y in range(height)
+    )
+    path.write_bytes(magic + header + table + chunks)
+
+
+def write_sequence_fixture(root: Path, *, count: int = 3, steps_per_frame: int = 8) -> Path:
+    """Create a tiny fake exported map set WITH a T7 `frames` block: still color/
+    height maps plus per-frame color/height PNG sequences and an emission EXR
+    sequence (placeholder bytes — emission frames aren't pixel-inspected). Pure
+    stdlib, so the vendored reader unit test and the Blender background test share
+    it. Returns ``root`` (containing ``mapset.json``)."""
+    root = Path(root)
+    (root / "frames").mkdir(parents=True, exist_ok=True)
+    _tiny_png(root / "color.png")
+    _tiny_png(root / "height.png")
+    color_files, height_files, emission_files = [], [], []
+    for i in range(count):
+        cf = f"frames/frame_{i:04d}.png"
+        _tiny_png(root / cf)
+        color_files.append(cf)
+        hf = f"frames/height_{i:04d}.png"
+        _tiny_png(root / hf)
+        height_files.append(hf)
+        ef = f"frames/emission_{i:04d}.exr"
+        _tiny_exr(root / ef)  # loaded by bpy (frame 0), never pixel-inspected
+        emission_files.append(ef)
+    manifest = {
+        "schema_version": 1,
+        "generator": {"name": "gasgiant", "version": "test"},
+        "name": "seqfix",
+        "seed": 7,
+        "projection": "equirectangular",
+        "resolution": [4, 2],
+        "physical": {"radius_km": 69911.0, "height_scale": 0.004, "height_midlevel": 0.5},
+        "maps": {
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "height": {"file": "height.png", "format": "png16", "colorspace": "non-color"},
+        },
+        "preset": {},
+        "frames": {
+            "count": count,
+            "steps_per_frame": steps_per_frame,
+            "pattern": "frames/frame_%04d.png",
+            "files": color_files,
+            "maps": {"height": height_files, "emission": emission_files},
+            "video": "sequence.mp4",
+        },
+    }
+    (root / "mapset.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return root
+
+
+def write_rings_fixture(root: Path) -> Path:
+    """Create a tiny fake exported map set carrying a T16 `rings` map + the
+    physical ring_*_km extent. Pure stdlib (the rings.exr is placeholder bytes;
+    Blender's EXR loader is not exercised for pixels here -- the assertion is
+    that a ring OBJECT is created and parented to the rig). Returns ``root``."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    _tiny_png(root / "color.png")
+    _tiny_png(root / "height.png")
+    _tiny_exr(root / "rings.exr")  # loaded by bpy, not pixel-checked
+    manifest = {
+        "schema_version": 1,
+        "generator": {"name": "gasgiant", "version": "test"},
+        "name": "ringfix",
+        "seed": 5,
+        "projection": "equirectangular",
+        "resolution": [4, 2],
+        "physical": {
+            "radius_km": 60268.0, "height_scale": 0.004, "height_midlevel": 0.5,
+            "ring_inner_km": 74500.0, "ring_outer_km": 136780.0,
+        },
+        "maps": {
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "height": {"file": "height.png", "format": "png16", "colorspace": "non-color"},
+            "rings": {
+                "file": "rings.exr", "format": "exr32f", "colorspace": "non-color",
+                "channels": 4, "convention": "radial_inner_to_outer_alpha_coverage",
+            },
+        },
+        "preset": {},
+    }
+    (root / "mapset.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return root
 
 
 def main() -> dict:
@@ -136,15 +277,82 @@ def main() -> dict:
                 n.type == "BSDF_TRANSPARENT" for n in au_nodes
             )
 
+    # Animated-sequence import (T9): build a tiny fixture WITH a frames block
+    # and assert the colour (and height) map imports as an image SEQUENCE with
+    # the off-by-one pin. frame_offset == -1 is the load-bearing assertion.
+    import tempfile
+
+    seq_dir = Path(tempfile.mkdtemp(prefix="gg_seq_"))
+    write_sequence_fixture(seq_dir, count=4)
+    result = bpy.ops.import_scene.gasgiant(
+        filepath=str(seq_dir / "mapset.json"), atmosphere_mode="NONE",
+    )
+    checks["sequence_import_finished"] = result == {"FINISHED"}
+    planet_seq = bpy.context.active_object
+    nodes_seq = planet_seq.data.materials[0].node_tree.nodes
+    color_seq_nodes = [
+        n for n in nodes_seq
+        if n.type == "TEX_IMAGE" and n.image
+        and Path(n.image.filepath).name.lower() == "frame_0000.png"
+    ]
+    checks["sequence_color_node"] = len(color_seq_nodes) == 1
+    if color_seq_nodes:
+        node = color_seq_nodes[0]
+        iu = node.image_user
+        checks["sequence_source"] = node.image.source == "SEQUENCE"
+        checks["sequence_frame_duration"] = iu.frame_duration == 4
+        checks["sequence_frame_start"] = iu.frame_start == 1
+        checks["sequence_frame_offset"] = iu.frame_offset == -1
+        checks["sequence_auto_refresh"] = iu.use_auto_refresh is True
+    height_seq_nodes = [
+        n for n in nodes_seq
+        if n.type == "TEX_IMAGE" and n.image
+        and Path(n.image.filepath).name.lower() == "height_0000.png"
+    ]
+    checks["sequence_height_node"] = len(height_seq_nodes) == 1
+    if height_seq_nodes:
+        checks["sequence_height_source"] = height_seq_nodes[0].image.source == "SEQUENCE"
+        checks["sequence_height_offset"] = height_seq_nodes[0].image_user.frame_offset == -1
+
+    # Rings import (T16): a map set with a `rings` map builds a flat annulus
+    # object parented to the rig empty, with a material sampling the ring image.
+    ring_dir = Path(tempfile.mkdtemp(prefix="gg_ring_"))
+    write_rings_fixture(ring_dir)
+    result = bpy.ops.import_scene.gasgiant(
+        filepath=str(ring_dir / "mapset.json"), atmosphere_mode="NONE",
+    )
+    checks["rings_import_finished"] = result == {"FINISHED"}
+    ring_obj = next((o for o in bpy.data.objects if o.name.endswith("_rings")), None)
+    checks["rings_object_created"] = ring_obj is not None
+    if ring_obj is not None:
+        checks["rings_parented_to_rig"] = (
+            ring_obj.parent is not None and ring_obj.parent.type == "EMPTY"
+        )
+        checks["rings_has_material"] = bool(ring_obj.data.materials)
+        checks["rings_has_faces"] = len(ring_obj.data.polygons) > 0
+        if ring_obj.data.materials:
+            rnodes = ring_obj.data.materials[0].node_tree.nodes
+            checks["rings_samples_image"] = any(
+                n.type == "TEX_IMAGE" and n.image
+                and Path(n.image.filepath).name.lower() == "rings.exr"
+                for n in rnodes
+            )
+
     return checks
 
 
-try:
-    checks = main()
-    ok = all(v for k, v in checks.items() if not k.startswith("_diag"))
-    RESULT_PATH.write_text(json.dumps({"ok": ok, "checks": checks}, indent=1), encoding="utf-8")
-except Exception:
-    RESULT_PATH.write_text(
-        json.dumps({"ok": False, "error": traceback.format_exc()}, indent=1), encoding="utf-8"
-    )
-    raise
+if __name__ == "__main__":
+    # Blender runs this script as __main__ (blender --python ...); importing the
+    # module (e.g. from the vendored-reader unit test) must NOT execute the bpy
+    # path, so the run is guarded here.
+    try:
+        checks = main()
+        ok = all(v for k, v in checks.items() if not k.startswith("_diag"))
+        RESULT_PATH.write_text(
+            json.dumps({"ok": ok, "checks": checks}, indent=1), encoding="utf-8"
+        )
+    except Exception:
+        RESULT_PATH.write_text(
+            json.dumps({"ok": False, "error": traceback.format_exc()}, indent=1), encoding="utf-8"
+        )
+        raise

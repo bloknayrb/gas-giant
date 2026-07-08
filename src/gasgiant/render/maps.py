@@ -10,7 +10,7 @@ import numpy as np
 
 from gasgiant.gl import GpuContext
 from gasgiant.palette import bake_lut, bake_rows
-from gasgiant.params.model import AppearanceParams, EmissionParams, GradientStop
+from gasgiant.params.model import AppearanceParams, EmissionParams, GradientStop, MaskParams
 from gasgiant.params.seeds import subseed
 
 if TYPE_CHECKING:
@@ -82,37 +82,68 @@ def emission_uniforms(seed: int, emission: EmissionParams) -> dict[str, object]:
 class MapDeriver:
     def __init__(self, gpu: GpuContext) -> None:
         self.gpu = gpu
-        # Program variants keyed by (EMISSION, CHROMA_FX): each disabled
+        # Program variants keyed by (EMISSION, CHROMA_FX, MASK): each disabled
         # feature preprocesses OUT of the kernel text, so neutral defaults
         # stay byte-identical by construction rather than by hope
         # (recompiling a changed kernel can shift FP scheduling on BOTH
         # sides of an off/on comparison). The two default variants compile
         # eagerly (their absence would only surface at first use);
         # FX variants compile lazily on first selection.
-        self._progs: dict[tuple[bool, bool], moderngl.ComputeShader] = {}
+        self._progs: dict[tuple[bool, bool, bool, bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(emission=False, chroma_fx=False)
         self.prog_emission = self._program(emission=True, chroma_fx=False)
         self._palette_tex: moderngl.Texture | None = None
         self._storm_tex: moderngl.Texture | None = None
+        self._band_tint_tex: moderngl.Texture | None = None
+        # T10 flow-map kernel, compiled lazily on first resample_flow (default
+        # export never touches it). Lives in the shared GpuContext program cache.
+        self._flow_prog: moderngl.ComputeShader | None = None
 
-    def _program(self, emission: bool, chroma_fx: bool) -> moderngl.ComputeShader:
-        key = (emission, chroma_fx)
+    def _program(
+        self, emission: bool, chroma_fx: bool, mask: bool = False, band_tint: bool = False,
+        projection_cube: bool = False,
+    ) -> moderngl.ComputeShader:
+        key = (emission, chroma_fx, mask, band_tint, projection_cube)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if emission:
                 defines["EMISSION"] = "1"
             if chroma_fx:
                 defines["CHROMA_FX"] = "1"
+            if mask:
+                defines["MASK"] = "1"
+            if band_tint:
+                defines["BAND_TINT"] = "1"
+            if projection_cube:
+                # T17: cube-face uv->lat/lon mapping; every downstream line is
+                # shared with equirect (the block is verbatim-#else). Compiles
+                # lazily on first cube export -- the default program is untouched.
+                defines["PROJECTION_CUBE"] = "1"
             self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
         return self._progs[key]
 
+    def release(self) -> None:
+        """Free the baked palette/storm/band-tint LUT textures (idempotent:
+        each is guarded and nulled). The compute programs live in the shared
+        ``GpuContext`` cache and are NOT released here. ``derive`` re-bakes the
+        LUTs lazily (``_palette_tex is None``) on next use, so the deriver stays
+        reusable after a release."""
+        for attr in ("_palette_tex", "_storm_tex", "_band_tint_tex"):
+            tex = getattr(self, attr)
+            if tex is not None:
+                tex.release()
+                setattr(self, attr, None)
+
     def update_palettes(self, appearance: AppearanceParams) -> None:
-        for tex in (self._palette_tex, self._storm_tex):
+        for tex in (self._palette_tex, self._storm_tex, self._band_tint_tex):
             if tex is not None:
                 tex.release()
         rows = [(row.latitude, _stops(row.stops)) for row in appearance.palette_rows]
         self._palette_tex = self.gpu.lut_texture(bake_rows(rows, height=64))
         self._storm_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.storm_tints)))
+        # 256x1 latitude tint LUT (mirrors the storm-tint bake). Baked always but
+        # only bound/sampled when band_tint_on (strength > 0).
+        self._band_tint_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.band_tint_stops)))
 
     def derive(
         self,
@@ -136,11 +167,27 @@ class MapDeriver:
         seed: int = 0,
         profile_dyn: moderngl.Texture | None = None,
         profile_stamp: moderngl.Texture | None = None,
+        mask: moderngl.Texture | None = None,
+        mask_params: MaskParams | None = None,
+        projection_cube: bool = False,
+        cube_face: int = 0,
     ) -> None:
         """lanes: (latitude, strength) thin dark lane lines; warp: the band
         meander (offset, amount, freq) the lanes ride on. Passing emission_out
         + an enabled EmissionParams selects the EMISSION program variant
-        (which also needs the profile LUT textures for its gates)."""
+        (which also needs the profile LUT textures for its gates).
+
+        The imported paint mask travels PER-CALL (never deriver state): pass the
+        live/snapshot mask texture as ``mask`` plus its ``mask_params`` (gains).
+        The MASK variant is selected only when a mask is bound AND at least one
+        gain > 0 -- so a mask with all-zero gains compiles the default program
+        and stays byte-identical (the silent-no-op trap keys on the gains).
+
+        ``projection_cube`` selects the PROJECTION_CUBE variant: this pass then
+        renders ONE cube face (``cube_face`` 0..5 = +X,-X,+Y,-Y,+Z,-Z) instead of
+        the equirect grid. ``origin``/``full_size`` describe the FACE tile grid
+        (each face is its own square). Default (False) is the equirect path --
+        byte-identical, the cube define is absent from the program text."""
         if self._palette_tex is None:
             self.update_palettes(appearance)
         emission_on = (
@@ -161,7 +208,28 @@ class MapDeriver:
             or appearance.hue_variance > 0.0  # silent-no-op trap: must be here
             or appearance.chroma_aging > 0.0
         )
-        prog = self._program(emission=emission_on, chroma_fx=chroma_on)
+        # Silent-no-op trap: key on the GAINS, not just presence, so a mask
+        # bound with all-zero gains selects the default program and stays
+        # byte-identical (each gain listed here so none can silently miss).
+        mask_on = (
+            mask is not None
+            and mask_params is not None
+            and (
+                mask_params.band_fade > 0.0
+                or mask_params.emission_gain > 0.0
+                or mask_params.detail_gain > 0.0
+            )
+        )
+        # Silent-no-op trap: key on the STRENGTH, not the stops, so neutral or
+        # non-neutral stops with strength 0 select the default program and stay
+        # byte-identical (strength 0 is an exact no-op in the shader).
+        band_tint_on = appearance.band_tint_strength > 0.0
+        prog = self._program(
+            emission=emission_on, chroma_fx=chroma_on, mask=mask_on, band_tint=band_tint_on,
+            projection_cube=projection_cube,
+        )
+        if projection_cube:
+            _set(prog, "u_cube_face", int(cube_face))
         size = color_out.size
         lanes = lanes or []
         packed = np.zeros((16, 2), dtype=np.float32)
@@ -205,6 +273,16 @@ class MapDeriver:
         if chroma_on:
             for name, value in chroma_uniforms(seed, appearance).items():
                 _set(prog, name, value)
+        if mask_on:
+            mask.use(location=8)
+            _set(prog, "u_mask", 8)
+            _set(prog, "u_mask_band_fade", mask_params.band_fade)
+            _set(prog, "u_mask_emission_gain", mask_params.emission_gain)
+            _set(prog, "u_mask_detail_gain", mask_params.detail_gain)
+        if band_tint_on:
+            self._band_tint_tex.use(location=9)
+            _set(prog, "u_band_tint", 9)
+            _set(prog, "u_band_tint_strength", appearance.band_tint_strength)
         color_out.bind_to_image(0, read=False, write=True)
         height_out.bind_to_image(1, read=False, write=True)
         if emission_on:
@@ -215,6 +293,47 @@ class MapDeriver:
             for name, value in emission_uniforms(seed, emission).items():
                 _set(prog, name, value)
             emission_out.bind_to_image(2, read=False, write=True)
+        gx = (size[0] + _GROUP - 1) // _GROUP
+        gy = (size[1] + _GROUP - 1) // _GROUP
+        prog.run(gx, gy, 1)
+        self.gpu.ctx.memory_barrier()
+
+    def resample_flow(
+        self,
+        vel_eq: moderngl.Texture,
+        vel_n: moderngl.Texture,
+        vel_s: moderngl.Texture,
+        patch_rho_max: float,
+        blend_band: tuple[float, float],
+        flow_out: moderngl.Texture,
+        origin: tuple[int, int] = (0, 0),
+        full_size: tuple[int, int] | None = None,
+    ) -> None:
+        """Resample the solver's frozen velocity field into an equirect (east,
+        north) flow map (T10) via ``flow_resample.comp``. Mirrors ``derive``'s
+        tiled contract: global lat/lon sampling from ``origin`` / ``full_size``,
+        so a tile is byte-for-byte the matching crop of a single-pass render.
+
+        A NEW kernel (never touches derive.comp / any pinned kernel), so this
+        path has no byte-identity exposure; it is only run when
+        ``export.flow_map`` is on. Every sampler is bound explicitly."""
+        if self._flow_prog is None:
+            self._flow_prog = self.gpu.compute(_KERNELS, "flow_resample.comp")
+        prog = self._flow_prog
+        size = flow_out.size
+        prog["u_origin"].value = origin
+        prog["u_full_size"].value = full_size if full_size is not None else size
+        prog["u_size"].value = size
+        vel_eq.use(location=0)
+        prog["u_vel_eq"].value = 0
+        vel_n.use(location=1)
+        prog["u_vel_n"].value = 1
+        vel_s.use(location=2)
+        prog["u_vel_s"].value = 2
+        prog["u_patch_rho_max"].value = patch_rho_max
+        prog["u_blend_lo"].value = blend_band[0]
+        prog["u_blend_hi"].value = blend_band[1]
+        flow_out.bind_to_image(0, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP
         gy = (size[1] + _GROUP - 1) // _GROUP
         prog.run(gx, gy, 1)

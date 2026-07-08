@@ -13,6 +13,7 @@ composites them with a narrow feather. Invalidation-tier dispatch:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -53,6 +54,11 @@ class Simulation:
         self._preview_em_height: moderngl.Texture | None = None
         self._emission_preview_dirty = True
         self._detail_tex: moderngl.Texture | None = None
+        # Imported paint mask texture (POST art-direction), uploaded from
+        # params.mask.file. None = no mask. Owned by the facade; re-synced on a
+        # mask-file change and cloned into export snapshots.
+        self._mask_tex: moderngl.Texture | None = None
+        self._mask_cpu: np.ndarray | None = None  # app-painted mask (no file backing)
         self._post_dirty = True
         self._tracers_changed = True
         self._extra_steps = 0
@@ -71,9 +77,10 @@ class Simulation:
         p = self.params
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(p.seed, self.bands, p.bands, p.jets)
+        dt = compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed)
         self.vortices = generate_vortices(
             p.seed, self.bands, self.profiles, p.storms, p.poles,
-            dt=compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed),
+            dt=dt,
             dev_steps=p.sim.dev_steps,
         )
         self.lanes = select_lanes(p.seed, self.bands, p.bands.lane_density)
@@ -85,11 +92,12 @@ class Simulation:
         self.solver = Solver(
             self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp,
             wave_lats=select_wave_latitudes(self.bands, self.profiles),
-            events=EventSchedule.generate(p, self.bands),
+            events=EventSchedule.generate(p, self.bands, self.profiles, dt),
             profile_omega_tex=self.profile_omega,
         )
         self.solver.init_tracers()
         self._init_baroclinic()
+        self._sync_mask()
         self._tracers_changed = True
         self._post_dirty = True
         self._emission_preview_dirty = True
@@ -103,14 +111,49 @@ class Simulation:
         self._release_sim()
         self._build()
 
+    def release(self) -> None:
+        """Release EVERY GPU resource this sim owns, then null the handles.
+
+        The SINGLE teardown path: ``rebuild``/``update_params`` (RESTART) route
+        through it before ``_build`` re-creates the sim, the app's checkpoint
+        load-swap calls it to reclaim the outgoing sim, and a headless
+        checkpoint/CLI run can call it on exit. Idempotent -- every handle is
+        guarded and set to None, so a double call (or a call before ``_build``
+        finished) is safe; a ``rebuild`` re-populates them afterward, and the
+        lazy preview/detail/palette paths re-allocate on next use.
+
+        Covers what the old partial release MISSED: the preview color/height
+        textures, the emission-preview scratch trio, ``_detail_tex``, the
+        imported ``_mask_tex``, and the deriver's palette/storm/band-tint LUTs
+        -- in addition to the solver (+ its domain/omega textures + external
+        vorticity source) and the three profile LUTs it already freed. The
+        deriver/detail-synth OBJECTS persist (their compute programs live in the
+        shared ``GpuContext`` cache); only their owned textures are freed."""
+        solver = getattr(self, "solver", None)
+        if solver is not None:
+            if solver.external_omega_tex is not None:
+                solver.external_omega_tex.release()
+                solver.external_omega_tex = None
+            solver.release()
+            self.solver = None
+        for attr in (
+            "profile_dyn", "profile_stamp", "profile_omega",
+            "_preview_color", "_preview_height",
+            "_preview_emission", "_preview_em_color", "_preview_em_height",
+            "_detail_tex", "_mask_tex",
+        ):
+            tex = getattr(self, attr, None)
+            if tex is not None:
+                tex.release()
+                setattr(self, attr, None)
+        deriver = getattr(self, "deriver", None)
+        if deriver is not None:
+            deriver.release()
+
+    # Legacy internal name kept for the many gpu tests (and the RESTART/rebuild
+    # paths) that already call it: there is now ONE real release path.
     def _release_sim(self) -> None:
-        if self.solver.external_omega_tex is not None:
-            self.solver.external_omega_tex.release()
-            self.solver.external_omega_tex = None
-        self.solver.release()
-        self.profile_dyn.release()
-        self.profile_stamp.release()
-        self.profile_omega.release()
+        self.release()
 
     def _init_baroclinic(self) -> None:
         """Build/reuse the baroclinic source driver when enabled. Caches on
@@ -228,9 +271,76 @@ class Simulation:
             tex.write(arr)  # arr is contiguous float32; avoid a per-call copy
         self.solver.external_gain = float(gain)
 
+    # -- imported paint mask (POST art-direction) --------------------------------
+
+    def set_mask(self, arr: np.ndarray | None) -> None:
+        """Upload a single-channel equirect mask (H, W float32 in [0, 1]) as the
+        live mask texture, or clear it with ``arr=None``. Replacing releases the
+        previous texture. The mask is a POST input consumed per-derive; setting
+        it marks the color/emission previews dirty. repeat_x (longitude wrap) is
+        the texture2d default -- no repeat kwarg exists.
+
+        An explicitly-set mask (the GUI paint tool -- no ``params.mask.file``
+        backing) is retained on the CPU so a RESTART-tier rebuild, which
+        releases every GL resource, restores it instead of silently wiping it;
+        ``set_mask(None)`` is an explicit clear and forgets it."""
+        self._mask_cpu = self._upload_mask(arr)
+
+    def _upload_mask(self, arr: np.ndarray | None) -> np.ndarray | None:
+        """Upload/clear the mask texture WITHOUT claiming app ownership (the
+        file-sync path uses this so a file-derived mask never masquerades as a
+        painted one). Returns the contiguous float32 copy that was uploaded."""
+        if self._mask_tex is not None:
+            self._mask_tex.release()
+            self._mask_tex = None
+        a = None
+        if arr is not None:
+            a = np.ascontiguousarray(arr.astype(np.float32))
+            h, w = a.shape[:2]
+            self._mask_tex = self.gpu.texture2d((w, h), 1, "f4", data=a, linear=True)
+        self._post_dirty = True
+        self._emission_preview_dirty = True
+        return a
+
+    def _sync_mask(self) -> None:
+        """Re-resolve the mask texture from ``params.mask.file`` (an ABSOLUTE
+        path by the time it reaches the engine -- path resolution is an app/CLI
+        concern, params stay source-agnostic). A missing/invalid file WARNS and
+        disables the mask (the gains then run over a no-op) rather than crashing
+        -- this is also the checkpoint-restore path, where a saved absolute path
+        may not exist on another machine."""
+        from gasgiant.export.writers import decode_image
+
+        f = self.params.mask.file
+        if not f:
+            # No file backing: restore an app-painted mask if one was set (a
+            # RESTART rebuild released its texture; the CPU copy survives),
+            # otherwise clear. Never forget the painted copy here -- only an
+            # explicit set_mask(None) does that.
+            self._upload_mask(self._mask_cpu)
+            return
+        try:
+            arr = decode_image(Path(f))
+        except (OSError, ValueError) as exc:
+            log.warning("mask disabled: %s", exc)
+            self._upload_mask(None)
+            return
+        self._upload_mask(arr)
+
     # -- parameters ---------------------------------------------------------------
 
-    def update_params(self, new_params: PlanetParams) -> set[Tier]:
+    def update_params(
+        self, new_params: PlanetParams, *, preserve_target: bool = False
+    ) -> set[Tier]:
+        """Apply a params diff at the cheapest sufficient tier.
+
+        ``preserve_target=True`` skips ONLY the VELOCITY-tier ``_extra_steps``
+        reset, leaving the current development target/step-clock untouched while
+        still rebuilding the velocity field (profiles + ``apply_velocity_params``).
+        The ramp sequence export needs this: it re-applies lerped params EVERY
+        frame, and the default reset would clobber the ``extend_run`` frame clock
+        (advancing ``_ADAPT_STEPS`` on frame 1 and zero steps thereafter)."""
+        old_mask_file = self.params.mask.file
         tiers = diff_tiers(self.params, new_params)
         self.params = new_params
         if Tier.RESTART in tiers:
@@ -247,7 +357,8 @@ class Simulation:
             self.solver.params = new_params
             self.solver.set_profiles(self.profiles)
             self.solver.apply_velocity_params()
-            self._extra_steps = _ADAPT_STEPS if self.is_developed else 0
+            if not preserve_target:
+                self._extra_steps = _ADAPT_STEPS if self.is_developed else 0
             self._post_dirty = True
             self._emission_preview_dirty = True
         elif tiers:  # POST
@@ -262,6 +373,12 @@ class Simulation:
         # Refresh whenever anything changed so the palette always tracks appearance.
         if tiers:
             self.deriver.update_palettes(new_params.appearance)
+            # A RESTART edit already re-synced via _build; for VELOCITY/POST edits
+            # re-decode+upload the mask ONLY when the file path changed (a gain
+            # tweak reuses the same texture -- so a live POST drag doesn't reload
+            # the PNG from disk every frame). File is a POST-tier field.
+            if Tier.RESTART not in tiers and new_params.mask.file != old_mask_file:
+                self._sync_mask()
         return tiers
 
     # -- stepping --------------------------------------------------------------------
@@ -387,6 +504,8 @@ class Simulation:
             seed=p.seed,
             profile_dyn=self.profile_dyn,
             profile_stamp=self.profile_stamp,
+            mask=self._mask_tex,
+            mask_params=p.mask,
         )
 
     # -- preview -----------------------------------------------------------------------
@@ -442,6 +561,25 @@ class Simulation:
             self._emission_preview_dirty = False
             return self._preview_emission, True
         return self._preview_emission, False
+
+    def snapshot_preview_color(self) -> moderngl.Texture:
+        """A GPU-side CLONE of the current color-preview texture, for the
+        viewport's A/B compare. The CALLER OWNS the returned texture and MUST
+        release it (the facade does not track it) -- so the app releases any
+        previously-held snapshot before capturing a new one (no leak on retake).
+
+        ``ensure_preview`` must have populated the preview first (it runs every
+        viewport frame, so this holds by the time any button can be clicked);
+        raises if not. ``clone_texture`` leaves an offscreen FBO bound, so this
+        rebinds the default framebuffer before returning -- imgui's native
+        backend renders into whatever is bound."""
+        if self._preview_color is None:
+            raise RuntimeError(
+                "no preview to snapshot; call ensure_preview() first"
+            )
+        clone = self.gpu.clone_texture(self._preview_color)
+        self.gpu.ctx.screen.use()
+        return clone
 
     @property
     def preview_height_texture(self) -> moderngl.Texture | None:

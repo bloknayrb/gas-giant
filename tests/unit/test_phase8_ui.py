@@ -47,6 +47,13 @@ def _make_export_app(emission_enabled: bool) -> StudioApp:
     app._live = params
     app._dialog = None
     app._export = None
+    app._seq_frames = 1
+    app._seq_steps_per_frame = 30
+    app._seq_all_maps = False
+    app._seq_video = False
+    app._seq_fps = 24
+    app._restart_dev_after_export = False
+    app._export_is_sequence = False
     app._commit = lambda new_params: setattr(app, "params", new_params)  # type: ignore[method-assign]
     app._reset_working_copy = lambda: None  # type: ignore[method-assign]
     return app

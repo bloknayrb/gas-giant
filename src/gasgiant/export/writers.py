@@ -34,6 +34,22 @@ def write_png16_rgb_u16(path: Path, rgb_u16: np.ndarray, compression: int = 2) -
         raise OSError(f"cv2.imwrite failed for {path}")
 
 
+def write_png8_rgb(path: Path, rgb: np.ndarray, compression: int = 2) -> None:
+    """(H, W, 3+) float32 0..1 -> 8-bit sRGB PNG. Values are clipped; only the
+    first three channels are written (an rgba color map drops its alpha). Used by
+    the contact-sheet tool and the GUI preset thumbnails -- 8-bit is plenty for a
+    small preview and keeps the cache cheap. BGR write order matches the other
+    writers (OpenCV convention)."""
+    if rgb.ndim != 3 or rgb.shape[2] < 3:
+        raise ValueError(f"expected (H, W, 3+) array, got {rgb.shape}")
+    u8 = np.clip(rgb[..., :3], 0.0, 1.0)
+    u8 = (u8 * 255.0 + 0.5).astype(np.uint8)
+    bgr = u8[..., ::-1]  # OpenCV writes BGR order
+    ok = cv2.imwrite(str(path), bgr, [cv2.IMWRITE_PNG_COMPRESSION, int(compression)])
+    if not ok:
+        raise OSError(f"cv2.imwrite failed for {path}")
+
+
 def write_png16_gray(path: Path, gray: np.ndarray, compression: int = 2) -> None:
     """(H, W) float32 0..1 -> 16-bit grayscale PNG."""
     if gray.ndim != 2:
@@ -64,6 +80,37 @@ def write_exr_rgba(path: Path, rgba: np.ndarray) -> None:
     channels = {"RGBA": np.ascontiguousarray(rgba, dtype=np.float32)}
     with OpenEXR.File(header, channels) as f:
         f.write(str(path))
+
+
+def decode_image(path: Path, *, color: bool = False) -> np.ndarray:
+    """Read an equirect image -> float32 in [0, 1]. A missing/unreadable file
+    raises OSError.
+
+    ``color=False`` (default, the mask path): -> (H, W) grayscale. A color
+    image is converted to luminance. The mask MUST be a 2:1 equirect
+    (width == 2*height) -- anything else is a clear error, not a silent stretch.
+
+    ``color=True`` (the palette-calibration path): -> (H, W, 3) RGB. A grayscale
+    image is broadcast to three channels. The 2:1 constraint is relaxed -- a
+    reference photo need not be exactly 2:1; the calibrator maps the full image
+    height to +90..-90 latitude regardless of aspect."""
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise OSError(f"cv2.imread failed for {path} (missing or unreadable image)")
+    maxv = np.float32(65535.0 if img.dtype == np.uint16 else 255.0)
+    if color:
+        # grayscale -> broadcast to 3ch; BGR(A) -> RGB (drop any alpha).
+        rgb = np.repeat(img[..., None], 3, axis=2) if img.ndim == 2 else img[..., 2::-1]
+        return np.ascontiguousarray(rgb.astype(np.float32) / maxv)
+    if img.ndim == 3:
+        # BGR(A) -> single-channel luminance (drop any alpha first).
+        img = cv2.cvtColor(img[..., :3], cv2.COLOR_BGR2GRAY)
+    h, w = img.shape[:2]
+    if w != 2 * h:
+        raise ValueError(
+            f"{path}: mask must be a 2:1 equirect (width == 2*height), got {w}x{h}"
+        )
+    return np.ascontiguousarray(img.astype(np.float32) / maxv)
 
 
 def read_png16(path: Path) -> np.ndarray:

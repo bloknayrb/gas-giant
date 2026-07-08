@@ -115,6 +115,15 @@ DEFAULT_STORM_TINTS = [
     GradientStop(pos=1.0, color=(0.78, 0.42, 0.30)),  # GRS salmon red
 ]
 
+# Neutral band-tint default: a flat mid-gray gradient. With band_tint_strength
+# at its default 0 the tint is never sampled, but a NEUTRAL, non-empty default
+# means turning the strength up does not snap the planet toward an arbitrary
+# color -- the artist paints latitudes in from a blank slate.
+DEFAULT_BAND_TINT = [
+    GradientStop(pos=0.0, color=(0.5, 0.5, 0.5)),  # south pole
+    GradientStop(pos=1.0, color=(0.5, 0.5, 0.5)),  # north pole
+]
+
 
 class PaletteRow(_Params):
     """One palette gradient anchored at a signed latitude (degrees, north
@@ -127,6 +136,26 @@ class PaletteRow(_Params):
 
 def default_palette_rows() -> list[PaletteRow]:
     return [PaletteRow(latitude=0.0, stops=list(DEFAULT_PALETTE))]
+
+
+def palette_rows_from_fit(rows: list[dict]) -> list[PaletteRow]:
+    """Convert the plain-dict rows returned by ``gasgiant.palette.fit.calibrate``
+    into validated ``PaletteRow`` models.
+
+    The ``palette`` layer cannot import ``params`` (it sits below it), so the
+    fit function returns plain dicts/arrays; this bridge — called by the CLI,
+    GUI, and the ``calibrate_palette`` script — performs the model conversion in
+    the ``params`` layer where ``PaletteRow``/``GradientStop`` live."""
+    return [
+        PaletteRow(
+            latitude=float(row["latitude"]),
+            stops=[
+                GradientStop(pos=float(s["pos"]), color=tuple(float(c) for c in s["color"]))
+                for s in row["stops"]
+            ],
+        )
+        for row in rows
+    ]
 
 
 class BandTemplate(_Params):
@@ -390,6 +419,84 @@ def hero_latitude_cap(hero_radius: float) -> float:
     return 63.0 - 206.3 * hero_radius
 
 
+class CastKind(StrEnum):
+    """The storm archetype a cast entry stamps. Each maps to a KIND_* constant
+    plus a per-kind base strength law and sign convention in the generator
+    (``sim/vortices.py::_add_cast``)."""
+    HERO = "hero"     # GRS-class giant anticyclone (wake + solid-core capable)
+    OVAL = "oval"     # white-oval anticyclone
+    BARGE = "barge"   # brown-barge cyclone (opposes the ambient shear sign)
+    PEARL = "pearl"   # small bright string-of-pearls oval
+
+
+class StormOverride(_Params):
+    """One art-directed storm placed by hand (the 'cast list'): kind, rendered
+    position, size, and an optional appearance override. Strict (unknown keys
+    error, like every other params group). Cast entries are DETERMINISTIC (no
+    RNG, no ``rand`` metadata) -- they are placed verbatim after the seeded
+    populations and are exempt from the population cap and runtime mergers, so
+    a director's storm survives the whole development run where the artist put
+    it. ``lat_deg``/``lon_deg`` name the RENDERED (end-of-dev-run) position:
+    the generator inverse-compensates the zonal drift (like the T1 pins) so the
+    storm lands on target when the snapshot is taken."""
+
+    kind: CastKind = pfield(
+        CastKind.OVAL, tier=Tier.RESTART, ui="Cast",
+        description="Which storm archetype to stamp: a GRS-class hero "
+                    "anticyclone, a white oval, a brown-barge cyclone, or a "
+                    "small pearl. The kind selects the base velocity law, the "
+                    "rotation sign, and the default appearance",
+    )
+    lat_deg: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-68.0, hi=68.0, ui="Cast",
+        description="Rendered latitude of the storm (degrees, north positive). "
+                    "The effective range is radius-coupled (see the cast "
+                    "validator) so the stamp stays clear of the 63 deg "
+                    "storm-free exchange band, same rule as the hero pin",
+    )
+    lon_deg: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-180.0, hi=180.0, ui="Cast",
+        description="Rendered longitude of the storm at the final snapshot "
+                    "(degrees, -180..180). Drift-compensated at generation "
+                    "(like the T1 longitude pins): the generator inverse-"
+                    "compensates the eastward zonal drift over the development "
+                    "run so the storm lands where you asked",
+    )
+    radius: float = pfield(
+        0.03, tier=Tier.RESTART, lo=0.01, hi=0.15, ui="Cast",
+        description="Core radius, radians of arc (1 rad = 57.3 deg; default "
+                    "0.03 rad is about 1.7 deg). Larger radii tighten the "
+                    "latitude cap (the stamp must stay clear of the exchange "
+                    "band)",
+    )
+    strength_scale: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, ui="Cast",
+        description="Multiplier on the per-kind base vorticity law: hero "
+                    "0.045*hero_strength, oval 0.012*(radius/0.03), barge "
+                    "-0.006, pearl 0.008. 1.0 = the kind's default strength; "
+                    "0 = a color-only stamp with no circulation",
+    )
+    tint: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-1.0, hi=1.0, ui="Cast",
+        description="Storm tint (T3): positive = warm/red end of the "
+                    "storm_tints gradient, negative = cool. None = the kind "
+                    "default (hero: hero_tint; oval 0.1; barge 0.35; pearl "
+                    "0.05). Applied verbatim (bypasses stamp_contrast)",
+    )
+    brightness: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-0.5, hi=0.5, ui="Cast",
+        description="Storm brightness (T0); negative = a dark storm. None = "
+                    "the kind default (hero: hero_brightness; oval 0.22; barge "
+                    "-0.28; pearl 0.25). Applied verbatim (bypasses "
+                    "stamp_contrast)",
+    )
+    aspect: float = pfield(
+        1.0, tier=Tier.RESTART, lo=1.0, hi=3.0, ui="Cast",
+        description="lon:lat elongation of the stamp (1.0 = round). Stretches "
+                    "the iso-contours along longitude, like hero_aspect",
+    )
+
+
 class StormsParams(_Params):
     """Field declaration order matches the panel's Hero / Ovals / Accents /
     Barges / Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
@@ -431,6 +538,17 @@ class StormsParams(_Params):
                     "placement. The effective range is further limited by "
                     "hero_radius (see validator) so the stamp stays clear of the "
                     "63 deg exchange band",
+    )
+    hero_longitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-180.0, hi=180.0, adv=True, ui="Hero",
+        description="Pin the hero storm's RENDERED longitude (degrees, "
+                    "-180..180; the 'pin' checkbox toggles it). Unpinned (None) "
+                    "= seeded placement. The value is the end-of-run longitude, "
+                    "not the seed: the generator inverse-compensates the storm's "
+                    "eastward zonal drift over the whole development run so the "
+                    "spot lands where you asked when the snapshot is taken. A "
+                    "hero that merges with or absorbs another storm deviates "
+                    "(a recorded caveat)",
     )
     rim_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True, ui="Hero",
@@ -582,6 +700,16 @@ class StormsParams(_Params):
                     "radius-coupled (see validator) so the stamp stays clear of "
                     "the 63 deg storm-free exchange band",
     )
+    accent_longitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-180.0, hi=180.0, adv=True, ui="Accents",
+        description="Pin the accent ovals' RENDERED longitude (degrees, "
+                    "-180..180). Unpinned (None) = seeded Poisson-disc "
+                    "placement. The value is the end-of-run longitude of the "
+                    "FIRST accent: the generator inverse-compensates the shared "
+                    "zonal drift so it lands where you asked, and a count=2 pair "
+                    "is offset a fixed step (0.6 rad) downstream of it. Accents "
+                    "that get caught in a merger deviate (a recorded caveat)",
+    )
     accent_tint: float = pfield(
         0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Accents",
         description="Accent oval tint (T3): positive = warm/red end of the "
@@ -640,6 +768,18 @@ class StormsParams(_Params):
                     "the belt-candidate selection entirely (including the "
                     "outbreak_lat_min floor), so equatorial eruptions work",
     )
+    outbreak_longitude: float | None = pfield(
+        None, tier=Tier.RESTART, lo=-180.0, hi=180.0, adv=True, ui="Outbreaks",
+        description="Pin the outbreak train's RENDERED longitude (degrees, "
+                    "-180..180; the 'pin' checkbox toggles it). Unpinned (None) "
+                    "= seeded placement. The value is where the eruption head "
+                    "sits at the final snapshot: since the plume knots carry no "
+                    "circulation, the sim velocity advects them at roughly the "
+                    "zonal rate, so the generator inverse-compensates that drift "
+                    "over the post-eruption life (best-effort -- the belt shear "
+                    "folds the tail into a streak, so only the head lands "
+                    "precisely)",
+    )
     outbreak_phase: float | None = pfield(
         None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Outbreaks",
         description="Pin WHEN outbreaks erupt: eruption start as a fraction "
@@ -692,6 +832,35 @@ class StormsParams(_Params):
         description="Brightness of the transient turbulent collar a fresh "
                     "merger leaves behind (inert while merge_rate is 0)",
     )
+
+    # -- Cast (art-directed storms) ----------------------------------------
+    cast: list[StormOverride] = pfield(
+        factory=list, tier=Tier.RESTART, adv=True, ui="Cast",
+        description="Cast list: storms placed by hand (kind + rendered "
+                    "position + size + optional color). Each entry is stamped "
+                    "verbatim after the seeded populations, exempt from the "
+                    "population cap and runtime mergers, so a director's storm "
+                    "survives the whole run where it was placed. Empty (the "
+                    "default) = no cast, byte-identical to the seeded-only "
+                    "field. Capped at 16 entries",
+    )
+
+    @model_validator(mode="after")
+    def _validate_cast(self) -> StormsParams:
+        if len(self.cast) > 16:
+            raise ValueError(
+                f"storms.cast has {len(self.cast)} entries; the cap is 16"
+            )
+        for i, entry in enumerate(self.cast):
+            cap = hero_latitude_cap(entry.radius)
+            if abs(entry.lat_deg) > cap:
+                raise ValueError(
+                    f"storms.cast[{i}].lat_deg={entry.lat_deg} exceeds the "
+                    f"radius-coupled limit +-{cap:.1f} deg "
+                    f"(radius={entry.radius}); the stamp would smear into the "
+                    f"63 deg storm-free exchange band. Lower lat_deg or radius."
+                )
+        return self
 
     @model_validator(mode="after")
     def _validate_hero_latitude(self) -> StormsParams:
@@ -1144,6 +1313,22 @@ class AppearanceParams(_Params):
         tier=Tier.POST, adv=True, ui="Appearance",
         description="Secondary tint axis for storms/festoons/hot spots",
     )
+    band_tint_stops: list[GradientStop] = pfield(
+        factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_BAND_TINT],
+        tier=Tier.POST, adv=True, ui="Appearance",
+        description="Per-latitude RGB tint laid over the whole planet as a final "
+                    "art-direction override: pick a color at each latitude (pos 0 = "
+                    "south pole, 1 = north pole) and it recolors that band directly, "
+                    "applied after every other grade so it wins. Neutral gray = no "
+                    "visible shift. Only acts when band_tint_strength > 0",
+    )
+    band_tint_strength: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="How strongly the per-latitude band_tint_stops override the "
+                    "planet color (0 = off, byte-identical; 1 = the tint fully "
+                    "replaces the graded color). Blended in after the post chain and "
+                    "chroma FX so the tint is not re-graded by contrast/saturation",
+    )
     haze_amount: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Appearance",
         description="Global haze: the Jupiter (0) to Saturn (~0.6) axis",
@@ -1312,6 +1497,45 @@ class EmissionParams(_Params):
         )
 
 
+class MaskParams(_Params):
+    """Imported paint mask: a single-channel grayscale equirect (2:1) PNG sidecar
+    that drives three POST-tier art-direction targets. Every gain defaults 0.0,
+    which is an EXACT no-op (each target uses a ``mix(1.0, mask, gain)``-style
+    factor/weight), so a planet with no mask -- or a mask with all-zero gains --
+    renders byte-identically to no mask at all. The mask travels per-derive and
+    is a preprocessor variant of derive.comp (MASK), never a runtime branch."""
+
+    file: str | None = pfield(
+        None, tier=Tier.POST, adv=True, ui="Mask",
+        description="Path to a grayscale equirect (2:1) PNG mask that paints WHERE "
+                    "the three Mask targets act (white = full effect, black = none). "
+                    "Use forward slashes. None = no mask (all Mask targets inert). "
+                    "The path is resolved relative to a loaded preset's folder and "
+                    "re-saved next to a preset you save, so a preset stays portable; "
+                    "a missing file at load warns and disables the mask (never crashes)",
+    )
+    band_fade: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",
+        description="Fade the busy features (storm tint, polar tint, detail, lanes) "
+                    "back toward the plain band color where the mask is painted -- a "
+                    "way to calm chosen regions to clean bands. Weight is "
+                    "mask * this gain; 0 = off (byte-identical)",
+    )
+    emission_gain: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",
+        description="Modulate the night-side emission map (thermal/lightning glow + "
+                    "aurora) by the mask, dimming the glow where the mask is dark. "
+                    "Factor is mix(1, mask, this gain); 0 = off (byte-identical). "
+                    "Only visible on the Emission map, not Color",
+    )
+    detail_gain: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",
+        description="Modulate color luminance/detail by the mask, settling painted-"
+                    "dark regions while painted-bright regions stay untouched. Factor "
+                    "is mix(1, mask, this gain); 0 = off (byte-identical)",
+    )
+
+
 class PhysicalParams(_Params):
     """Real-world scale hints passed through to the Blender importer."""
 
@@ -1329,6 +1553,64 @@ class PhysicalParams(_Params):
         description="Height-map value mapped to the mid cloud deck (Blender importer "
                     "reference level)",
     )
+    ring_inner_km: float = pfield(
+        74500.0, tier=Tier.POST, lo=1000.0, hi=1000000.0, adv=True, ui="Physical",
+        description="Inner radius of the ring system in kilometers, measured from the "
+                    "planet center (default = Saturn's C-ring inner edge). Only meaningful "
+                    "when rings are enabled; passed through to the Blender importer, which "
+                    "builds an annulus from ring_inner_km..ring_outer_km",
+    )
+    ring_outer_km: float = pfield(
+        136780.0, tier=Tier.POST, lo=1000.0, hi=1000000.0, adv=True, ui="Physical",
+        description="Outer radius of the ring system in kilometers (default = Saturn's "
+                    "A-ring outer edge). Only meaningful when rings are enabled",
+    )
+
+
+class RingsParams(_Params):
+    """Saturn-style ring system. DEFAULT OFF and a Blender-only product feature:
+    rings are exported as a separate ``rings.exr`` radial strip and rebuilt as an
+    annulus by the importer -- they are NOT part of the equirect map set and are
+    invisible in the GUI preview. Because rings are a separate map, enabling them
+    never touches the color/height/emission output (p05 render hash is unaffected).
+
+    The radial optical-depth profile is a BOUNDED, hardcoded table modelling the
+    real Saturn C/B/Cassini-division/A structure (see export/rings.py); the knobs
+    here scale coverage/brightness/tint and add seeded fine grain. The radial
+    EXTENT is set by physical.ring_inner_km / ring_outer_km."""
+
+    enabled: bool = pfield(
+        False, tier=Tier.POST, adv=True, ui="Rings",
+        description="Export a ring texture strip (rings.exr) and, in Blender, build a "
+                    "Saturn-style annulus from it. Blender-only -- invisible in the GUI "
+                    "equirect preview. Off by default: the default export file-set "
+                    "(color + height) is unchanged. No rand",
+    )
+    opacity: float = pfield(
+        1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Rings",
+        description="Multiplier on the ring alpha (coverage) derived from the optical-"
+                    "depth table. 1.0 = physically-derived Beer-Lambert coverage",
+    )
+    brightness: float = pfield(
+        1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Rings",
+        description="Multiplier on the ice reflectance (ring RGB brightness)",
+    )
+    tint_color: tuple[float, float, float] = pfield(
+        (0.86, 0.83, 0.78), tier=Tier.POST, adv=True, ui="Rings",
+        description="Slightly warm ice tint (linear RGB) applied to the ring particles",
+    )
+    fine_grain: float = pfield(
+        0.15, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Rings",
+        description="Amount of seeded fine-grain ringlet variation added on top of the "
+                    "bounded optical-depth table (0 = the smooth table only). Uses the "
+                    "master seed's 'rings' substream, so it is deterministic",
+    )
+
+
+class ProjectionKind(StrEnum):
+    """Output projection for the exported map set."""
+    EQUIRECT = "equirect"   # 2:1 equirectangular (default; the only legacy form)
+    CUBE = "cube"           # 6-face cube map for game-engine / real-time use
 
 
 class ExportParams(_Params):
@@ -1336,9 +1618,30 @@ class ExportParams(_Params):
         2048, tier=Tier.POST, lo=512, hi=16384, ui="Export",
         description="Equirect map width in pixels; height is width/2",
     )
+    projection: ProjectionKind = pfield(
+        ProjectionKind.EQUIRECT, tier=Tier.POST, ui="Export",
+        description="Output projection. 'equirect' writes the classic 2:1 "
+                    "equirectangular color/height(/emission) set (the default -- "
+                    "unchanged file-set and manifest). 'cube' instead writes a "
+                    "6-face cube map (px,nx,py,ny,pz,nz per map) sized width/4 per "
+                    "face, for game engines / real-time renderers that texture a "
+                    "sky-cube or cube-mapped sphere. Cube export bumps the manifest "
+                    "schema to v2 (projection='cube', per-map 'faces' block); older "
+                    "importers that only build equirect geometry reject it cleanly. "
+                    "No rand.",
+    )
     png_compression: int = pfield(
         2, tier=Tier.POST, lo=0, hi=9, ui="Export",
         description="PNG deflate level (low = much faster at 16K)",
+    )
+    flow_map: bool = pfield(
+        False, tier=Tier.POST, ui="Export",
+        description="Also export flow.exr: the sim's per-step velocity field "
+                    "resampled to the equirect grid as an (east, north) flow "
+                    "map (R = eastward, G = northward; B=0, A=1), so Blender / a "
+                    "compositor can drive motion vectors or advected effects. "
+                    "Off by default -- the default export file-set (color + "
+                    "height) is unchanged. No rand.",
     )
 
 
@@ -1361,8 +1664,10 @@ class PlanetParams(_Params):
     poles: PolesParams = Field(default_factory=PolesParams)
     appearance: AppearanceParams = Field(default_factory=AppearanceParams)
     detail: DetailParams = Field(default_factory=DetailParams)
+    mask: MaskParams = Field(default_factory=MaskParams)
     emission: EmissionParams = Field(default_factory=EmissionParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
+    rings: RingsParams = Field(default_factory=RingsParams)
     export: ExportParams = Field(default_factory=ExportParams)
 
     def to_json(self, indent: int = 2) -> str:

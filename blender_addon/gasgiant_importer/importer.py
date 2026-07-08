@@ -76,6 +76,12 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         "transparent shell at ~1.03 R instead of the cloud surface — the "
         "real aurora sits ~1000 km up. Dayside-negligible, not sun-gated",
     )
+    build_rings: BoolProperty(
+        name="Build rings", default=True,
+        description="If the map set carries a ring strip (rings.exr), build a flat "
+        "Saturn-style annulus in the equatorial plane from ring_inner_km..ring_outer_km. "
+        "Rings are a Blender-only feature (invisible in the GUI preview)",
+    )
     longitude_offset: FloatProperty(
         name="Longitude offset", subtype="ANGLE", default=0.0,
         description="Rotate the planet so the feature you care about faces the camera",
@@ -96,9 +102,17 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         for warning in doc["_warnings"]:
             self.report({"WARNING"}, warning)
 
-        color_path = manifest_schema.map_path(doc, "color")
-        height_path = manifest_schema.map_path(doc, "height")
-        emission_path = manifest_schema.map_path(doc, "emission")
+        # Animation: when the manifest carries a T7 `frames` block, a map is
+        # imported as a SEQUENCE pointed at its frame-0 file; without one (or for
+        # a map absent from `frames.maps`) the still map is used, unchanged.
+        frame_count = manifest_schema.frame_count(doc)
+        color_seq = manifest_schema.frame_zero_path(doc, "color")
+        height_seq = manifest_schema.frame_zero_path(doc, "height")
+        emission_seq = manifest_schema.frame_zero_path(doc, "emission")
+
+        color_path = color_seq or manifest_schema.map_path(doc, "color")
+        height_path = height_seq or manifest_schema.map_path(doc, "height")
+        emission_path = emission_seq or manifest_schema.map_path(doc, "emission")
         color_img = bpy.data.images.load(str(color_path), check_existing=True)
         height_img = (
             bpy.data.images.load(str(height_path), check_existing=True)
@@ -136,7 +150,7 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         planet.rotation_euler = (0.0, 0.0, self.longitude_offset)
         planet.parent = rig
 
-        mat = material.build_planet_material(
+        built = material.build_planet_material(
             f"{doc['name']}_surface",
             color_img,
             height_img,
@@ -152,7 +166,17 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
             aurora_color=aurora_color,
             aurora_on_surface=not self.aurora_shell,
         )
-        planet.data.materials.append(mat)
+        planet.data.materials.append(built.material)
+
+        # Sequence wiring: reconfigure each animated texture node's image_user.
+        # See compat.configure_image_sequence for the frame_start/offset formula
+        # (frame_offset = -1 maps scene frame 1 -> 0000-based picture 0).
+        if color_seq is not None:
+            compat.configure_image_sequence(built.color_node, frame_duration=frame_count)
+        if height_seq is not None and built.height_node is not None:
+            compat.configure_image_sequence(built.height_node, frame_duration=frame_count)
+        if emission_seq is not None and built.emission_node is not None:
+            compat.configure_image_sequence(built.emission_node, frame_duration=frame_count)
 
         if emission_img is not None and self.aurora_shell:
             aurora = atmosphere.build_aurora_shell(
@@ -162,6 +186,23 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
                 clearance=clearance,
             )
             aurora.parent = rig
+
+        # Rings (T16): a flat annulus sampling the rings.exr radial strip, in the
+        # planet's equatorial plane and parented to the rig so it tilts/spins with
+        # the planet. Blender-only -- there is no equirect ring data.
+        ring_extent = manifest_schema.ring_extent(doc)
+        if self.build_rings and ring_extent is not None:
+            ring_path = manifest_schema.map_path(doc, "rings")
+            ring_img = bpy.data.images.load(str(ring_path), check_existing=True)
+            inner_km, outer_km = ring_extent
+            # Scale km -> Blender units by the planet's own radius (radius_km).
+            radius_km = physical.get("radius_km", 69911.0)
+            scale = self.radius / radius_km
+            ring = atmosphere.build_ring_annulus(
+                f"{doc['name']}_rings", ring_img,
+                inner_km * scale, outer_km * scale,
+            )
+            ring.parent = rig
 
         if self.use_displacement:
             compat.enable_adaptive_subdivision(planet, context.scene)

@@ -14,7 +14,7 @@ import dataclasses
 from gasgiant.engine.checkpoint import _REG_FIELDS
 from gasgiant.sim.vortices import Vortex
 
-_SEPARATELY_SERIALIZED = {"cooldown", "ttl"}
+_SEPARATELY_SERIALIZED = {"cooldown", "ttl", "origin"}
 
 
 def test_every_vortex_field_has_a_serialization_home():

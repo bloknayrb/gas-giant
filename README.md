@@ -105,7 +105,7 @@ and wind-sheared cirrus streaks.
 ## Into Blender
 
 ```sh
-uv run python scripts/build_addon.py     # -> dist/gasgiant_importer-1.0.0.zip
+uv run python scripts/build_addon.py     # -> dist/gasgiant_importer-1.1.0.zip
 ```
 
 Drag the zip into Blender, then *File → Import → Gas Giant Map Set (.json)*

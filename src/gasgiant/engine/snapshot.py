@@ -81,6 +81,9 @@ class ExportSnapshot:
     vel_s: moderngl.Texture
     profile_dyn: moderngl.Texture
     profile_stamp: moderngl.Texture
+    # Imported paint mask (POST art-direction), cloned so mid-export mask edits
+    # can't make tiles disagree. None when no mask is bound.
+    mask: moderngl.Texture | None
     patch_rho_max: float
     blend_band: tuple[float, float]
     # Hero-storm centers at their drifted positions, (x, y, z, r_core, spin, aspect)
@@ -109,6 +112,7 @@ class ExportSnapshot:
             vel_s=gpu.clone_texture(s.south.vel_tex),
             profile_dyn=gpu.clone_texture(sim.profile_dyn),
             profile_stamp=gpu.clone_texture(sim.profile_stamp),
+            mask=(gpu.clone_texture(sim._mask_tex) if sim._mask_tex is not None else None),
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
             heroes=hero_centers(sim.vortices),
@@ -122,3 +126,5 @@ class ExportSnapshot:
                     self.vel_eq, self.vel_n, self.vel_s,
                     self.profile_dyn, self.profile_stamp):
             tex.release()
+        if self.mask is not None:
+            self.mask.release()
