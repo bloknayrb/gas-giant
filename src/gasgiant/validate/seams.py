@@ -175,6 +175,148 @@ def check_latitude_band_continuity(arr: np.ndarray, name: str, report: Report) -
         )
 
 
+# --- Cube-map face-continuity validation (T17) ------------------------------
+# Face order matches export.manifest.CUBE_FACE_NAMES and the GL cube-map axis
+# convention used by derive.comp's PROJECTION_CUBE branch (+X,-X,+Y,-Y,+Z,-Z).
+CUBE_FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
+_CUBE_EDGES = ("top", "bottom", "left", "right")
+# A shared cube edge's two-face border pixels sample nearly the same directions
+# (offset by ~1 texel across the seam), so the seam diff must look like an
+# interior adjacent-pixel step, never a cliff.
+CUBE_EDGE_FACTOR = 6.0
+
+
+def _cube_dir(face: int, uc: float, vc: float) -> tuple[float, float, float]:
+    """Unnormalized cube-surface direction for face-local coords (uc, vc) in
+    [-1, 1]. MUST match derive.comp's PROJECTION_CUBE branch exactly."""
+    if face == 0:
+        return (1.0, -vc, -uc)   # +X
+    if face == 1:
+        return (-1.0, -vc, uc)   # -X
+    if face == 2:
+        return (uc, 1.0, vc)     # +Y
+    if face == 3:
+        return (uc, -1.0, -vc)   # -Y
+    if face == 4:
+        return (uc, -vc, 1.0)    # +Z
+    return (-uc, -vc, -1.0)      # -Z
+
+
+def _cube_edge_uc_vc(edge: str, s: float) -> tuple[float, float]:
+    """(uc, vc) at parameter ``s`` in [0, 1] along a face edge. left/right run
+    down the rows (v, top->bottom); top/bottom run across the columns
+    (u, left->right) -- matching ``_cube_edge_line`` pixel ordering."""
+    t = 2.0 * s - 1.0
+    if edge == "left":
+        return (-1.0, t)
+    if edge == "right":
+        return (1.0, t)
+    if edge == "top":
+        return (t, -1.0)
+    return (t, 1.0)  # bottom
+
+
+def _cube_edge_corners(face: int, edge: str) -> tuple[tuple, tuple]:
+    """The two corner directions (s=0, s=1) of a face edge, rounded to ints so
+    physical edges compare exactly (cube corners have integer +/-1 coords)."""
+    def corner(s: float) -> tuple:
+        uc, vc = _cube_edge_uc_vc(edge, s)
+        return tuple(int(round(c)) for c in _cube_dir(face, uc, vc))
+    return corner(0.0), corner(1.0)
+
+
+def _build_cube_edge_table() -> tuple:
+    """The 12 shared cube edges as ``(faceA, edgeA, faceB, edgeB, reversed)``,
+    derived geometrically (never hand-typed): two face edges are the SAME
+    physical edge when their corner-direction SETS match; ``reversed`` is True
+    when the two parameterizations run opposite along it. ``faceA < faceB``, each
+    physical edge listed once."""
+    faces_edges = [(f, e) for f in range(6) for e in _CUBE_EDGES]
+    table: list[tuple] = []
+    seen: set = set()
+    for fa, ea in faces_edges:
+        a0, a1 = _cube_edge_corners(fa, ea)
+        for fb, eb in faces_edges:
+            if fb <= fa:
+                continue
+            b0, b1 = _cube_edge_corners(fb, eb)
+            if {a0, a1} != {b0, b1}:
+                continue
+            key = frozenset((a0, a1))
+            if key in seen:
+                continue
+            seen.add(key)
+            table.append((fa, ea, fb, eb, a0 == b1 and a1 == b0))
+    return tuple(table)
+
+
+CUBE_EDGE_TABLE = _build_cube_edge_table()
+
+
+def _cube_edge_line(a: np.ndarray, edge: str) -> np.ndarray:
+    """The 1-texel border line of face image ``a`` (H, W, C) along ``edge``,
+    ordered by s in [0, 1] (left/right: rows top->bottom; top/bottom: cols
+    left->right)."""
+    if edge == "left":
+        return a[:, 0, :]
+    if edge == "right":
+        return a[:, -1, :]
+    if edge == "top":
+        return a[0, :, :]
+    return a[-1, :, :]  # bottom
+
+
+def check_cube_face_continuity(
+    faces: dict[str, np.ndarray], name: str, report: Report
+) -> None:
+    """Continuity across all 12 shared cube-face edges.
+
+    ``faces`` maps each face name (px..nz) to its (H, W[, C]) array. For every
+    shared edge the two faces' border pixels are compared (reversing the second
+    when the edge parameterizations run opposite, per ``CUBE_EDGE_TABLE``), and
+    the worst seam diff is checked against the interior adjacent-pixel gradient."""
+    arrs = {k: _flat(v) for k, v in faces.items()}
+    grads: list[float] = []
+    for a in arrs.values():
+        stride = max(a.shape[1] // 256, 1)
+        cols = np.arange(0, a.shape[1] - 1, stride)
+        grads.append(float(np.abs(a[:, cols + 1] - a[:, cols]).mean()))
+        rows = np.arange(0, a.shape[0] - 1, stride)
+        grads.append(float(np.abs(a[rows + 1, :] - a[rows, :]).mean()))
+    interior = float(np.mean(grads)) if grads else 0.0
+    limit = max(CUBE_EDGE_FACTOR * interior, ABS_FLOOR)
+    worst = 0.0
+    worst_edge = "-"
+    for fa, ea, fb, eb, rev in CUBE_EDGE_TABLE:
+        la = _cube_edge_line(arrs[CUBE_FACE_NAMES[fa]], ea)
+        lb = _cube_edge_line(arrs[CUBE_FACE_NAMES[fb]], eb)
+        if rev:
+            lb = lb[::-1]
+        d = float(np.abs(la - lb).mean())
+        if d > worst:
+            worst = d
+            worst_edge = f"{CUBE_FACE_NAMES[fa]}.{ea}|{CUBE_FACE_NAMES[fb]}.{eb}"
+    report.add(
+        f"{name}: cube face continuity",
+        bool(worst <= limit),
+        f"worst edge {worst_edge} diff {worst:.3e} vs interior {interior:.3e} "
+        f"(limit {limit:.3e}, {len(CUBE_EDGE_TABLE)} edges)",
+    )
+
+
+def validate_cube_arrays(face_maps: dict[str, dict[str, np.ndarray]]) -> Report:
+    """Run finiteness + 12-edge face-continuity checks on a cube map set.
+
+    ``face_maps`` maps each map name (color/height/emission) to its 6-face dict
+    (face name -> array)."""
+    report = Report()
+    for name, faces in face_maps.items():
+        for fn, arr in faces.items():
+            check_finite(arr, f"{name} {fn}", report)
+        check_cube_face_continuity(faces, name, report)
+    return report
+
+
 def validate_arrays(
     maps: dict[str, np.ndarray], flow_names: frozenset[str] | set[str] = frozenset()
 ) -> Report:
@@ -203,6 +345,26 @@ def validate_mapset(mapset_dir: Path) -> Report:
     from gasgiant.export.writers import read_exr_gray, read_exr_rgba, read_png16
 
     manifest = read_manifest(mapset_dir)
+    if manifest.get("projection") == "cube":
+        # Cube map set (T17): each maps entry carries a 6-face ``faces`` block.
+        face_maps: dict[str, dict[str, np.ndarray]] = {}
+        for name, entry in manifest["maps"].items():
+            arrs: dict[str, np.ndarray] = {}
+            for fn, rel in entry["faces"].items():
+                path = mapset_dir / rel
+                if entry["format"] == "png16":
+                    arrs[fn] = read_png16(path)
+                elif entry["format"] == "exr32f":
+                    if entry.get("channels", 1) >= 3:
+                        # HDR emission-class map: continuity in log space (sparse
+                        # radiance cores make the raw statistic flaky), NaN/Inf
+                        # survive log1p's monotonicity for the finiteness check.
+                        arrs[fn] = np.log1p(np.maximum(read_exr_rgba(path)[..., :3], 0.0))
+                    else:
+                        arrs[fn] = read_exr_gray(path)
+            face_maps[name] = arrs
+        return validate_cube_arrays(face_maps)
+
     maps: dict[str, np.ndarray] = {}
     flow_names: set[str] = set()
     for name, entry in manifest["maps"].items():

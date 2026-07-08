@@ -1616,6 +1616,14 @@ PNG deflate level (low = much faster at 16K)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### projection
+
+`export.projection` &mdash; dropdown, one of `equirect` / `cube`, default **`equirect`**, tier `post`.
+
+Output projection. 'equirect' writes the classic 2:1 equirectangular color/height(/emission) set (the default -- unchanged file-set and manifest). 'cube' instead writes a 6-face cube map (px,nx,py,ny,pz,nz per map) sized width/4 per face, for game engines / real-time renderers that texture a sky-cube or cube-mapped sphere. Cube export bumps the manifest schema to v2 (projection='cube', per-map 'faces' block); older importers that only build equirect geometry reject it cleanly. No rand.
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
+
 ### width
 
 `export.width` &mdash; range **512 to 16384**, default **2048**, tier `post`.

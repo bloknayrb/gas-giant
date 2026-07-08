@@ -17,7 +17,7 @@
     },
     "name": { "type": "string" },
     "seed": { "type": "integer" },
-    "projection": { "const": "equirectangular" },
+    "projection": { "enum": ["equirectangular", "cube"] },
     "resolution": {
       "type": "array",
       "items": { "type": "integer", "minimum": 1 },
@@ -38,9 +38,30 @@
       "required": ["color"],
       "additionalProperties": {
         "type": "object",
-        "required": ["file", "format", "colorspace"],
+        "required": ["format", "colorspace"],
+        "oneOf": [
+          { "required": ["file"], "not": { "required": ["faces"] } },
+          { "required": ["faces"], "not": { "required": ["file"] } }
+        ],
         "properties": {
-          "file": { "type": "string" },
+          "file": {
+            "description": "Equirectangular projection: the single map file (projection=equirectangular). Mutually exclusive with 'faces'.",
+            "type": "string"
+          },
+          "faces": {
+            "description": "Cube projection: the six per-face files keyed by GL cube-map axis (projection=cube, schema_version 2). Mutually exclusive with 'file'.",
+            "type": "object",
+            "required": ["px", "nx", "py", "ny", "pz", "nz"],
+            "additionalProperties": { "type": "string" },
+            "properties": {
+              "px": { "type": "string" },
+              "nx": { "type": "string" },
+              "py": { "type": "string" },
+              "ny": { "type": "string" },
+              "pz": { "type": "string" },
+              "nz": { "type": "string" }
+            }
+          },
           "format": { "enum": ["png16", "exr32f"] },
           "colorspace": { "enum": ["srgb", "non-color"] },
           "channels": { "type": "integer", "minimum": 1, "maximum": 4 },

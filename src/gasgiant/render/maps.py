@@ -89,7 +89,7 @@ class MapDeriver:
         # sides of an off/on comparison). The two default variants compile
         # eagerly (their absence would only surface at first use);
         # FX variants compile lazily on first selection.
-        self._progs: dict[tuple[bool, bool, bool, bool], moderngl.ComputeShader] = {}
+        self._progs: dict[tuple[bool, bool, bool, bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(emission=False, chroma_fx=False)
         self.prog_emission = self._program(emission=True, chroma_fx=False)
         self._palette_tex: moderngl.Texture | None = None
@@ -100,9 +100,10 @@ class MapDeriver:
         self._flow_prog: moderngl.ComputeShader | None = None
 
     def _program(
-        self, emission: bool, chroma_fx: bool, mask: bool = False, band_tint: bool = False
+        self, emission: bool, chroma_fx: bool, mask: bool = False, band_tint: bool = False,
+        projection_cube: bool = False,
     ) -> moderngl.ComputeShader:
-        key = (emission, chroma_fx, mask, band_tint)
+        key = (emission, chroma_fx, mask, band_tint, projection_cube)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if emission:
@@ -113,6 +114,11 @@ class MapDeriver:
                 defines["MASK"] = "1"
             if band_tint:
                 defines["BAND_TINT"] = "1"
+            if projection_cube:
+                # T17: cube-face uv->lat/lon mapping; every downstream line is
+                # shared with equirect (the block is verbatim-#else). Compiles
+                # lazily on first cube export -- the default program is untouched.
+                defines["PROJECTION_CUBE"] = "1"
             self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
         return self._progs[key]
 
@@ -163,6 +169,8 @@ class MapDeriver:
         profile_stamp: moderngl.Texture | None = None,
         mask: moderngl.Texture | None = None,
         mask_params: MaskParams | None = None,
+        projection_cube: bool = False,
+        cube_face: int = 0,
     ) -> None:
         """lanes: (latitude, strength) thin dark lane lines; warp: the band
         meander (offset, amount, freq) the lanes ride on. Passing emission_out
@@ -173,7 +181,13 @@ class MapDeriver:
         live/snapshot mask texture as ``mask`` plus its ``mask_params`` (gains).
         The MASK variant is selected only when a mask is bound AND at least one
         gain > 0 -- so a mask with all-zero gains compiles the default program
-        and stays byte-identical (the silent-no-op trap keys on the gains)."""
+        and stays byte-identical (the silent-no-op trap keys on the gains).
+
+        ``projection_cube`` selects the PROJECTION_CUBE variant: this pass then
+        renders ONE cube face (``cube_face`` 0..5 = +X,-X,+Y,-Y,+Z,-Z) instead of
+        the equirect grid. ``origin``/``full_size`` describe the FACE tile grid
+        (each face is its own square). Default (False) is the equirect path --
+        byte-identical, the cube define is absent from the program text."""
         if self._palette_tex is None:
             self.update_palettes(appearance)
         emission_on = (
@@ -211,8 +225,11 @@ class MapDeriver:
         # byte-identical (strength 0 is an exact no-op in the shader).
         band_tint_on = appearance.band_tint_strength > 0.0
         prog = self._program(
-            emission=emission_on, chroma_fx=chroma_on, mask=mask_on, band_tint=band_tint_on
+            emission=emission_on, chroma_fx=chroma_on, mask=mask_on, band_tint=band_tint_on,
+            projection_cube=projection_cube,
         )
+        if projection_cube:
+            _set(prog, "u_cube_face", int(cube_face))
         size = color_out.size
         lanes = lanes or []
         packed = np.zeros((16, 2), dtype=np.float32)

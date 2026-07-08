@@ -43,14 +43,27 @@ def read_mapset(path: Path) -> dict:
             raise MapsetError(f"{path.name}: missing required key {key!r}")
 
     version = doc.get("schema_version", 1)
+
+    # Projection gate. This importer builds ONLY equirectangular geometry, so a
+    # cube-map set (schema v2, projection "cube", per-map "faces" blocks) is
+    # rejected with a clear, actionable message rather than a confusing
+    # missing-'file' failure deeper in. Cube support needs a newer importer.
+    projection = doc.get("projection")
+    if projection == "cube":
+        raise MapsetError(
+            f"cube-map mapsets (schema_version {version}, projection 'cube') require "
+            f"a newer Gas Giant importer that builds cube geometry; this add-on "
+            f"supports the equirectangular projection only (schema <= {SUPPORTED_SCHEMA}). "
+            f"Re-export with projection=equirect, or update the importer."
+        )
+    if projection != "equirectangular":
+        raise MapsetError(f"unsupported projection {projection!r}")
+
     if version > SUPPORTED_SCHEMA:
         warnings.append(
             f"mapset schema_version {version} is newer than this add-on understands "
             f"({SUPPORTED_SCHEMA}); importing best-effort"
         )
-
-    if doc.get("projection") != "equirectangular":
-        raise MapsetError(f"unsupported projection {doc.get('projection')!r}")
 
     maps = doc.get("maps", {})
     if "color" not in maps:

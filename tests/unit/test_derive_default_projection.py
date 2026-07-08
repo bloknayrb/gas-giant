@@ -54,6 +54,26 @@ def test_mask_symbols_absent_from_default_projection():
         assert sym not in proj, f"{sym} leaked into the default (no-defines) program"
 
 
+def test_projection_cube_symbols_absent_from_default_projection():
+    """T17: the PROJECTION_CUBE variant (cube-face -> lat/lon mapping) wraps its
+    uniform and the whole mapping in ``#ifdef PROJECTION_CUBE`` with a VERBATIM
+    ``#else`` arm (the current equirect uv lines). The default (no-defines)
+    projection must strip every cube-only token; the golden hash above additionally
+    pins that the surviving equirect arm is byte-for-byte today's text."""
+    proj = _no_defines_projection()
+    for sym in ("u_cube_face", "cube_lat", "cube_lon", "PROJECTION_CUBE"):
+        assert sym not in proj, f"{sym} leaked into the default (no-defines) program"
+
+
+def test_projection_cube_symbols_present_in_cube_projection():
+    """Sanity: forcing PROJECTION_CUBE compiles the face uniform + the cube-face
+    direction -> (lat, lon) mapping in."""
+    source, _ = _load_flattened("gasgiant.render.kernels", "derive.comp", {})
+    proj = _preprocess(source, {"PROJECTION_CUBE"})
+    for sym in ("u_cube_face", "cube_lat", "cube_lon"):
+        assert sym in proj, f"{sym} missing from the PROJECTION_CUBE projection"
+
+
 def test_mask_symbols_present_in_mask_projection():
     """Sanity: forcing MASK compiles the uniforms + the target blocks in."""
     source, _ = _load_flattened("gasgiant.render.kernels", "derive.comp", {})

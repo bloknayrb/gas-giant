@@ -1558,10 +1558,28 @@ class RingsParams(_Params):
     )
 
 
+class ProjectionKind(StrEnum):
+    """Output projection for the exported map set."""
+    EQUIRECT = "equirect"   # 2:1 equirectangular (default; the only legacy form)
+    CUBE = "cube"           # 6-face cube map for game-engine / real-time use
+
+
 class ExportParams(_Params):
     width: int = pfield(
         2048, tier=Tier.POST, lo=512, hi=16384, ui="Export",
         description="Equirect map width in pixels; height is width/2",
+    )
+    projection: ProjectionKind = pfield(
+        ProjectionKind.EQUIRECT, tier=Tier.POST, ui="Export",
+        description="Output projection. 'equirect' writes the classic 2:1 "
+                    "equirectangular color/height(/emission) set (the default -- "
+                    "unchanged file-set and manifest). 'cube' instead writes a "
+                    "6-face cube map (px,nx,py,ny,pz,nz per map) sized width/4 per "
+                    "face, for game engines / real-time renderers that texture a "
+                    "sky-cube or cube-mapped sphere. Cube export bumps the manifest "
+                    "schema to v2 (projection='cube', per-map 'faces' block); older "
+                    "importers that only build equirect geometry reject it cleanly. "
+                    "No rand.",
     )
     png_compression: int = pfield(
         2, tier=Tier.POST, lo=0, hi=9, ui="Export",

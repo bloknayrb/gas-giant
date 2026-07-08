@@ -24,7 +24,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from gasgiant.export.manifest import (
+    CUBE_FACE_NAMES,
     MANIFEST_FILENAME,
+    PROJECTION_CUBE,
     attach_frames,
     build_manifest,
     read_manifest,
@@ -126,6 +128,162 @@ def derive_tile(
     )
 
 
+def _cube_face_size(width: int) -> int:
+    """Per-face square size for a cube map derived from the equirect ``width``.
+
+    ``width/4`` matches the equator texel density of the equirect map (equirect
+    has ``width/(2*pi)`` texels/radian in longitude; a cube face of size F has
+    ``2F/pi`` at its center, so ``F = width/4`` equalizes them). Floored at 64 so
+    tiny widths still produce a usable set."""
+    return max(width // 4, 64)
+
+
+def _export_cube_job(
+    sim: Any, out_dir: Path, snap: Any, params: Any, width: int, gpu: Any
+) -> Iterator[Progress]:
+    """Render a 6-face cube map (T17). Each face is a ``face_size`` square derived
+    with the PROJECTION_CUBE variant (``cube_face`` 0..5 = +X,-X,+Y,-Y,+Z,-Z),
+    tiled exactly like the equirect path so large faces stream. Writes
+    ``<map>_<face>.<ext>`` per map plus a v2 faces-manifest.
+
+    The synthesized detail layer is intentionally OMITTED here: detail synthesis
+    maps tile pixels through an EQUIRECT lat/lon, so per cube face it would
+    produce geometrically-wrong, seam-breaking filaments. The tracer-driven
+    detail_gain term still applies (it reads the equirect tracer at the correct
+    direction). Flow/rings maps (equirect-space conventions) are also not part of
+    the cube set. The cube job owns ``snap``'s release."""
+    face_size = _cube_face_size(width)
+    emission_on = params.emission.enabled
+    tiles = [
+        (x, y)
+        for y in range(0, face_size, TILE)
+        for x in range(0, face_size, TILE)
+    ]
+    total = 6 * len(tiles) + 2  # + encode + manifest
+
+    tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
+    tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
+    tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
+
+    pool = ThreadPoolExecutor(max_workers=3)
+    futures: list[Future] = []
+    written: list[Path] = []
+    completed = False
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        started = time.perf_counter()
+        step = 0
+        for face in range(6):
+            color_full = np.empty((face_size, face_size, 3), dtype=np.uint16)
+            height_full = np.empty((face_size, face_size), dtype=np.float32)
+            emission_full = (
+                np.empty((face_size, face_size, 4), dtype=np.float32) if emission_on else None
+            )
+            for x0, y0 in tiles:
+                tw = min(TILE, face_size - x0)
+                th = min(TILE, face_size - y0)
+                sim.deriver.derive(
+                    snap.tracers_eq, snap.tracers_n, snap.tracers_s,
+                    snap.patch_rho_max, snap.blend_band,
+                    tile_color, tile_height, params.appearance,
+                    detail_tex=None, detail_intensity=0.0,
+                    origin=(x0, y0), full_size=(face_size, face_size),
+                    lanes=snap.lanes, warp=snap.warp,
+                    emission_out=tile_emission,
+                    emission=params.emission if tile_emission is not None else None,
+                    seed=params.seed,
+                    profile_dyn=snap.profile_dyn, profile_stamp=snap.profile_stamp,
+                    mask=snap.mask, mask_params=params.mask,
+                    projection_cube=True, cube_face=face,
+                )
+                color = gpu.read_texture(tile_color)[:th, :tw, :3]
+                color_full[y0 : y0 + th, x0 : x0 + tw] = (
+                    np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
+                ).astype(np.uint16)
+                height_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(tile_height)[
+                    :th, :tw, 0
+                ]
+                if emission_on:
+                    emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                        tile_emission
+                    )[:th, :tw]
+                step += 1
+                yield Progress(step, total, f"cube face {face + 1}/6")
+
+            fn = CUBE_FACE_NAMES[face]
+            cpath = out_dir / f"color_{fn}.png"
+            written.append(cpath)
+            futures.append(pool.submit(
+                write_png16_rgb_u16, cpath, color_full.copy(), params.export.png_compression,
+            ))
+            hpath = out_dir / f"height_{fn}.exr"
+            written.append(hpath)
+            futures.append(pool.submit(write_exr_gray, hpath, height_full.copy()))
+            if emission_on:
+                epath = out_dir / f"emission_{fn}.exr"
+                written.append(epath)
+                futures.append(pool.submit(write_exr_rgba, epath, emission_full.copy()))
+
+        while not all(f.done() for f in futures):
+            yield Progress(total - 1, total, "encoding")
+            time.sleep(0.01)
+        for f in futures:
+            f.result()  # surface worker exceptions
+
+        def _faces(prefix: str, ext: str) -> dict[str, str]:
+            return {fn: f"{prefix}_{fn}.{ext}" for fn in CUBE_FACE_NAMES}
+
+        maps: dict[str, dict[str, Any]] = {
+            "color": {
+                "faces": _faces("color", "png"), "format": "png16",
+                "colorspace": "srgb", "channels": 3,
+            },
+            "height": {
+                "faces": _faces("height", "exr"), "format": "exr32f",
+                "colorspace": "non-color", "channels": 1,
+            },
+        }
+        if emission_on:
+            maps["emission"] = {
+                "faces": _faces("emission", "exr"), "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "aurora_color": list(params.emission.aurora_color),
+            }
+        physical = {
+            "radius_km": params.physical.radius_km,
+            "height_scale": params.physical.height_scale,
+            "height_midlevel": params.physical.height_midlevel,
+        }
+        manifest = build_manifest(
+            name=params.name,
+            seed=params.seed,
+            resolution=(face_size, face_size),
+            maps=maps,
+            physical=physical,
+            preset_doc=to_preset_doc(params),
+            atmosphere_hint={"rim_color": [0.55, 0.65, 1.0], "rim_strength": 0.4},
+            projection=PROJECTION_CUBE,
+        )
+        write_manifest(out_dir, manifest)
+        completed = True
+        log.info("exported %d-face cube map (%dpx faces) to %s in %.1fs",
+                 6, face_size, out_dir, time.perf_counter() - started)
+        yield Progress(total, total, "done")
+    finally:
+        pool.shutdown(wait=True)
+        tile_color.release()
+        tile_height.release()
+        if tile_emission is not None:
+            tile_emission.release()
+        snap.release()
+        if not completed:
+            for p in written:
+                p.unlink(missing_ok=True)
+            (out_dir / MANIFEST_FILENAME).unlink(missing_ok=True)
+            log.info("cube export cancelled; partial output removed")
+
+
 def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Progress]:
     """sim: engine.Simulation (duck-typed; export sits below engine in the
     layer order, so the engine object arrives as a parameter, never an import)."""
@@ -138,6 +296,13 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
     w = width or params.export.width
     h = w // 2
     gpu = sim.gpu
+
+    # Cube-map export (T17) is a wholly separate output path (6 square faces, a
+    # v2 faces-manifest); the equirect path below is untouched, so a default
+    # export is byte-identical. The cube job owns the snapshot's release.
+    if str(params.export.projection) == PROJECTION_CUBE:
+        yield from _export_cube_job(sim, out_dir, snap, params, w, gpu)
+        return
 
     tiles = [
         (x, y)
