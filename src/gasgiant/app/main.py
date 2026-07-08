@@ -74,6 +74,7 @@ class DialogKind(StrEnum):
     SAVE = "save"
     EXPORT = "export"
     IMPORT = "import"
+    PALETTE_FIT = "palette_fit"
 
 
 @dataclass
@@ -1080,7 +1081,10 @@ class StudioApp:
         kind, dlg = self._dialog
         if not dlg.ready():
             return
-        if kind in (DialogKind.LOAD, DialogKind.IMPORT) and self._export is not None:
+        if (
+            kind in (DialogKind.LOAD, DialogKind.IMPORT, DialogKind.PALETTE_FIT)
+            and self._export is not None
+        ):
             # A file was already picked (dialog opened before the export
             # started, or a race with the disabled-button gate below) but
             # applying it now would commit mid-export. Hold the dialog --
@@ -1116,6 +1120,8 @@ class StudioApp:
                 self._refresh_presets()
                 self.toasts.info(f"imported {path.name} as user/{name}")
                 self._toast_param_warnings(imported)
+            elif kind == DialogKind.PALETTE_FIT:
+                self._apply_palette_fit(Path(result[0]))
             elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
@@ -1197,6 +1203,23 @@ class StudioApp:
         imgui.same_line()
         if imgui.button("Reset to gas_giant_warm"):
             self._load_preset_entry("gas_giant_warm", PresetSource.FACTORY)
+
+        # T13: fit the latitude palette rows from a reference photo. The fitted
+        # colors are baked into appearance.palette_rows (POST tier, undoable);
+        # no image path is kept on the params.
+        if imgui.button("Fit palette from reference image...") and self._dialog is None:
+            self._dialog = (
+                DialogKind.PALETTE_FIT,
+                pfd.open_file(
+                    "Fit palette from reference image", "",
+                    ["Images", "*.png *.jpg *.jpeg *.tif *.tiff", "All files", "*"],
+                ),
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "fit the per-latitude palette rows from a cylindrical true-color "
+                "reference photo (values are baked in; undoable)"
+            )
 
         # B1-8: contextual overwrite/delete row, shown only while a USER
         # preset is active (factory presets are package data; a FILE identity
@@ -1671,6 +1694,33 @@ class StudioApp:
         new.storms.cast[index].lon_deg = lon
         self._commit(new)
         self._reset_working_copy()  # discrete action wins over pending edit
+
+    # -- T13: palette-from-image ------------------------------------------------
+
+    def _apply_palette_fit(self, path: Path) -> None:
+        """Fit palette rows from a reference image and BAKE them into
+        ``appearance.palette_rows`` via one undoable POST-tier commit. The
+        values are baked in; no image path is stored on the params. Decode +
+        model conversion happen here (the app layer) so ``palette.fit`` stays
+        layer-clean. A bad image just toasts an error and leaves params intact."""
+        if self._export is not None:
+            return  # defense-in-depth: never commit mid-export
+        from gasgiant.export.writers import decode_image
+        from gasgiant.palette.fit import calibrate
+        from gasgiant.params.model import palette_rows_from_fit
+        try:
+            img = decode_image(path, color=True)
+        except (OSError, ValueError) as exc:
+            self.toasts.error(f"could not read {path.name}: {exc}")
+            return
+        doc = calibrate(img)
+        rows = palette_rows_from_fit(doc["palette_rows"])
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        new.appearance.palette_rows = rows
+        self._commit(new)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"fit {len(rows)} palette rows from {path.name}")
 
     # -- T12: in-GUI mask brush --------------------------------------------------
 

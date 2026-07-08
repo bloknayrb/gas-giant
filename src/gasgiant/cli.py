@@ -33,11 +33,29 @@ def main(argv: list[str] | None = None) -> int:
     val = sub.add_parser("validate", help="run seam/pole checks on an exported map set")
     val.add_argument("mapset", type=Path)
 
+    pf = sub.add_parser(
+        "palette-fit",
+        help="fit palette rows from a reference image and bake them into a preset",
+    )
+    pf.add_argument("--image", type=Path, required=True,
+                    help="reference photo (cylindrical/equirect true-color image)")
+    pf.add_argument("--preset", default="jupiter_like",
+                    help="factory preset name or .json path to start from")
+    pf.add_argument("--out", type=Path, required=True, help="output preset .json path")
+    pf.add_argument("--anchors", nargs="+", type=float, default=None,
+                    help="anchor latitudes in signed degrees (space-separated)")
+    pf.add_argument("--bins", type=int, default=90)
+    pf.add_argument("--stops", type=int, choices=(3, 5), default=3,
+                    help="stops per fitted row")
+    pf.add_argument("--fit-mode", choices=("median", "chroma-restore"), default="median")
+
     args = parser.parse_args(argv)
     configure_logging(verbose=args.verbose)
 
     if args.command == "export":
         return _export(args)
+    if args.command == "palette-fit":
+        return _palette_fit(args)
     return _validate(args)
 
 
@@ -93,6 +111,46 @@ def _export(args: argparse.Namespace) -> int:
     seq = f" + {args.frames}-frame sequence" if args.frames is not None else ""
     print(f"exported {params.export.width}x{params.export.width // 2} map set{seq} "
           f"to {args.out} in {elapsed:.1f}s")
+    return 0
+
+
+def _palette_fit(args: argparse.Namespace) -> int:
+    """Fit palette rows from a reference image and BAKE them into a preset.
+
+    The palette values are baked into ``appearance.palette_rows`` (a POST-tier
+    field); no image path is stored. Decode happens here (the top layer) via
+    ``writers.decode_image`` and the model conversion via
+    ``params.model.palette_rows_from_fit`` -- keeping the ``palette`` layer clean.
+    """
+    from gasgiant.export.writers import decode_image
+    from gasgiant.palette.fit import DEFAULT_ANCHORS, calibrate
+    from gasgiant.params.model import palette_rows_from_fit
+    from gasgiant.params.presets import PresetError, resolve_preset, save_preset
+
+    if not args.image.is_file():
+        print(f"error: reference image not found: {args.image}", file=sys.stderr)
+        return 2
+    try:
+        params = resolve_preset(args.preset)
+    except PresetError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not hasattr(params.appearance, "palette_rows"):
+        print("error: preset lacks appearance.palette_rows (needs preset format 2+)",
+              file=sys.stderr)
+        return 2
+
+    try:
+        img = decode_image(args.image, color=True)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    anchors = tuple(args.anchors) if args.anchors else DEFAULT_ANCHORS
+    doc = calibrate(img, anchors, args.bins, fit_mode=args.fit_mode, stops=args.stops)
+    params.appearance.palette_rows = palette_rows_from_fit(doc["palette_rows"])
+    save_preset(params, args.out)
+    print(f"fit {len(doc['palette_rows'])} palette rows from {args.image} -> {args.out}")
     return 0
 
 

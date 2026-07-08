@@ -129,6 +129,26 @@ def default_palette_rows() -> list[PaletteRow]:
     return [PaletteRow(latitude=0.0, stops=list(DEFAULT_PALETTE))]
 
 
+def palette_rows_from_fit(rows: list[dict]) -> list[PaletteRow]:
+    """Convert the plain-dict rows returned by ``gasgiant.palette.fit.calibrate``
+    into validated ``PaletteRow`` models.
+
+    The ``palette`` layer cannot import ``params`` (it sits below it), so the
+    fit function returns plain dicts/arrays; this bridge — called by the CLI,
+    GUI, and the ``calibrate_palette`` script — performs the model conversion in
+    the ``params`` layer where ``PaletteRow``/``GradientStop`` live."""
+    return [
+        PaletteRow(
+            latitude=float(row["latitude"]),
+            stops=[
+                GradientStop(pos=float(s["pos"]), color=tuple(float(c) for c in s["color"]))
+                for s in row["stops"]
+            ],
+        )
+        for row in rows
+    ]
+
+
 class BandTemplate(_Params):
     """Explicit band skeleton: edge latitudes (degrees, strictly descending,
     +-90 endpoints, interior within +-76 -- the polar cap systems own the

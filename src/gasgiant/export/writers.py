@@ -66,15 +66,26 @@ def write_exr_rgba(path: Path, rgba: np.ndarray) -> None:
         f.write(str(path))
 
 
-def decode_image(path: Path) -> np.ndarray:
-    """Read an equirect grayscale mask PNG -> (H, W) float32 in [0, 1].
+def decode_image(path: Path, *, color: bool = False) -> np.ndarray:
+    """Read an equirect image -> float32 in [0, 1]. A missing/unreadable file
+    raises OSError.
 
-    Single-channel: a color image is converted to luminance. The mask MUST be a
-    2:1 equirect (width == 2*height) -- anything else is a clear error, not a
-    silent stretch. A missing/unreadable file raises OSError."""
+    ``color=False`` (default, the mask path): -> (H, W) grayscale. A color
+    image is converted to luminance. The mask MUST be a 2:1 equirect
+    (width == 2*height) -- anything else is a clear error, not a silent stretch.
+
+    ``color=True`` (the palette-calibration path): -> (H, W, 3) RGB. A grayscale
+    image is broadcast to three channels. The 2:1 constraint is relaxed -- a
+    reference photo need not be exactly 2:1; the calibrator maps the full image
+    height to +90..-90 latitude regardless of aspect."""
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if img is None:
         raise OSError(f"cv2.imread failed for {path} (missing or unreadable image)")
+    maxv = np.float32(65535.0 if img.dtype == np.uint16 else 255.0)
+    if color:
+        # grayscale -> broadcast to 3ch; BGR(A) -> RGB (drop any alpha).
+        rgb = np.repeat(img[..., None], 3, axis=2) if img.ndim == 2 else img[..., 2::-1]
+        return np.ascontiguousarray(rgb.astype(np.float32) / maxv)
     if img.ndim == 3:
         # BGR(A) -> single-channel luminance (drop any alpha first).
         img = cv2.cvtColor(img[..., :3], cv2.COLOR_BGR2GRAY)
@@ -83,7 +94,6 @@ def decode_image(path: Path) -> np.ndarray:
         raise ValueError(
             f"{path}: mask must be a 2:1 equirect (width == 2*height), got {w}x{h}"
         )
-    maxv = np.float32(65535.0 if img.dtype == np.uint16 else 255.0)
     return np.ascontiguousarray(img.astype(np.float32) / maxv)
 
 
