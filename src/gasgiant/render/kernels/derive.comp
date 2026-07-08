@@ -105,6 +105,16 @@ uniform float u_mask_band_fade;      // lerp toward the plain band color
 uniform float u_mask_emission_gain;  // modulate the emission output
 uniform float u_mask_detail_gain;    // modulate luminance/detail
 #endif
+#ifdef BAND_TINT
+// Per-band RGB tint (T14): a latitude-indexed LUT the artist lays over the whole
+// planet as a FINAL art-direction override, applied after the post chain / CHROMA_FX
+// and immediately before gamma so it is NOT re-graded by contrast/saturation/haze.
+// u_band_tint_strength 0 is an exact no-op (mix weight 0) and the whole block
+// preprocesses OUT of the default program -- keeping neutral-default output
+// byte-identical, the same construction as EMISSION/CHROMA_FX/MASK.
+uniform sampler2D u_band_tint;       // 256x1 latitude tint LUT, indexed 1-uv.y
+uniform float u_band_tint_strength;  // 0 disables (block is a no-op)
+#endif
 
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -287,6 +297,15 @@ void main() {
         }
         col = oklab_to_srgb(lab);
     }
+#endif
+#ifdef BAND_TINT
+    // Final art-direction override: a latitude-indexed RGB tint laid over the
+    // whole planet AFTER the post chain / CHROMA_FX and BEFORE gamma, so it is
+    // not re-graded by contrast/saturation/haze. The LUT axis matches the
+    // palette's signed-latitude convention (v = 0 at -90 deg): index by
+    // 1.0 - uv.y. strength 0 => mix weight 0 => byte-identical no-op.
+    vec3 tintColor = texture(u_band_tint, vec2(clamp(1.0 - uv.y, 0.0, 1.0), 0.5)).rgb;
+    col = mix(col, tintColor, u_band_tint_strength);
 #endif
     col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / max(u_gamma, 1e-3)));
 

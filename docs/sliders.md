@@ -1094,6 +1094,16 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 ## Appearance
 
+### band tint strength
+
+`appearance.band_tint_strength` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+How strongly the per-latitude band_tint_stops override the planet color (0 = off, byte-identical; 1 = the tint fully replaces the graded color). Blended in after the post chain and chroma FX so the tint is not re-graded by contrast/saturation
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
 ### chroma aging
 
 `appearance.chroma_aging` &mdash; range **0 to 0.6**, default **0**, tier `post`.

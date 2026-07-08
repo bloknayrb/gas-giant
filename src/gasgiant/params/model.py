@@ -115,6 +115,15 @@ DEFAULT_STORM_TINTS = [
     GradientStop(pos=1.0, color=(0.78, 0.42, 0.30)),  # GRS salmon red
 ]
 
+# Neutral band-tint default: a flat mid-gray gradient. With band_tint_strength
+# at its default 0 the tint is never sampled, but a NEUTRAL, non-empty default
+# means turning the strength up does not snap the planet toward an arbitrary
+# color -- the artist paints latitudes in from a blank slate.
+DEFAULT_BAND_TINT = [
+    GradientStop(pos=0.0, color=(0.5, 0.5, 0.5)),  # south pole
+    GradientStop(pos=1.0, color=(0.5, 0.5, 0.5)),  # north pole
+]
+
 
 class PaletteRow(_Params):
     """One palette gradient anchored at a signed latitude (degrees, north
@@ -1254,6 +1263,22 @@ class AppearanceParams(_Params):
         factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_STORM_TINTS],
         tier=Tier.POST, adv=True, ui="Appearance",
         description="Secondary tint axis for storms/festoons/hot spots",
+    )
+    band_tint_stops: list[GradientStop] = pfield(
+        factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_BAND_TINT],
+        tier=Tier.POST, adv=True, ui="Appearance",
+        description="Per-latitude RGB tint laid over the whole planet as a final "
+                    "art-direction override: pick a color at each latitude (pos 0 = "
+                    "south pole, 1 = north pole) and it recolors that band directly, "
+                    "applied after every other grade so it wins. Neutral gray = no "
+                    "visible shift. Only acts when band_tint_strength > 0",
+    )
+    band_tint_strength: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="How strongly the per-latitude band_tint_stops override the "
+                    "planet color (0 = off, byte-identical; 1 = the tint fully "
+                    "replaces the graded color). Blended in after the post chain and "
+                    "chroma FX so the tint is not re-graded by contrast/saturation",
     )
     haze_amount: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Appearance",

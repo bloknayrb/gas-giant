@@ -89,16 +89,17 @@ class MapDeriver:
         # sides of an off/on comparison). The two default variants compile
         # eagerly (their absence would only surface at first use);
         # FX variants compile lazily on first selection.
-        self._progs: dict[tuple[bool, bool, bool], moderngl.ComputeShader] = {}
+        self._progs: dict[tuple[bool, bool, bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(emission=False, chroma_fx=False)
         self.prog_emission = self._program(emission=True, chroma_fx=False)
         self._palette_tex: moderngl.Texture | None = None
         self._storm_tex: moderngl.Texture | None = None
+        self._band_tint_tex: moderngl.Texture | None = None
 
     def _program(
-        self, emission: bool, chroma_fx: bool, mask: bool = False
+        self, emission: bool, chroma_fx: bool, mask: bool = False, band_tint: bool = False
     ) -> moderngl.ComputeShader:
-        key = (emission, chroma_fx, mask)
+        key = (emission, chroma_fx, mask, band_tint)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if emission:
@@ -107,16 +108,21 @@ class MapDeriver:
                 defines["CHROMA_FX"] = "1"
             if mask:
                 defines["MASK"] = "1"
+            if band_tint:
+                defines["BAND_TINT"] = "1"
             self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
         return self._progs[key]
 
     def update_palettes(self, appearance: AppearanceParams) -> None:
-        for tex in (self._palette_tex, self._storm_tex):
+        for tex in (self._palette_tex, self._storm_tex, self._band_tint_tex):
             if tex is not None:
                 tex.release()
         rows = [(row.latitude, _stops(row.stops)) for row in appearance.palette_rows]
         self._palette_tex = self.gpu.lut_texture(bake_rows(rows, height=64))
         self._storm_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.storm_tints)))
+        # 256x1 latitude tint LUT (mirrors the storm-tint bake). Baked always but
+        # only bound/sampled when band_tint_on (strength > 0).
+        self._band_tint_tex = self.gpu.lut_texture(bake_lut(_stops(appearance.band_tint_stops)))
 
     def derive(
         self,
@@ -185,7 +191,13 @@ class MapDeriver:
                 or mask_params.detail_gain > 0.0
             )
         )
-        prog = self._program(emission=emission_on, chroma_fx=chroma_on, mask=mask_on)
+        # Silent-no-op trap: key on the STRENGTH, not the stops, so neutral or
+        # non-neutral stops with strength 0 select the default program and stay
+        # byte-identical (strength 0 is an exact no-op in the shader).
+        band_tint_on = appearance.band_tint_strength > 0.0
+        prog = self._program(
+            emission=emission_on, chroma_fx=chroma_on, mask=mask_on, band_tint=band_tint_on
+        )
         size = color_out.size
         lanes = lanes or []
         packed = np.zeros((16, 2), dtype=np.float32)
@@ -235,6 +247,10 @@ class MapDeriver:
             _set(prog, "u_mask_band_fade", mask_params.band_fade)
             _set(prog, "u_mask_emission_gain", mask_params.emission_gain)
             _set(prog, "u_mask_detail_gain", mask_params.detail_gain)
+        if band_tint_on:
+            self._band_tint_tex.use(location=9)
+            _set(prog, "u_band_tint", 9)
+            _set(prog, "u_band_tint_strength", appearance.band_tint_strength)
         color_out.bind_to_image(0, read=False, write=True)
         height_out.bind_to_image(1, read=False, write=True)
         if emission_on:

@@ -48,6 +48,8 @@ def test_mask_symbols_absent_from_default_projection():
         "u_mask_band_fade",
         "u_mask_emission_gain",
         "u_mask_detail_gain",
+        "u_band_tint",
+        "u_band_tint_strength",
     ):
         assert sym not in proj, f"{sym} leaked into the default (no-defines) program"
 
@@ -58,3 +60,11 @@ def test_mask_symbols_present_in_mask_projection():
     proj = _preprocess(source, {"MASK"})
     for sym in ("u_mask", "u_mask_band_fade", "u_mask_detail_gain", "mask_band_col"):
         assert sym in proj, f"{sym} missing from the MASK projection"
+
+
+def test_band_tint_symbols_present_in_band_tint_projection():
+    """Sanity: forcing BAND_TINT compiles the tint uniforms + sample block in."""
+    source, _ = _load_flattened("gasgiant.render.kernels", "derive.comp", {})
+    proj = _preprocess(source, {"BAND_TINT"})
+    for sym in ("u_band_tint", "u_band_tint_strength", "tintColor"):
+        assert sym in proj, f"{sym} missing from the BAND_TINT projection"
