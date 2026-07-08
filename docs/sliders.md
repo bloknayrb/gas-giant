@@ -1268,6 +1268,26 @@ Convective cell (closed-cell/popcorn) texture in quiet zones
 <td align="center"><img src="img/sliders/detail__cellular_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.9</sub></td><td align="center"><img src="img/sliders/detail__cellular_amount__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
+### cirrus fiber freq
+
+`detail.cirrus_fiber_freq` &mdash; range **2 to 24**, default **6**, tier `post`, log scale.
+
+Strand density of the cirrus fibers: strands across each bright-cloud streak half-width. Amplitude is attenuated when strands approach the output pixel size (spacing ~ cloud_radius/freq radians), so high values need high export resolution. Inert unless cirrus_fibers > 0
+
+<table><tr>
+<td align="center"><img src="img/sliders/detail__cirrus_fiber_freq__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/detail__cirrus_fiber_freq__hi.jpg" width="320"><br><sub>high &middot; 24</sub></td>
+</tr></table>
+
+### cirrus fibers
+
+`detail.cirrus_fibers` &mdash; range **0 to 2**, default **0**, tier `post`.
+
+Render-time combed-fiber synthesis over the ELONGATED bright-cloud stamps (companion/accent storms with aspect > 1, the Neptune methane-cirrus class): carves dark inter-strand lanes + gentle bright ridges into each streak, flow-oriented and flow-warped. Stamping fibers into the tracer was falsified (they smear over the dev run; docs/roadmap.md) — this synthesizes them post-advection. Requires detail.intensity > 0. No rand: a draw here would reshuffle every later randomize draw. 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/detail__cirrus_fibers__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
+</tr></table>
+
 ### flow phases
 
 `detail.flow_phases` &mdash; range **1 to 4**, default **3**, tier `post`.
@@ -1385,7 +1405,17 @@ Bright granular storm speckle (popcorn) poleward of ~55 deg (the band-to-mottle 
 Uniform detail coverage across latitude: 0 = band-gated (belts textured, zones calmer, the default look, byte-identical), >0 = the flow-folded detail-FX texture (belt/zone/mottle folds + filaments) applied at EVEN density everywhere at this level, so there are no detail-starved zones or stamped latitude bands. Still flow-folded (not flat noise). Pole-faded. ~0.36 is a balanced value
 
 <table><tr>
-<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.25</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/detail__spread__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.25</sub></td><td align="center"><img src="img/sliders/detail__spread__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
+</tr></table>
+
+### streak mute
+
+`detail.streak_mute` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Suppress the WHOLE filament-streak accumulator (the ungated base flow-streak + its intermittency gate + the belt_texture filament floor; the SPREAD streak too, if spread > 0). The base streak has a speed/shear floor and no zero lever of its own, so smooth laminar planets that enable detail.intensity only for cirrus_fibers would gain planet-wide flow-grain without this. No rand (draw-order safe). 0 = full streak (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/detail__streak_mute__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### striation amount

@@ -42,8 +42,40 @@ an account logout 2026-07-03 with no committed work).
 
 *Demo lesson (A06):* expressing a **different planet** is a whole-preset structural retune — injection strength, band count/contrast, and the storm field — not a palette recolor. The GDS levers (reversed-LUT hero + solid-core oval + companions) were already sufficient; the surrounding preset was the work.
 
-### Pending — genuine calibration sweeps (batch 3)
-F08 brown barges · F13 5-µm hotspots · F14 Saturn ribbon wave · F20 intermittent turbulence ·
-F23 temperate lace mottle · F29 Saturn polar hexagon · A08 Uranus polar hood · A10 cyclone–anticyclone asymmetry · A05 belt–zone emission contrast.
+### Genuine calibration sweeps (batch 3, seeds 4201/7/23 @2048)
 
-*(dispositions filled in as each batch completes)*
+**Method:** rendered `jupiter_vorticity` (F08/F13/F20/F23/A10/A05), `saturn_pale`
+(F14/F29), and `ice_giant` (A08) across seeds 4201/7/23; adversarial read of the color
+map. A pre-sweep lever audit mapped each row to its controlling pfield(s) first, so the
+question at each row was "does the existing lever already express it?" not "does a lever
+exist?". **Outcome: no preset value was changed.** Every dedicated lever is already set in
+the shipping presets — the expressible rows already read; the rest are honest ceilings
+(no dedicated lever, or a projection/contrast limit). The thermal rows (F13 emission
+component, A05) were judged on the visible channel + the `derive.comp` emission mechanism
+and params; the `emission.exr` channel was not visually inspected in-session (no EXR
+viewer in the env) — noted for honesty, it does not change either disposition.
+
+| Row | Phenomenon | Disposition | Evidence |
+|-----|-----------|-------------|----------|
+| F08 | Brown barges | RESOLVED | `storms.barge_density 2.989` on jupiter_vorticity renders discrete dark elongated cyclonic features in the belts (dedicated `VKIND_BARGE` stamp, `dome=-1` cloud-top dip). They sit low-contrast against the rust belt — as on the real NEB. *Limit:* barge aspect/contrast is not separately tunable (only heroes have `hero_aspect`); shared `stamp_contrast` only. Present and legible across all three seeds. |
+| F13 | 5-µm hotspots | RESOLVED | The visible cloud-clearing component reads strongly: `waves.festoon_strength 1.6` + `hotspot_depth 1.0` give the sawtooth blue-gray festoon scallops dipping into the equatorial-belt edge across all seeds. The 5-µm thermal channel is active by construction (`emission.thermal_strength 0.35`, `thermal_hdr 16`), glowing where the deck is depressed (`derive.comp`). |
+| F14 | Saturn ribbon wave | ACCEPT | `waves.ribbon_strength` is active on saturn_pale (1.0) but does **not** read against Saturn's intrinsically low band contrast. A test bump to 2.6 (+1.5× band contrast) only crisped the bands — no legible standing meander emerged, and pushing further enters the painted-sine failure class this program repeatedly rejects (over-driven festoons, GRS spiral-amp). Compounded by the shader fixing the ribbon latitude (no param to pin the real ~47 °N). No cheap legible improvement — honest ceiling. |
+| F20 | Intermittent turbulence | RESOLVED | `detail.intermittency 0.65` + `vort_inject_mask "shear"` give exactly the target mosaic: violent folded-filament patches abutting calmer laminar belt runs, not uniform churn. Reads across all seeds. |
+| F23 | Temperate lace mottle | RESOLVED | `detail.mottle 1.1` (latitude-windowed to 35–60°) renders the granular lace/dot texture at mid-latitudes where banding gives way; `bands.contrast_envelope 0.6` collapses banding poleward into it. Present. |
+| F29 | Saturn polar hexagon | ACCEPT | Present in the data — saturn_pale uses `poles.north.style=polygon_jet`, `polygon_sides=6`, which stamps the hexagonal polar jet. But the equirect color-map export smears the pole across the top row and Saturn's low contrast leaves it non-legible in the exported map. Expressible; validating the hexagon needs a polar-projection view, which the export/`validate` path does not produce. Not a lever gap. |
+| A08 | Uranus polar hood | DEFER | ice_giant does not express a bright polar hood (`appearance.polar_tint_strength 0.0`; poles just fade). The audit confirms **no dedicated bright-polar-hood lever** — the only polar-cap lever (`polar_tint_*`) is engineered for a dark blue-gray Juno cap (applied where cloud tops are LOW), the opposite of a bright hood. A bright hood is only approximable via high-latitude `appearance.palette_rows` + `bands.template`; a first-class bright-cap lever is feature-grade, not a calibration. Fenced as a feature, not attempted. |
+| A10 | Cyclone/anticyclone asymmetry | RESOLVED | The asymmetry reads correctly on jupiter_vorticity: anticyclones (`oval_density 3.0` + accents/heroes) are the bright, round, discrete features; cyclones (`barge_density`) are the darker, dipped, lower-contrast ones — the brighter-anticyclone half is baked into the shader stamp sign (`derive.comp dome=+1` vs barge `-1`) and anticyclone-dry lightning. No single "asymmetry" scalar, but the two-population design expresses it by construction. |
+| A05 | Belt/zone emission contrast | ACCEPT | The belt-vs-zone thermal split is not a param — `derive.comp` computes thermal glow from the tracer's cloud-top depression vs the band stamp, so belts glimmer and zones stay dark as an **emergent** function of `bands.template` heights. `emission.thermal_strength 0.35` / `thermal_hdr 16` set the global amplitude/range. Calibrating the split means moving band heights, not a dedicated knob; a first-class belt/zone emission-ratio would be DEFER. Approximated by general params — honest ceiling. |
+
+**Batch-3 tally:** 5 RESOLVED (F08, F13, F20, F23, A10) · 3 ACCEPT (F14, F29, A05) · 1 DEFER
+(A08). Zero preset changes — every expressible row was already dialled in the shipping
+presets; the ACCEPT/DEFER rows are projection limits (F29), intrinsic-contrast limits
+(F14), or genuine no-dedicated-lever ceilings (A05, A08). This closes the 21-row
+`candidate_poor`/F28/A05 disposition list opened at the top of this addendum.
+
+*Batch-3 lesson:* the lever audit before rendering was the efficiency win — knowing each
+row's controlling pfield up front turned nine "does the engine do this?" open questions
+into nine "is the shipped preset value enough?" checks, and the answer was yes for every
+row that has a dedicated lever. The three that landed ACCEPT/DEFER are the three the audit
+had already flagged as having *no* dedicated lever (A08, A10-as-single-scalar, A05) plus
+two display-medium limits (F14 contrast, F29 equirect polar-smear) — none is an engine gap.

@@ -75,11 +75,13 @@ def test_facade_preview_spread_differs(gpu):
     base_color, _ = sim.ensure_preview(256)
     base = gpu.read_texture(base_color).copy()
     p2 = sim.params.model_copy(deep=True)
-    p2.detail.spread = 0.36  # POST edit -> re-derive
+    # gas_giant_warm BAKES spread=0.36, so the edit must move it to a
+    # different value or the "preview changed" assertion is vacuous.
+    p2.detail.spread = 0.9  # POST edit -> re-derive
     sim.update_params(p2)
     fd_color, _ = sim.ensure_preview(256)
     fd = gpu.read_texture(fd_color)
-    assert not np.allclose(base, fd, atol=1e-2), "spread=0.36 did not change preview"
+    assert not np.allclose(base, fd, atol=1e-2), "spread edit did not change preview"
 
 
 def test_export_tiled_matches_full_at_spread(gpu):

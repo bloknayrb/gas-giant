@@ -471,7 +471,7 @@ class Simulation:
         p = self.params
         detail_tex = None
         if p.detail.intensity > 0.0:
-            from gasgiant.engine.snapshot import hero_centers
+            from gasgiant.engine.snapshot import bright_cloud_centers, hero_centers
             from gasgiant.render.detail import PolarRoute
 
             detail_tex = self._get_detail_tex(color_tex.size)
@@ -483,6 +483,8 @@ class Simulation:
                     s.north.vel_tex, s.south.vel_tex,
                     s.north.tracers.cur, s.south.tracers.cur, RHO_MAX,
                 ),
+                clouds=bright_cloud_centers(self.vortices),
+                profile_stamp=self.profile_stamp,
             )
         self.deriver.derive(
             s.equirect.tracers.cur,
