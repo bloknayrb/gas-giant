@@ -10,6 +10,13 @@ moderngl (GLSL 430 compute), pydantic params, imgui GUI, headless CLI, Blender a
 uv sync --all-extras                 # deps incl. GUI extra (imgui-bundle)
 uv run gasgiant-studio               # live-preview GUI (needs a display + GL 4.3)
 uv run gasgiant export --preset gas_giant_warm --res 2048 --out out/x   # headless render
+uv run gasgiant export --preset saturn_pale --frames 60 --steps-per-frame 5 \
+      --ramp-to gas_giant_warm --all-maps --video --fps 24 --out out/seq  # A->B animation seq
+uv run gasgiant export --resume ckpt.npz --frames 60 --steps-per-frame 5 --out out/seq  # from checkpoint
+uv run gasgiant export --recipe faded_seb --out out/x   # apply an epoch recipe overlay (docs/recipes.md)
+uv run gasgiant checkpoint --preset gas_giant_warm --out ckpt.npz   # develop + save a resumable .npz
+uv run gasgiant palette-fit --image jup.png --preset jupiter_like --out out/fit.json  # bake palette rows from a photo
+uv run gasgiant sheet --preset gas_giant_warm --count 12 --res 256 --out sheet.png    # seed contact sheet
 uv run gasgiant validate out/x       # seam/pole invariants on an exported map set
 uv run ruff check .                  # lint (line-length 100; E701/E702 deliberately off)
 uv run lint-imports                  # layer contracts — run after ANY new import
@@ -103,6 +110,14 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   mode-specific: `psi.comp` params are feather-only in vorticity mode; `storms.hero_solid_core`
   is a no-op in kinematic mode. Opt-in baroclinic coupling (`engine/baroclinic_coupling.py`)
   requires vorticity mode; off = byte-identical.
+- **Export levers (all default-off / byte-identical when off)**: `export.projection` =
+  equirect (default; manifest schema_version 1) or cube (6-face map, per-face `width/4`,
+  manifest schema_version 2 with a per-map `faces` block — cube OMITS synthesized detail and
+  the flow/rings maps, both equirect-space); `export.flow_map` adds `flow.exr` (east/north
+  velocity, equirect only); `rings.enabled` adds `rings.exr` (radial strip, Blender-only,
+  invisible in the GUI preview). derive.comp's preprocessor variants are now
+  (EMISSION × CHROMA_FX × MASK) plus BAND_TINT and PROJECTION_CUBE; `mask.file` binds an
+  imported paint mask whose band_fade/emission_gain/detail_gain art-direct POST output.
 
 ## Lever-author checklist (adding a new opt-in visual lever)
 

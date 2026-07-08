@@ -101,6 +101,20 @@ importer loads the colour map — and the height / emission maps when
   auto-refresh keeps the viewport in sync. A map absent from `frames.maps`
   (and any map set with no `frames` block) imports as a still, unchanged.
 
+## Projection & extra maps
+
+This importer builds **equirectangular** planets only. A **cube-map** map set
+(`export.projection=cube` — manifest `schema_version 2`, `projection: "cube"`,
+per-map `faces` blocks) is **rejected on load with a clear, actionable message**
+(`manifest_schema.py`: re-export with `projection=equirect`, or update the
+importer) rather than importing wrong geometry. A future importer version would
+add cube support; today's does not.
+
+The optional **flow map** (`flow.exr`, east/north velocity — see
+`docs/architecture.md`) is a compositor / motion-vector deliverable and is
+**not consumed** by this importer; it rides along in the folder as an extra
+file the tolerant reader ignores. Rings, by contrast, ARE built (above).
+
 ## Version compatibility
 
 `compat.py` is the only file that branches on `bpy.app.version`. Verified

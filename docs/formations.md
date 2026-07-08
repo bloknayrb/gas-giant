@@ -133,6 +133,25 @@ see tests/unit/test_mergers.py. Pre-merge co-orbiting remains deferred to
 the animation release (it would break the gate's purity and is invisible in
 stills).
 
+### Art-directed cast storms
+The seeded populations above answer to the seed; a director sometimes wants a
+specific storm at a specific place. *Implementation:* `storms.cast` — a list
+(cap 16) of hand-placed `StormOverride` entries (kind ∈ hero/oval/barge/pearl,
+rendered lat/lon, radius, optional color). Each is stamped **verbatim after**
+the seeded populations, so it composes into the same ψ/registry but sits on top
+of the seeded field. Cast entries are DETERMINISTIC (no RNG, no `rand`
+metadata), **exempt from the population cap and from runtime mergers**
+(`origin == "cast"` in `sim/vortices.py`; heroes/pearls/twins keep their own
+merger protections), so a director's storm survives the whole development run
+where it was put. `lat_deg`/`lon_deg` name the RENDERED (end-of-dev-run)
+position: the generator inverse-compensates the eastward zonal drift over the
+run (the same drift-compensation the `storms.hero_longitude` /
+`accent_longitude` / `outbreak_longitude` pins and the T1 pins use) so the
+storm lands on target when the snapshot is taken. Latitude is radius-coupled to
+the same 63° storm-free exchange floor as the hero pin. Empty cast (the
+default) is byte-identical to the seeded-only field. In the GUI, cast storms can
+be click-placed and dragged in the viewport.
+
 ## Waves and instabilities
 
 ### Kelvin–Helmholtz billows

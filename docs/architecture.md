@@ -212,9 +212,49 @@ intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
 16384×8192 with all maps and all FX variants on in ~31 s on an RTX 3070
 (encode-bound).
 
+**Projection + extra maps (all default-off, byte-identical when off).**
+`export.projection = equirect` (default) writes the classic 2:1 set; `cube`
+instead writes a 6-face cube map (`<map>_<face>.<ext>`, face size `width/4`
+matched to the equator texel density) tiled exactly like the equirect path so
+large faces still stream. Cube faces derive with the `PROJECTION_CUBE` variant
+and — recorded LIMIT — OMIT synthesized detail (detail synthesis maps tile
+pixels through an equirect lat/lon, so per-face it would tear at the cube
+edges; the mask's `detail_gain` term, which reads the equirect tracer at the
+correct direction, still applies) and omit the flow/rings maps (both use
+equirect-space conventions). Two opt-in extra equirect maps ride alongside the
+color/height set: `export.flow_map` writes `flow.exr` (the per-step velocity
+resampled to the equirect grid as an east/north flow map — R eastward, G
+northward — for motion vectors / advected compositor effects), and
+`rings.enabled` writes `rings.exr` (a Saturn ring radial strip; a Blender-only
+product feature, invisible in the GUI equirect preview — see
+`docs/blender_addon.md`). Because both are separate files, enabling either
+never touches the color/height/emission output (p05 render hash unaffected).
+
+**Conditional manifest versioning.** The equirect path keeps
+`schema_version 1` with each map's `file` key, so deployed importers never
+warn. The cube path bumps to `schema_version 2` with `projection: "cube"` and
+a per-map `faces` block; older importers that only build equirect geometry
+reject it cleanly (`export/manifest.py`, `SCHEMA_VERSION` /
+`SCHEMA_VERSION_CUBE`). Additive maps (flow, rings) stay on v1 — they are
+extra keys a tolerant reader ignores, not a schema break.
+
+**Imported-mask invariant.** When `mask.file` is set the derive pass binds the
+imported paint mask (the `MASK` variant) whose `band_fade` / `emission_gain` /
+`detail_gain` gains art-direct POST output; the mask is inert until at least
+one gain is nonzero. The mask travels with each derive call (it is a
+snapshot-resident texture read at the tile origin/full-size), so a tiled export
+is bit-identical to a whole-frame derive — masks respect the same
+tile-apron-free contract as the analytic passes.
+
 **Program variants.** Optional shader features are preprocessor-gated and
-cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX) —
-up to four programs — and detail.comp per (DETAIL_FX, SPREAD). The DETAIL_FX variant
+cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX, MASK)
+plus the independent BAND_TINT (per-band RGB tint via
+`appearance.band_tint_stops`/`_strength`) and PROJECTION_CUBE (cube-face
+sampling) variants; detail.comp per (DETAIL_FX, SPREAD). Each new variant's
+default is a no-op that preprocesses OUT (MASK only when a mask is bound and a
+gain is nonzero; BAND_TINT only when `band_tint_strength > 0`; PROJECTION_CUBE
+only on a cube export — guarded by the default-projection byte-identity test),
+so a default equirect render is unchanged by construction. The DETAIL_FX variant
 is selected whenever **any detail-FX lever is nonzero**; the lever set is
 not hand-enumerated but derived from the `fx=True` pfield flag in
 `params/model.py` (`render/detail.py::detail_fx_enabled`), which also
@@ -271,8 +311,17 @@ swaps in the saved registry. A `generation_version` mismatch is refused
 loudly: stale tracers would pair with differently-generated state. The live
 step path advances the registry through one shared function
 (`sim/advance.py: advance_registry` — events, drift, mergers) so any future
-registry evolution lands in exactly one place. This is the foundation for
-the planned animation exporter (restore → step k → export per frame).
+registry evolution lands in exactly one place.
+
+Checkpoints are wired end to end: `gasgiant checkpoint` develops a run and
+saves the .npz; `gasgiant export --resume <ckpt.npz>` reloads it (optionally
+`--frames …` to export a sequence from the resumed state), and the GUI has
+Save/Load state. A `generation_version` mismatch or corrupt file surfaces as a
+clear CLI error rather than a traceback. GPU teardown goes through one path,
+`Simulation.release()` — the public method the CLI, GUI, and `run_sheet` all
+call to free textures/SSBOs/programs without leaking a context between runs.
+This is the foundation for the animation exporter (restore → step k → export
+per frame).
 
 ## GUI
 
