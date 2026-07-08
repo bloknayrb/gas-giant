@@ -158,18 +158,30 @@ APPEARANCE_SCALARS = {
     "polar_canvas_value": 0.0,
 }
 
-# Strip the heavy Jupiter belt-texture detail -- Neptune's zones are smooth and low-texture.
+# The detail pass runs ON Neptune now (intensity > 0), but ONLY for the cirrus fibers:
+# every other detail term is zeroed. The previous intensity=0.0 bake left the inherited
+# gas_giant_warm amounts (belt_texture 0.3, mottle 0.3, polar_stipple 0.8, hero_spiral
+# 0.55, ...) latent in the JSON -- flipping intensity on would have woken ALL of them and
+# re-textured the deliberately smooth zones/poles/GDS. streak_mute=1.0 kills the one term
+# with no zero lever of its own (the base filament streak's speed/shear floor).
 DETAIL = {
-    "intensity": 0.0,
-    "cellular_amount": 0.2,
+    "intensity": 0.85,
+    "cellular_amount": 0.0,
     "striation_amount": 0.0,
     "hero_calm": 0.0,
     "zone_texture": 0.0,
-    "belt_texture": 0.3,
-    "belt_texture_fine": 0.3,
-    "mottle": 0.3,
+    "belt_texture": 0.0,
+    "belt_texture_fine": 0.0,
+    "mottle": 0.0,
     "polar_filaments": 0.0,
+    "polar_stipple": 0.0,
+    "intermittency": 0.0,
+    "hero_spiral": 0.0,
+    "hero_collar_wrap": 0.0,
     "spread": 0.0,
+    "streak_mute": 1.0,
+    "cirrus_fibers": 1.8,
+    "cirrus_fiber_freq": 3.0,
 }
 
 
@@ -204,6 +216,15 @@ def build() -> None:
     assert reloaded.storms.accent_aspect == 4.0
     assert reloaded.waves.ribbon_strength == 0.0
     assert reloaded.bands.count == 7
+    # The detail pass is fiber-only: intensity on, every other term dead.
+    assert reloaded.detail.intensity == 0.85
+    assert reloaded.detail.cirrus_fibers == 1.8
+    assert reloaded.detail.cirrus_fiber_freq == 3.0
+    assert reloaded.detail.streak_mute == 1.0
+    for dead in ("cellular_amount", "belt_texture", "belt_texture_fine", "mottle",
+                 "polar_stipple", "intermittency", "hero_spiral", "hero_collar_wrap",
+                 "zone_texture", "striation_amount", "spread"):
+        assert getattr(reloaded.detail, dead) == 0.0, dead
     assert len(reloaded.appearance.palette_rows) == 1
     assert list(reloaded.appearance.palette_rows[0].stops[0].color) == [0.04, 0.11, 0.44]
     print(f"wrote + verified {out}", flush=True)

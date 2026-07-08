@@ -246,6 +246,21 @@ pseudo-times and high-frequency sphere noise is sampled there, yielding
 noise stretched and folded by the flow (true filaments, not line-integral
 smear), masked by T2/shear/speed (`render/detail.py`).
 
+### Fibrous cirrus (Neptune bright-cloud strands)
+Neptune's bright methane clouds are bundles of parallel sheared filaments —
+"combed fiber" cirrus, not single soft lobes. Stamping strands into the
+tracer was falsified (rotation winds them into hooks; hyperviscosity smears
+them — `docs/roadmap.md`). *Implementation:* DETAIL — render-time synthesis
+over the elongated bright-cloud stamps (companion/accent storms with
+aspect > 1): a CPU list of drifted cloud ellipses (`bright_cloud_centers`,
+the hero-centers snapshot mechanism) intersected with the pixel's T0 excess
+over the band-stamp baseline masks a flow-oriented anisotropic strand fbm
+(~7:1 along:across, short backtrace, per-cloud decorrelation, ragged
+termination, carve-dominant dark inter-strand lanes). Attenuated when strand
+spacing nears the output pixel (`detail.cirrus_fibers`,
+`detail.cirrus_fiber_freq`; `detail.streak_mute` lets laminar planets run
+the detail pass fiber-only).
+
 ### Convective cell fields
 Closed-cell / "popcorn" granulation in quiet zone interiors — without it,
 quiet regions read as fuzz. *Implementation:* DETAIL — 3D Worley cellular
