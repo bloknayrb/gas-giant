@@ -1579,6 +1579,14 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 ## Export
 
+### flow map
+
+`export.flow_map` &mdash; toggle (on/off), default **`False`**, tier `post`.
+
+Also export flow.exr: the sim's per-step velocity field resampled to the equirect grid as an (east, north) flow map (R = eastward, G = northward; B=0, A=1), so Blender / a compositor can drive motion vectors or advected effects. Off by default -- the default export file-set (color + height) is unchanged. No rand.
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
+
 ### png compression
 
 `export.png_compression` &mdash; range **0 to 9**, default **2**, tier `post`.

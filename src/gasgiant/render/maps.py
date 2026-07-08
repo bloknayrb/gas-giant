@@ -95,6 +95,9 @@ class MapDeriver:
         self._palette_tex: moderngl.Texture | None = None
         self._storm_tex: moderngl.Texture | None = None
         self._band_tint_tex: moderngl.Texture | None = None
+        # T10 flow-map kernel, compiled lazily on first resample_flow (default
+        # export never touches it). Lives in the shared GpuContext program cache.
+        self._flow_prog: moderngl.ComputeShader | None = None
 
     def _program(
         self, emission: bool, chroma_fx: bool, mask: bool = False, band_tint: bool = False
@@ -273,6 +276,47 @@ class MapDeriver:
             for name, value in emission_uniforms(seed, emission).items():
                 _set(prog, name, value)
             emission_out.bind_to_image(2, read=False, write=True)
+        gx = (size[0] + _GROUP - 1) // _GROUP
+        gy = (size[1] + _GROUP - 1) // _GROUP
+        prog.run(gx, gy, 1)
+        self.gpu.ctx.memory_barrier()
+
+    def resample_flow(
+        self,
+        vel_eq: moderngl.Texture,
+        vel_n: moderngl.Texture,
+        vel_s: moderngl.Texture,
+        patch_rho_max: float,
+        blend_band: tuple[float, float],
+        flow_out: moderngl.Texture,
+        origin: tuple[int, int] = (0, 0),
+        full_size: tuple[int, int] | None = None,
+    ) -> None:
+        """Resample the solver's frozen velocity field into an equirect (east,
+        north) flow map (T10) via ``flow_resample.comp``. Mirrors ``derive``'s
+        tiled contract: global lat/lon sampling from ``origin`` / ``full_size``,
+        so a tile is byte-for-byte the matching crop of a single-pass render.
+
+        A NEW kernel (never touches derive.comp / any pinned kernel), so this
+        path has no byte-identity exposure; it is only run when
+        ``export.flow_map`` is on. Every sampler is bound explicitly."""
+        if self._flow_prog is None:
+            self._flow_prog = self.gpu.compute(_KERNELS, "flow_resample.comp")
+        prog = self._flow_prog
+        size = flow_out.size
+        prog["u_origin"].value = origin
+        prog["u_full_size"].value = full_size if full_size is not None else size
+        prog["u_size"].value = size
+        vel_eq.use(location=0)
+        prog["u_vel_eq"].value = 0
+        vel_n.use(location=1)
+        prog["u_vel_n"].value = 1
+        vel_s.use(location=2)
+        prog["u_vel_s"].value = 2
+        prog["u_patch_rho_max"].value = patch_rho_max
+        prog["u_blend_lo"].value = blend_band[0]
+        prog["u_blend_hi"].value = blend_band[1]
+        flow_out.bind_to_image(0, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP
         gy = (size[1] + _GROUP - 1) // _GROUP
         prog.run(gx, gy, 1)

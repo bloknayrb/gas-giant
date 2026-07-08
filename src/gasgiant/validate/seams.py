@@ -113,6 +113,22 @@ def check_finite(arr: np.ndarray, name: str, report: Report) -> None:
     report.add(f"{name}: finite", bad == 0, f"{bad} non-finite values")
 
 
+def check_pole_speed(arr: np.ndarray, name: str, report: Report) -> None:
+    """Pole continuity for a VECTOR (flow) map, checked on the SPEED magnitude.
+
+    The (east, north) components of a flow map rotate through the tangent basis
+    as you go around a near-pole ring — a solid polar vortex is +east on one
+    side of the pole and -east on the other — so per-component near-constancy
+    (``check_pole_rows``) is the wrong invariant and would false-positive. The
+    physical invariant that survives the basis rotation is the SPEED
+    |v| = sqrt(vE^2 + vN^2): it is near-axisymmetric around the pole. So reduce
+    RG to speed and reuse the pole-row tangential/vertical continuity checks on
+    that scalar."""
+    a = _flat(arr)
+    speed = np.sqrt((a[..., :2].astype(np.float32) ** 2).sum(axis=-1))
+    check_pole_rows(speed[..., None], f"{name} speed", report)
+
+
 # A processing seam (detail route switch, domain feather bug) is a row-pair
 # jump that is UNIFORM across longitude; legitimate sharp content in the same
 # band (band edges) meanders and varies along the row. A row is flagged only
@@ -159,13 +175,25 @@ def check_latitude_band_continuity(arr: np.ndarray, name: str, report: Report) -
         )
 
 
-def validate_arrays(maps: dict[str, np.ndarray]) -> Report:
+def validate_arrays(
+    maps: dict[str, np.ndarray], flow_names: frozenset[str] | set[str] = frozenset()
+) -> Report:
+    """Run the seam/pole/continuity checks on each named map.
+
+    ``flow_names`` marks maps whose RG channels are an (east, north) VELOCITY
+    field: they wrap-check on the components but take the pole check on the SPEED
+    magnitude (``check_pole_speed``) rather than per-component, because the
+    components rotate through the basis around the pole (see ``check_pole_speed``)."""
     report = Report()
     for name, arr in maps.items():
+        is_flow = name in flow_names
         check_finite(arr, name, report)
         check_wrap_continuity(arr, name, report)
-        check_pole_rows(arr, name, report)
-        check_latitude_band_continuity(arr, name, report)
+        if is_flow:
+            check_pole_speed(arr, name, report)
+        else:
+            check_pole_rows(arr, name, report)
+            check_latitude_band_continuity(arr, name, report)
     return report
 
 
@@ -176,12 +204,19 @@ def validate_mapset(mapset_dir: Path) -> Report:
 
     manifest = read_manifest(mapset_dir)
     maps: dict[str, np.ndarray] = {}
+    flow_names: set[str] = set()
     for name, entry in manifest["maps"].items():
         path = mapset_dir / entry["file"]
         if entry["format"] == "png16":
             maps[name] = read_png16(path)
         elif entry["format"] == "exr32f":
-            if entry.get("channels", 1) >= 3:
+            if name == "flow":
+                # Flow/velocity map: keep the RG (east, north) channels; the pole
+                # check runs on speed magnitude, not per-component (see
+                # check_pole_speed). Must precede the channels>=3 emission branch.
+                maps[name] = read_exr_rgba(path)[..., :2]
+                flow_names.add(name)
+            elif entry.get("channels", 1) >= 3:
                 # Emission-class HDR map. Sparse radiance-10+ cores make the
                 # raw wrap statistic flaky, so continuity runs in log space;
                 # finiteness/range still covers the raw values via log1p's
@@ -191,4 +226,4 @@ def validate_mapset(mapset_dir: Path) -> Report:
                 maps[f"{name}_alpha"] = arr[..., 3]
             else:
                 maps[name] = read_exr_gray(path)
-    return validate_arrays(maps)
+    return validate_arrays(maps, flow_names=flow_names)

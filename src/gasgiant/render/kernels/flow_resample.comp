@@ -1,0 +1,79 @@
+#version 430
+// Flow/velocity map resample (T10): the sim's frozen per-step velocity field,
+// resampled to the equirect output grid as an (east, north) flow map so
+// Blender / a compositor can drive motion vectors from it.
+//
+// This is a NEW kernel; it deliberately does NOT touch derive.comp or any
+// pinned kernel, so the default export path stays byte-identical. It reads the
+// SAME velocity textures the solver produced (equirect + two polar patches) and
+// composites them with the SAME polar feather derive.comp uses -- the feather is
+// DUPLICATED below (the plan forbids editing derive.comp's token stream to share
+// an #include); tests/unit/test_flow_feather_consistency.py pins the two feathers
+// to agree.
+//
+// BASIS (the crux). Both velocity textures are ALREADY in the geographic
+// (east, north) tangent basis -- velocity.comp writes them that way for every
+// domain:
+//   * DOMAIN 0 (equirect): u = -dpsi/dphi (eastward), v = (1/cos phi) dpsi/dlambda
+//     (northward). RG = (v_east, v_north) directly.
+//   * DOMAIN != 0 (polar patch): velocity.comp takes the patch-plane psi gradient,
+//     forms the radial/azimuthal derivatives (dpsi/drho, dpsi/dtheta), and ROTATES
+//     them into (east, north) before storing -- exactly the "patch-frame -> east/
+//     north" rotation. The contract is spelled out in common.glsl::patchVelocity,
+//     whose input is documented "(u east, v north)". So the patch RG is geographic
+//     (east, north) too, in the SAME basis as the equirect and as this output.
+// Consequence: the composite needs NO per-texel rotation -- the sim already did it.
+// Sampling the patch at the geographic point's puv returns (east, north) at that
+// same point, so mixing the two domains' (east, north) is basis-consistent. (The
+// blend band sits at ~64-67 deg, i.e. rho ~23-26 deg, far from the rho->0 pole
+// singularity, so bilinear interpolation of the components across the patch there
+// is well-conditioned -- the same reason derive.comp feathers tracers here.)
+//
+// Output: RG = (v_east, v_north) in the solver's per-step velocity units; B=0,
+// A=1. Manifest convention string: "rg_east_north_texel_per_step".
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba32f, binding = 0) writeonly uniform image2D out_flow;
+
+uniform sampler2D u_vel_eq;        // equirect velocity, RG = (east, north)
+uniform sampler2D u_vel_n;         // north polar patch velocity, RG = (east, north)
+uniform sampler2D u_vel_s;         // south polar patch velocity, RG = (east, north)
+uniform float u_patch_rho_max;     // patch angular radius (radians)
+uniform float u_blend_lo;          // |lat| feather start (radians)
+uniform float u_blend_hi;          // |lat| fully patch
+uniform ivec2 u_size;              // tile size (== full size for single-pass)
+uniform ivec2 u_origin;            // tile origin in the full equirect output
+uniform ivec2 u_full_size;         // full equirect output size
+
+const float PI = 3.14159265358979;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= u_size.x || px.y >= u_size.y) return;
+
+    // Global (full-output) coordinates drive all lat/lon sampling; the tile
+    // origin only offsets where we are in the full map (same tiling as derive.comp).
+    vec2 uv = (vec2(px + u_origin) + 0.5) / vec2(u_full_size);
+
+    // Equirect velocity is already geographic (east, north).
+    vec2 vel = texture(u_vel_eq, uv).rg;
+
+    // Polar composite: feather toward the patch velocity over the blend band.
+    // *** DUPLICATE of derive.comp's polar feather (its lines ~131-140) ***
+    // Kept in sync by test_flow_feather_consistency, NOT by a shared #include.
+    float lat = 0.5 * PI - uv.y * PI;
+    float w = smoothstep(u_blend_lo, u_blend_hi, abs(lat));
+    if (w > 0.0) {
+        float lon = uv.x * 2.0 * PI - PI;
+        float rho = 0.5 * PI - abs(lat);
+        vec2 st = rho * vec2(cos(lon), sin(lon));
+        vec2 puv = st / u_patch_rho_max * 0.5 + 0.5;
+        // Patch velocity is ALSO geographic (east, north) (see BASIS note above),
+        // so this mixes two vectors in one basis -- no rotation, just the feather.
+        vec2 velp = (lat >= 0.0) ? texture(u_vel_n, puv).rg : texture(u_vel_s, puv).rg;
+        vel = mix(vel, velp, w);
+    }
+
+    imageStore(out_flow, px, vec4(vel.x, vel.y, 0.0, 1.0));
+}

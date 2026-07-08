@@ -146,14 +146,17 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
     total = len(tiles) + 2  # + encode + manifest
 
     emission_on = params.emission.enabled
+    flow_on = params.export.flow_map
     color_full = np.empty((h, w, 3), dtype=np.uint16)
     height_full = np.empty((h, w), dtype=np.float32)
     emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
+    flow_full = np.empty((h, w, 4), dtype=np.float32) if flow_on else None
 
     tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
     tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
     tile_detail = gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
     tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
+    tile_flow = gpu.texture2d((TILE, TILE), 4, "f4") if flow_on else None
 
     pool = ThreadPoolExecutor(max_workers=3)
     futures: list[Future] = []
@@ -179,6 +182,18 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
                     tile_emission
                 )[:th, :tw]
+            if flow_on:
+                # Resample the frozen velocity field into (east, north) for this
+                # tile. Reads only snapshot velocity textures + analytic feather,
+                # so tiles agree at their borders just like the color/height path.
+                sim.deriver.resample_flow(
+                    snap.vel_eq, snap.vel_n, snap.vel_s,
+                    snap.patch_rho_max, snap.blend_band,
+                    tile_flow, origin=(x0, y0), full_size=(w, h),
+                )
+                flow_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                    tile_flow
+                )[:th, :tw]
             yield Progress(i + 1, total, f"tile {i + 1}/{len(tiles)}")
 
         # Encode off-thread; keep yielding so the GUI stays live.
@@ -193,6 +208,8 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
             futures.append(
                 pool.submit(write_exr_rgba, out_dir / "emission.exr", emission_full)
             )
+        if flow_on:
+            futures.append(pool.submit(write_exr_rgba, out_dir / "flow.exr", flow_full))
         while not all(f.done() for f in futures):
             yield Progress(len(tiles) + 1, total, "encoding")
             time.sleep(0.01)
@@ -217,6 +234,14 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 "file": "emission.exr", "format": "exr32f",
                 "colorspace": "non-color", "channels": 4,
                 "aurora_color": list(params.emission.aurora_color),
+            }
+        if flow_on:
+            # RG = (eastward, northward) sim per-step velocity; B=0, A=1. The
+            # convention string names the channel layout + units for the importer.
+            maps["flow"] = {
+                "file": "flow.exr", "format": "exr32f",
+                "colorspace": "non-color", "channels": 4,
+                "convention": "rg_east_north_texel_per_step",
             }
         manifest = build_manifest(
             name=params.name,
@@ -243,12 +268,16 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
         tile_detail.release()
         if tile_emission is not None:
             tile_emission.release()
+        if tile_flow is not None:
+            tile_flow.release()
         snap.release()
         if not completed:
             # Cancellation: remove only the files WE write (the user may have
             # picked a folder containing their own data), after the pool
             # drained so there are no Windows open-handle races.
-            for name in ("color.png", "height.exr", "emission.exr", MANIFEST_FILENAME):
+            for name in (
+                "color.png", "height.exr", "emission.exr", "flow.exr", MANIFEST_FILENAME
+            ):
                 (out_dir / name).unlink(missing_ok=True)
             log.info("export cancelled; partial output removed")
 
@@ -311,7 +340,14 @@ def export_sequence_job(
     Determinism note: the kinematic path is byte-exact across runs; vorticity
     frames carry compounding SOR LSB noise (structural guarantees only).
 
-    Extension point: additional per-frame maps (e.g. a future flow map) slot in
+    Flow map (T10): when ``export.flow_map`` is on, frame 0's ``export_job``
+    already writes the base ``flow.exr`` (and the manifest ``flow`` entry). A
+    per-frame flow sequence (``frames/flow_NNNN.exr``) is the natural extension
+    but is NOT yet wired here -- resample the velocity of each frame's snapshot
+    with ``sim.deriver.resample_flow`` beside the height/emission tiles and add a
+    ``flow`` list to ``maps_block`` (the same slot the note below describes).
+
+    Extension point: additional per-frame maps (e.g. per-frame flow) slot in
     beside height/emission — enqueue their encode alongside the others and add
     their file list to ``maps_block``.
     """
@@ -489,7 +525,9 @@ def export_sequence_job(
             if frames_dir.is_dir():
                 with contextlib.suppress(OSError):  # user data in frames/: leave it
                     frames_dir.rmdir()
-            for name in ("color.png", "height.exr", "emission.exr", MANIFEST_FILENAME):
+            for name in (
+                "color.png", "height.exr", "emission.exr", "flow.exr", MANIFEST_FILENAME
+            ):
                 (out_dir / name).unlink(missing_ok=True)
             log.info("sequence export cancelled; partial output removed")
 

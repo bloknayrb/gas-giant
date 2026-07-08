@@ -1515,6 +1515,15 @@ class ExportParams(_Params):
         2, tier=Tier.POST, lo=0, hi=9, ui="Export",
         description="PNG deflate level (low = much faster at 16K)",
     )
+    flow_map: bool = pfield(
+        False, tier=Tier.POST, ui="Export",
+        description="Also export flow.exr: the sim's per-step velocity field "
+                    "resampled to the equirect grid as an (east, north) flow "
+                    "map (R = eastward, G = northward; B=0, A=1), so Blender / a "
+                    "compositor can drive motion vectors or advected effects. "
+                    "Off by default -- the default export file-set (color + "
+                    "height) is unchanged. No rand.",
+    )
 
 
 class PlanetParams(_Params):
