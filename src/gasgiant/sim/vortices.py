@@ -547,7 +547,7 @@ def generate_vortices(
         _add_accent_ovals(reg, subseed(seed, "accent-ovals"), zones, profiles, storms)
     if storms.hero_companions > 0:
         _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
-                             storms.hero_companions)
+                             storms.hero_companions, storms.companion_aspect)
     # Atomic trim, mirroring the merger-pair rule: drop the newest entries
     # (accents/companions), never a pre-existing storm.
     while len(reg.vortices) > MAX_VORTICES:
@@ -588,7 +588,8 @@ def _add_accent_ovals(
     for lon in _poisson_lons(rng, storms.accent_count, min_sep=0.6):
         reg.vortices.append(
             Vortex(lat, lon, r, s, KIND_OVAL,
-                   tint=storms.accent_tint, brightness=storms.accent_brightness)
+                   tint=storms.accent_tint, brightness=storms.accent_brightness,
+                   aspect=storms.accent_aspect)
         )
 
 
@@ -597,6 +598,7 @@ def _add_hero_companions(
     rng: np.random.Generator,
     profiles: LatProfiles,
     count: int,
+    aspect: float = 1.0,
 ) -> None:
     """Bright companion clouds beside each hero (review B5-5: the Neptune GDS
     companion / Scooter class). KIND_PEARL stamps — bright spot with a slight
@@ -619,7 +621,8 @@ def _add_hero_companions(
             r = float(np.clip(0.30 * hero.r_core, 0.015, 0.035))
             s = _ambient_sign(profiles, lat) * 0.008
             reg.vortices.append(
-                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=0.32)
+                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=0.32,
+                       aspect=aspect)
             )
 
 

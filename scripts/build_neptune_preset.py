@@ -6,26 +6,36 @@ Neptune is NOT a recolored Jupiter. The batch-2 lesson: the Great Dark Spot leve
 sufficient; expressing a *different planet* is a whole-preset STRUCTURAL retune. So this
 starts from gas_giant_warm's proven vorticity engine and:
 
-  * drops the shear-masked eddy injection hard (vort_inject 1.8 -> 0.15) and raises
-    hyperviscosity -- the injection was folding the belts into Jupiter churn; without it
-    the belts are smooth broad Neptune zones;
+  * drops the shear-masked eddy injection to ZERO (vort_inject 1.8 -> 0) with strong
+    hyperviscosity -- injection folds the belts into Jupiter churn, and even a trace (0.06)
+    left a mechanical Kelvin-Helmholtz sawtooth along one jet edge that read as a "blue
+    Jupiter" tell under adversarial review. Laminar => smooth broad Neptune zones;
   * removes the planet-girdling Jupiter storm field (oval/barge/pearl/small -> 0) and the
-    festoons, leaving only the dark GDS hero + 2 bright companion clouds;
+    festoons, leaving only the dark GDS hero + 3 bright companion clouds;
   * collapses to a few soft low-contrast bands (count 22 -> 7, value_contrast 1.7 -> 0.55)
     with SMOOTH boundaries (no festoons, no ribbon) -- Voyager 2 shows no sharp band edge;
   * calms turbulence + strips the heavy Jupiter belt-texture detail;
-  * a bright vivid methane cobalt-azure palette (matched to the Voyager reference), bluish
-    haze, no polar tint/canvas, plus 2 bright blue-white accent clouds (Scooter class).
+  * a deep luminous methane cobalt-azure palette (matched to the Voyager reference; a first
+    brighter cut read as pale periwinkle, so this is deepened + pulled off cyan), bluish
+    haze, no polar tint/canvas;
+  * ONE bright blue-white accent cloud (Scooter class) ELONGATED into a wispy east-west
+    cirrus streak (accent_aspect), and the 3 GDS companion clouds likewise elongated
+    (companion_aspect) -- real Neptune bright clouds are sheared streaks, not round dots.
 
 The dark GDS hero is the reversed-LUT lever from W5 per-storm color: hero_tint -0.9 /
 hero_brightness -0.3 over hero_solid_core (a coherent oval, not a whirlpool), with the
 Jupiter-only rim/wake levers (rim_tint/rim_warp/wake_detail) zeroed -- the GDS has no red
 collar or turbulent trailing wake.
 
-NO kernel changes: every lever here already defaults to a no-op, so this only bakes preset
-values. Adding a NEW factory JSON changes no existing preset's output, so the p05 render-
-hash baseline is unaffected. The model_copy(update=) calls bypass pydantic bounds, so the
-preset is load_preset'd back at the end to PROVE it is in-bounds (save does not re-validate).
+The cloud-elongation levers (accent_aspect / companion_aspect) are a small engine capability
+added in the same PR: they route accent/companion stamps through the hero's generic
+elliptical-q aspect path plus a collar-free soft-streak glow branch. Both DEFAULT to 1.0
+(round) and short-circuit that path, so every existing preset is byte-identical and the p05
+render-hash baseline is unaffected. (True multi-strand "combed fiber" cirrus is NOT reachable
+by stamping -- the sim advects/diffuses fine tracer detail into a wash over the dev run; it
+needs a render-time synthesis pass on a dedicated cloud mask, recorded in docs/roadmap.md.)
+The model_copy(update=) calls bypass pydantic bounds, so the preset is load_preset'd back at
+the end to PROVE it is in-bounds (save does not re-validate).
 
 Run: uv run python scripts/build_neptune_preset.py
 """
@@ -38,14 +48,15 @@ from gasgiant.params.presets import load_factory_preset, load_preset, save_prese
 
 PRESETS_DIR = Path("src/gasgiant/presets")
 
-# Bright vivid methane cobalt-azure, matched to the Voyager 2 full-disk reference (the disk
-# is a luminous cobalt, NOT a dark navy). Deep cobalt gaps -> vivid azure -> pale blue-white
-# bright clouds; the top stays off pure white so bright clouds read blue-white.
+# Deep luminous methane cobalt-azure, matched to the Voyager 2 full-disk reference. A first
+# brighter cut read as pale periwinkle/cyan under adversarial review, so this is deepened
+# (rich cobalt shadows) and pulled off cyan (lower green vs blue): deep cobalt gaps -> saturated
+# royal -> vivid azure -> pale blue-white bright-cloud caps (top stays off pure white).
 DEEP_BLUE = [
-    (0.00, (0.10, 0.20, 0.45)),
-    (0.40, (0.18, 0.36, 0.68)),
-    (0.75, (0.34, 0.56, 0.82)),
-    (1.00, (0.66, 0.82, 0.96)),
+    (0.00, (0.04, 0.11, 0.44)),
+    (0.42, (0.07, 0.22, 0.66)),
+    (0.75, (0.16, 0.42, 0.80)),
+    (1.00, (0.55, 0.76, 0.95)),
 ]
 
 # Storm-tint LUT (indexed by the storm T3 tracer): a blue ramp so the dark GDS core and the
@@ -60,13 +71,14 @@ STORM_TINTS_NEPTUNE = [
 # broad smooth zones (the demo was calibrated at this depth).
 SIM = {"dev_steps": 1256}
 
-# Kill the Jupiter belt-churn engine: drop injection, raise hyperviscosity to erase residual
-# small-scale folds, and lean on psi-drag for gravest-mode calm. The solid-core hero is a
+# Kill the Jupiter belt-churn engine AND the residual shear billow: vort_inject 0 (fully
+# laminar zones -- even 0.06 left a mechanical Kelvin-Helmholtz sawtooth along one jet edge
+# that read as a "blue Jupiter" tell), with strong hyperviscosity. The solid-core hero is a
 # separate vorticity patch, so the coherent dark oval survives the calm field.
 SOLVER = {
-    "vort_inject": 0.15,
+    "vort_inject": 0.0,
     "vort_inject_scale": 1.2,
-    "vort_hypervisc": 1.0,
+    "vort_hypervisc": 1.5,
     "vort_psi_drag": 0.5,
 }
 
@@ -92,13 +104,16 @@ STORMS_HERO = {
     "hero_rim_tint": 0.0,     # no red collar (Jupiter GRS only)
     "hero_rim_warp": 0.0,
     "hero_wake_detail": 0.0,  # no turbulent trailing wake
+    "companion_aspect": 3.5,  # elongate the companion clouds into wispy east-west streaks
+                              # (real GDS companions are sheared cirrus, not round dots)
 }
 
 # Remove the planet-girdling Jupiter storm field -- only the hero + companions remain, plus
-# 2 bright blue-white ACCENT clouds (Neptune's discrete bright methane patches: the "Scooter"
-# + a companion streak). accent_tint 1.0 picks the storm_tint bright end (blue-white),
-# accent_brightness maxed; auto-placed in zones (accent_latitude=null). NOT a Jupiter field
-# (2 discrete accents, not density ~3 ovals/barges/pearls).
+# ONE bright blue-white ACCENT cloud (Neptune's discrete bright methane patch, the "Scooter"
+# class), ELONGATED east-west into a wispy streak. Single accent, not a pair: two accents
+# share one latitude+appearance and read as obvious clone stamps under review. accent_tint
+# 1.0 picks the storm_tint bright end (blue-white); accent_brightness kept semi-transparent
+# (0.32, not maxed) so it reads as a soft cirrus streak, not an opaque puff.
 STORMS_FIELD = {
     "oval_density": 0.0,
     "barge_density": 0.0,
@@ -106,10 +121,11 @@ STORMS_FIELD = {
     "small_density": 0.0,
     "outbreak_count": 1,
     "outbreak_strength": 1.0,
-    "accent_count": 2,
+    "accent_count": 1,
     "accent_tint": 1.0,
-    "accent_brightness": 0.5,
+    "accent_brightness": 0.32,
     "accent_radius": 0.06,
+    "accent_aspect": 4.0,     # elongate into a wispy east-west cirrus streak
 }
 
 TURBULENCE = {
@@ -132,7 +148,7 @@ APPEARANCE_SCALARS = {
     "haze_amount": 0.25,
     "haze_color": (0.55, 0.70, 0.85),
     "contrast": 0.95,
-    "saturation": 1.05,
+    "saturation": 1.3,
     "chroma_variance": 0.0,
     "hue_variance": 0.0,
     "chroma_aging": 0.0,
@@ -179,15 +195,17 @@ def build() -> None:
     save_preset(p, out, name="neptune")
     # Prove it is in-bounds (save_preset does not re-validate; load_preset does).
     reloaded = load_preset(out)
-    assert reloaded.solver.vort_inject == 0.15
+    assert reloaded.solver.vort_inject == 0.0
     assert reloaded.storms.hero_tint == -0.9
     assert reloaded.storms.hero_companions == 3
+    assert reloaded.storms.companion_aspect == 3.5
     assert reloaded.storms.oval_density == 0.0
-    assert reloaded.storms.accent_count == 2
+    assert reloaded.storms.accent_count == 1
+    assert reloaded.storms.accent_aspect == 4.0
     assert reloaded.waves.ribbon_strength == 0.0
     assert reloaded.bands.count == 7
     assert len(reloaded.appearance.palette_rows) == 1
-    assert list(reloaded.appearance.palette_rows[0].stops[0].color) == [0.10, 0.20, 0.45]
+    assert list(reloaded.appearance.palette_rows[0].stops[0].color) == [0.04, 0.11, 0.44]
     print(f"wrote + verified {out}", flush=True)
 
 

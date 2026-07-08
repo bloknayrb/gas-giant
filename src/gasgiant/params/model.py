@@ -534,6 +534,15 @@ class StormsParams(_Params):
                     "seeded on their own substream after the population cap. "
                     "0 = off (byte-identical)",
     )
+    companion_aspect: float = pfield(
+        1.0, tier=Tier.RESTART, lo=1.0, hi=5.0, adv=True, ui="Hero",
+        description="East-west elongation (lon:lat) of the bright companion "
+                    "clouds; 1.0 = round. Stretches each KIND_PEARL companion "
+                    "into a wispy cirrus streak beside the hero (real Neptune's "
+                    "GDS companion clouds are sheared streaks, not round dots), "
+                    "via the same generic aspect path as hero_aspect. "
+                    "1.0 = round (byte-identical)",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(
@@ -592,6 +601,13 @@ class StormsParams(_Params):
                     "vortex_omega.glsl), so oval_solid_core>0 keeps accents "
                     "coherent in vorticity mode; below 0.035 they stay Gaussian "
                     "and can wind into eddies over a long dev run (F07)",
+    )
+    accent_aspect: float = pfield(
+        1.0, tier=Tier.RESTART, lo=1.0, hi=5.0, adv=True, ui="Accents",
+        description="Accent oval east-west elongation (lon:lat); 1.0 = round. "
+                    "Stretches the bright accent stamp into a wispy cirrus streak "
+                    "(Neptune bright-cloud / Scooter class) via the same generic "
+                    "aspect path as hero_aspect. 1.0 = round (byte-identical)",
     )
 
     # -- Barges -------------------------------------------------------------

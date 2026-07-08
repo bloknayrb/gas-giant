@@ -16,9 +16,9 @@
       "sor_omega": 1.7,
       "deformation_radius": 0.18,
       "vort_relax_tau": 600.0,
-      "vort_hypervisc": 1.0,
+      "vort_hypervisc": 1.5,
       "coriolis_f0": 3.0,
-      "vort_inject": 0.15,
+      "vort_inject": 0.0,
       "vort_inject_scale": 1.2,
       "vort_inject_mask": "shear",
       "vort_drag": 0.0,
@@ -132,13 +132,15 @@
       "hero_tint": -0.9,
       "hero_brightness": -0.3,
       "hero_companions": 3,
+      "companion_aspect": 3.5,
       "oval_density": 0.0,
       "oval_solid_core": 0.0,
-      "accent_count": 2,
+      "accent_count": 1,
       "accent_latitude": null,
       "accent_tint": 1.0,
-      "accent_brightness": 0.5,
+      "accent_brightness": 0.32,
       "accent_radius": 0.06,
+      "accent_aspect": 4.0,
       "barge_density": 0.0,
       "pearls_count": 0,
       "outbreak_count": 1,
@@ -183,33 +185,33 @@
             {
               "pos": 0.0,
               "color": [
-                0.1,
-                0.2,
-                0.45
+                0.04,
+                0.11,
+                0.44
               ]
             },
             {
-              "pos": 0.4,
+              "pos": 0.42,
               "color": [
-                0.18,
-                0.36,
-                0.68
+                0.07,
+                0.22,
+                0.66
               ]
             },
             {
               "pos": 0.75,
               "color": [
-                0.34,
-                0.56,
-                0.82
+                0.16,
+                0.42,
+                0.8
               ]
             },
             {
               "pos": 1.0,
               "color": [
-                0.66,
-                0.82,
-                0.96
+                0.55,
+                0.76,
+                0.95
               ]
             }
           ]
@@ -248,7 +250,7 @@
         0.85
       ],
       "contrast": 0.95,
-      "saturation": 1.05,
+      "saturation": 1.3,
       "gamma": 1.0,
       "chroma_scale": 1.0,
       "chroma_variance": 0.0,

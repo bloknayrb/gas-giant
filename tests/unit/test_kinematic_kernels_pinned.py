@@ -46,7 +46,12 @@ _PINNED: dict[str, str] = {
     # tracer-side hero wake mirrors psi.comp — wake_lat_off lane read,
     # |across| 2.5 locality window. INTENTIONAL pixel change on presets with
     # heroes; P0.5 baseline advanced the same day (scripts/p05_baseline_hash.py).
-    "vortex_stamp.glsl": "57524532a8c40952941a750b0b01921869e12a3c",
+    # Updated 2026-07-08 (neptune cirrus-streak lever): the OVAL/PEARL stamp
+    # else-branch gained an `asp > 1.0` path (soft collar-free feathered glow +
+    # flow-frame noise modulation) for elongated bright accent/companion clouds.
+    # asp==1.0 (every existing preset's accents/companions) short-circuits it =>
+    # byte-identical kinematic output; p05 baseline unchanged (9/9 match).
+    "vortex_stamp.glsl": "a9ac4c262603c514499faed3aa92f8b987448408",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }
