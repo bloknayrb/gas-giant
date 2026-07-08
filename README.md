@@ -60,7 +60,7 @@ uv run gasgiant export --preset jupiter_vorticity --frames 120 \
 
 ## Presets
 
-Five factory presets ship in `src/gasgiant/presets/`. Each image below is that
+Six factory presets ship in `src/gasgiant/presets/`. Each image below is that
 preset developed for 1,000 steps, exported as the raw equirectangular color map
 — the same texture that wraps onto the sphere. Parameter details and the
 manifest contract: `docs/presets.md`.
@@ -87,10 +87,16 @@ bands and pale ovals.
 
 ![saturn_pale developed for 1,000 steps](docs/img/presets/saturn_pale.png)
 
-**`ice_giant`** — a Neptune/Uranus-like ice giant: cool blue banding with a
+**`ice_giant`** — a Uranus-like ice giant: cool, pale blue banding with a
 discrete dark vortex.
 
 ![ice_giant developed for 1,000 steps](docs/img/presets/ice_giant.png)
+
+**`neptune`** — a deep methane-blue Neptune: smooth broad zones (laminar, no
+belt churn), a dark Great-Dark-Spot anticyclone with bright companion clouds,
+and wind-sheared cirrus streaks.
+
+![neptune developed for 1,000 steps](docs/img/presets/neptune.png)
 
 > Generated with `scripts/render_readme_examples.py` (a reduced sim grid keeps
 > the set tractable under software GL; the shipped presets develop at

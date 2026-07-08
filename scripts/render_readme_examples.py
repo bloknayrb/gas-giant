@@ -32,6 +32,7 @@ PRESETS = [
     "jupiter_vorticity",
     "saturn_pale",
     "ice_giant",
+    "neptune",
 ]
 
 
