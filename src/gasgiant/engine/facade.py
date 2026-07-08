@@ -442,6 +442,25 @@ class Simulation:
             return self._preview_emission, True
         return self._preview_emission, False
 
+    def snapshot_preview_color(self) -> moderngl.Texture:
+        """A GPU-side CLONE of the current color-preview texture, for the
+        viewport's A/B compare. The CALLER OWNS the returned texture and MUST
+        release it (the facade does not track it) -- so the app releases any
+        previously-held snapshot before capturing a new one (no leak on retake).
+
+        ``ensure_preview`` must have populated the preview first (it runs every
+        viewport frame, so this holds by the time any button can be clicked);
+        raises if not. ``clone_texture`` leaves an offscreen FBO bound, so this
+        rebinds the default framebuffer before returning -- imgui's native
+        backend renders into whatever is bound."""
+        if self._preview_color is None:
+            raise RuntimeError(
+                "no preview to snapshot; call ensure_preview() first"
+            )
+        clone = self.gpu.clone_texture(self._preview_color)
+        self.gpu.ctx.screen.use()
+        return clone
+
     @property
     def preview_height_texture(self) -> moderngl.Texture | None:
         return self._preview_height

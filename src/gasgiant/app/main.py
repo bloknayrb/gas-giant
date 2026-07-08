@@ -544,6 +544,16 @@ class StudioApp:
         self._storm_tool_radius = 0.03  # placement radius (StormOverride default)
         self._drag_index: int | None = None  # cast index being dragged
         self._drag_lonlat: tuple[float, float] | None = None  # live cursor lon/lat
+        # T5: A/B compare + ROI export-res inspector. _snapshot_a is an
+        # app-OWNED clone of the color preview (released on retake / never leaked);
+        # the ROI tile is likewise app-owned (released on close/retake).
+        self._snapshot_a = None  # moderngl.Texture | None
+        self._compare_mode = "off"  # "off" | "flash" | "split"
+        self._flash_show_a = False  # flash mode: True shows A, False shows live
+        self._show_inspect = False
+        self._inspect_center = (0.5, 0.5)  # normalized (x, y) ROI tile center
+        self._inspect_tile = None  # moderngl.Texture | None (ROI color tile)
+        self._inspect_label = ""
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -1412,21 +1422,29 @@ class StudioApp:
         self._single_step_requested = False
         if step_now and self.sim.tick(self._steps_per_frame):
             self.viewport.mark_stale()
-        self.viewport.draw(self.sim, PREVIEW_WIDTH)
-        # T4: marker overlay + place/drag tool. These use the window draw list /
-        # imgui widgets, so they must run inside this (the Equirect window)
-        # callback, right after the image was blitted and its rect captured. The
-        # guard keeps draw_equirect a pure tick/blit body when driven headlessly
-        # (no image -> image_rect_min is None -> no imgui calls), preserving the
-        # invariant its playback tests rely on.
+        self.viewport.draw(
+            self.sim, PREVIEW_WIDTH,
+            compare_mode=self._compare_mode,
+            snapshot_a=self._snapshot_a,
+            flash_show_a=self._flash_show_a,
+        )
+        # imgui-drawing block for the Equirect window. Everything here uses imgui
+        # widgets / the window draw list, so it must run right after the image was
+        # blitted and its rect captured. The guard keeps draw_equirect a pure
+        # tick/blit body when driven headlessly (no image -> image_rect_min is
+        # None -> no imgui calls), preserving the invariant its playback tests
+        # rely on. The T5 A/B compare + ROI controls always draw here; the T4
+        # storm tool additionally needs a hit-testable (non-compare) equirect.
         if self.viewport.image_rect_min is not None:
-            self.viewport.draw_markers(
-                self.params.storms.cast,
-                drag_index=self._drag_index,
-                drag_lonlat=self._drag_lonlat,
-            )
-            self._draw_storm_tool_ui()
-            self._handle_storm_tool()
+            self._draw_compare_controls()
+            if self.viewport.hit_testable:
+                self.viewport.draw_markers(
+                    self.params.storms.cast,
+                    drag_index=self._drag_index,
+                    drag_lonlat=self._drag_lonlat,
+                )
+                self._draw_storm_tool_ui()
+                self._handle_storm_tool()
         self.render_perf.end()
 
     # -- T4: click-to-place / drag-to-move storms --------------------------------
@@ -1593,6 +1611,148 @@ class StudioApp:
         self._commit(new)
         self._reset_working_copy()  # discrete action wins over pending edit
 
+    # -- T5: A/B compare + ROI export-res inspector ------------------------------
+
+    def _compare_active(self) -> bool:
+        """Compare draws only when a mode is selected AND snapshot A is held; a
+        mode chosen with no snapshot is an inert no-op (viewport shows live)."""
+        return self._compare_mode != "off" and self._snapshot_a is not None
+
+    def _take_snapshot_a(self) -> None:
+        """Capture the current color preview into snapshot A, RELEASING any
+        previously-held snapshot first (no leak on retake). The app owns the
+        returned clone (facade contract); on failure the old snapshot is kept."""
+        try:
+            new = self.sim.snapshot_preview_color()
+        except RuntimeError as exc:  # no preview yet (shouldn't happen post-first-frame)
+            self.toasts.error(str(exc))
+            return
+        if self._snapshot_a is not None:
+            self._snapshot_a.release()
+        self._snapshot_a = new
+        self.toasts.info("captured snapshot A")
+
+    def _draw_compare_controls(self) -> None:
+        """A/B compare + ROI toolbar under the viewport: take snapshot A, a mode
+        selector (off/flash/split; disabled until A is held), the flash A/live
+        toggle, and the ROI inspector opener (gated during export)."""
+        if imgui.button("Take snapshot A"):
+            self._take_snapshot_a()
+        imgui.same_line()
+        have_a = self._snapshot_a is not None
+        imgui.begin_disabled(not have_a)
+        modes = ["off", "flash", "split"]
+        cur = modes.index(self._compare_mode) if self._compare_mode in modes else 0
+        imgui.set_next_item_width(90.0)
+        changed, idx = imgui.combo("compare##ab", cur, modes)
+        if changed:
+            self._compare_mode = modes[idx]
+        if self._compare_mode == "flash":
+            imgui.same_line()
+            if imgui.button("Show live" if self._flash_show_a else "Show A"):
+                self._flash_show_a = not self._flash_show_a
+        imgui.end_disabled()
+        if not have_a:
+            imgui.same_line()
+            imgui.text_disabled("(take snapshot A to compare)")
+        imgui.same_line()
+        exporting = self._export is not None
+        imgui.begin_disabled(exporting)
+        if imgui.button("Inspect region..."):
+            self._show_inspect = True
+            self._run_inspect()
+        imgui.end_disabled()
+
+    def _run_inspect(self) -> None:
+        """Render ONE export-resolution tile centered on the picked region from a
+        consistent snapshot and hold it for display. GATED while an export is in
+        flight (deriver / detail-synth state is shared -- same guard as every
+        discrete action). Releases the snapshot immediately and the prior tile on
+        retake; the tile is app-owned (released on close). The inspected tile is
+        byte-for-byte the corresponding crop of a full export at the same dims/
+        origin (kinematic mode)."""
+        if self._export is not None:
+            return  # defense-in-depth: never touch the shared deriver mid-export
+        from gasgiant.export.exporter import TILE, derive_tile, roi_tile_origin
+
+        w = self.params.export.width
+        h = w // 2
+        cx, cy = self._inspect_center
+        x0, y0 = roi_tile_origin(cx, cy, w, h, TILE)
+        snap = self.sim.create_snapshot()
+        n_step = self.sim.steps_done
+        m_step = snap.params.sim.dev_steps
+        tile_color = self.gpu.texture2d((TILE, TILE), 4, "f4")
+        tile_height = self.gpu.texture2d((TILE, TILE), 1, "f4")
+        tile_detail = self.gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
+        ok = False
+        try:
+            derive_tile(
+                self.sim, snap, snap.params, x0, y0, w, h,
+                tile_color, tile_height, tile_detail, None,
+            )
+            ok = True
+        finally:
+            tile_height.release()
+            tile_detail.release()
+            snap.release()
+            # FBO hygiene: create_snapshot's clone_texture (and derive) leave an
+            # offscreen FBO bound; rebind the default framebuffer for imgui.
+            self.gpu.ctx.screen.use()
+            if not ok:
+                tile_color.release()
+        if self._inspect_tile is not None:
+            self._inspect_tile.release()
+        self._inspect_tile = tile_color
+        self._inspect_label = (
+            f"tile origin ({x0}, {y0}) at {w}x{h} · as of step {n_step} / {m_step}"
+        )
+
+    def _release_inspect(self) -> None:
+        if self._inspect_tile is not None:
+            self._inspect_tile.release()
+            self._inspect_tile = None
+        self._inspect_label = ""
+
+    def _draw_inspect_window(self) -> None:
+        """The ROI inspector window (drawn from gui_overlays, like Help). Picks a
+        normalized region center, renders one export-resolution tile, and shows
+        it 1:1. Render is gated while an export is in flight."""
+        if not self._show_inspect:
+            return
+        imgui.set_next_window_size(imgui.ImVec2(560.0, 660.0), imgui.Cond_.first_use_ever)
+        opened, self._show_inspect = imgui.begin("ROI inspector", self._show_inspect)
+        if opened:
+            imgui.text_wrapped(
+                "Renders one export-resolution tile so you can check fine detail "
+                "without a full export. Pick a region center, then Render."
+            )
+            cx, cy = self._inspect_center
+            xchg, cx = imgui.slider_float("center x##roi", cx, 0.0, 1.0)
+            ychg, cy = imgui.slider_float("center y##roi", cy, 0.0, 1.0)
+            if xchg or ychg:
+                self._inspect_center = (cx, cy)
+            exporting = self._export is not None
+            imgui.begin_disabled(exporting)
+            if imgui.button("Render region"):
+                self._run_inspect()
+            imgui.end_disabled()
+            if exporting:
+                imgui.same_line()
+                imgui.text_disabled("paused during export")
+            if self._inspect_tile is not None:
+                imgui.separator()
+                imgui.text(self._inspect_label)
+                avail = imgui.get_content_region_avail()
+                side = max(min(avail.x, 512.0), 64.0)
+                imgui.image(
+                    imgui.ImTextureRef(self._inspect_tile.glo),
+                    imgui.ImVec2(side, side),
+                )
+        imgui.end()
+        if not self._show_inspect:  # window just closed via its title-bar X
+            self._release_inspect()
+
     def draw_sphere(self) -> None:
         if self.sim is None:  # init_gl failed; the runner is already exiting
             return
@@ -1723,6 +1883,7 @@ class StudioApp:
         self._draw_dev_overlay()
         self.toasts.draw()
         self.draw_help()
+        self._draw_inspect_window()
 
     def _draw_dev_overlay(self) -> None:
         """B1-1: one line over the viewport while the dev run evolves, so the

@@ -66,7 +66,7 @@ class FakeViewport:
     def mark_stale(self) -> None:
         self.stale += 1
 
-    def draw(self, sim, width) -> None:  # noqa: ARG002 - matches EquirectViewport.draw
+    def draw(self, sim, width, **kwargs) -> None:  # noqa: ARG002 - matches EquirectViewport.draw
         self.draw_calls += 1
 
     def draw_markers(self, cast, **kwargs) -> None:  # noqa: ARG002 - matches EquirectViewport
@@ -81,6 +81,10 @@ def _make_app(*, playing: bool, steps_per_frame: int, single_step: bool, target:
     app._playing = playing
     app._steps_per_frame = steps_per_frame
     app._single_step_requested = single_step
+    # T5 A/B compare state read by draw_equirect when calling viewport.draw.
+    app._compare_mode = "off"
+    app._snapshot_a = None
+    app._flash_show_a = False
     return app
 
 

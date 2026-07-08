@@ -43,7 +43,29 @@ log = logging.getLogger(__name__)
 TILE = 1024
 
 
-def _derive_tile(
+def roi_tile_origin(
+    center_x: float,
+    center_y: float,
+    full_w: int,
+    full_h: int,
+    tile: int = TILE,
+) -> tuple[int, int]:
+    """Top-left origin of a ``tile``-sized ROI centered (as closely as the map
+    bounds allow) on the normalized point ``(center_x, center_y)`` -- each in
+    [0, 1] -- of a ``(full_w, full_h)`` map. Clamped so the tile stays wholly
+    inside the map; when the map is smaller than the tile on an axis the origin
+    is 0 there. Pure (no GL) so the ROI inspector's region math is unit-testable
+    without a context. The tile it locates is byte-for-byte the corresponding
+    crop of a full export at the same dims (see derive_tile's origin/full_size)."""
+    def axis(c: float, full: int) -> int:
+        if full <= tile:
+            return 0
+        o = int(round(c * full - tile / 2.0))
+        return max(0, min(full - tile, o))
+    return axis(center_x, full_w), axis(center_y, full_h)
+
+
+def derive_tile(
     sim: Any,
     snap: Any,
     params: Any,
@@ -128,7 +150,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
         for i, (x0, y0) in enumerate(tiles):
             tw = min(TILE, w - x0)
             th = min(TILE, h - y0)
-            _derive_tile(
+            derive_tile(
                 sim, snap, params, x0, y0, w, h,
                 tile_color, tile_height, tile_detail, tile_emission,
             )
@@ -279,7 +301,7 @@ def export_sequence_job(
                 for x0, y0 in tiles:
                     tw = min(TILE, w - x0)
                     th = min(TILE, h - y0)
-                    _derive_tile(
+                    derive_tile(
                         sim, snap, snap.params, x0, y0, w, h,
                         tile_color, tile_height, tile_detail, None,
                     )

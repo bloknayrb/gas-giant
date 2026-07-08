@@ -85,7 +85,7 @@ def test_facade_preview_spread_differs(gpu):
 def test_export_tiled_matches_full_at_spread(gpu):
     """Tiled export must equal a single-tile render at spread>0: the SPREAD
     weights are functions of absolute lon/lat, so they are seam-safe."""
-    from gasgiant.export.exporter import _derive_tile
+    from gasgiant.export.exporter import derive_tile
 
     sim = _warm_sim(gpu, res=512)
     p2 = sim.params.model_copy(deep=True)
@@ -97,12 +97,12 @@ def test_export_tiled_matches_full_at_spread(gpu):
     full_c = gpu.texture2d((w, h), 4, "f4")
     full_hh = gpu.texture2d((w, h), 1, "f4")
     full_d = gpu.texture2d((w, h), 1, "f4", linear=True)
-    _derive_tile(sim, snap, snap.params, 0, 0, w, h, full_c, full_hh, full_d, None)
+    derive_tile(sim, snap, snap.params, 0, 0, w, h, full_c, full_hh, full_d, None)
     full = gpu.read_texture(full_c).copy()
     tile_c = gpu.texture2d((w, h // 2), 4, "f4")
     tile_hh = gpu.texture2d((w, h // 2), 1, "f4")
     tile_d = gpu.texture2d((w, h // 2), 1, "f4", linear=True)
-    _derive_tile(sim, snap, snap.params, 0, 0, w, h, tile_c, tile_hh, tile_d, None)
+    derive_tile(sim, snap, snap.params, 0, 0, w, h, tile_c, tile_hh, tile_d, None)
     top = gpu.read_texture(tile_c)[: h // 2].copy()
     np.testing.assert_allclose(full[: h // 2], top, atol=1e-3)
     snap.release()

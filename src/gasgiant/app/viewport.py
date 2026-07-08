@@ -154,14 +154,26 @@ class EquirectViewport:
         self._display: moderngl.Texture | None = None
         self._fbo: moderngl.Framebuffer | None = None
         self._stale = True
+        # T5 A/B compare: snapshot A gets its OWN view-transformed display
+        # texture so the split/flash compare is apples-to-apples (same AgX pass
+        # as the live side). _display_a_glo pins which snapshot is currently
+        # baked in, so a fresh snapshot re-renders even when nothing else moved.
+        self._display_a: moderngl.Texture | None = None
+        self._fbo_a: moderngl.Framebuffer | None = None
+        self._display_a_glo: int | None = None
+        self._compare_stale = True
         # (x, y) pixel corners of the on-screen equirect image, captured after
         # imgui.image() each frame so main.py can hit-test the storm tool. None
         # whenever no image was drawn this frame (e.g. emission disabled).
         self.image_rect_min: tuple[float, float] | None = None
         self.image_rect_max: tuple[float, float] | None = None
+        # True only for the normal single-image equirect (a hit-testable map for
+        # the storm tool); False during an A/B compare split/flash view.
+        self.hit_testable = False
 
     def mark_stale(self) -> None:
         self._stale = True
+        self._compare_stale = True
 
     def _ensure_display(self, size: tuple[int, int]) -> None:
         if self._display is not None and self._display.size == size:
@@ -173,11 +185,20 @@ class EquirectViewport:
         self._fbo = self.gpu.framebuffer(self._display)
         self._stale = True
 
-    def draw(self, sim: Simulation, preview_width: int) -> None:
+    def draw(
+        self,
+        sim: Simulation,
+        preview_width: int,
+        *,
+        compare_mode: str = "off",
+        snapshot_a: moderngl.Texture | None = None,
+        flash_show_a: bool = False,
+    ) -> None:
         # Reset each frame: an early return (emission disabled) leaves no image,
         # so the tool must not hit-test against a stale rect.
         self.image_rect_min = None
         self.image_rect_max = None
+        self.hit_testable = False
         src, rerendered = sim.ensure_preview(preview_width)
         if rerendered:
             self._stale = True
@@ -190,6 +211,7 @@ class EquirectViewport:
         changed, self.agx = imgui.checkbox("AgX preview", self.agx)
         if changed:
             self._stale = True
+            self._compare_stale = True  # snapshot A shares the AgX view transform
 
         # Emission derives via its own preview path (separate scratch textures +
         # dirty flag) only when its channel is selected -- don't force the extra
@@ -231,11 +253,106 @@ class EquirectViewport:
         if h > avail.y > 64.0:
             h = avail.y
             w = h * 2.0
+
+        # T5 A/B compare (only when a mode is chosen AND snapshot A is held).
+        # A split/flash view is NOT a hit-testable equirect: image_rect_* is set
+        # (so the app's imgui block still runs) but hit_testable stays False, so
+        # the storm tool disengages.
+        if compare_mode != "off" and snapshot_a is not None:
+            self._render_compare_a(snapshot_a)
+            p0 = imgui.get_cursor_screen_pos()
+            if compare_mode == "split":
+                self._draw_compare_split(w, h)
+            else:  # "flash": whole image, toggled between A and live
+                self._draw_compare_single(
+                    self._display_a if flash_show_a else self._display,
+                    "A (snapshot)" if flash_show_a else "live",
+                    w, h,
+                )
+            self.image_rect_min = (p0.x, p0.y)
+            self.image_rect_max = (p0.x + w, p0.y + h)
+            return
+
         imgui.image(imgui.ImTextureRef(self._display.glo), imgui.ImVec2(w, h))
         rmin = imgui.get_item_rect_min()
         rmax = imgui.get_item_rect_max()
         self.image_rect_min = (rmin.x, rmin.y)
         self.image_rect_max = (rmax.x, rmax.y)
+        self.hit_testable = True
+
+    # -- T5 A/B compare rendering ------------------------------------------------
+
+    def _ensure_display_a(self, size: tuple[int, int]) -> None:
+        if self._display_a is not None and self._display_a.size == size:
+            return
+        if self._display_a is not None:
+            self._fbo_a.release()
+            self._display_a.release()
+        self._display_a = self.gpu.texture2d(size, components=4, dtype="f1")
+        self._fbo_a = self.gpu.framebuffer(self._display_a)
+        self._compare_stale = True
+
+    def _render_compare_a(self, snapshot_a: moderngl.Texture) -> None:
+        """View-transform the held snapshot-A color texture into its OWN display
+        texture through the SAME pass (and current AgX mode) the live side uses,
+        so the compare is apples-to-apples. Snapshot A is always the Color
+        channel -- it is a clone of the color preview. Re-renders only when the
+        view went stale or a fresh snapshot was taken. This binds an offscreen
+        FBO, so it rebinds the default framebuffer before returning (imgui's
+        native backend renders into whatever is bound)."""
+        self._ensure_display_a(snapshot_a.size)
+        if not self._compare_stale and self._display_a_glo == snapshot_a.glo:
+            return
+        snapshot_a.use(location=0)
+        self.pass_.prog["u_image"].value = 0
+        self.pass_.prog["u_mode"].value = 1 if self.agx else 0
+        self.pass_.prog["u_channel"].value = 0
+        self.pass_.prog["u_aurora"].value = (0.0, 0.0, 0.0)
+        self.pass_.render(self._fbo_a)
+        self._compare_stale = False
+        self._display_a_glo = snapshot_a.glo
+        self.gpu.ctx.screen.use()  # rebind default framebuffer for imgui
+
+    def _draw_compare_split(self, w: float, h: float) -> None:
+        """Vertical split: left half = snapshot A, right half = live. Each half
+        samples its OWN half of the source via uv0/uv1 (imgui-bundle 1.92's
+        imgui.image takes uv0/uv1 directly), so there is no horizontal squash."""
+        half = w * 0.5
+        p0 = imgui.get_cursor_screen_pos()
+        imgui.image(
+            imgui.ImTextureRef(self._display_a.glo), imgui.ImVec2(half, h),
+            imgui.ImVec2(0.0, 0.0), imgui.ImVec2(0.5, 1.0),
+        )
+        imgui.same_line(0.0, 0.0)
+        imgui.image(
+            imgui.ImTextureRef(self._display.glo), imgui.ImVec2(half, h),
+            imgui.ImVec2(0.5, 0.0), imgui.ImVec2(1.0, 1.0),
+        )
+        draw_list = imgui.get_window_draw_list()
+        mid = p0.x + half
+        line = imgui.get_color_u32(imgui.ImVec4(1.0, 1.0, 1.0, 0.9))
+        draw_list.add_line(imgui.ImVec2(mid, p0.y), imgui.ImVec2(mid, p0.y + h), line, 1.5)
+        self._overlay_label(draw_list, p0.x + 6.0, p0.y + 6.0, "A (snapshot)")
+        self._overlay_label(draw_list, mid + 6.0, p0.y + 6.0, "live")
+
+    def _draw_compare_single(
+        self, display: moderngl.Texture | None, label: str, w: float, h: float
+    ) -> None:
+        p0 = imgui.get_cursor_screen_pos()
+        imgui.image(imgui.ImTextureRef(display.glo), imgui.ImVec2(w, h))
+        draw_list = imgui.get_window_draw_list()
+        self._overlay_label(draw_list, p0.x + 6.0, p0.y + 6.0, f"showing: {label}")
+
+    @staticmethod
+    def _overlay_label(draw_list, x: float, y: float, text: str) -> None:
+        bg = imgui.get_color_u32(imgui.ImVec4(0.0, 0.0, 0.0, 0.55))
+        fg = imgui.get_color_u32(imgui.ImVec4(1.0, 1.0, 1.0, 1.0))
+        ts = imgui.calc_text_size(text)
+        draw_list.add_rect_filled(
+            imgui.ImVec2(x - 3.0, y - 2.0),
+            imgui.ImVec2(x + ts.x + 3.0, y + ts.y + 2.0), bg,
+        )
+        draw_list.add_text(imgui.ImVec2(x, y), fg, text)
 
     def draw_markers(self, cast, *, drag_index=None, drag_lonlat=None) -> None:
         """Overlay a marker (color-coded circle + kind glyph) at each cast
