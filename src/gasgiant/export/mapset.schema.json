@@ -70,7 +70,7 @@
     "preset": { "type": "object" },
     "frames": {
       "type": "object",
-      "description": "Optional animation sequence: color-only frames rendered steps_per_frame sim steps apart; frames/frame_0000.png duplicates maps.color. Absent for single-mapset exports.",
+      "description": "Optional animation sequence rendered steps_per_frame sim steps apart; frames/frame_0000.png duplicates maps.color. 'files' is always the color-frame list. The optional 'maps' sub-block lists per-map frame files (height/emission) when the sequence was exported with all-maps; 'video' is a relative mp4 path. Both are additive - tolerant readers ignore them. Absent for single-mapset exports.",
       "required": ["count", "steps_per_frame", "files"],
       "properties": {
         "count": { "type": "integer", "minimum": 1 },
@@ -80,7 +80,17 @@
           "type": "array",
           "items": { "type": "string" },
           "minItems": 1
-        }
+        },
+        "maps": {
+          "type": "object",
+          "description": "Per-map frame file lists (all-maps sequence export); each value parallels 'files' index-for-index.",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        },
+        "video": { "type": "string" }
       }
     }
   }

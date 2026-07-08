@@ -41,6 +41,14 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--steps-per-frame", type=int, default=None,
                      help="sim steps advanced between sequence frames "
                           "(required with --frames)")
+    exp.add_argument("--all-maps", action="store_true",
+                     help="with --frames: also write height (and emission, when "
+                          "enabled) per frame into frames/, not just color")
+    exp.add_argument("--video", action="store_true",
+                     help="with --frames: encode the color frames into an mp4 "
+                          "via ffmpeg (must be on PATH)")
+    exp.add_argument("--fps", type=int, default=24,
+                     help="frames per second for --video (default 24)")
     exp.add_argument("--seed", type=int, default=None, help="override the preset seed")
     exp.add_argument("--name", default=None, help="override the planet name")
     exp.add_argument("--out", type=Path, required=True, help="output map-set directory")
@@ -156,6 +164,7 @@ def _export(args: argparse.Namespace) -> int:
     from gasgiant.engine import Simulation
     from gasgiant.engine.checkpoint import load_checkpoint
     from gasgiant.export.exporter import run_export, run_export_sequence
+    from gasgiant.export.video import ffmpeg_available as _ffmpeg_available
 
     if (args.frames is None) != (args.steps_per_frame is None):
         print("error: --frames and --steps-per-frame must be given together",
@@ -193,8 +202,12 @@ def _export(args: argparse.Namespace) -> int:
         sim = Simulation(params)
 
     if args.frames is not None:
+        if args.video and not _ffmpeg_available():
+            print("error: --video needs ffmpeg on PATH (not found)", file=sys.stderr)
+            return 2
         run_export_sequence(
-            sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame
+            sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame,
+            all_maps=args.all_maps, video=args.video, fps=args.fps,
         )
     else:
         run_export(sim, args.out)

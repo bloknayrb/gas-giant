@@ -41,8 +41,9 @@ from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
 from gasgiant.engine.checkpoint import load_checkpoint, save_checkpoint
 from gasgiant.engine.invalidation import diff_tiers
-from gasgiant.export.exporter import export_job
+from gasgiant.export.exporter import export_job, export_sequence_job
 from gasgiant.export.manifest import MANIFEST_FILENAME
+from gasgiant.export.video import ffmpeg_available
 from gasgiant.gl import GpuContext
 from gasgiant.jobs import Progress
 from gasgiant.params.model import (
@@ -555,6 +556,23 @@ class StudioApp:
         # B1-4: a picked export folder that already contains a map set, held
         # here until the user confirms/cancels the overwrite modal.
         self._pending_export: tuple[Path, list[str]] | None = None
+        # T7: sequence-export settings, edited in the Export modal's Sequence
+        # section. frames == 1 means the plain single-mapset export; > 1 drives
+        # export_sequence_job. all_maps/video are opt-in; fps feeds the ffmpeg
+        # encode. These are session-local app state (not planet params).
+        self._seq_frames = 1
+        self._seq_steps_per_frame = 30
+        self._seq_all_maps = False
+        self._seq_video = False
+        self._seq_fps = 24
+        # T7: whether to restart the dev run once a sequence export finishes
+        # (a sequence advances the LIVE sim forward via extend_run, so the
+        # in-app preview ends at the final frame unless rebuilt).
+        self._restart_dev_after_export = False
+        # T7: set true while a sequence export is in flight, so the completion
+        # handler knows to honor _restart_dev_after_export (a plain single-map
+        # export never advances the sim, so it never restarts).
+        self._export_is_sequence = False
         # B1-8: (name, path) of a user preset awaiting overwrite/delete
         # confirmation in their respective modals.
         self._pending_overwrite: tuple[str, Path] | None = None
@@ -1575,6 +1593,15 @@ class StudioApp:
         imgui.text("Files written to the chosen folder:")
         for line in _export_file_lines(self.params):
             imgui.bullet_text(line)
+        if self._seq_frames > 1:
+            extra = "color" + (", height" + (", emission" if self.params.emission.enabled
+                                             else "") if self._seq_all_maps else "")
+            imgui.bullet_text(
+                f"frames/ — {self._seq_frames} frames per map ({extra})"
+                + (" + sequence.mp4" if self._seq_video else "")
+            )
+        imgui.separator()
+        self._draw_export_sequence_section()
         imgui.separator()
         if imgui.button("Export...") and self._dialog is None:
             default_dir = str(self._last_export_dir) if self._last_export_dir else ""
@@ -1588,10 +1615,79 @@ class StudioApp:
             imgui.close_current_popup()
         imgui.end_popup()
 
+    def _draw_export_sequence_section(self) -> None:
+        """T7: the Sequence section of the export modal. frames == 1 leaves the
+        plain single-mapset export; > 1 exports an animation. All fields are
+        session-local app state (not planet params, so not undoable). Warns that
+        a sequence advances the LIVE dev run, with an opt-in restart affordance;
+        the video checkbox is disabled (with a tooltip) when ffmpeg is absent."""
+        imgui.text("Sequence (animation)")
+        imgui.set_next_item_width(110.0)
+        changed, value = imgui.input_int("Frames", self._seq_frames)
+        if changed:
+            self._seq_frames = max(1, min(9999, value))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("1 = single map set; >1 exports an animated sequence "
+                              "into frames/ (frame 0 = the map set)")
+        if self._seq_frames <= 1:
+            imgui.text_disabled("single map set (no animation)")
+            return
+        imgui.set_next_item_width(110.0)
+        schanged, sval = imgui.input_int("Steps per frame", self._seq_steps_per_frame)
+        if schanged:
+            self._seq_steps_per_frame = max(1, min(100000, sval))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("sim steps advanced between frames (more = larger motion)")
+        _, self._seq_all_maps = imgui.checkbox("All maps per frame", self._seq_all_maps)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("also write height (and emission, when enabled) per frame, "
+                              "not just color")
+        ffmpeg = ffmpeg_available()
+        imgui.begin_disabled(not ffmpeg)
+        _, self._seq_video = imgui.checkbox("Encode mp4 (ffmpeg)", self._seq_video and ffmpeg)
+        imgui.end_disabled()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "encode the color frames into sequence.mp4 via ffmpeg" if ffmpeg
+                else "ffmpeg not found on PATH — install ffmpeg to enable mp4 encoding"
+            )
+        if self._seq_video and ffmpeg:
+            imgui.same_line()
+            imgui.set_next_item_width(90.0)
+            fchanged, fval = imgui.input_int("fps", self._seq_fps)
+            if fchanged:
+                self._seq_fps = max(1, min(120, fval))
+        # A sequence runs the sim forward (extend_run) — the live dev state is
+        # NOT where it was before export. Warn, and offer to rebuild it after.
+        imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.8, 0.3, 1.0))
+        imgui.text_wrapped(
+            "Note: a sequence advances the live development run forward; the "
+            "in-app planet will be at its final frame afterward."
+        )
+        imgui.pop_style_color()
+        _, self._restart_dev_after_export = imgui.checkbox(
+            "Restart dev run after export", self._restart_dev_after_export
+        )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("rebuild the live development run from the current settings "
+                              "once the export finishes, so the preview returns to normal")
+
     def _start_export(self, out: Path) -> None:
         """Kick off the tiled export job into ``out`` (folder already picked
-        and, if it contained a map set, overwrite-confirmed)."""
-        self._export = ExportJob(export_job(self.sim, out), out)
+        and, if it contained a map set, overwrite-confirmed). T7: > 1 frame
+        drives the sequence job; the single-frame path is unchanged."""
+        if self._seq_frames > 1:
+            self._export_is_sequence = True
+            job = export_sequence_job(
+                self.sim, out, self._seq_frames, self._seq_steps_per_frame,
+                all_maps=self._seq_all_maps,
+                video=self._seq_video and ffmpeg_available(),
+                fps=self._seq_fps,
+            )
+        else:
+            self._export_is_sequence = False
+            job = export_job(self.sim, out)
+        self._export = ExportJob(job, out)
 
     def _draw_export_overwrite_confirm(self) -> None:
         """B1-4: confirm modal shown when the picked folder already contains
@@ -2302,6 +2398,14 @@ class StudioApp:
             self._last_export_dir = out
             _save_last_export_dir(out)
             self.toasts.info(f"exported to {out} — 'Open folder' in Controls")
+            # T7: a sequence advanced the live dev run; optionally rebuild it so
+            # the preview returns to a fresh development instead of the last frame.
+            if self._export_is_sequence and self._restart_dev_after_export:
+                self.sim.rebuild()
+                self.viewport.mark_stale()
+                self._recomputing = True
+                self.toasts.info("dev run restarted")
+            self._export_is_sequence = False
         except Exception as exc:  # noqa: BLE001 - surface any export failure
             # Record the full traceback (this catch is broad -- a GL error mid
             # derive, an IndexError in the tiler, an OSError on the last tile),
@@ -2309,6 +2413,7 @@ class StudioApp:
             # KeyError etc.) so the toast is never "export failed: " (#7).
             log.exception("export failed")
             self._export = None
+            self._export_is_sequence = False
             detail = str(exc) or type(exc).__name__
             self.toasts.error(f"export failed: {detail}")
         if self._export is None:
@@ -2319,6 +2424,7 @@ class StudioApp:
             return
         self._export.job.close()  # finally-block removes partial output
         self._export = None
+        self._export_is_sequence = False
         self.toasts.info("export cancelled")
         self._flush_pending_edit()  # apply anything the export gate held back
 

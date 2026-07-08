@@ -149,8 +149,8 @@ def test_sequence_cancellation_cleans_up(gpu, tmp_path):
     job = export_sequence_job(sim, out, frames=4, steps_per_frame=6)
     saw_frame_1 = False
     for prog in job:
-        if prog.message == "frame 1":
-            saw_frame_1 = True  # frame_0001.png written; cancel mid-sequence
+        if prog.message.startswith("frame 1"):
+            saw_frame_1 = True  # rendering frame 1; cancel mid-sequence
             break
     assert saw_frame_1
     job.close()

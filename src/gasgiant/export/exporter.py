@@ -30,7 +30,14 @@ from gasgiant.export.manifest import (
     read_manifest,
     write_manifest,
 )
-from gasgiant.export.writers import write_exr_gray, write_exr_rgba, write_png16_rgb_u16
+from gasgiant.export.video import encode_video_job
+from gasgiant.export.writers import (
+    read_exr_gray,
+    write_exr_gray,
+    write_exr_rgba,
+    write_png16_gray,
+    write_png16_rgb_u16,
+)
 from gasgiant.jobs import Progress
 from gasgiant.params.presets import to_preset_doc
 from gasgiant.render.detail import PolarRoute
@@ -41,6 +48,12 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 TILE = 1024
+
+# Sequence export encodes each finished frame off-thread (PNG deflate / EXR ZIP
+# of a full map is seconds of pure CPU). Bound the in-flight encodes so a long
+# sequence can't buffer every frame's arrays in memory: when more than this many
+# futures are pending, the generator keeps yielding until they drain.
+_MAX_PENDING_ENCODES = 6
 
 
 def roi_tile_origin(
@@ -246,22 +259,49 @@ def run_export(sim: Any, out_dir: Path, width: int | None = None) -> None:
         pass
 
 
+def _reap(f: Future) -> bool:
+    """True (and surface any worker exception) once encode future ``f`` is done;
+    False while it is still running. Lets the sequence job prune finished encodes
+    and fail fast on an encode error."""
+    if f.done():
+        f.result()  # re-raise a worker exception at the driver
+        return True
+    return False
+
+
 def export_sequence_job(
     sim: Any, out_dir: Path, frames: int, steps_per_frame: int,
-    width: int | None = None,
+    width: int | None = None, *, all_maps: bool = False,
+    video: bool = False, fps: int = 24,
 ) -> Iterator[Progress]:
     """Animated sequence export.
 
     Frame 0 is the full existing mapset export (its color map duplicated as
     ``frames/frame_0000.png``); each subsequent frame advances the sim by
-    ``steps_per_frame`` via ``Simulation.extend_run`` and renders COLOR ONLY
-    through the same per-tile path as the mapset export. The manifest gains an
-    optional ``frames`` block, written only once every frame file exists — a
-    cancelled/failed sequence removes everything it wrote, so no half-written
+    ``steps_per_frame`` via ``Simulation.extend_run`` and renders through the
+    same per-tile path as the mapset export. The per-frame loop yields a
+    ``Progress`` PER TILE (not once per frame) and pushes each finished frame's
+    encode onto a bounded thread pool, so a single frame's render+encode never
+    blocks the generator for seconds — the GUI stays responsive.
+
+    ``all_maps`` additionally writes ``frames/height_NNNN.png`` (16-bit gray)
+    and, when ``emission.enabled``, ``frames/emission_NNNN.exr`` per frame; the
+    frame-0 versions are derived from the base ``height.exr`` / ``emission.exr``
+    so every per-map list starts at 0000 like color does. ``video`` runs an
+    ffmpeg mp4 encode over the color frames after they all exist.
+
+    The manifest gains an optional ``frames`` block (with a ``maps`` sub-block
+    when ``all_maps`` and a ``video`` key when ``video``), written only once
+    every output file exists — a cancelled/failed sequence removes everything it
+    wrote (never pre-existing user data in ``frames/``), so no half-written
     frame is ever counted in a manifest.
 
     Determinism note: the kinematic path is byte-exact across runs; vorticity
     frames carry compounding SOR LSB noise (structural guarantees only).
+
+    Extension point: additional per-frame maps (e.g. a future flow map) slot in
+    beside height/emission — enqueue their encode alongside the others and add
+    their file list to ``maps_block``.
     """
     if frames < 1:
         raise ValueError(f"frames must be >= 1, got {frames}")
@@ -271,68 +311,152 @@ def export_sequence_job(
     frames_dir = out_dir / "frames"
     written: list[Path] = []
     tile_texs: list[Any] = []
+    pool = ThreadPoolExecutor(max_workers=3)
+    futures: list[Future] = []
     completed = False
-    total = frames + 1  # frames + manifest rewrite
     try:
-        # Frame 0: the full mapset export (writes color/height/manifest and
-        # cleans up after ITSELF if cancelled inside this phase).
+        # Frame 0: the full mapset export (writes color/height/(emission)/
+        # manifest and cleans up after ITSELF if cancelled inside this phase).
         yield from export_job(sim, out_dir, width)
 
         params = sim.params
         w = width or params.export.width
         h = w // 2
         gpu = sim.gpu
+        emission_on = all_maps and params.emission.enabled
+
+        tiles = [(x, y) for y in range(0, h, TILE) for x in range(0, w, TILE)]
+        # Progress bookkeeping: frame 0 + a slice per (frame>=1, tile) + a final
+        # manifest/done slice. Encoding-wait and video yields reuse the current
+        # index so the bar never exceeds 1.
+        total = 1 + (frames - 1) * len(tiles) + 1
+        step = 0
 
         frames_dir.mkdir(parents=True, exist_ok=True)
+
+        # -- Frame 0 into frames/: color copy plus (all_maps) the base maps
+        # re-expressed at the per-frame names/formats so each list starts 0000.
         frame0 = frames_dir / "frame_0000.png"
         written.append(frame0)
         shutil.copyfile(out_dir / "color.png", frame0)
-        yield Progress(1, total, "frame 0")
+        if all_maps:
+            h0 = frames_dir / "height_0000.png"
+            written.append(h0)
+            # Per-frame height is a 16-bit gray PNG; convert the base float EXR.
+            write_png16_gray(h0, np.clip(read_exr_gray(out_dir / "height.exr"), 0.0, 1.0))
+            if emission_on:
+                e0 = frames_dir / "emission_0000.exr"
+                written.append(e0)
+                shutil.copyfile(out_dir / "emission.exr", e0)  # same format: copy
+        step += 1
+        yield Progress(step, total, "frame 0")
 
         tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
         tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
         tile_detail = gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
         tile_texs += [tile_color, tile_height, tile_detail]
-        tiles = [(x, y) for y in range(0, h, TILE) for x in range(0, w, TILE)]
+        tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
+        if tile_emission is not None:
+            tile_texs.append(tile_emission)
+
         color_full = np.empty((h, w, 3), dtype=np.uint16)
+        height_full = np.empty((h, w), dtype=np.float32) if all_maps else None
+        emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
 
         for fi in range(1, frames):
             sim.extend_run(steps_per_frame)
             snap = sim.create_snapshot()
             try:
-                for x0, y0 in tiles:
+                for ti, (x0, y0) in enumerate(tiles):
                     tw = min(TILE, w - x0)
                     th = min(TILE, h - y0)
                     derive_tile(
                         sim, snap, snap.params, x0, y0, w, h,
-                        tile_color, tile_height, tile_detail, None,
+                        tile_color, tile_height, tile_detail, tile_emission,
                     )
                     color = gpu.read_texture(tile_color)[:th, :tw, :3]
                     color_full[y0 : y0 + th, x0 : x0 + tw] = (
                         np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
                     ).astype(np.uint16)
+                    if all_maps:
+                        height_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                            tile_height
+                        )[:th, :tw, 0]
+                    if emission_on:
+                        emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                            tile_emission
+                        )[:th, :tw]
+                    step += 1
+                    yield Progress(step, total, f"frame {fi} tile {ti + 1}/{len(tiles)}")
             finally:
                 snap.release()
-            path = frames_dir / f"frame_{fi:04d}.png"
-            written.append(path)  # tracked BEFORE the write so a partial file
-            write_png16_rgb_u16(path, color_full, params.export.png_compression)
-            yield Progress(fi + 1, total, f"frame {fi}")
+
+            # Frame arrays complete: enqueue the encodes off-thread. Copy the
+            # reused buffers so the worker owns a stable snapshot; track paths
+            # BEFORE submitting so a partial file is always in the cleanup list.
+            cpath = frames_dir / f"frame_{fi:04d}.png"
+            written.append(cpath)
+            futures.append(pool.submit(
+                write_png16_rgb_u16, cpath, color_full.copy(), params.export.png_compression,
+            ))
+            if all_maps:
+                hpath = frames_dir / f"height_{fi:04d}.png"
+                written.append(hpath)
+                futures.append(pool.submit(write_png16_gray, hpath, height_full.copy()))
+            if emission_on:
+                epath = frames_dir / f"emission_{fi:04d}.exr"
+                written.append(epath)
+                futures.append(pool.submit(write_exr_rgba, epath, emission_full.copy()))
+
+            # Bound in-flight encodes: reap finished ones (surfacing errors) and,
+            # while too many remain, keep yielding so we don't block or OOM.
+            futures = [f for f in futures if not _reap(f)]
+            while len(futures) > _MAX_PENDING_ENCODES:
+                yield Progress(step, total, f"frame {fi} encoding")
+                time.sleep(0.005)
+                futures = [f for f in futures if not _reap(f)]
+
+        # Drain remaining encodes before the manifest counts them.
+        while not all(f.done() for f in futures):
+            yield Progress(step, total, "encoding")
+            time.sleep(0.01)
+        for f in futures:
+            f.result()  # surface worker exceptions
+        futures = []
+
+        # Optional mp4 (color frames drive it); tracked for cleanup on cancel.
+        maps_block: dict[str, list[str]] | None = None
+        if all_maps:
+            maps_block = {"height": [f"frames/height_{i:04d}.png" for i in range(frames)]}
+            if emission_on:
+                maps_block["emission"] = [
+                    f"frames/emission_{i:04d}.exr" for i in range(frames)
+                ]
+        video_name: str | None = None
+        if video:
+            video_path = out_dir / "sequence.mp4"
+            written.append(video_path)
+            yield from encode_video_job(frames_dir, video_path, fps, w, h)
+            video_name = "sequence.mp4"
 
         manifest = read_manifest(out_dir)
         attach_frames(
             manifest, count=frames, steps_per_frame=steps_per_frame,
             files=[f"frames/frame_{i:04d}.png" for i in range(frames)],
+            maps=maps_block, video=video_name,
         )
         write_manifest(out_dir, manifest)
         completed = True
         yield Progress(total, total, "done")
     finally:
+        pool.shutdown(wait=True)
         for tex in tile_texs:
             tex.release()
         if not completed:
-            # Remove only files WE wrote: the frame PNGs plus the base map set
-            # (export_job's own cancellation already covers the frame-0 phase;
-            # these unlinks are no-ops then). The user's files are untouched.
+            # Remove only files WE wrote: the per-frame maps plus the base map
+            # set (export_job's own cancellation already covers the frame-0
+            # phase; those unlinks are no-ops then). The user's files are
+            # untouched, and a non-empty pre-existing frames/ is left in place.
             for p in written:
                 p.unlink(missing_ok=True)
             if frames_dir.is_dir():
@@ -345,8 +469,12 @@ def export_sequence_job(
 
 def run_export_sequence(
     sim: Any, out_dir: Path, frames: int, steps_per_frame: int,
-    width: int | None = None,
+    width: int | None = None, *, all_maps: bool = False,
+    video: bool = False, fps: int = 24,
 ) -> None:
     """Drain the sequence job synchronously (CLI / tests)."""
-    for _ in export_sequence_job(sim, out_dir, frames, steps_per_frame, width):
+    for _ in export_sequence_job(
+        sim, out_dir, frames, steps_per_frame, width,
+        all_maps=all_maps, video=video, fps=fps,
+    ):
         pass

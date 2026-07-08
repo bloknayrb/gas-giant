@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from gasgiant.export.manifest import build_manifest, write_manifest
+from gasgiant.export.manifest import attach_frames, build_manifest, write_manifest
 from gasgiant.params.model import PlanetParams
 from gasgiant.params.presets import to_preset_doc
 
@@ -115,3 +115,39 @@ def test_vendored_reader_rejects_missing_color(tmp_path):
     path.write_text(json.dumps(doc))
     with pytest.raises(reader.MapsetError):
         reader.read_mapset(tmp_path)
+
+
+def test_vendored_reader_accepts_all_maps_frames_block(tmp_path):
+    """T7: the additive frames.maps / frames.video sub-blocks (all-maps + mp4
+    sequence export) don't break the vendored tolerant reader — the base map set
+    still resolves cleanly with no warnings."""
+    reader = _load_vendored_reader()
+    manifest = build_manifest(
+        name="contract",
+        seed=42,
+        resolution=(2048, 1024),
+        maps={
+            "color": {"file": "color.png", "format": "png16", "colorspace": "srgb"},
+            "height": {"file": "height.exr", "format": "exr32f", "colorspace": "non-color"},
+        },
+        physical={"radius_km": 69911.0, "height_scale": 0.004, "height_midlevel": 0.5},
+        preset_doc=to_preset_doc(PlanetParams()),
+    )
+    attach_frames(
+        manifest, count=3, steps_per_frame=8,
+        files=[f"frames/frame_{i:04d}.png" for i in range(3)],
+        maps={
+            "height": [f"frames/height_{i:04d}.png" for i in range(3)],
+            "emission": [f"frames/emission_{i:04d}.exr" for i in range(3)],
+        },
+        video="sequence.mp4",
+    )
+    write_manifest(tmp_path, manifest)
+    (tmp_path / "color.png").write_bytes(b"")
+    (tmp_path / "height.exr").write_bytes(b"")
+    doc = reader.read_mapset(tmp_path)
+    assert doc["_warnings"] == []
+    assert reader.map_path(doc, "color").name == "color.png"
+    # the frames block travels through untouched (readers may use it or ignore it)
+    assert doc["frames"]["maps"]["emission"][2] == "frames/emission_0002.exr"
+    assert doc["frames"]["video"] == "sequence.mp4"
