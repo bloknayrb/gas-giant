@@ -18,6 +18,13 @@ def main(argv: list[str] | None = None) -> int:
     exp = sub.add_parser("export", help="render a map set headlessly")
     exp.add_argument("--preset", default=None, help="factory preset name or .json path")
     exp.add_argument(
+        "--resume", type=Path, default=None,
+        help="resume from a saved checkpoint .npz (from `gasgiant checkpoint`) "
+             "instead of building from a preset. Mutually exclusive with "
+             "--preset/--recipe; combine with --frames to export a sequence from "
+             "the resumed state.",
+    )
+    exp.add_argument(
         "--recipe", default=None,
         help="epoch recipe to overlay (e.g. faded_seb, ochre_ez): a small "
              "parameter overlay reproducing a documented historical atmosphere "
@@ -37,6 +44,22 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--seed", type=int, default=None, help="override the preset seed")
     exp.add_argument("--name", default=None, help="override the planet name")
     exp.add_argument("--out", type=Path, required=True, help="output map-set directory")
+
+    ckpt = sub.add_parser(
+        "checkpoint",
+        help="develop a run and save it as a resumable checkpoint .npz",
+    )
+    ckpt.add_argument("--preset", default=None, help="factory preset name or .json path")
+    ckpt.add_argument(
+        "--recipe", default=None,
+        help="epoch recipe to overlay (same precedence as export's --recipe)",
+    )
+    ckpt.add_argument("--res", type=int, default=None,
+                      help="equirect width in pixels (2:1 maps)")
+    ckpt.add_argument("--dev-steps", type=int, default=None,
+                      help="override the preset's development step count")
+    ckpt.add_argument("--seed", type=int, default=None, help="override the preset seed")
+    ckpt.add_argument("--out", type=Path, required=True, help="output checkpoint .npz path")
 
     val = sub.add_parser("validate", help="run seam/pole checks on an exported map set")
     val.add_argument("mapset", type=Path)
@@ -62,14 +85,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "export":
         return _export(args)
+    if args.command == "checkpoint":
+        return _checkpoint(args)
     if args.command == "palette-fit":
         return _palette_fit(args)
     return _validate(args)
 
 
-def _export(args: argparse.Namespace) -> int:
-    from gasgiant.engine import Simulation
-    from gasgiant.export.exporter import run_export, run_export_sequence
+def _resolve_params_from_args(args: argparse.Namespace, *, default_preset: str):
+    """Resolve the params for a preset-building subcommand (export/checkpoint):
+    apply any --recipe overlay onto the base preset, then the CLI overrides
+    (--seed/--name/--res/--dev-steps). Returns ``(params, None)`` on success or
+    ``(None, exit_code)`` on a user error (message already printed to stderr).
+
+    --preset wins the base choice; without it the recipe's own base is used;
+    with neither, ``default_preset`` holds. `--name`/`--dev-steps` are ignored
+    when the corresponding attribute is absent from ``args``."""
     from gasgiant.params.presets import (
         PresetError,
         apply_overlay,
@@ -77,29 +108,18 @@ def _export(args: argparse.Namespace) -> int:
         resolve_preset,
     )
 
-    if (args.frames is None) != (args.steps_per_frame is None):
-        print("error: --frames and --steps-per-frame must be given together",
-              file=sys.stderr)
-        return 2
-    if args.frames is not None and (args.frames < 1 or args.steps_per_frame < 1):
-        print("error: --frames and --steps-per-frame must be >= 1", file=sys.stderr)
-        return 2
-
-    # Resolve the base preset, then (if --recipe) overlay the epoch recipe.
-    # --preset wins the base choice; without it the recipe's own base is used;
-    # with neither, the historical jupiter_like default holds.
     overlay: dict | None = None
     base_name = args.preset
-    if args.recipe is not None:
+    if getattr(args, "recipe", None) is not None:
         try:
             recipe_base, overlay, _meta = load_recipe(args.recipe)
         except PresetError as exc:
             print(f"error: {exc}", file=sys.stderr)
-            return 2
+            return None, 2
         if base_name is None:
             base_name = recipe_base
     if base_name is None:
-        base_name = "jupiter_like"
+        base_name = default_preset
 
     try:
         params = resolve_preset(base_name)
@@ -107,18 +127,18 @@ def _export(args: argparse.Namespace) -> int:
             params = apply_overlay(params, overlay)
     except (PresetError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 2
+        return None, 2
 
     updates: dict = {}
     if args.seed is not None:
         updates["seed"] = args.seed
-    if args.name is not None:
+    if getattr(args, "name", None) is not None:
         updates["name"] = args.name
     if updates:
         params = params.model_copy(update=updates)
     if args.res is not None:
         params.export.width = args.res
-    if args.dev_steps is not None:
+    if getattr(args, "dev_steps", None) is not None:
         params.sim.dev_steps = args.dev_steps
 
     # Mask sidecar: load_preset already resolved a relative path against the
@@ -128,10 +148,50 @@ def _export(args: argparse.Namespace) -> int:
     # sidecar).
     if params.mask.file is not None and not Path(params.mask.file).is_file():
         print(f"error: mask file not found: {params.mask.file}", file=sys.stderr)
+        return None, 2
+    return params, None
+
+
+def _export(args: argparse.Namespace) -> int:
+    from gasgiant.engine import Simulation
+    from gasgiant.engine.checkpoint import load_checkpoint
+    from gasgiant.export.exporter import run_export, run_export_sequence
+
+    if (args.frames is None) != (args.steps_per_frame is None):
+        print("error: --frames and --steps-per-frame must be given together",
+              file=sys.stderr)
+        return 2
+    if args.frames is not None and (args.frames < 1 or args.steps_per_frame < 1):
+        print("error: --frames and --steps-per-frame must be >= 1", file=sys.stderr)
+        return 2
+
+    # --resume and --preset/--recipe are mutually exclusive: one builds a fresh
+    # run from a preset, the other reloads a saved run. --preset defaults None,
+    # so their simultaneous presence is detectable rather than ambiguous.
+    if args.resume is not None and (args.preset is not None or args.recipe is not None):
+        print("error: --resume is mutually exclusive with --preset/--recipe",
+              file=sys.stderr)
         return 2
 
     started = time.perf_counter()
-    sim = Simulation(params)
+    if args.resume is not None:
+        if not args.resume.is_file():
+            print(f"error: checkpoint not found: {args.resume}", file=sys.stderr)
+            return 2
+        try:
+            # GENERATION_VERSION mismatch / corrupt-file errors surface as clear
+            # messages rather than a raw traceback.
+            sim = load_checkpoint(args.resume)
+        except (ValueError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        params = sim.params
+    else:
+        params, err = _resolve_params_from_args(args, default_preset="jupiter_like")
+        if params is None:
+            return err
+        sim = Simulation(params)
+
     if args.frames is not None:
         run_export_sequence(
             sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame
@@ -140,8 +200,30 @@ def _export(args: argparse.Namespace) -> int:
         run_export(sim, args.out)
     elapsed = time.perf_counter() - started
     seq = f" + {args.frames}-frame sequence" if args.frames is not None else ""
-    print(f"exported {params.export.width}x{params.export.width // 2} map set{seq} "
+    src = f" (resumed from {args.resume})" if args.resume is not None else ""
+    print(f"exported {params.export.width}x{params.export.width // 2} map set{seq}{src} "
           f"to {args.out} in {elapsed:.1f}s")
+    return 0
+
+
+def _checkpoint(args: argparse.Namespace) -> int:
+    """Develop a run to completion and save it as a resumable checkpoint .npz
+    (the input to `gasgiant export --resume`). Kept deliberately simple: it
+    develops to the preset's ``sim.dev_steps`` and saves there."""
+    from gasgiant.engine import Simulation
+    from gasgiant.engine.checkpoint import save_checkpoint
+
+    params, err = _resolve_params_from_args(args, default_preset="jupiter_like")
+    if params is None:
+        return err
+
+    started = time.perf_counter()
+    sim = Simulation(params)
+    sim.run_to_completion()
+    out = args.out if args.out.suffix else args.out.with_suffix(".npz")
+    save_checkpoint(sim, out)
+    elapsed = time.perf_counter() - started
+    print(f"saved checkpoint at step {sim.steps_done} to {out} in {elapsed:.1f}s")
     return 0
 
 

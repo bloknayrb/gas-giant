@@ -39,6 +39,7 @@ from gasgiant.app.viewport import (
 from gasgiant.core import brush
 from gasgiant.diagnostics import PerfCounter, configure_logging
 from gasgiant.engine import Simulation
+from gasgiant.engine.checkpoint import load_checkpoint, save_checkpoint
 from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.export.exporter import export_job
 from gasgiant.export.manifest import MANIFEST_FILENAME
@@ -94,6 +95,8 @@ class DialogKind(StrEnum):
     EXPORT = "export"
     IMPORT = "import"
     PALETTE_FIT = "palette_fit"
+    SAVE_STATE = "save_state"  # T3: save the dev run as a resumable checkpoint
+    LOAD_STATE = "load_state"  # T3: resume a saved checkpoint (swaps the sim)
 
 
 @dataclass
@@ -1079,6 +1082,78 @@ class StudioApp:
         default = str(USER_PRESET_DIR / "preset.json")
         self._dialog = (DialogKind.SAVE, pfd.save_file("Save preset", default, ["JSON", "*.json"]))
 
+    # -- checkpoint save/load state (T3) --------------------------------------
+
+    def _open_save_state_dialog(self) -> None:
+        """Open the "Save state..." file dialog. No-op if a dialog is already
+        open (mirrors the button's ``self._dialog is None`` guard)."""
+        if self._dialog is not None:
+            return
+        default = str(Path.home() / "gasgiant_state.npz")
+        self._dialog = (
+            DialogKind.SAVE_STATE,
+            pfd.save_file("Save state", default, ["Checkpoint", "*.npz"]),
+        )
+
+    def _save_state(self, path: Path) -> None:
+        """Save the current dev run as a resumable checkpoint. Gated while an
+        export is in flight (the sim is being stepped by the export job)."""
+        if self._export is not None:
+            return
+        try:
+            save_checkpoint(self.sim, path)
+        except OSError as exc:
+            self.toasts.error(str(exc))
+            return
+        self.toasts.info(f"saved state {path.name} (step {self.sim.steps_done})")
+
+    def _load_state(self, path: Path) -> None:
+        """Resume a saved checkpoint: load it, then swap the app onto it.
+
+        Step 1 of the load-swap: refuse while an export is in flight (swapping
+        the sim out from under the export job would corrupt it). The load itself
+        happens BEFORE any mutation, so a failure (GENERATION_VERSION mismatch,
+        corrupt/renamed file) toasts and leaves the app untouched -- never a
+        half-swap. The actual swap is factored into ``_apply_loaded_checkpoint``."""
+        if self._export is not None:
+            return
+        try:
+            new_sim = load_checkpoint(path, gpu=self.gpu)
+        except (ValueError, OSError) as exc:
+            self.toasts.error(f"load state failed: {exc}")
+            return
+        self._apply_loaded_checkpoint(new_sim, path)
+        self.toasts.info(f"resumed state {path.name} (step {new_sim.steps_done})")
+        self._toast_param_warnings(new_sim.params)
+
+    def _apply_loaded_checkpoint(self, new_sim: Simulation, path: Path) -> None:
+        """Swap the app onto a freshly loaded checkpoint sim (steps 2-7 of the
+        T3 load-swap; step 1 export-refusal and the load itself are the caller's).
+        Ordered and complete so a load never leaves a half-swapped app. Factored
+        out so it is drivable headlessly with a fake sim in tests."""
+        # 2. release the OUTGOING sim's GPU resources (real leak fix -- the old
+        #    partial release path missed preview/detail/mask/palette textures).
+        self.sim.release()
+        # 3. adopt the loaded sim.
+        self.sim = new_sim
+        # 4. adopt its params AND drop any pending working-copy draft (else the
+        #    stale draft would re-commit over the loaded state next frame).
+        self.params = new_sim.params
+        self._reset_working_copy()
+        # 5. clear undo/redo history + the transient status flag (the loaded run
+        #    is a fresh starting point; prior history no longer applies).
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._recomputing = False
+        # 6. reset the preset identity to a transient checkpoint identity + the
+        #    baroclinic toast latch (so the next status transition re-toasts).
+        self._set_identity((f"checkpoint/{path.stem}", PresetSource.FILE), new_sim.params)
+        self._baro_status_seen = "off"
+        # 7. mark the preview dirty so it re-derives from the restored tracers;
+        #    reflect any still-pending dev steps in the recomputing flag.
+        self.viewport.mark_stale()
+        self._recomputing = not new_sim.is_developed
+
     def _handle_shortcuts(self) -> None:
         """Global keyboard shortcuts (Phase 7), registered as hello_imgui's
         ``post_new_frame`` callback -- it runs right after ImGui::NewFrame(),
@@ -1127,7 +1202,10 @@ class StudioApp:
         if not dlg.ready():
             return
         if (
-            kind in (DialogKind.LOAD, DialogKind.IMPORT, DialogKind.PALETTE_FIT)
+            kind in (
+                DialogKind.LOAD, DialogKind.IMPORT, DialogKind.PALETTE_FIT,
+                DialogKind.LOAD_STATE, DialogKind.SAVE_STATE,
+            )
             and self._export is not None
         ):
             # A file was already picked (dialog opened before the export
@@ -1167,6 +1245,13 @@ class StudioApp:
                 self._toast_param_warnings(imported)
             elif kind == DialogKind.PALETTE_FIT:
                 self._apply_palette_fit(Path(result[0]))
+            elif kind == DialogKind.SAVE_STATE:
+                path = Path(result if isinstance(result, str) else result[0])
+                if path.suffix != ".npz":
+                    path = path.with_suffix(".npz")
+                self._save_state(path)
+            elif kind == DialogKind.LOAD_STATE:
+                self._load_state(Path(result[0]))
             elif kind == DialogKind.SAVE:
                 path = Path(result if isinstance(result, str) else result[0])
                 if path.suffix != ".json":
@@ -1248,6 +1333,23 @@ class StudioApp:
         imgui.same_line()
         if imgui.button("Reset to gas_giant_warm"):
             self._load_preset_entry("gas_giant_warm", PresetSource.FACTORY)
+
+        # T3: save/resume the live dev run as a checkpoint (.npz). A checkpoint
+        # captures the exact tracer/vorticity/registry state; Load state swaps
+        # the running sim for the resumed one (byte-identical resume in
+        # kinematic mode).
+        if imgui.button("Save state...") and self._dialog is None:
+            self._open_save_state_dialog()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("save the current dev run as a resumable checkpoint (.npz)")
+        imgui.same_line()
+        if imgui.button("Load state...") and self._dialog is None:
+            self._dialog = (
+                DialogKind.LOAD_STATE,
+                pfd.open_file("Load state", "", ["Checkpoint", "*.npz"]),
+            )
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("resume a saved checkpoint (.npz); replaces the current run")
 
         # T13: fit the latitude palette rows from a reference photo. The fitted
         # colors are baked into appearance.palette_rows (POST tier, undoable);

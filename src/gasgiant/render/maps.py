@@ -113,6 +113,18 @@ class MapDeriver:
             self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
         return self._progs[key]
 
+    def release(self) -> None:
+        """Free the baked palette/storm/band-tint LUT textures (idempotent:
+        each is guarded and nulled). The compute programs live in the shared
+        ``GpuContext`` cache and are NOT released here. ``derive`` re-bakes the
+        LUTs lazily (``_palette_tex is None``) on next use, so the deriver stays
+        reusable after a release."""
+        for attr in ("_palette_tex", "_storm_tex", "_band_tint_tex"):
+            tex = getattr(self, attr)
+            if tex is not None:
+                tex.release()
+                setattr(self, attr, None)
+
     def update_palettes(self, appearance: AppearanceParams) -> None:
         for tex in (self._palette_tex, self._storm_tex, self._band_tint_tex):
             if tex is not None:

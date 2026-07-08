@@ -110,14 +110,49 @@ class Simulation:
         self._release_sim()
         self._build()
 
+    def release(self) -> None:
+        """Release EVERY GPU resource this sim owns, then null the handles.
+
+        The SINGLE teardown path: ``rebuild``/``update_params`` (RESTART) route
+        through it before ``_build`` re-creates the sim, the app's checkpoint
+        load-swap calls it to reclaim the outgoing sim, and a headless
+        checkpoint/CLI run can call it on exit. Idempotent -- every handle is
+        guarded and set to None, so a double call (or a call before ``_build``
+        finished) is safe; a ``rebuild`` re-populates them afterward, and the
+        lazy preview/detail/palette paths re-allocate on next use.
+
+        Covers what the old partial release MISSED: the preview color/height
+        textures, the emission-preview scratch trio, ``_detail_tex``, the
+        imported ``_mask_tex``, and the deriver's palette/storm/band-tint LUTs
+        -- in addition to the solver (+ its domain/omega textures + external
+        vorticity source) and the three profile LUTs it already freed. The
+        deriver/detail-synth OBJECTS persist (their compute programs live in the
+        shared ``GpuContext`` cache); only their owned textures are freed."""
+        solver = getattr(self, "solver", None)
+        if solver is not None:
+            if solver.external_omega_tex is not None:
+                solver.external_omega_tex.release()
+                solver.external_omega_tex = None
+            solver.release()
+            self.solver = None
+        for attr in (
+            "profile_dyn", "profile_stamp", "profile_omega",
+            "_preview_color", "_preview_height",
+            "_preview_emission", "_preview_em_color", "_preview_em_height",
+            "_detail_tex", "_mask_tex",
+        ):
+            tex = getattr(self, attr, None)
+            if tex is not None:
+                tex.release()
+                setattr(self, attr, None)
+        deriver = getattr(self, "deriver", None)
+        if deriver is not None:
+            deriver.release()
+
+    # Legacy internal name kept for the many gpu tests (and the RESTART/rebuild
+    # paths) that already call it: there is now ONE real release path.
     def _release_sim(self) -> None:
-        if self.solver.external_omega_tex is not None:
-            self.solver.external_omega_tex.release()
-            self.solver.external_omega_tex = None
-        self.solver.release()
-        self.profile_dyn.release()
-        self.profile_stamp.release()
-        self.profile_omega.release()
+        self.release()
 
     def _init_baroclinic(self) -> None:
         """Build/reuse the baroclinic source driver when enabled. Caches on
