@@ -18,6 +18,7 @@ What every slider in the live-preview GUI (`uv run gasgiant-studio`) actually do
 - [Poles](#poles)
 - [Appearance](#appearance)
 - [Detail](#detail)
+- [Mask](#mask)
 - [Emission](#emission)
 - [Physical](#physical)
 - [Export](#export)
@@ -1385,6 +1386,47 @@ Flow-folded luminance structure inside ZONES (the calm lanes between belts, gate
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/detail__zone_texture__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
 </tr></table>
+
+
+## Mask
+
+### band fade
+
+`mask.band_fade` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Fade the busy features (storm tint, polar tint, detail, lanes) back toward the plain band color where the mask is painted -- a way to calm chosen regions to clean bands. Weight is mask * this gain; 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### detail gain
+
+`mask.detail_gain` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Modulate color luminance/detail by the mask, settling painted-dark regions while painted-bright regions stay untouched. Factor is mix(1, mask, this gain); 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### emission gain
+
+`mask.emission_gain` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Modulate the night-side emission map (thermal/lightning glow + aurora) by the mask, dimming the glow where the mask is dark. Factor is mix(1, mask, this gain); 0 = off (byte-identical). Only visible on the Emission map, not Color
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
+### file
+
+`mask.file` &mdash; file path, default **None**, tier `post`.
+
+Path to a grayscale equirect (2:1) PNG mask that paints WHERE the three Mask targets act (white = full effect, black = none). Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
+
+_File-path field: the GUI shows a text entry + **Browse...** button (empty = None). Documented as text; no rendered example._
 
 
 ## Emission

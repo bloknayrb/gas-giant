@@ -638,7 +638,9 @@ class StudioApp:
 
     def _save_session(self) -> None:
         try:
-            save_preset(self.params, SESSION_PATH, name="session")
+            # The session is machine-local state: keep the mask's ABSOLUTE path
+            # (do NOT relativize/copy a sidecar next to session.json).
+            save_preset(self.params, SESSION_PATH, name="session", relativize_mask=False)
         except OSError as exc:
             log.warning("session autosave failed: %s", exc)
 

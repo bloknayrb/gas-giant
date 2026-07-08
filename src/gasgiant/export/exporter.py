@@ -107,6 +107,8 @@ def derive_tile(
         seed=params.seed,
         profile_dyn=snap.profile_dyn,
         profile_stamp=snap.profile_stamp,
+        mask=snap.mask,
+        mask_params=params.mask,
     )
 
 

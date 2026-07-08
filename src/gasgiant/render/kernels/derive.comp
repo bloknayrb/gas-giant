@@ -93,6 +93,18 @@ uniform vec3  u_au_pole_n;          // magnetic pole unit vectors (y = axis)
 uniform vec3  u_au_pole_s;
 uniform vec3  u_au_offset;          // subseed("emission-aurora")
 #endif
+#ifdef MASK
+// Imported paint mask (single-channel equirect grayscale sidecar) driving three
+// POST art-direction targets. Every gain defaults 0 and each target uses a
+// mix(1.0, mask, gain)-style factor/weight, so gain 0 is an exact no-op; the
+// whole block preprocesses OUT of the default program, keeping neutral-default
+// output byte-identical (the same construction as EMISSION/CHROMA_FX). Sampled
+// at the same global uv as the tracers.
+uniform sampler2D u_mask;
+uniform float u_mask_band_fade;      // lerp toward the plain band color
+uniform float u_mask_emission_gain;  // modulate the emission output
+uniform float u_mask_detail_gain;    // modulate luminance/detail
+#endif
 
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -119,6 +131,14 @@ void main() {
 
     // Palette row axis: v = 0 at -90 deg, 1 at +90 deg (signed latitude).
     vec3 col = texture(u_palette, vec2(clamp(t.r, 0.0, 1.0), 1.0 - uv.y)).rgb;
+#ifdef MASK
+    // Capture the plain post-palette band color and sample the mask once, up
+    // front, so band_fade below can fade the busy features (storm tint, polar
+    // tint, detail, lanes) back toward this base band color where the mask is
+    // painted. gain 0 => the lerp weight is 0 => no-op.
+    vec3 mask_band_col = col;
+    float mask_value = texture(u_mask, uv).r;
+#endif
 
     // Storm tint axis: blend toward the secondary palette where |T3| is high.
     vec3 tint = texture(u_storm_palette, vec2(clamp(t.a * 0.5 + 0.5, 0.0, 1.0), 0.5)).rgb;
@@ -147,6 +167,12 @@ void main() {
         dsyn = texture(u_detail, (vec2(px) + 0.5) / vec2(u_size)).r;
         col *= 1.0 + u_detail_intensity * 0.55 * (dsyn - 0.5);
     }
+#ifdef MASK
+    // Mask-driven luminance/detail modulation: factor = mix(1.0, mask, gain)
+    // (gain 0 => factor 1.0 => no-op). Painted-dark mask regions darken/settle;
+    // painted-bright regions are untouched.
+    col *= mix(1.0, mask_value, u_mask_detail_gain);
+#endif
 
     // Dark-teal polar canvas: deepen the cap AFTER the folded-filament lace is
     // present so the DARK inter-wisp floor sinks toward a deep teal while the
@@ -181,6 +207,13 @@ void main() {
         }
         col *= 1.0 - clamp(lane_dim, 0.0, 0.5);
     }
+#ifdef MASK
+    // band_fade: lerp the fully-featured color back toward the plain band color
+    // captured up front, weighted by mask_value * gain (gain 0 => weight 0 =>
+    // no-op). Applied before the post chain so haze/contrast/gamma still apply
+    // uniformly over the faded result.
+    col = mix(col, mask_band_col, mask_value * u_mask_band_fade);
+#endif
 
     // Post chain: haze -> contrast -> saturation -> gamma.
     col = mix(col, u_haze_color, u_haze_amount);
@@ -334,6 +367,14 @@ void main() {
                 au += u_au_strength * along * exp(-dr * dr);
             }
         }
+#ifdef MASK
+        // Mask-driven emission modulation: factor = mix(1.0, mask, gain)
+        // (gain 0 => 1.0 => no-op). Scales both the RGB radiance and the
+        // aurora alpha so painted regions dim/keep the night-side glow.
+        float em_mask = mix(1.0, texture(u_mask, uv).r, u_mask_emission_gain);
+        emis *= em_mask;
+        au *= em_mask;
+#endif
         imageStore(out_emission, px, vec4(emis, au));
     }
 #endif

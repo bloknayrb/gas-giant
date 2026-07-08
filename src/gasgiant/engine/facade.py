@@ -13,6 +13,7 @@ composites them with a narrow feather. Invalidation-tier dispatch:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -53,6 +54,10 @@ class Simulation:
         self._preview_em_height: moderngl.Texture | None = None
         self._emission_preview_dirty = True
         self._detail_tex: moderngl.Texture | None = None
+        # Imported paint mask texture (POST art-direction), uploaded from
+        # params.mask.file. None = no mask. Owned by the facade; re-synced on a
+        # mask-file change and cloned into export snapshots.
+        self._mask_tex: moderngl.Texture | None = None
         self._post_dirty = True
         self._tracers_changed = True
         self._extra_steps = 0
@@ -91,6 +96,7 @@ class Simulation:
         )
         self.solver.init_tracers()
         self._init_baroclinic()
+        self._sync_mask()
         self._tracers_changed = True
         self._post_dirty = True
         self._emission_preview_dirty = True
@@ -229,9 +235,49 @@ class Simulation:
             tex.write(arr)  # arr is contiguous float32; avoid a per-call copy
         self.solver.external_gain = float(gain)
 
+    # -- imported paint mask (POST art-direction) --------------------------------
+
+    def set_mask(self, arr: np.ndarray | None) -> None:
+        """Upload a single-channel equirect mask (H, W float32 in [0, 1]) as the
+        live mask texture, or clear it with ``arr=None``. Replacing releases the
+        previous texture. The mask is a POST input consumed per-derive; setting
+        it marks the color/emission previews dirty. repeat_x (longitude wrap) is
+        the texture2d default -- no repeat kwarg exists."""
+        if self._mask_tex is not None:
+            self._mask_tex.release()
+            self._mask_tex = None
+        if arr is not None:
+            a = np.ascontiguousarray(arr.astype(np.float32))
+            h, w = a.shape[:2]
+            self._mask_tex = self.gpu.texture2d((w, h), 1, "f4", data=a, linear=True)
+        self._post_dirty = True
+        self._emission_preview_dirty = True
+
+    def _sync_mask(self) -> None:
+        """Re-resolve the mask texture from ``params.mask.file`` (an ABSOLUTE
+        path by the time it reaches the engine -- path resolution is an app/CLI
+        concern, params stay source-agnostic). A missing/invalid file WARNS and
+        disables the mask (the gains then run over a no-op) rather than crashing
+        -- this is also the checkpoint-restore path, where a saved absolute path
+        may not exist on another machine."""
+        from gasgiant.export.writers import decode_image
+
+        f = self.params.mask.file
+        if not f:
+            self.set_mask(None)
+            return
+        try:
+            arr = decode_image(Path(f))
+        except (OSError, ValueError) as exc:
+            log.warning("mask disabled: %s", exc)
+            self.set_mask(None)
+            return
+        self.set_mask(arr)
+
     # -- parameters ---------------------------------------------------------------
 
     def update_params(self, new_params: PlanetParams) -> set[Tier]:
+        old_mask_file = self.params.mask.file
         tiers = diff_tiers(self.params, new_params)
         self.params = new_params
         if Tier.RESTART in tiers:
@@ -263,6 +309,12 @@ class Simulation:
         # Refresh whenever anything changed so the palette always tracks appearance.
         if tiers:
             self.deriver.update_palettes(new_params.appearance)
+            # A RESTART edit already re-synced via _build; for VELOCITY/POST edits
+            # re-decode+upload the mask ONLY when the file path changed (a gain
+            # tweak reuses the same texture -- so a live POST drag doesn't reload
+            # the PNG from disk every frame). File is a POST-tier field.
+            if Tier.RESTART not in tiers and new_params.mask.file != old_mask_file:
+                self._sync_mask()
         return tiers
 
     # -- stepping --------------------------------------------------------------------
@@ -386,6 +438,8 @@ class Simulation:
             seed=p.seed,
             profile_dyn=self.profile_dyn,
             profile_stamp=self.profile_stamp,
+            mask=self._mask_tex,
+            mask_params=p.mask,
         )
 
     # -- preview -----------------------------------------------------------------------

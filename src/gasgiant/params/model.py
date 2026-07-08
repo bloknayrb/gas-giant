@@ -1403,6 +1403,45 @@ class EmissionParams(_Params):
         )
 
 
+class MaskParams(_Params):
+    """Imported paint mask: a single-channel grayscale equirect (2:1) PNG sidecar
+    that drives three POST-tier art-direction targets. Every gain defaults 0.0,
+    which is an EXACT no-op (each target uses a ``mix(1.0, mask, gain)``-style
+    factor/weight), so a planet with no mask -- or a mask with all-zero gains --
+    renders byte-identically to no mask at all. The mask travels per-derive and
+    is a preprocessor variant of derive.comp (MASK), never a runtime branch."""
+
+    file: str | None = pfield(
+        None, tier=Tier.POST, adv=True, ui="Mask",
+        description="Path to a grayscale equirect (2:1) PNG mask that paints WHERE "
+                    "the three Mask targets act (white = full effect, black = none). "
+                    "Use forward slashes. None = no mask (all Mask targets inert). "
+                    "The path is resolved relative to a loaded preset's folder and "
+                    "re-saved next to a preset you save, so a preset stays portable; "
+                    "a missing file at load warns and disables the mask (never crashes)",
+    )
+    band_fade: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",
+        description="Fade the busy features (storm tint, polar tint, detail, lanes) "
+                    "back toward the plain band color where the mask is painted -- a "
+                    "way to calm chosen regions to clean bands. Weight is "
+                    "mask * this gain; 0 = off (byte-identical)",
+    )
+    emission_gain: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",
+        description="Modulate the night-side emission map (thermal/lightning glow + "
+                    "aurora) by the mask, dimming the glow where the mask is dark. "
+                    "Factor is mix(1, mask, this gain); 0 = off (byte-identical). "
+                    "Only visible on the Emission map, not Color",
+    )
+    detail_gain: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",
+        description="Modulate color luminance/detail by the mask, settling painted-"
+                    "dark regions while painted-bright regions stay untouched. Factor "
+                    "is mix(1, mask, this gain); 0 = off (byte-identical)",
+    )
+
+
 class PhysicalParams(_Params):
     """Real-world scale hints passed through to the Blender importer."""
 
@@ -1452,6 +1491,7 @@ class PlanetParams(_Params):
     poles: PolesParams = Field(default_factory=PolesParams)
     appearance: AppearanceParams = Field(default_factory=AppearanceParams)
     detail: DetailParams = Field(default_factory=DetailParams)
+    mask: MaskParams = Field(default_factory=MaskParams)
     emission: EmissionParams = Field(default_factory=EmissionParams)
     physical: PhysicalParams = Field(default_factory=PhysicalParams)
     export: ExportParams = Field(default_factory=ExportParams)

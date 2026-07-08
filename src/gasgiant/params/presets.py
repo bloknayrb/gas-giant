@@ -9,6 +9,7 @@ tolerant policy.)
 from __future__ import annotations
 
 import json
+import shutil
 from enum import StrEnum
 from importlib import resources
 from pathlib import Path
@@ -31,6 +32,40 @@ class PresetError(ValueError):
     pass
 
 
+def resolve_mask_path(params: PlanetParams, base_dir: Path) -> None:
+    """In-place: make ``params.mask.file`` ABSOLUTE by resolving a relative path
+    against ``base_dir`` (a loaded preset's own folder). None stays None; an
+    already-absolute path is normalized. The MODEL never knows its source -- this
+    resolution runs only through the preset/session/CLI I/O boundary, so the
+    in-memory params carry an absolute path the engine can decode directly (a
+    missing file is handled downstream: the CLI errors, the engine warns+disables)."""
+    f = params.mask.file
+    if not f:
+        return
+    p = Path(f)
+    if not p.is_absolute():
+        p = base_dir / p
+    params.mask.file = str(p.resolve())
+
+
+def _relativized_for_save(params: PlanetParams, dest_dir: Path) -> PlanetParams:
+    """Return a copy of ``params`` whose ``mask.file`` is re-relativized to just
+    the sidecar filename next to ``dest_dir`` (a portable saved preset), copying
+    the mask PNG into ``dest_dir`` when it lives elsewhere. None stays None. The
+    original (in-memory, absolute) params are left untouched."""
+    f = params.mask.file
+    if not f:
+        return params
+    src = Path(f)
+    out = params.model_copy(deep=True)
+    dest = dest_dir / src.name
+    if src.is_file() and src.resolve() != dest.resolve():
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+    out.mask.file = src.name  # sits next to the saved JSON -> portable
+    return out
+
+
 def to_preset_doc(params: PlanetParams, name: str | None = None) -> dict:
     return {
         "preset_format": CURRENT_PRESET_FORMAT,
@@ -40,9 +75,19 @@ def to_preset_doc(params: PlanetParams, name: str | None = None) -> dict:
     }
 
 
-def save_preset(params: PlanetParams, path: Path, name: str | None = None) -> None:
+def save_preset(
+    params: PlanetParams, path: Path, name: str | None = None,
+    relativize_mask: bool = True,
+) -> None:
+    """Write ``params`` as a preset envelope at ``path``.
+
+    ``relativize_mask`` (default) re-relativizes ``mask.file`` to a sidecar next
+    to ``path`` and copies the mask PNG there, so a saved preset is portable. The
+    session autosave passes ``relativize_mask=False`` to keep the ABSOLUTE path
+    (the session is machine-local state, not a portable artifact)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(to_preset_doc(params, name), indent=2), encoding="utf-8")
+    doc_params = _relativized_for_save(params, path.parent) if relativize_mask else params
+    path.write_text(json.dumps(to_preset_doc(doc_params, name), indent=2), encoding="utf-8")
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -95,7 +140,11 @@ def load_preset_doc(doc: dict, source: str = "<preset>") -> PlanetParams:
 
 def load_preset(path: Path) -> PlanetParams:
     doc = json.loads(path.read_text(encoding="utf-8"))
-    return load_preset_doc(doc, source=str(path))
+    params = load_preset_doc(doc, source=str(path))
+    # Resolve a relative mask sidecar against the preset's OWN folder so the
+    # in-memory params carry an absolute path (app + CLI file case).
+    resolve_mask_path(params, path.parent)
+    return params
 
 
 def factory_preset_names() -> list[str]:

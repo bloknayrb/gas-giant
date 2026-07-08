@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+from pathlib import Path
 from typing import Any
 
 import annotated_types
@@ -480,6 +481,11 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
             return "optional_float"
         if len(inner) == 1 and inner[0] is int:
             return "optional_int"
+        if len(inner) == 1 and inner[0] is str:
+            # Optional string (mask.file): a text-entry + Browse button; None =
+            # unset. Placed beside optional_float/int so str|None doesn't fall
+            # through to None (which fails test_panels_coverage).
+            return "optional_str"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -648,6 +654,8 @@ def _draw_leaf(
         changed, committed = _draw_palette_rows(label, value)
     elif kind == "model_list":
         changed, committed = _draw_cast_list(label, value)
+    elif kind == "optional_str":
+        changed, committed = _draw_optional_str(name, label, doc)
     elif kind == "optional_float":
         changed, committed = _draw_optional_float(name, label, doc, lo, hi)
     elif kind == "optional_int":
@@ -690,6 +698,35 @@ def _draw_leaf(
         imgui.end_popup()
 
     imgui.pop_id()
+    return changed, committed
+
+
+def _draw_optional_str(
+    name: str, label: str, doc: dict[str, Any]
+) -> tuple[bool, bool]:
+    """Text entry + ``Browse...`` button for an optional string path
+    (``mask.file``). Editing writes the (absolute) path into the draft; an empty
+    string clears it to None (no mask). The Browse button opens the native file
+    picker and commits the chosen ABSOLUTE path. Returns ``(changed, committed)``
+    like the other composite editors."""
+    from imgui_bundle import portable_file_dialogs as pfd
+
+    changed = committed = False
+    current = doc[name] or ""
+    c, text = imgui.input_text(label, current)
+    if c:
+        doc[name] = text or None
+        changed = True
+    committed = committed or imgui.is_item_deactivated_after_edit()
+    imgui.same_line()
+    if imgui.button(f"Browse...##{name}"):
+        picked = pfd.open_file(
+            "Select mask image", "",
+            ["PNG images", "*.png", "All files", "*"],
+        ).result()
+        if picked:
+            doc[name] = str(Path(picked[0]).resolve())
+            changed = committed = True
     return changed, committed
 
 

@@ -72,6 +72,15 @@ def _export(args: argparse.Namespace) -> int:
     if args.dev_steps is not None:
         params.sim.dev_steps = args.dev_steps
 
+    # Mask sidecar: load_preset already resolved a relative path against the
+    # preset's folder (absolute in memory). A path that doesn't exist is a clear
+    # CLI error rather than a silently-disabled mask (the engine's warn+disable
+    # is for the checkpoint/GUI case, where a portable preset may outlive its
+    # sidecar).
+    if params.mask.file is not None and not Path(params.mask.file).is_file():
+        print(f"error: mask file not found: {params.mask.file}", file=sys.stderr)
+        return 2
+
     started = time.perf_counter()
     sim = Simulation(params)
     if args.frames is not None:

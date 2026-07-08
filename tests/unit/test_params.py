@@ -118,15 +118,18 @@ def test_overall_basic_set_is_non_empty():
 
 def test_every_non_allowlisted_section_has_a_basic_leaf():
     """Guard test #6 (H1), part b: every top-level section except the
-    reviewed fully-advanced allowlist (solver, emission, physical -- and
+    reviewed fully-advanced allowlist (solver, emission, physical, mask -- and
     baroclinic, nested under solver, so it's covered by the same 'solver'
     top-level key and listing it again would be redundant-but-harmless) must
     keep at least one adv=False leaf, so a newcomer never lands on a section
     that's silently empty in Basic mode. This is a real assertion: it would
-    fail today if e.g. every Storms field were marked adv=True."""
+    fail today if e.g. every Storms field were marked adv=True.
+
+    'mask' is fully advanced like emission: an opt-in art-direction feature that
+    is a no-op (byte-identical) until a power user supplies a paint mask."""
     from collections import defaultdict
 
-    allowlist = {"solver", "emission", "physical"}
+    allowlist = {"solver", "emission", "physical", "mask"}
     basic_count: dict[str, int] = defaultdict(int)
     for _path, top, extra in _pfield_leaves():
         if not extra.get("adv"):

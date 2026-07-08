@@ -10,7 +10,7 @@ import numpy as np
 
 from gasgiant.gl import GpuContext
 from gasgiant.palette import bake_lut, bake_rows
-from gasgiant.params.model import AppearanceParams, EmissionParams, GradientStop
+from gasgiant.params.model import AppearanceParams, EmissionParams, GradientStop, MaskParams
 from gasgiant.params.seeds import subseed
 
 if TYPE_CHECKING:
@@ -82,27 +82,31 @@ def emission_uniforms(seed: int, emission: EmissionParams) -> dict[str, object]:
 class MapDeriver:
     def __init__(self, gpu: GpuContext) -> None:
         self.gpu = gpu
-        # Program variants keyed by (EMISSION, CHROMA_FX): each disabled
+        # Program variants keyed by (EMISSION, CHROMA_FX, MASK): each disabled
         # feature preprocesses OUT of the kernel text, so neutral defaults
         # stay byte-identical by construction rather than by hope
         # (recompiling a changed kernel can shift FP scheduling on BOTH
         # sides of an off/on comparison). The two default variants compile
         # eagerly (their absence would only surface at first use);
         # FX variants compile lazily on first selection.
-        self._progs: dict[tuple[bool, bool], moderngl.ComputeShader] = {}
+        self._progs: dict[tuple[bool, bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(emission=False, chroma_fx=False)
         self.prog_emission = self._program(emission=True, chroma_fx=False)
         self._palette_tex: moderngl.Texture | None = None
         self._storm_tex: moderngl.Texture | None = None
 
-    def _program(self, emission: bool, chroma_fx: bool) -> moderngl.ComputeShader:
-        key = (emission, chroma_fx)
+    def _program(
+        self, emission: bool, chroma_fx: bool, mask: bool = False
+    ) -> moderngl.ComputeShader:
+        key = (emission, chroma_fx, mask)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if emission:
                 defines["EMISSION"] = "1"
             if chroma_fx:
                 defines["CHROMA_FX"] = "1"
+            if mask:
+                defines["MASK"] = "1"
             self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
         return self._progs[key]
 
@@ -136,11 +140,19 @@ class MapDeriver:
         seed: int = 0,
         profile_dyn: moderngl.Texture | None = None,
         profile_stamp: moderngl.Texture | None = None,
+        mask: moderngl.Texture | None = None,
+        mask_params: MaskParams | None = None,
     ) -> None:
         """lanes: (latitude, strength) thin dark lane lines; warp: the band
         meander (offset, amount, freq) the lanes ride on. Passing emission_out
         + an enabled EmissionParams selects the EMISSION program variant
-        (which also needs the profile LUT textures for its gates)."""
+        (which also needs the profile LUT textures for its gates).
+
+        The imported paint mask travels PER-CALL (never deriver state): pass the
+        live/snapshot mask texture as ``mask`` plus its ``mask_params`` (gains).
+        The MASK variant is selected only when a mask is bound AND at least one
+        gain > 0 -- so a mask with all-zero gains compiles the default program
+        and stays byte-identical (the silent-no-op trap keys on the gains)."""
         if self._palette_tex is None:
             self.update_palettes(appearance)
         emission_on = (
@@ -161,7 +173,19 @@ class MapDeriver:
             or appearance.hue_variance > 0.0  # silent-no-op trap: must be here
             or appearance.chroma_aging > 0.0
         )
-        prog = self._program(emission=emission_on, chroma_fx=chroma_on)
+        # Silent-no-op trap: key on the GAINS, not just presence, so a mask
+        # bound with all-zero gains selects the default program and stays
+        # byte-identical (each gain listed here so none can silently miss).
+        mask_on = (
+            mask is not None
+            and mask_params is not None
+            and (
+                mask_params.band_fade > 0.0
+                or mask_params.emission_gain > 0.0
+                or mask_params.detail_gain > 0.0
+            )
+        )
+        prog = self._program(emission=emission_on, chroma_fx=chroma_on, mask=mask_on)
         size = color_out.size
         lanes = lanes or []
         packed = np.zeros((16, 2), dtype=np.float32)
@@ -205,6 +229,12 @@ class MapDeriver:
         if chroma_on:
             for name, value in chroma_uniforms(seed, appearance).items():
                 _set(prog, name, value)
+        if mask_on:
+            mask.use(location=8)
+            _set(prog, "u_mask", 8)
+            _set(prog, "u_mask_band_fade", mask_params.band_fade)
+            _set(prog, "u_mask_emission_gain", mask_params.emission_gain)
+            _set(prog, "u_mask_detail_gain", mask_params.detail_gain)
         color_out.bind_to_image(0, read=False, write=True)
         height_out.bind_to_image(1, read=False, write=True)
         if emission_on:

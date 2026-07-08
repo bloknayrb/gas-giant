@@ -66,6 +66,27 @@ def write_exr_rgba(path: Path, rgba: np.ndarray) -> None:
         f.write(str(path))
 
 
+def decode_image(path: Path) -> np.ndarray:
+    """Read an equirect grayscale mask PNG -> (H, W) float32 in [0, 1].
+
+    Single-channel: a color image is converted to luminance. The mask MUST be a
+    2:1 equirect (width == 2*height) -- anything else is a clear error, not a
+    silent stretch. A missing/unreadable file raises OSError."""
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise OSError(f"cv2.imread failed for {path} (missing or unreadable image)")
+    if img.ndim == 3:
+        # BGR(A) -> single-channel luminance (drop any alpha first).
+        img = cv2.cvtColor(img[..., :3], cv2.COLOR_BGR2GRAY)
+    h, w = img.shape[:2]
+    if w != 2 * h:
+        raise ValueError(
+            f"{path}: mask must be a 2:1 equirect (width == 2*height), got {w}x{h}"
+        )
+    maxv = np.float32(65535.0 if img.dtype == np.uint16 else 255.0)
+    return np.ascontiguousarray(img.astype(np.float32) / maxv)
+
+
 def read_png16(path: Path) -> np.ndarray:
     """16-bit PNG -> float32 0..1; RGB order for color images, (H, W) for gray."""
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)

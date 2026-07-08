@@ -82,6 +82,8 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
             return "optional_float"
         if len(inner) == 1 and inner[0] is int:
             return "optional_int"
+        if len(inner) == 1 and inner[0] is str:
+            return "optional_str"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -134,7 +136,7 @@ SLIDER_INPUT_INT_LIMIT = 1_000_000
 # GUI group order (matches the collapsing headers top to bottom).
 GROUP_ORDER = [
     "Sim", "Solver", "Bands", "Jets", "Turbulence", "Storms",
-    "Waves", "Poles", "Appearance", "Detail", "Emission", "Physical", "Export",
+    "Waves", "Poles", "Appearance", "Detail", "Mask", "Emission", "Physical", "Export",
 ]
 
 # Groups whose sliders only do anything under the vorticity solver.
@@ -241,6 +243,18 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
                 tier=str(extra.get("tier", "")),
                 description=info.description or "",
                 visual=False, optional=True,
+            ))
+            continue
+        if kind == "optional_str":
+            # Optional string path (mask.file): text-entry + Browse button in the
+            # GUI. Text-only entry, no images (a path can't anchor a lo/hi row).
+            out.append(Slider(
+                path=path, group=group or "Global", label=name.replace("_", " "),
+                lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
+                tier=str(extra.get("tier", "")),
+                description=info.description or "",
+                visual=False, text_only=True, text_widget="path",
+                text_default="None",
             ))
             continue
         if kind == "model_list":
@@ -582,6 +596,10 @@ def build_markdown(sliders: list[Slider]) -> str:
                     meta = (
                         f"`{s.path}` &mdash; toggle (on/off), default "
                         f"**`{s.text_default}`**, tier `{s.tier}`")
+                elif s.text_widget == "path":
+                    meta = (
+                        f"`{s.path}` &mdash; file path, default "
+                        f"**{s.text_default}**, tier `{s.tier}`")
                 else:  # model_list
                     meta = (
                         f"`{s.path}` &mdash; list editor, default "
@@ -593,6 +611,11 @@ def build_markdown(sliders: list[Slider]) -> str:
                     lines.append(
                         "_Boolean toggle (GUI checkbox) &mdash; documented as "
                         "text; no rendered example._\n")
+                elif s.text_widget == "path":
+                    lines.append(
+                        "_File-path field: the GUI shows a text entry + **Browse...** "
+                        "button (empty = None). Documented as text; no rendered "
+                        "example._\n")
                 else:
                     lines.append(
                         "_List of hand-placed sub-records edited in a dedicated "
