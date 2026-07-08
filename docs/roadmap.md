@@ -167,6 +167,22 @@ Falsified or dropped directions that are under-recorded elsewhere. Check this li
 (and the FALSIFIED sections above, plus `docs/superpowers/specs/*verdict*.md`)
 before proposing work in these areas.
 
+- **Fibrous cirrus by STAMPING fine strands into the tracer — FALSIFIED (2026-07-08).**
+  Neptune's bright methane clouds are multi-stranded "combed fiber" cirrus, not smooth
+  lobes. Attempt: modulate the elongated bright cloud stamps (accent/companion, via
+  `accent_aspect`/`companion_aspect`) with a ridged anisotropic pattern to bake in thin
+  east-west strands. Result: the strands do not survive to the render — over the dev run
+  each feature's own rotation winds the stamped tracer into a hook and hyperviscosity +
+  advective diffusion smear the fine detail into a smooth wash (verified by zoomed render
+  inspection + a ~14-agent adversarial visual panel over 6 rounds). The `accent_aspect`/
+  `companion_aspect` elongation lever itself SHIPPED (round dots -> soft wind-stretched
+  streaks, a clear improvement baked into the `neptune` preset; byte-identical when off).
+  **The genuinely viable path** for true fibrous cirrus is a RENDER-TIME synthesis pass
+  (post-advection, so nothing smears it): a dedicated bright-cloud mask/channel that the
+  derive pass renders with flow-parallel fiber synthesis (the `detail.comp` flow-folded-
+  filament / `striation_amount` machinery is the starting point, but it is currently
+  shear/belt-gated and Neptune runs laminar). That is a real feature (new channel + derive
+  work), not a calibration — design it before attempting.
 - **`jupiter_baroclinic` factory preset — DROPPED (2026-06-28).** Its baroclinic
   festoon comb is intrinsically regular and reads *mechanical*; a natural-looking
   baroclinic preset converges to an injection-driven Jupiter clone, so the preset

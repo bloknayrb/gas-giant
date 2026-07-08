@@ -568,6 +568,16 @@ Extra turbulence where jet shear is strong
 
 ## Storms
 
+### accent aspect
+
+`storms.accent_aspect` &mdash; range **1 to 5**, default **1**, tier `restart`.
+
+Accent oval east-west elongation (lon:lat); 1.0 = round. Stretches the bright accent stamp into a wispy cirrus streak (Neptune bright-cloud / Scooter class) via the same generic aspect path as hero_aspect. 1.0 = round (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 5<br>(not rendered)</sub></td>
+</tr></table>
+
 ### accent brightness
 
 `storms.accent_brightness` &mdash; range **-0.5 to 0.5**, default **0.12**, tier `restart`.
@@ -641,6 +651,16 @@ Brown-barge cyclone population multiplier (belts)
 Cast list: storms placed by hand (kind + rendered position + size + optional color). Each entry is stamped verbatim after the seeded populations, exempt from the population cap and runtime mergers, so a director's storm survives the whole run where it was placed. Empty (the default) = no cast, byte-identical to the seeded-only field. Capped at 16 entries
 
 _List of hand-placed sub-records edited in a dedicated GUI panel &mdash; documented as text; no rendered example._
+
+### companion aspect
+
+`storms.companion_aspect` &mdash; range **1 to 5**, default **1**, tier `restart`.
+
+East-west elongation (lon:lat) of the bright companion clouds; 1.0 = round. Stretches each KIND_PEARL companion into a wispy cirrus streak beside the hero (real Neptune's GDS companion clouds are sheared streaks, not round dots), via the same generic aspect path as hero_aspect. 1.0 = round (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 5<br>(not rendered)</sub></td>
+</tr></table>
 
 ### hero aspect
 

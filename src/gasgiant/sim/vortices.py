@@ -588,7 +588,7 @@ def generate_vortices(
                           dt, dev_steps)
     if storms.hero_companions > 0:
         _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
-                             storms.hero_companions)
+                             storms.hero_companions, storms.companion_aspect)
     # Cast list (art-directed storms): stamped LAST, after the cap and every
     # seeded population, so they are byte-identical no-ops when the list is
     # empty and never perturb a seeded draw when present.
@@ -663,7 +663,8 @@ def _add_accent_ovals(
             lon = float((pin_base + k * min_sep + np.pi) % (2.0 * np.pi) - np.pi)
         reg.vortices.append(
             Vortex(lat, lon, r, s, KIND_OVAL,
-                   tint=storms.accent_tint, brightness=storms.accent_brightness)
+                   tint=storms.accent_tint, brightness=storms.accent_brightness,
+                   aspect=storms.accent_aspect)
         )
 
 
@@ -672,6 +673,7 @@ def _add_hero_companions(
     rng: np.random.Generator,
     profiles: LatProfiles,
     count: int,
+    aspect: float = 1.0,
 ) -> None:
     """Bright companion clouds beside each hero (review B5-5: the Neptune GDS
     companion / Scooter class). KIND_PEARL stamps — bright spot with a slight
@@ -694,7 +696,8 @@ def _add_hero_companions(
             r = float(np.clip(0.30 * hero.r_core, 0.015, 0.035))
             s = _ambient_sign(profiles, lat) * 0.008
             reg.vortices.append(
-                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=0.32)
+                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=0.32,
+                       aspect=aspect)
             )
 
 

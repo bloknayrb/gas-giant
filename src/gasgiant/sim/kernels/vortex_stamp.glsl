@@ -206,6 +206,34 @@ vec3 vortexStamp(vec3 p) {
                      - 0.10 * exp(-q * q * 9.0)
                      + 0.14 * exp(-(q - 2.0) * (q - 2.0) * 2.2);
                 dT1 -= 0.06 * exp(-q * q * 9.0);
+            } else if (asp > 1.0) {
+                // Elongated bright stamp = wispy cirrus streak (Neptune bright-cloud
+                // class): a SOFT, longer-tailed feathered glow with NO dark collar
+                // ring (a collar reads as a hard stamped rim; a pure Gaussian reads
+                // as an opaque puff), BROKEN into multiple thin flow-parallel
+                // filaments -- real Neptune cirrus is "combed fibers", not one lobe.
+                // An anisotropic fbm does the combing: high frequency ACROSS the
+                // streak (fine strands), low frequency ALONG it (long tails). The
+                // fibers ride the streak's own east-west frame. asp==1.0 never
+                // enters here => byte-identical when off.
+                // Soft feathered glow, plus a mild flow-frame noise modulation so the
+                // streak is not a perfectly uniform lobe. (A crisp multi-strand "combed
+                // fiber" texture cannot be stamped here -- the sim advects and diffuses
+                // fine tracer detail into a wash over the dev run; true fibrous cirrus
+                // needs a render-time synthesis pass on a dedicated cloud mask. See
+                // docs/roadmap.md.) asp==1.0 never enters here => byte-identical when off.
+                float glow = 0.6 * core + 0.4 * exp(-q * 1.3);
+                vec3 cc = a.xyz;
+                vec3 few = cross(vec3(0.0, 1.0, 0.0), cc);
+                float fewl = length(few);
+                if (fewl > 1e-4) {
+                    vec3 f1 = few / fewl;            // east-west == along the streak
+                    vec3 f2 = cross(cc, f1);         // cross-streak (latitude)
+                    float strand = fbm(vec3(dot(p, f1) * 6.0, dot(p, f2) * 44.0, 3.1)
+                                       + vec3(11.3, 4.7, 8.1), 3, 2.0, 0.5);
+                    glow *= clamp(0.4 + 0.95 * strand, 0.0, 1.35);
+                }
+                dT0 += b.w * glow;
             } else {
                 float ring = exp(-(q - 1.2) * (q - 1.2) * 4.0);  // collar annulus
                 dT0 += b.w * core - 0.3 * abs(b.w) * ring;
