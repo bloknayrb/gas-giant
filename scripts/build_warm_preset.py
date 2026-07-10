@@ -45,7 +45,18 @@ def main():
         "belt_replenish": 0.0,
         "replenish_rate": 0.35,
     })
-    p.storms = p.storms.model_copy(update={"hero_radius": 0.05})
+    # Flow-negotiated hero edge (the de-stamped GRS): fade the hero's relaxation
+    # forcing through the rim/collar/near-interior so the storm's own vortex
+    # velocity folds ambient tracer into a ragged, filament-shedding boundary
+    # woven into the band, instead of a clean analytic template re-imposed every
+    # step. The deep-core anchor keeps full relaxation, so the oval stays
+    # coherent (solid_core=1.0 preserved) and everything beyond the storm is
+    # byte-identical. 0.8 = strong effect, still a distinct storm (calibrated by
+    # emergence x solid_core sweep, 2026-07-09).
+    p.storms = p.storms.model_copy(update={
+        "hero_radius": 0.05,
+        "hero_emergence": 0.8,
+    })
 
     # Uniform detail coverage: apply the flow-folded detail-FX texture at EVEN
     # density across latitude instead of leaving zones detail-starved. 0.36 was

@@ -112,7 +112,22 @@ void main() {
     float q_target   = (omega_jet + omega_vort) * confine + f;
 
     if (u_relax_tau > 0.0) {
+#ifdef HERO_EMERGENCE
+        // Hero anchor (emergence lever): boost the nudge inside the hero
+        // window so the prognostic core cannot wander from the registry
+        // position the tracer stamp paints (the real GRS is famously
+        // position-stable). 60x at full emergence: the standing offset
+        // scales as drift_error_rate x tau_eff, and the per-step drift
+        // error doubles at half resolution — 60x holds the core within
+        // ~half a core radius across the 512..2048 range. Rate-clamped for
+        // stability. Variant-compiled: the default program keeps the
+        // pre-feature line below.
+        float wa = heroAnchorWindow(p);
+        q += (q_target - q)
+           * min((1.0 + 60.0 * u_hero_emergence * wa) / u_relax_tau, 0.5);
+#else
         q += (q_target - q) / u_relax_tau;
+#endif
     }
 
     // M3 baroclinic coupling does NOT touch the persistent q state: it is injected

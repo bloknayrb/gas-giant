@@ -173,6 +173,12 @@ STORMS_HERO = {
                             # moat, not a uniform ring) => discrete vortex
     "hero_wake_detail": 0.80,  # fray the downstream wake into folded filaments instead
                                # of a smooth wedge (reads as turbulence, not a blob)
+    "hero_emergence": 0.8,  # GRS-realism pack (2026-07-09): annular-ring vorticity
+                            # (stagnant core), plateau fill, core anchor, rim-band
+                            # relax fade + neighborhood band-flush. Without it this
+                            # preset's big (r 0.16) hero smears into a half-dissolved
+                            # arc (the prognostic core wanders from the stamp); with
+                            # it the spot is a filled red oval in a hollow.
 }
 
 # Warm's gentler jet profile (vs the stock 1.0/1.6/0.12/0.5): lower strength + WIDER

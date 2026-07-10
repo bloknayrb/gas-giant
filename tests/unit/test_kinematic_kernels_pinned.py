@@ -23,7 +23,7 @@ _PKG = "gasgiant.sim.kernels"
 #   pkg = 'gasgiant.sim.kernels'
 #   for f in ['psi.comp','velocity.comp','advect.comp',
 #             'noise3d.glsl','common.glsl','vortex_stamp.glsl',
-#             'band_mod.glsl','wave_stamp.glsl']:
+#             'band_mod.glsl','wave_stamp.glsl','hero_q.glsl']:
 #       t = ir.files(pkg).joinpath(f).read_text(encoding='utf-8')
 #       print(f, hashlib.sha1(t.encode()).hexdigest())
 # "
@@ -34,7 +34,14 @@ _PINNED: dict[str, str] = {
     # so it can no longer leak into the psi_feather polar band.
     "psi.comp":          "4e905a61164cea74991442622d38742482f0edeb",
     "velocity.comp":     "a5edeb117303788431b9d1ab686f0dddae402fd6",
-    "advect.comp":       "a44a0061d19ac2769c45b308500e6405f8663fd1",
+    # Updated 2026-07-10 (hero_emergence, GRS-realism pack): pass 2's relaxation
+    # lines compile as a HERO_EMERGENCE preprocessor VARIANT (define selected when
+    # storms.hero_emergence > 0); the #else branches carry the pre-feature lines
+    # verbatim, so the default program text is unchanged after preprocessing —
+    # byte-identical by construction. (An earlier runtime-guarded cut moved the
+    # jupiter@1024 p05 hash via FMA-contraction changes on shared expressions;
+    # the variant conversion is the fix, per the CLAUDE.md gated-out rule.)
+    "advect.comp":       "239d5022eeab06c8ea747a1614e9f00c55d04040",
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
     "common.glsl":       "48c13b438e4e893b32b594234ef965bdfeac1cad",
     # Updated 2026-06-29 for the convective white-plume outbreak stamp branch
@@ -51,7 +58,24 @@ _PINNED: dict[str, str] = {
     # flow-frame noise modulation) for elongated bright accent/companion clouds.
     # asp==1.0 (every existing preset's accents/companions) short-circuits it =>
     # byte-identical kinematic output; p05 baseline unchanged (9/9 match).
-    "vortex_stamp.glsl": "a9ac4c262603c514499faed3aa92f8b987448408",
+    # Updated 2026-07-10 (storms.hero_emergence, the GRS-realism pack — see
+    # docs/superpowers/specs/2026-07-09-hero-emergence-design.md): the whole
+    # feature (heroRelaxWeight rim fade + band flush, plateau fill + radial
+    # identity, ring/collar/moat remap, quiet-storm fades, hero_q.glsl include)
+    # compiles under `#ifdef HERO_EMERGENCE` with the pre-feature lines
+    # verbatim in the #else branches, so the default program text is unchanged
+    # after preprocessing => byte-identical by construction; p05 9/9. (An
+    # earlier runtime-guarded cut moved the jupiter@1024 hash via
+    # FMA-contraction changes on shared expressions — hence the variant rule.)
+    # Re-pinned same day: COMMENT-ONLY fix above heroRelaxWeight (the old text
+    # claimed advect.comp runtime-guards the call; the guard is variant
+    # compilation). Zero code change — the compiled default program and the
+    # p05 hashes are untouched.
+    "vortex_stamp.glsl": "0ab171fa175e7243e6382ea81f884f9ced50072b",
+    # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
+    # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
+    # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
+    "hero_q.glsl": "0d116e76423ac56301e74907bf2b2a81aaa659fa",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }

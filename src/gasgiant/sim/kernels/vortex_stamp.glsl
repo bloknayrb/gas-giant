@@ -10,12 +10,22 @@ layout(std430, binding = 2) readonly buffer Vortices {
     vec4 vortex_data[];
 };
 uniform int u_vortex_count;
+// heroEllipQ for the variant-only heroRelaxWeight below; the include's whole
+// body is #ifdef HERO_EMERGENCE so the default program is unchanged.
+#include "hero_q.glsl"
 uniform float u_rim_contrast;
 uniform float u_hero_mottle;       // interior brightness churn (T0); 0 disables
 uniform float u_hero_tint_var;     // interior tint festoon (T3); 0 disables
 uniform float u_hero_rim_warp;     // lumpy-oval boundary warp; 0 disables (byte-identical)
 uniform float u_hero_rim_tint;     // dark reddish collar rim; 0 disables (byte-identical)
 uniform float u_hero_wake_detail;  // wake filament structure; 0 disables (byte-identical)
+#ifdef HERO_EMERGENCE
+// GRS-realism pack strength. The whole feature compiles as a preprocessor
+// VARIANT (HERO_EMERGENCE define, selected when storms.hero_emergence > 0), so
+// the default program text is the pre-feature kernel — byte-identical by
+// construction, per the project rule (gated out, not branch-guarded).
+uniform float u_hero_emergence;
+#endif
 // Seeded noise offset for the hero interior fbm. Declared here (not reusing the
 // includer's u_detail_offset) because this file is #included BEFORE that uniform
 // is declared in init.comp/advect.comp, so it is not yet in scope. Set from the
@@ -120,7 +130,12 @@ vec3 vortexStamp(vec3 p) {
                 // degenerate pole-aligned case. Guarded => byte-identical when both off.
                 float hth = 0.0;
                 bool hth_ok = false;
+#ifdef HERO_EMERGENCE
+                if (u_hero_rim_warp > 0.0 || u_hero_rim_tint > 0.0
+                    || u_hero_emergence > 0.0) {
+#else
                 if (u_hero_rim_warp > 0.0 || u_hero_rim_tint > 0.0) {
+#endif
                     vec3 hc = a.xyz;
                     vec3 hew = cross(vec3(0.0, 1.0, 0.0), hc);
                     float hewl = length(hew);
@@ -146,16 +161,115 @@ vec3 vortexStamp(vec3 p) {
                     qrim += u_hero_rim_warp * 0.20 * wr;
                     qcol += u_hero_rim_warp * 0.20 * wc;
                 }
+                // Hero fill profile (emergence): the real GRS is a FILLED oval —
+                // its red is a near-flat plateau across the whole spot (PIA21775),
+                // not a Gaussian stain fading from the center, and the red reaches
+                // nearly to the bright hollow margin (thin pale collar, NOT a small
+                // egg in a big bright basin). The plateau EDGE sits at q~1.0 — the
+                // authored hero_radius — with the thin ring/collar hugging just
+                // outside (an earlier cut inflated the edge to q~1.55 with the
+                // collar at 2.0, which made the storm and its whole influence
+                // zone read much bigger than its authored size). Under emergence:
+                //  - the tint/brightness fill morphs core -> a WIDE plateau riding
+                //    the warped qrim (lumpy oval), with an fbm-frayed edge so
+                //    filaments peel instead of a sticker cutoff;
+                //  - radial identity: inner half slightly darker (EBSCO: "in the
+                //    inner half of the Spot, reflectivity was lower"), outer
+                //    annulus grades paler (Juno: pale salmon rim);
+                //  - faint concentric wrapped lanes (the Voyager low-contrast
+                //    internal banding), azimuth-wobbled so they read as wound
+                //    cloud lanes, not target rings.
+                // The dark perimeter ring and bright collar shift OUT to the new
+                // edge with emergence (mix below). Variant-gated => the default
+                // program never contains any of this.
+#ifdef HERO_EMERGENCE
+                float fill = core;
+                {
+                    float plate = 1.0 - smoothstep(0.62, 1.0, qrim);
+                    // fbm edge fray, only where its Gaussian window is
+                    // non-negligible (< 2% past qrim 1.7; plate is already 0
+                    // there) — this runs per pixel per step as the relaxation
+                    // target, so skipping the dead outer annulus matters.
+                    if (qrim < 1.7) {
+                        // Fray/wisp frequencies ride the compaction (x~1.55) so
+                        // the interior character keeps its proportions on the
+                        // smaller oval.
+                        float ffrq = mix(5.0, 8.0, u_hero_emergence);
+                        float efray = fbm(p * (a.w > 0.0 ? ffrq / a.w : ffrq)
+                                          + u_hero_noise_offset.yxz, 3, 2.0, 0.5);
+                        plate = clamp(plate + 0.6 * u_hero_emergence * efray
+                                      * exp(-(qrim - 0.84) * (qrim - 0.84) * 6.0),
+                                      0.0, 1.0);
+                    }
+                    fill = mix(core, plate, u_hero_emergence);
+                    // Upgrade the shared Gaussian tint/dome to the plateau fill
+                    // (delta form: the shared lines above already added *core).
+                    dT3 += b.z * (fill - core);
+                    dT1 += 0.15 * (fill - core);
+                    // Radial identity: deeper red + slightly darker core, paler
+                    // salmon outer annulus. NOTE the storm_tints LUT is
+                    // NON-MONOTONIC (tan -> dark brown ~0.72 -> salmon 1.0): the
+                    // deep brick red lives at LOWER T3 than the pale salmon, so
+                    // the core LOWERS T3 (toward brick) and the annulus RAISES it
+                    // (toward pale salmon; the LUT lookup clamps at 1).
+                    // The LUT index and the blend WEIGHT are both |T3|-driven, so
+                    // "pale edge" is reached by dropping T3 steeply (weight fades,
+                    // cream base shows through), NOT by raising it (that saturates
+                    // at pure salmon and reads as rust). Center: slight drop into
+                    // the brick zone at full weight = deep. Edge: strong drop to
+                    // ~0.3 = pale wash.
+                    // Deep center via VALUE (T0 down at full salmon weight), not
+                    // via T3: the weight coupling makes a lowered T3 fade pale.
+                    float deep = 1.0 - smoothstep(0.19, 0.55, q);
+                    dT0 -= 0.10 * u_hero_emergence * deep;
+                    dT3 -= 0.60 * u_hero_emergence * b.z
+                         * smoothstep(0.45, 0.97, q) * plate;
+                    dT0 += 0.06 * u_hero_emergence
+                         * smoothstep(0.45, 0.97, q) * plate;
+                    // Concentric wrapped lanes, windowed off the very center.
+                    if (hth_ok) {
+                        vec3 lph = u_hero_noise_offset * 9.42;
+                        float lane = sin(q * 10.0 + 1.1 * sin(hth + lph.x) + lph.y);
+                        dT0 += 0.07 * u_hero_emergence * lane * plate
+                             * smoothstep(0.16, 0.32, q);
+                    }
+                }
+                // Ring at the plateau edge, THIN pale collar hugging just outside
+                // (mix so small lever values stay near the legacy anatomy). The
+                // widths sharpen with the lever — the real Red Spot Hollow is a
+                // thin margin, not a broad bright basin around the oval.
+                float ring_q = mix(1.0, 1.05, u_hero_emergence);
+                float col_q  = mix(1.55, 1.30, u_hero_emergence);
+                float ring_k = mix(16.0, 38.0, u_hero_emergence);
+                float col_k  = mix(5.0, 12.0, u_hero_emergence);
+                // Quiet hollow: the real Red Spot Hollow is only slightly
+                // brighter than the bands (Juno close-ups), not a glowing
+                // basin — soften both the dark ring and the bright collar
+                // with the lever.
+                float quiet = 1.0 - 0.5 * u_hero_emergence;
+                dT0 += b.w * fill
+                     - 0.16 * quiet * u_rim_contrast * exp(-(qrim - ring_q) * (qrim - ring_q) * ring_k)
+                     + 0.22 * quiet * u_rim_contrast * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
+#else
                 dT0 += b.w * core
                      - 0.16 * u_rim_contrast * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
                      + 0.22 * u_rim_contrast * exp(-(qcol - 1.55) * (qcol - 1.55) * 5.0);
+#endif
                 // Dark reddish collar (the Red Spot Hollow rim): redden (T3 up,
                 // toward the salmon storm-tint LUT) and darken (T0 down) the
                 // perimeter annulus so the spot has a discrete dark-red rim.
                 // Rides on the warped qrim so the tint follows the lumpy edge.
                 // Guarded => byte-identical when off.
                 if (u_hero_rim_tint > 0.0) {
+#ifdef HERO_EMERGENCE
+                    // Hugs the plateau edge; thinner with the lever (the real
+                    // moat is a narrow margin on the oval, not a wide annulus).
+                    float rt_q = mix(1.08, 1.09, u_hero_emergence);
+                    float rt_k = mix(11.0, 26.0, u_hero_emergence);
+                    float rring = exp(-(qrim - rt_q) * (qrim - rt_q) * rt_k);
+#else
                     float rring = exp(-(qrim - 1.08) * (qrim - 1.08) * 11.0);
+#endif
                     // Azimuthal break-up: the real Red Spot Hollow is a soft, broken,
                     // asymmetric moat -- dark on some arcs, faint on others -- not a
                     // uniform ring. Modulate the DARKENING (not the reddening) with a
@@ -170,8 +284,17 @@ vec3 vortexStamp(vec3 p) {
                                      + 0.2 * sin(3.0 * hth + tph.z));
                         azw = clamp(0.35 + 0.65 * (0.5 + 0.5 * lobe), 0.35, 1.0);
                     }
+#ifdef HERO_EMERGENCE
+                    // Under emergence the moat sits ON the enlarged pale margin —
+                    // the real hollow boundary is subtle wisps, not a heavy dark
+                    // ring — so both moat terms soften with the lever.
+                    float moat = 1.0 - 0.6 * u_hero_emergence;
+                    dT3 += u_hero_rim_tint * 0.55 * rring * moat;     // redden
+                    dT0 -= u_hero_rim_tint * 0.16 * rring * azw * moat;  // darken + broken
+#else
                     dT3 += u_hero_rim_tint * 0.55 * rring;            // redden -- unchanged
                     dT0 -= u_hero_rim_tint * 0.16 * rring * azw;      // deeper (was 0.12) + broken
+#endif
                 }
                 // Interior turbulent churn: a flow-scale fbm breaks up the
                 // smooth Gaussian core so the spot reads as churning cloud, not
@@ -181,7 +304,19 @@ vec3 vortexStamp(vec3 p) {
                 // Guarded => byte-identical when off (fbm never evaluated).
                 if (u_hero_mottle > 0.0) {
                     float win = core * (1.0 - smoothstep(0.6, 1.0, q));
+#ifdef HERO_EMERGENCE
+                    // Under emergence the interior is the whole plateau, not just
+                    // the Gaussian core: extend the churn window with it — but
+                    // MUTED (the real interior motion is "small and random",
+                    // ~3%-contrast wisps, not loud churn). Wisp frequency rides
+                    // the compaction so the texture keeps its proportions.
+                    win = max(win, fill * (1.0 - smoothstep(0.78, 1.04, qrim)))
+                        * (1.0 - 0.6 * u_hero_emergence);
+                    float fscale = (a.w > 0.0 ? 9.0 / a.w : 9.0)
+                                 * (1.0 + 0.55 * u_hero_emergence);
+#else
                     float fscale = a.w > 0.0 ? 9.0 / a.w : 9.0;
+#endif
                     // Fixed amplitude in the rim/collar league (~0.16/0.22), NOT
                     // scaled by the dim hero core brightness (b.w~0.05) which
                     // would render the churn invisible. The interior window keeps
@@ -194,7 +329,14 @@ vec3 vortexStamp(vec3 p) {
                 // instead of flat red. Signed => spot mean tint ~preserved.
                 if (u_hero_tint_var > 0.0) {
                     float winT = core * (1.0 - smoothstep(0.55, 1.0, q));
+#ifdef HERO_EMERGENCE
+                    winT = max(winT, fill * (1.0 - smoothstep(0.75, 1.0, qrim)))
+                         * (1.0 - 0.5 * u_hero_emergence);
+                    float fscaleT = (a.w > 0.0 ? 7.0 / a.w : 7.0)
+                                  * (1.0 + 0.55 * u_hero_emergence);
+#else
                     float fscaleT = a.w > 0.0 ? 7.0 / a.w : 7.0;
+#endif
                     dT3 += b.z * u_hero_tint_var * winT
                          * fbm(p * fscaleT + u_hero_noise_offset.zxy + 13.0, 3, 2.0, 0.5);
                 }
@@ -290,3 +432,64 @@ vec3 vortexStamp(vec3 p) {
     }
     return vec3(dT0, dT1, dT3);
 }
+
+#ifdef HERO_EMERGENCE
+// Per-pixel relaxation multiplier that makes the hero's edge FLOW-NEGOTIATED
+// and its NEIGHBORHOOD band-flushed.
+//
+// The relaxation forcing (advect.comp pass 2) re-imposes the analytic hero
+// stamp every step, so the flow can never own the storm -> it reads as stamped.
+// Two hero-local modifications, both gated by u_hero_emergence:
+//   RIM BAND (q ~ 1.0, the plateau edge): FADE relaxation so advection (the
+//     annular ring's shear) folds the tracer into a ragged, filament-shedding
+//     boundary. The interior keeps FULL relaxation — the real GRS interior is
+//     stagnant and must hold its plateau fill.
+//   FLUSH ANNULUS (q ~ 1.55-3.4): BOOST relaxation toward the band stamp. Over
+//     a dev run even a weak orbital flow winds the whole neighborhood into
+//     concentric arcs, and with relax_tau ~2000 nothing ever erases them —
+//     while on the real planet the jets sweep wound material downstream and
+//     the bands re-assert (Cassini PIA07782: band-parallel beyond ~1.5 spot
+//     radii, thin collar hugging the oval). The boost is that flushing,
+//     hero-local (the hero stamp is ~0 out there, so the target IS the band).
+//     With the plateau edge at q~1.0, q IS spot radii — flush starts right
+//     where Cassini shows the bands re-asserting, and is done by ~3, so the
+//     storm's influence zone stays a small multiple of the storm itself.
+// Far-field pixels (no hero within q<3.6) return exactly 1.0.
+//
+// Compiled and called only in the HERO_EMERGENCE variant (advect.comp's pass-2
+// relaxation lines select rk = u_relax_k * heroRelaxWeight(p) under the same
+// #ifdef, with no runtime guard) — the default program contains none of this
+// by construction, so it stays byte-identical.
+float heroRelaxWeight(vec3 p) {
+    float infl = 0.0;    // strongest rim-band fade at this pixel, in [0,1.4]
+    float flush = 0.0;   // strongest neighborhood-flush boost, in [0,1]
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 b = vortex_data[3 * i + 1];
+        if (b.y != VKIND_HERO) continue;
+        float q = heroEllipQ(p, i, 3.6);
+        if (q > 3.6) continue;   // strictly local to the storm neighborhood
+        float rim_bump = exp(-(q - 1.0) * (q - 1.0) * 3.8);
+        if (q < 2.2) {
+            // Per-azimuth erosion: some arcs keep the ring, others dissolve ->
+            // the boundary is ragged, not a uniformly-softened circle.
+            // Flow-scale fbm on the seeded hero offset (deterministic). Only
+            // evaluated where rim_bump is non-negligible (< 0.6% past q 2.2) —
+            // the flush annulus beyond gets the smoothsteps only.
+            float rc = vortex_data[3 * i].w;
+            float fscale = rc > 0.0 ? 9.0 / rc : 9.0;
+            float ero = clamp(0.15 + 1.4 * fbm(p * fscale + u_hero_noise_offset.zyx + 5.0,
+                                               4, 2.0, 0.5),
+                              0.0, 1.4);
+            infl = max(infl, rim_bump * ero);
+        }
+        flush = max(flush, smoothstep(1.55, 2.1, q) * (1.0 - smoothstep(2.7, 3.4, q)));
+    }
+    // Fade in the rim band (down to 0), boost in the flush annulus (up to x6:
+    // tau_eff ~ relax_tau/6 -> the wound arcs decay over the dev run while the
+    // bands re-assert; still << 1 per step, stability untouched). The boost is
+    // paired with the partial vorticity shield: the residual ~30% circulation
+    // still winds the annulus, just slowly enough for this flush to win.
+    return clamp(1.0 - u_hero_emergence * infl, 0.0, 1.0)
+         + 5.0 * u_hero_emergence * flush;
+}
+#endif  // HERO_EMERGENCE

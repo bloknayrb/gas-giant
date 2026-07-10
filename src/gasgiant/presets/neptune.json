@@ -120,6 +120,7 @@
       "hero_radius": 0.13,
       "hero_strength": 1.7,
       "hero_latitude": -22.5,
+      "hero_longitude": null,
       "rim_contrast": 2.0,
       "hero_aspect": 2.2,
       "hero_mottle": 0.35,
@@ -128,6 +129,7 @@
       "hero_rim_warp": 0.0,
       "hero_wake_detail": 0.0,
       "hero_solid_core": 1.0,
+      "hero_emergence": 0.8,
       "wake_turbulence": 1.593,
       "hero_tint": -0.9,
       "hero_brightness": -0.3,
@@ -137,6 +139,7 @@
       "oval_solid_core": 0.0,
       "accent_count": 1,
       "accent_latitude": null,
+      "accent_longitude": null,
       "accent_tint": 1.0,
       "accent_brightness": 0.32,
       "accent_radius": 0.06,
@@ -146,13 +149,15 @@
       "outbreak_count": 1,
       "outbreak_strength": 1.0,
       "outbreak_latitude": null,
+      "outbreak_longitude": null,
       "outbreak_phase": null,
       "outbreak_lat_min": 0.2,
       "small_density": 0.0,
       "stamp_contrast": 2.4,
       "stamp_tint_contrast": null,
       "merge_rate": 0.219,
-      "merge_debris": 2.0
+      "merge_debris": 2.0,
+      "cast": []
     },
     "waves": {
       "festoon_strength": 0.0,
@@ -243,6 +248,25 @@
           ]
         }
       ],
+      "band_tint_stops": [
+        {
+          "pos": 0.0,
+          "color": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "pos": 1.0,
+          "color": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "band_tint_strength": 0.0,
       "haze_amount": 0.25,
       "haze_color": [
         0.55,
@@ -288,6 +312,12 @@
       "cirrus_fiber_freq": 3.0,
       "streak_mute": 1.0
     },
+    "mask": {
+      "file": null,
+      "band_fade": 0.0,
+      "emission_gain": 0.0,
+      "detail_gain": 0.0
+    },
     "emission": {
       "thermal_strength": 0.35,
       "thermal_color": [
@@ -317,11 +347,26 @@
     "physical": {
       "radius_km": 69911.0,
       "height_scale": 0.004,
-      "height_midlevel": 0.5
+      "height_midlevel": 0.5,
+      "ring_inner_km": 74500.0,
+      "ring_outer_km": 136780.0
+    },
+    "rings": {
+      "enabled": false,
+      "opacity": 1.0,
+      "brightness": 1.0,
+      "tint_color": [
+        0.86,
+        0.83,
+        0.78
+      ],
+      "fine_grain": 0.15
     },
     "export": {
       "width": 2048,
-      "png_compression": 2
+      "projection": "equirect",
+      "png_compression": 2,
+      "flow_map": false
     }
   }
 }
