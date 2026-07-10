@@ -207,8 +207,19 @@ void main() {
 #else
     ws = waveStamp(ll);
 #endif
+#ifdef HERO_EMERGENCE
+    // Flow-negotiated hero edge + neighborhood band-flush: scale the relaxation
+    // rate by heroRelaxWeight (fade at the hero rim so advection owns the
+    // boundary; boost in the outer annulus so the bands re-assert around the
+    // storm). Hero-local: exactly 1.0 far from any hero. Compiled only in the
+    // HERO_EMERGENCE variant — the default program keeps the pre-feature lines.
+    float rk = u_relax_k * heroRelaxWeight(p);
+    result.x += (s0 + vs.x + ws.x + ring - result.x) * rk;
+    result.y += (s1 + vs.y + ws.y - result.y) * rk;
+#else
     result.x += (s0 + vs.x + ws.x + ring - result.x) * u_relax_k;
     result.y += (s1 + vs.y + ws.y - result.y) * u_relax_k;
+#endif
 
     // Detail tracer: blend in fresh evolving noise (an exponential-decay
     // flow-noise by construction).
@@ -233,7 +244,11 @@ void main() {
 
     // T3 tint relaxes toward the live vortex + wave tint stamps: cores and
     // festoon roots stay colored while they exist, advected trails decay.
+#ifdef HERO_EMERGENCE
+    result.w += (vs.z + ws.z - result.w) * rk * 0.6;
+#else
     result.w += (vs.z + ws.z - result.w) * u_relax_k * 0.6;
+#endif
 
     imageStore(out_tracers, px, result);
 #else

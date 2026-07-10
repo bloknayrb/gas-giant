@@ -106,6 +106,12 @@ STORMS_HERO = {
     "hero_wake_detail": 0.0,  # no turbulent trailing wake
     "companion_aspect": 3.5,  # elongate the companion clouds into wispy east-west streaks
                               # (real GDS companions are sheared cirrus, not round dots)
+    "hero_emergence": 0.8,  # GRS-realism pack (2026-07-09) — sign-agnostic: the
+                            # plateau fill makes the NEGATIVE-brightness GDS a filled
+                            # coherent dark oval (Voyager's GDS was exactly that), the
+                            # anchor keeps it on its stamp, and the band-flush stops
+                            # the neighborhood from winding around it. Companions ride
+                            # the flush target (they are stamps) and survive.
 }
 
 # Remove the planet-girdling Jupiter storm field -- only the hero + companions remain, plus

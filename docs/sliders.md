@@ -702,6 +702,16 @@ Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating brigh
 <td align="center"><img src="img/sliders/storms__hero_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
+### hero emergence
+
+`storms.hero_emergence` &mdash; range **0 to 1**, default **0**, tier `restart`.
+
+GRS-realism pack for hero storms (Juno/Voyager-anchored). Morphs the hero from a soft stamped whirlpool to the real storm architecture: (1) the vorticity becomes an ANNULAR RING — the ~430 km/h winds live at the periphery while the interior is stagnant, so the quiescent core HOLDS its fill instead of winding into a dark-eye pinwheel; (2) the tint/brightness stamp becomes a FILLED PLATEAU (the GRS is a near-uniform red oval, not a Gaussian stain); (3) the prognostic core is ANCHORED to the registry position so the red fill lands on the visible vortex; (4) tracer relaxation fades in the ring band only, so the ring's shear folds a ragged, filament-shedding boundary that exchanges material with the jets. Vorticity-mode levers (1)(3) need solver.type=vorticity; (2)(4) act in both modes. Hero-local (nothing beyond ~3.6 hero radii is touched; the visible oval edge sits AT hero_radius). 0 = legacy stamped hero (byte-identical, all four paths are guarded out)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__hero_emergence__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
+</tr></table>
+
 ### hero latitude
 
 `storms.hero_latitude` &mdash; optional; pin range **-55 to 55**, default **None (auto)**, tier `restart`.

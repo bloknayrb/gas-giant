@@ -80,6 +80,17 @@ uniform vec3 u_offset_spiral;     // subseed("detail-hero-spiral")
 // Rotation sense per hero, sign(strength) — deliberately NOT packed into
 // u_heroes.w so heroMask and the default program text stay untouched.
 uniform float u_hero_spin[3];
+#ifdef HERO_EMERGENCE
+// storms.hero_emergence: the sim-side GRS-realism pack fills the hero to a
+// plateau whose edge sits at q~1.0 (the authored hero_radius, thin collar
+// hugging just outside) and makes its interior a stagnant quiescent core.
+// The hero-keyed detail treatments adapt: interior log-spiral suppressed (a
+// wound whirlpool inside a stagnant core is the exact tell the pack removes),
+// collar streamlines tightened onto the thin collar, legacy churn boosts
+// faded (quiet storm). Compiled as a variant so the default program text is
+// unchanged (byte-identical by construction).
+uniform float u_hero_emergence;
+#endif
 // Storm-scale folded structure inside belts + temperate lace mottle (the
 // v1.4 audit's two biggest texture gaps: the filament masks are jet-gated
 // and a reference-aligned broad-band layout puts band interiors far from
@@ -240,6 +251,17 @@ void main() {
     // at the hero centre. u_hero_calm in [0,1], hero in [0,1] => calm in [0,1];
     // u_hero_calm=0 => exactly 1.0 (w*1.0==w, byte-identical).
     float calm = 1.0 - u_hero_calm * hero;
+#ifdef HERO_EMERGENCE
+    // QUIET STORM: the legacy hero treatments BOOST churn/winding inside the
+    // spot (built for the old whirlpool look) — the emergence anatomy is the
+    // opposite: a stagnant, quiescent interior and a subtle hollow (Juno
+    // close-ups are smooth tonal fields with sparse ~3%-contrast wisps).
+    // heroQ drives the legacy boosts and fades with the lever; `hero` keeps
+    // the full mask so calm/coverage still see the enlarged oval. Deepen calm
+    // toward a floor so the interior drops to reference quietness.
+    float heroQ = hero * (1.0 - u_hero_emergence);
+    calm = min(calm, 1.0 - clamp(0.9 * u_hero_emergence, 0.0, 1.0) * hero);
+#endif
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the
     // feather both stacks are computed and the noise VALUES are mixed (never
@@ -253,14 +275,24 @@ void main() {
     float w_streak;
     float w_cell;
     if (routeW < 1.0) {
+#ifdef HERO_EMERGENCE
+        vec2 ns = noiseStack(u_vel, 0, ll, heroQ);
+#else
         vec2 ns = noiseStack(u_vel, 0, ll, hero);
+#endif
         streak = ns.x;
         stria = ns.y;
     }
     if (routeW > 0.0) {
+#ifdef HERO_EMERGENCE
+        vec2 nsp = (ll.y >= 0.0)
+            ? noiseStack(u_vel_n, 1, ll, heroQ)
+            : noiseStack(u_vel_s, 1, ll, heroQ);
+#else
         vec2 nsp = (ll.y >= 0.0)
             ? noiseStack(u_vel_n, 1, ll, hero)
             : noiseStack(u_vel_s, 1, ll, hero);
+#endif
         streak = mix(streak, nsp.x, routeW);
         stria = mix(stria, nsp.y, routeW);
         // Patch-route masks: the equirect profile LUT zeroes speed/belt
@@ -300,13 +332,23 @@ void main() {
     // cells where it is quiet and bright (zone interiors).
 #ifdef SPREAD
     float fd_sh = mix(shearN, shear_drv, drive_eff);
+#ifdef HERO_EMERGENCE
+    w_streak = clamp(0.2 + 0.8 * (fd_sh + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
+             * (1.0 + 1.4 * heroQ);
+#else
     w_streak = clamp(0.2 + 0.8 * (fd_sh + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
              * (1.0 + 1.4 * hero);
+#endif
     w_cell = u_cell_amount * mix(1.0 - belt, fd_cell, drive_eff) * (1.0 - speedN)
            * (1.0 - fd_sh) * (1.0 - 0.6 * routeW);
 #else
+#ifdef HERO_EMERGENCE
+    w_streak = clamp(0.2 + 0.8 * (shearN + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
+             * (1.0 + 1.4 * heroQ);
+#else
     w_streak = clamp(0.2 + 0.8 * (shearN + speedN), 0.0, 1.0) * (0.4 + 0.6 * tr.b)
              * (1.0 + 1.4 * hero);
+#endif
     w_cell = u_cell_amount * (1.0 - belt) * (1.0 - speedN) * (1.0 - shearN)
            * (1.0 - 0.6 * routeW);  // the caps are not quiet zone interiors
 #endif
@@ -512,9 +554,25 @@ void main() {
             float lane = cos(2.0 * theta + k * log(qc) + 2.4 * jig)
                        * (0.55 + 0.45 * jig);
             float win = smoothstep(0.12, 0.34, q) * (1.0 - smoothstep(0.72, 0.98, q));
+#ifdef HERO_EMERGENCE
+            // The emergence interior is a stagnant quiescent core ("small and
+            // random" cloud motion) — the tightly-wound interior log-spiral is
+            // the whirlpool tell the pack removes. Fade it with the lever; the
+            // sim-side mottle/lanes carry the interior instead.
+            win *= 1.0 - 0.85 * u_hero_emergence;
+#endif
             sp += win * lane;
             // Collar streamlines: thin turbulent rings hugging the rim.
+#ifdef HERO_EMERGENCE
+            // The emergence collar is a THIN margin at q~1.3: pull the window's
+            // outer edge in with the lever so the streamlines hug it instead of
+            // ringing out to 1.85 (part of the oversized-footprint fix).
+            float wino = smoothstep(0.98, 1.12, q)
+                       * (1.0 - smoothstep(mix(1.5, 1.32, u_hero_emergence),
+                                           mix(1.85, 1.52, u_hero_emergence), q));
+#else
             float wino = smoothstep(0.98, 1.12, q) * (1.0 - smoothstep(1.5, 1.85, q));
+#endif
             float rj = fbm(pc * (u_freq * 0.9) + u_offset_spiral.zxy, 2, 2.0, 0.5);
             // m=5 (odd) gives zero azimuthal mean: odd m is orthogonal to
             // even harmonics from elliptical area-weighting, so the

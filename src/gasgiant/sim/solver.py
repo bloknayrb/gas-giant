@@ -214,6 +214,12 @@ class Solver:
     def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
         gpu = self.gpu
         defines = {"DOMAIN": str(kind)}
+        # hero_emergence compiles as a preprocessor VARIANT (project rule: gated
+        # out, not branch-guarded) — the default program text is the pre-feature
+        # kernel, byte-identical by construction. RESTART tier => a change
+        # rebuilds the solver and re-selects the variant.
+        if self.params.storms.hero_emergence > 0.0:
+            defines["HERO_EMERGENCE"] = "1"
         wrap = kind == DOMAIN_EQUIRECT
         # Zero-filled: with dev_steps == 0 the first derive runs before any
         # step has written these, and an undefined-content texture would feed
@@ -246,6 +252,8 @@ class Solver:
         gpu = self.gpu
         size = domain.size
         dom_defines = {"DOMAIN": str(domain.kind)}
+        if self.params.storms.hero_emergence > 0.0:
+            dom_defines["HERO_EMERGENCE"] = "1"
         # Patch textures do NOT wrap in x (AE patch clamps both axes).
         wrap = domain.kind == DOMAIN_EQUIRECT
 
@@ -336,6 +344,7 @@ class Solver:
         for k in [state.k_init, state.k_force0]:
             _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
             _set(k, "u_oval_solid_core", p.storms.oval_solid_core)
+            _set(k, "u_hero_emergence", p.storms.hero_emergence)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # Eddy-only drag (equirect only): the reduction kernel's grid size and the
@@ -636,6 +645,7 @@ class Solver:
                     _set(prog, "u_hero_rim_warp", p.storms.hero_rim_warp)
                     _set(prog, "u_hero_rim_tint", p.storms.hero_rim_tint)
                     _set(prog, "u_hero_wake_detail", p.storms.hero_wake_detail)
+                    _set(prog, "u_hero_emergence", p.storms.hero_emergence)
                     _set(prog, "u_hero_noise_offset", self._detail_offset)
                     _set(prog, "u_warp_offset", self._warp_offset)
                     _set(prog, "u_warp_amount", p.bands.warp_amount)
@@ -669,6 +679,7 @@ class Solver:
             _set(k, "u_size", dom.size)
             _set(k, "u_rho_max", RHO_MAX)
             _set(k, "u_rim_contrast", p.storms.rim_contrast)
+            _set(k, "u_hero_emergence", p.storms.hero_emergence)
             _set(k, "u_hero_mottle", p.storms.hero_mottle)
             _set(k, "u_hero_tint_var", p.storms.hero_tint_var)
             _set(k, "u_hero_rim_warp", p.storms.hero_rim_warp)

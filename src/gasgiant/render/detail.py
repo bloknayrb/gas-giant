@@ -123,22 +123,36 @@ class DetailSynth:
         # Default program eagerly (its text is the pre-FX kernel, so neutral
         # defaults stay byte-identical by construction); the DETAIL_FX
         # variant compiles lazily on first selection (mirrors MapDeriver).
-        self._progs: dict[tuple[bool, bool], moderngl.ComputeShader] = {}
+        self._progs: dict[tuple[bool, bool, bool], moderngl.ComputeShader] = {}
         self.prog = self._program(fx=False)
 
-    def _program(self, fx: bool, spread: bool = False) -> moderngl.ComputeShader:
-        key = (fx, spread)
+    def _program(
+        self, fx: bool, spread: bool = False, hero_emergence: bool = False
+    ) -> moderngl.ComputeShader:
+        key = (fx, spread, hero_emergence)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if fx:
                 defines["DETAIL_FX"] = "1"
             if spread:
                 defines["SPREAD"] = "1"
+            if hero_emergence:
+                # storms.hero_emergence > 0: the hero's anatomy is the enlarged
+                # GRS-realism oval (fill to ~1.55 q, collar ~1.55-2.4), so the
+                # hero-keyed detail treatments (calm mask, spiral lanes, collar
+                # streamlines) re-map to it. Variant per the project rule so the
+                # default program text is unchanged.
+                defines["HERO_EMERGENCE"] = "1"
             prog = self.gpu.compute(_KERNELS, "detail.comp", defines=defines or None)
             if fx:
                 _assert_fx_uniforms(prog)  # loud at build, never a silent no-op
             if spread:
                 _assert_spread_uniforms(prog)
+            if hero_emergence and _absent(prog, "u_hero_emergence"):
+                raise RuntimeError(
+                    "detail.comp HERO_EMERGENCE variant is missing u_hero_emergence: "
+                    "the hero-anatomy remap would silently no-op."
+                )
             self._progs[key] = prog
         return self._progs[key]
 
@@ -156,6 +170,7 @@ class DetailSynth:
         polar: PolarRoute | None = None,
         clouds: list[tuple[float, float, float, float, float]] | None = None,
         profile_stamp: moderngl.Texture | None = None,
+        hero_emergence: float = 0.0,
     ) -> None:
         """heroes: up to 3 (x, y, z, r_core, spin, aspect) hero-storm centers; the
         detail amplitude and winding time grow inside them, and the
@@ -171,7 +186,10 @@ class DetailSynth:
         rng = subseed(seed, "detail-synth")
         fx_on = detail_fx_enabled(params)  # derived from pfield fx metadata
         spread_on = spread_enabled(params)  # SPREAD variant selector
-        prog = self._program(fx=fx_on, spread=spread_on)
+        he_on = hero_emergence > 0.0 and bool(heroes)
+        prog = self._program(fx=fx_on, spread=spread_on, hero_emergence=he_on)
+        if he_on:
+            _set(prog, "u_hero_emergence", hero_emergence)
         size = out_tex.size
         if fx_on:
             _set(prog, "u_intermittency", params.intermittency)

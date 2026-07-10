@@ -58,6 +58,11 @@ const float VKIND_OVAL = 0.0;
 const float OVAL_SOLID_MIN_R = 0.035;
 uniform float u_hero_solid_core;
 uniform float u_oval_solid_core;
+#ifdef HERO_EMERGENCE
+// GRS-realism pack strength (annular-ring morph + core anchor). Compiled as a
+// preprocessor variant: the default program text is the pre-feature kernel.
+uniform float u_hero_emergence;
+#endif
 
 // ---------------------------------------------------------------------------
 // Accumulated ω for all vortices at sphere point p.
@@ -70,6 +75,51 @@ uniform float u_oval_solid_core;
 // below EPS * |reference_scale| (= |S/r_core²|).  A fixed q-cutoff would
 // truncate contributions from large-core vortices (GRS r_core ~ 0.15 rad).
 // ---------------------------------------------------------------------------
+
+#ifdef HERO_EMERGENCE
+// Hero anchor window in [0,1]: 1 inside any hero's core+ring, fading to 0 past
+// the collar. Used by omega_force SUBPASS 0 to locally BOOST the q-nudge so the
+// prognostic hero core stays glued to the (drifting) registry position — without
+// it the core wanders ~0.2 rad from where the tracer stamp paints the red fill,
+// smearing the spot into a muddy arc.
+float heroAnchorWindow(vec3 p) {
+    float w = 0.0;
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 b = vortex_data[3 * i + 1];
+        if (b.y != VKIND_HERO) continue;
+        vec4 a = vortex_data[3 * i];
+        float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
+        float asp = vortex_data[3 * i + 2].y;
+        float q;
+        if (asp == 1.0) {
+            q = d / a.w;
+        } else {
+            vec3 c = a.xyz;
+            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
+            float ewl = length(ew);
+            if (ewl < 1e-4) {
+                q = d / a.w;
+            } else {
+                vec3 e1 = ew / ewl;
+                vec3 e2 = cross(c, e1);
+                q = (dot(p, c) > 0.0)
+                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / a.w
+                  : 1e3;
+            }
+        }
+        // Deliberately WIDER than the visible anatomy (the compacted collar
+        // ends ~1.5): this is a capture basin, not a visual feature — it must
+        // exceed the core's free-drift excursion (~0.2 rad at 512 res) or the
+        // wandering core escapes the boosted nudge and never gets pulled back
+        // (the anchor test's 0.04-T3 failure mode), and it must cover the
+        // whole shield skirt (ends 2.6) so the skirt is held in place too.
+        // Costs no footprint: the boost only speeds relaxation toward the
+        // band target out there.
+        w = max(w, 1.0 - smoothstep(1.6, 2.8, q));
+    }
+    return w;
+}
+#endif  // HERO_EMERGENCE
 
 float vortexOmegaAccum(vec3 p) {
     float omega = 0.0;
@@ -129,6 +179,51 @@ float vortexOmegaAccum(vec3 p) {
         if (b.y == VKIND_HERO && u_hero_solid_core > 0.0) {
             // ('patch' is a reserved GLSL keyword — use 'disk'.)
             float disk = -2.5 * scale * (1.0 - smoothstep(0.80, 1.15, q));
+            // Hero emergence: morph the solid disk toward an ANNULAR RING of
+            // vorticity — the real GRS profile (Voyager/Juno): the ~430 km/h
+            // winds live in a peripheral ring while the interior is STAGNANT
+            // ("currents inside it seem stagnant, with little inflow or
+            // outflow"). By Stokes' theorem a ring with zero enclosed vorticity
+            // induces v~0 inside -> the quiescent core HOLDS its stamped red
+            // fill (physics and relaxation agree), while the ring's intense
+            // shear folds the tracer at the BOUNDARY — genuine emergent
+            // raggedness exactly where the real storm has it, no injected
+            // noise. Amplitude 1.8x the disk's roughly conserves circulation
+            // (ring occupies ~55% of the disk area), keeping v_peak at the rim
+            // in the same league as the calibrated disk (CFL-safe).
+#ifdef HERO_EMERGENCE
+            // Ring placed so its shear peaks just inside the visible oval edge
+            // (the plateau fill's edge sits at q~1.0, the authored hero_radius):
+            // folding happens at the color boundary, matching the real GRS.
+            // Amplitude -6.0: the compacted ring has ~0.42x the old annulus
+            // area, so circulation is scaled to keep v_peak just outside the
+            // rim in the same league as the calibrated disk (CFL-safe — the
+            // advection CFL is velocity-based, and v_peak is unchanged).
+            {
+                float ring = -6.0 * scale
+                           * (smoothstep(0.29, 0.55, q) - smoothstep(0.78, 1.04, q));
+                // PARTIAL SHIELD skirt: the single-signed ring (like the solid
+                // disk it morphs from) carries NET circulation, so its velocity
+                // decays like 1/r and winds the whole neighborhood into a
+                // pinwheel many spot-radii wide — the "effect much bigger than
+                // the storm" tell. (The kinematic Gaussian never had this: a
+                // Laplacian-of-Gaussian is self-shielded.) A gentle opposite-
+                // signed annulus cancels ~70% of it, taming the far-field
+                // winding; the tracer-side band-flush (heroRelaxWeight) erases
+                // the slower residual. Deliberately PARTIAL and WIDE/WEAK
+                // (peak 0.7 vs the ring's 6.0): a full-strength concentrated
+                // shield rolls up into its own companion cyclone and the
+                // resulting near-dipole self-propels off the anchor (observed:
+                // a second creamy swirl displacing the core). Enclosed
+                // circulation at the rim — the peripheral wind speed — is
+                // untouched. Physically: the counter-flowing jets deflected
+                // around the Hollow; Cassini shows bands running parallel
+                // again by ~1.5-2 spot radii.
+                ring += 0.7 * scale
+                      * (smoothstep(1.05, 1.4, q) - smoothstep(2.0, 2.6, q));
+                disk = mix(disk, ring, u_hero_emergence);
+            }
+#endif
             contrib = mix(contrib, disk, u_hero_solid_core);
         } else if (b.y == VKIND_OVAL && u_oval_solid_core > 0.0
                    && r_core >= OVAL_SOLID_MIN_R) {

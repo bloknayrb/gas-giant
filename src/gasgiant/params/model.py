@@ -621,6 +621,27 @@ class StormsParams(_Params):
                     "(byte-identical); 1 = full patch. Pairs with a larger "
                     "hero_radius and lower hero_strength.",
     )
+    hero_emergence: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",
+        description="GRS-realism pack for hero storms (Juno/Voyager-anchored). "
+                    "Morphs the hero from a soft stamped whirlpool to the real "
+                    "storm architecture: (1) the vorticity becomes an ANNULAR "
+                    "RING — the ~430 km/h winds live at the periphery while the "
+                    "interior is stagnant, so the quiescent core HOLDS its fill "
+                    "instead of winding into a dark-eye pinwheel; (2) the "
+                    "tint/brightness stamp becomes a FILLED PLATEAU (the GRS is "
+                    "a near-uniform red oval, not a Gaussian stain); (3) the "
+                    "prognostic core is ANCHORED to the registry position so the "
+                    "red fill lands on the visible vortex; (4) tracer relaxation "
+                    "fades in the ring band only, so the ring's shear folds a "
+                    "ragged, filament-shedding boundary that exchanges material "
+                    "with the jets. Vorticity-mode levers (1)(3) need "
+                    "solver.type=vorticity; (2)(4) act in both modes. Hero-local "
+                    "(nothing beyond ~3.6 hero radii is touched; the visible "
+                    "oval edge sits AT hero_radius). 0 = legacy "
+                    "stamped hero (byte-identical, all four paths are guarded "
+                    "out)",
+    )
     wake_turbulence: float = pfield(
         1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), adv=True, ui="Hero",
         description="Turbulence boost in the wake wedge downstream of hero storms",

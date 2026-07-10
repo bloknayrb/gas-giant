@@ -485,6 +485,7 @@ class Simulation:
                 ),
                 clouds=bright_cloud_centers(self.vortices),
                 profile_stamp=self.profile_stamp,
+                hero_emergence=p.storms.hero_emergence,
             )
         self.deriver.derive(
             s.equirect.tracers.cur,
