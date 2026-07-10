@@ -456,8 +456,10 @@ vec3 vortexStamp(vec3 p) {
 //     storm's influence zone stays a small multiple of the storm itself.
 // Far-field pixels (no hero within q<3.6) return exactly 1.0.
 //
-// Only ever CALLED when u_hero_emergence > 0.0 (advect.comp guards the call), so
-// the default program is byte-identical (the loop/fbm are never evaluated).
+// Compiled and called only in the HERO_EMERGENCE variant (advect.comp's pass-2
+// relaxation lines select rk = u_relax_k * heroRelaxWeight(p) under the same
+// #ifdef, with no runtime guard) — the default program contains none of this
+// by construction, so it stays byte-identical.
 float heroRelaxWeight(vec3 p) {
     float infl = 0.0;    // strongest rim-band fade at this pixel, in [0,1.4]
     float flush = 0.0;   // strongest neighborhood-flush boost, in [0,1]

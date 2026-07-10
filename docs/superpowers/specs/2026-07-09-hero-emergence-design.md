@@ -125,12 +125,14 @@ Modes: (1), (2) and (4) act in vorticity mode only; the rest act in both.
 
 ## Safety ("don't mess up the rest")
 
-- **Off = byte-identical**: every path is guarded (`u_hero_emergence > 0.0`);
-  the off-case arithmetic is bit-exact (`fill == core`, `rk == u_relax_k`, the
-  unguarded nudge line is untouched). p05 9/9 green throughout.
+- **Off = byte-identical by construction**: every path compiles only in the
+  `HERO_EMERGENCE` preprocessor variant, selected by `solver._domain_defines`
+  when `hero_emergence > 0` AND a hero exists (`hero_count` or a cast-list
+  hero) — the default program text is the pre-feature kernel (the `#else`
+  branches carry the pre-feature lines verbatim). p05 9/9 green throughout.
 - **Hero-local**: every window returns exactly 1.0 (or contributes 0) beyond
-  q<3.6 of a hero; a hero-free render with emergence=1 is byte-identical
-  (tested).
+  q<3.6 of a hero; a hero-free config never compiles the variant at all
+  (tested), so it never pays the per-pixel vortex scan.
 - **Global chaos caveat (measured)**: in vorticity mode ANY real change to the
   flow re-rolls fine detail globally (butterfly effect). Control experiment:
   identical-params rerun noise floor = 0.106 far-field / 0.518 whole-field max
@@ -143,10 +145,14 @@ Modes: (1), (2) and (4) act in vorticity mode only; the rest act in both.
 
 ## Tests
 
-`tests/gpu/test_hero_emergence.py`:
-- emergence=0 no-op (byte-identical with other hero levers on)
-- emergence>0 with NO hero: byte-identical (locality)
-- effect + far-field byte-identity (hero present)
+`tests/gpu/test_hero_emergence.py` (byte-exact asserts are kinematic-mode only,
+asserted in the param helper — vorticity output is never byte-compared):
+- emergence=0 determinism canary (identical params, two full builds; the real
+  off == pre-feature guarantee is the source-hash pins + p05, not runtime)
+- emergence>0 with NO hero: default program selected (predicate pin) =>
+  byte-identical
+- forced-variant no-op, hero-local edition: variant compiled (hero present),
+  effect near the hero + far-field byte-identity
 - **anchor test**: vorticity mode, developed, mean T3 over the interior at the
   registry position > 0.3 (regression guard for the stamp/core divergence)
 

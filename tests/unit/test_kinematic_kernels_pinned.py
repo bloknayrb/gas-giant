@@ -67,7 +67,11 @@ _PINNED: dict[str, str] = {
     # after preprocessing => byte-identical by construction; p05 9/9. (An
     # earlier runtime-guarded cut moved the jupiter@1024 hash via
     # FMA-contraction changes on shared expressions — hence the variant rule.)
-    "vortex_stamp.glsl": "e4d1c38b924b0963813eb1e5574daf28e8c04c38",
+    # Re-pinned same day: COMMENT-ONLY fix above heroRelaxWeight (the old text
+    # claimed advect.comp runtime-guards the call; the guard is variant
+    # compilation). Zero code change — the compiled default program and the
+    # p05 hashes are untouched.
+    "vortex_stamp.glsl": "0ab171fa175e7243e6382ea81f884f9ced50072b",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

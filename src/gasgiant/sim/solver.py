@@ -21,6 +21,7 @@ import numpy as np
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import (
     INJECT_MASK_CODE,
+    CastKind,
     PlanetParams,
     PoleParams,
     PoleStyle,
@@ -218,9 +219,19 @@ class Solver:
         out, not branch-guarded) — the default program text is the pre-feature
         kernel, byte-identical by construction. RESTART tier => a change
         rebuilds the solver and re-selects the variant.
+
+        The variant also requires a hero to exist (hero_count, or a cast-list
+        hero — the two sources of KIND_HERO in sim/vortices.py): with no hero,
+        heroRelaxWeight/heroAnchorWindow scan the whole vortex SSBO per pixel
+        per step only to return exactly 1.0, so a no-hero config would pay a
+        real per-pixel cost for a guaranteed no-op. Both fields are RESTART
+        tier, so the predicate is re-evaluated whenever they change.
         """
         defines = {"DOMAIN": str(kind)}
-        if self.params.storms.hero_emergence > 0.0:
+        s = self.params.storms
+        if s.hero_emergence > 0.0 and (
+            s.hero_count > 0 or any(c.kind == CastKind.HERO for c in s.cast)
+        ):
             defines["HERO_EMERGENCE"] = "1"
         return defines
 

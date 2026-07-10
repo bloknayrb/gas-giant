@@ -7,13 +7,22 @@ in vortex_stamp.glsl), so advection folds ambient tracer there instead. The
 deep-core anchor keeps full relaxation, and the weight is exactly 1.0 far from any
 hero, so everything outside the storm neighborhood is byte-identical.
 
-Invariants:
-  1. emergence=0 takes a guarded branch (the call is skipped) => BYTE-IDENTICAL,
-     even with other hero levers on.
-  2. emergence>0 with NO hero is a no-op: heroRelaxWeight returns exactly 1.0
-     everywhere => byte-identical (locality has nothing to bite).
-  3. emergence>0 with a hero CHANGES the hero neighborhood (after dev steps) while
-     leaving the far field (a hemisphere away) byte-identical.
+The whole feature compiles as a HERO_EMERGENCE preprocessor variant selected by
+solver._domain_defines (emergence > 0 AND a hero exists), so "off is the
+pre-feature program" is structural — pinned by the kinematic source hashes
+(tests/unit/test_kinematic_kernels_pinned.py) and the p05 render-hash gate, not
+re-provable at runtime. What CAN be pinned at runtime, and is below:
+  1. the default kinematic path (emergence=0, rim levers on) is deterministic
+     across full Simulation rebuilds;
+  2. emergence>0 with NO hero selects the default program (predicate pin);
+  3. with the variant COMPILED (hero present, emergence>0), the far field is
+     byte-identical — the runtime forced-variant no-op, hero-locality edition;
+  4. the anchored plateau fill actually lands on the registry position.
+
+Every byte-exact assert here relies on the KINEMATIC solver path (the vorticity
+SOR solve carries a documented ~1e-3 noise floor and is never byte-compared);
+_params asserts the mode so a future default-solver flip fails loudly instead
+of flaking against the noise floor.
 """
 from __future__ import annotations
 
@@ -21,7 +30,7 @@ import numpy as np
 import pytest
 
 from gasgiant.engine import Simulation
-from gasgiant.params.model import PlanetParams
+from gasgiant.params.model import PlanetParams, SolverType
 
 pytestmark = pytest.mark.gpu
 
@@ -42,6 +51,9 @@ def _params(
     p.storms.hero_rim_tint = rim_tint
     p.storms.hero_rim_warp = rim_warp
     p.storms.hero_emergence = emergence
+    # The byte-exact asserts in this file are only valid on the kinematic path
+    # (vorticity output is tolerance-compared everywhere else in the suite).
+    assert p.solver.type == SolverType.KINEMATIC
     return p
 
 
@@ -54,16 +66,23 @@ def _developed_tracers(p: PlanetParams, gpu) -> np.ndarray:
 # ------------------------------------------------------------- byte-identity
 
 def test_emergence_off_byte_identical_with_other_levers_on(gpu):
-    """emergence=0 is a guarded no-op: the heroRelaxWeight call is skipped, so the
-    developed tracers are byte-identical even with rim_tint + rim_warp on."""
+    """Determinism canary for the emergence=0 program: both runs use IDENTICAL
+    params (emergence defaults to 0.0 in _params — this is deliberate, not an
+    off-vs-on comparison), so this pins that the default kinematic path with
+    rim_tint + rim_warp on is reproducible across two full Simulation builds.
+    The actual off == pre-feature guarantee is structural (variant not
+    compiled) and is pinned by the source hashes + p05, not runtime-testable."""
     base = _developed_tracers(_params(rim_tint=0.7, rim_warp=0.5), gpu)
     same = _developed_tracers(_params(emergence=0.0, rim_tint=0.7, rim_warp=0.5), gpu)
     np.testing.assert_array_equal(base, same)
 
 
 def test_emergence_no_hero_is_byte_identical(gpu):
-    """With NO hero, heroRelaxWeight returns exactly 1.0 everywhere, so rk ==
-    u_relax_k (x1.0 is bit-exact) -> emergence>0 is byte-identical to off."""
+    """With NO hero, _domain_defines does not select the HERO_EMERGENCE variant
+    (the predicate requires a hero), so emergence>0 runs the DEFAULT program —
+    byte-identical to off by construction. This pins the predicate: a no-hero
+    config must never pay the variant's per-pixel vortex-SSBO scan for a
+    guaranteed no-op (heroRelaxWeight would return exactly 1.0 everywhere)."""
     off = _developed_tracers(_params(emergence=0.0, hero_count=0), gpu)
     on = _developed_tracers(_params(emergence=1.0, hero_count=0), gpu)
     np.testing.assert_array_equal(off, on)
@@ -77,7 +96,6 @@ def test_emergence_anchors_red_fill_on_hero(gpu):
     developed T3 tint AT the registry position must be strongly warm. (Without
     the anchor the core wanders ~0.2 rad from the stamp and the probe reads
     ~0.0 — the diagnostic that motivated the anchor.)"""
-    from gasgiant.params.model import SolverType
     from gasgiant.params.presets import load_factory_preset
 
     p = load_factory_preset("gas_giant_warm").model_copy(update={"seed": 7})
@@ -102,9 +120,12 @@ def test_emergence_anchors_red_fill_on_hero(gpu):
 
 
 def test_emergence_changes_hero_neighborhood_only(gpu):
-    """emergence>0 measurably changes the developed tracers near the hero (the
-    relaxation there is faded so advection folds the field), while a hemisphere
-    away nothing is touched (heroRelaxWeight is exactly 1.0 outside q<3)."""
+    """The runtime forced-variant no-op test (CLAUDE.md lever rule), hero-local
+    edition: with a hero present and emergence>0 the HERO_EMERGENCE variant IS
+    compiled, and it must (a) measurably change the developed tracers near the
+    hero (the relaxation there is faded so advection folds the field) while
+    (b) leaving the far field byte-identical — heroRelaxWeight returns exactly
+    1.0 outside q<3.6, so rk == u_relax_k bit-for-bit out there."""
     off = _developed_tracers(_params(emergence=0.0), gpu)
     on = _developed_tracers(_params(emergence=0.8), gpu)
 
@@ -114,7 +135,7 @@ def test_emergence_changes_hero_neighborhood_only(gpu):
 
     # Locality: the far NORTH quarter (hero is at -22.5 deg south, i.e. the
     # southern half) is byte-identical. heroRelaxWeight returns exactly 1.0 there
-    # (no hero within q<3), so rk is unchanged and the relaxation math matches
+    # (no hero within q<3.6), so rk is unchanged and the relaxation math matches
     # bit-for-bit. A real leak would be obvious given the hero is far south.
     h = off.shape[0]
     far = slice(0, h // 4)                       # top quarter = far north
