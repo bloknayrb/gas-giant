@@ -63,6 +63,10 @@ uniform float u_oval_solid_core;
 // preprocessor variant: the default program text is the pre-feature kernel.
 uniform float u_hero_emergence;
 #endif
+// heroEllipQ for the variant-only heroAnchorWindow below (include-once, and
+// the include's whole body is #ifdef HERO_EMERGENCE). Needs vortex_data,
+// which the includer declares before this file.
+#include "hero_q.glsl"
 
 // ---------------------------------------------------------------------------
 // Accumulated ω for all vortices at sphere point p.
@@ -87,35 +91,15 @@ float heroAnchorWindow(vec3 p) {
     for (int i = 0; i < u_vortex_count; ++i) {
         vec4 b = vortex_data[3 * i + 1];
         if (b.y != VKIND_HERO) continue;
-        vec4 a = vortex_data[3 * i];
-        float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
-        float asp = vortex_data[3 * i + 2].y;
-        float q;
-        if (asp == 1.0) {
-            q = d / a.w;
-        } else {
-            vec3 c = a.xyz;
-            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
-            float ewl = length(ew);
-            if (ewl < 1e-4) {
-                q = d / a.w;
-            } else {
-                vec3 e1 = ew / ewl;
-                vec3 e2 = cross(c, e1);
-                q = (dot(p, c) > 0.0)
-                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / a.w
-                  : 1e3;
-            }
-        }
-        // Deliberately WIDER than the visible anatomy (the compacted collar
-        // ends ~1.5): this is a capture basin, not a visual feature — it must
-        // exceed the core's free-drift excursion (~0.2 rad at 512 res) or the
-        // wandering core escapes the boosted nudge and never gets pulled back
-        // (the anchor test's 0.04-T3 failure mode), and it must cover the
-        // whole shield skirt (ends 2.6) so the skirt is held in place too.
-        // Costs no footprint: the boost only speeds relaxation toward the
-        // band target out there.
-        w = max(w, 1.0 - smoothstep(1.6, 2.8, q));
+        // Window deliberately WIDER than the visible anatomy (the compacted
+        // collar ends ~1.5): this is a capture basin, not a visual feature —
+        // it must exceed the core's free-drift excursion (~0.2 rad at 512
+        // res) or the wandering core escapes the boosted nudge and never gets
+        // pulled back (the anchor test's 0.04-T3 failure mode), and it must
+        // cover the whole shield skirt (ends 2.6) so the skirt is held in
+        // place too. Costs no footprint: the boost only speeds relaxation
+        // toward the band target out there.
+        w = max(w, 1.0 - smoothstep(1.6, 2.8, heroEllipQ(p, i, 2.8)));
     }
     return w;
 }
@@ -188,9 +172,7 @@ float vortexOmegaAccum(vec3 p) {
             // fill (physics and relaxation agree), while the ring's intense
             // shear folds the tracer at the BOUNDARY — genuine emergent
             // raggedness exactly where the real storm has it, no injected
-            // noise. Amplitude 1.8x the disk's roughly conserves circulation
-            // (ring occupies ~55% of the disk area), keeping v_peak at the rim
-            // in the same league as the calibrated disk (CFL-safe).
+            // noise. (Amplitude/placement rationale lives with the code below.)
 #ifdef HERO_EMERGENCE
             // Ring placed so its shear peaks just inside the visible oval edge
             // (the plateau fill's edge sits at q~1.0, the authored hero_radius):

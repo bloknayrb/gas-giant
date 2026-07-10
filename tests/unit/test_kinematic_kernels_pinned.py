@@ -23,7 +23,7 @@ _PKG = "gasgiant.sim.kernels"
 #   pkg = 'gasgiant.sim.kernels'
 #   for f in ['psi.comp','velocity.comp','advect.comp',
 #             'noise3d.glsl','common.glsl','vortex_stamp.glsl',
-#             'band_mod.glsl','wave_stamp.glsl']:
+#             'band_mod.glsl','wave_stamp.glsl','hero_q.glsl']:
 #       t = ir.files(pkg).joinpath(f).read_text(encoding='utf-8')
 #       print(f, hashlib.sha1(t.encode()).hexdigest())
 # "
@@ -58,29 +58,20 @@ _PINNED: dict[str, str] = {
     # flow-frame noise modulation) for elongated bright accent/companion clouds.
     # asp==1.0 (every existing preset's accents/companions) short-circuits it =>
     # byte-identical kinematic output; p05 baseline unchanged (9/9 match).
-    # Updated 2026-07-10 (hero_emergence, GRS-realism pack): the whole feature —
-    # u_hero_emergence uniform, heroRelaxWeight() (rim fade + neighborhood
-    # band-flush), the enlarged/graded/frayed plateau fill, radial identity,
-    # wrapped lanes, shifted ring/collar/moat radii, extended mottle/tint_var
-    # windows — compiles under `#ifdef HERO_EMERGENCE`, with the pre-feature
-    # lines verbatim in the #else branches. Default program text unchanged after
-    # preprocessing => byte-identical by construction; p05 9/9.
-    # Re-updated 2026-07-10 (quiet-storm pass): inside the HERO_EMERGENCE
-    # variant only — collar/ring brightness softened (the real hollow is
-    # subtle), interior mottle/tint_var windows muted (the real interior is
-    # ~3%-contrast wisps). Default text untouched; p05 9/9.
-    # Re-updated 2026-07-10 (footprint compaction): inside the HERO_EMERGENCE
-    # variant only — the whole emergence anatomy scaled by ~0.65 so the plateau
-    # edge sits at q~1.0 (the authored hero_radius) with a THIN collar hugging
-    # it, and the band-flush annulus pulled in to 1.55-3.4 (cutoff 3.6, was
-    # 5.5): the storm's influence zone no longer dwarfs the storm. The mottle/
-    # tint_var fscale lines gained #ifdef/#else duplication (variant scales the
-    # wisp frequency with the compaction); the #else carries the pre-feature
-    # lines verbatim. Default text unchanged after preprocessing; p05 9/9.
-    # Re-updated 2026-07-10 (partial-shield pairing): flush boost x4 -> x6 in
-    # heroRelaxWeight (variant-only), paired with the partial vorticity shield
-    # in vortex_omega.glsl.
-    "vortex_stamp.glsl": "8dc957ef4ba1c71be16cd106aede93218aee62a1",
+    # Updated 2026-07-10 (storms.hero_emergence, the GRS-realism pack — see
+    # docs/superpowers/specs/2026-07-09-hero-emergence-design.md): the whole
+    # feature (heroRelaxWeight rim fade + band flush, plateau fill + radial
+    # identity, ring/collar/moat remap, quiet-storm fades, hero_q.glsl include)
+    # compiles under `#ifdef HERO_EMERGENCE` with the pre-feature lines
+    # verbatim in the #else branches, so the default program text is unchanged
+    # after preprocessing => byte-identical by construction; p05 9/9. (An
+    # earlier runtime-guarded cut moved the jupiter@1024 hash via
+    # FMA-contraction changes on shared expressions — hence the variant rule.)
+    "vortex_stamp.glsl": "e4d1c38b924b0963813eb1e5574daf28e8c04c38",
+    # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
+    # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
+    # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
+    "hero_q.glsl": "0d116e76423ac56301e74907bf2b2a81aaa659fa",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
     "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
 }

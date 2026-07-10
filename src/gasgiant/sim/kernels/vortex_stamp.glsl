@@ -10,6 +10,9 @@ layout(std430, binding = 2) readonly buffer Vortices {
     vec4 vortex_data[];
 };
 uniform int u_vortex_count;
+// heroEllipQ for the variant-only heroRelaxWeight below; the include's whole
+// body is #ifdef HERO_EMERGENCE so the default program is unchanged.
+#include "hero_q.glsl"
 uniform float u_rim_contrast;
 uniform float u_hero_mottle;       // interior brightness churn (T0); 0 disables
 uniform float u_hero_tint_var;     // interior tint festoon (T3); 0 disables
@@ -183,13 +186,21 @@ vec3 vortexStamp(vec3 p) {
                 float fill = core;
                 {
                     float plate = 1.0 - smoothstep(0.62, 1.0, qrim);
-                    // Fray/wisp frequencies ride the compaction (x~1.55) so the
-                    // interior character keeps its proportions on the smaller oval.
-                    float ffrq = mix(5.0, 8.0, u_hero_emergence);
-                    float efray = fbm(p * (a.w > 0.0 ? ffrq / a.w : ffrq)
-                                      + u_hero_noise_offset.yxz, 3, 2.0, 0.5);
-                    plate = clamp(plate + 0.6 * u_hero_emergence * efray
-                                  * exp(-(qrim - 0.84) * (qrim - 0.84) * 6.0), 0.0, 1.0);
+                    // fbm edge fray, only where its Gaussian window is
+                    // non-negligible (< 2% past qrim 1.7; plate is already 0
+                    // there) — this runs per pixel per step as the relaxation
+                    // target, so skipping the dead outer annulus matters.
+                    if (qrim < 1.7) {
+                        // Fray/wisp frequencies ride the compaction (x~1.55) so
+                        // the interior character keeps its proportions on the
+                        // smaller oval.
+                        float ffrq = mix(5.0, 8.0, u_hero_emergence);
+                        float efray = fbm(p * (a.w > 0.0 ? ffrq / a.w : ffrq)
+                                          + u_hero_noise_offset.yxz, 3, 2.0, 0.5);
+                        plate = clamp(plate + 0.6 * u_hero_emergence * efray
+                                      * exp(-(qrim - 0.84) * (qrim - 0.84) * 6.0),
+                                      0.0, 1.0);
+                    }
                     fill = mix(core, plate, u_hero_emergence);
                     // Upgrade the shared Gaussian tint/dome to the plateau fill
                     // (delta form: the shared lines above already added *core).
@@ -433,7 +444,7 @@ vec3 vortexStamp(vec3 p) {
 //     annular ring's shear) folds the tracer into a ragged, filament-shedding
 //     boundary. The interior keeps FULL relaxation — the real GRS interior is
 //     stagnant and must hold its plateau fill.
-//   FLUSH ANNULUS (q ~ 1.6-3.0): BOOST relaxation toward the band stamp. Over
+//   FLUSH ANNULUS (q ~ 1.55-3.4): BOOST relaxation toward the band stamp. Over
 //     a dev run even a weak orbital flow winds the whole neighborhood into
 //     concentric arcs, and with relax_tau ~2000 nothing ever erases them —
 //     while on the real planet the jets sweep wound material downstream and
@@ -448,46 +459,32 @@ vec3 vortexStamp(vec3 p) {
 // Only ever CALLED when u_hero_emergence > 0.0 (advect.comp guards the call), so
 // the default program is byte-identical (the loop/fbm are never evaluated).
 float heroRelaxWeight(vec3 p) {
-    float infl = 0.0;    // strongest rim-band fade at this pixel, in [0,~1.3]
+    float infl = 0.0;    // strongest rim-band fade at this pixel, in [0,1.4]
     float flush = 0.0;   // strongest neighborhood-flush boost, in [0,1]
     for (int i = 0; i < u_vortex_count; ++i) {
         vec4 b = vortex_data[3 * i + 1];
         if (b.y != VKIND_HERO) continue;
-        vec4 a = vortex_data[3 * i];
-        float d = acos(clamp(dot(p, a.xyz), -1.0, 1.0));
-        float asp = vortex_data[3 * i + 2].y;
-        float q;
-        if (asp == 1.0) {
-            q = d / a.w;
-        } else {
-            vec3 c = a.xyz;
-            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
-            float ewl = length(ew);
-            if (ewl < 1e-4) {
-                q = d / a.w;
-            } else {
-                vec3 e1 = ew / ewl;
-                vec3 e2 = cross(c, e1);
-                q = (dot(p, c) > 0.0)
-                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / a.w
-                  : 1e3;
-            }
-        }
+        float q = heroEllipQ(p, i, 3.6);
         if (q > 3.6) continue;   // strictly local to the storm neighborhood
         float rim_bump = exp(-(q - 1.0) * (q - 1.0) * 3.8);
-        // Per-azimuth erosion: some arcs keep the ring, others dissolve -> the
-        // boundary is ragged, not a uniformly-softened circle. Flow-scale fbm on
-        // the seeded hero offset (deterministic).
-        float fscale = a.w > 0.0 ? 9.0 / a.w : 9.0;
-        float ero = clamp(0.15 + 1.4 * fbm(p * fscale + u_hero_noise_offset.zyx + 5.0,
-                                           4, 2.0, 0.5),
-                          0.0, 1.4);
-        infl = max(infl, rim_bump * ero);
+        if (q < 2.2) {
+            // Per-azimuth erosion: some arcs keep the ring, others dissolve ->
+            // the boundary is ragged, not a uniformly-softened circle.
+            // Flow-scale fbm on the seeded hero offset (deterministic). Only
+            // evaluated where rim_bump is non-negligible (< 0.6% past q 2.2) —
+            // the flush annulus beyond gets the smoothsteps only.
+            float rc = vortex_data[3 * i].w;
+            float fscale = rc > 0.0 ? 9.0 / rc : 9.0;
+            float ero = clamp(0.15 + 1.4 * fbm(p * fscale + u_hero_noise_offset.zyx + 5.0,
+                                               4, 2.0, 0.5),
+                              0.0, 1.4);
+            infl = max(infl, rim_bump * ero);
+        }
         flush = max(flush, smoothstep(1.55, 2.1, q) * (1.0 - smoothstep(2.7, 3.4, q)));
     }
     // Fade in the rim band (down to 0), boost in the flush annulus (up to x6:
     // tau_eff ~ relax_tau/6 -> the wound arcs decay over the dev run while the
-    // bands re-assert; still << 1 per step, stability untouched). x6 (was x4)
+    // bands re-assert; still << 1 per step, stability untouched). The boost is
     // paired with the partial vorticity shield: the residual ~30% circulation
     // still winds the annulus, just slowly enough for this flush to win.
     return clamp(1.0 - u_hero_emergence * infl, 0.0, 1.0)

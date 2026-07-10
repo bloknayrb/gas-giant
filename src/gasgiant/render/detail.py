@@ -137,11 +137,12 @@ class DetailSynth:
             if spread:
                 defines["SPREAD"] = "1"
             if hero_emergence:
-                # storms.hero_emergence > 0: the hero's anatomy is the enlarged
-                # GRS-realism oval (fill to ~1.55 q, collar ~1.55-2.4), so the
-                # hero-keyed detail treatments (calm mask, spiral lanes, collar
-                # streamlines) re-map to it. Variant per the project rule so the
-                # default program text is unchanged.
+                # storms.hero_emergence > 0: the hero's anatomy is the
+                # GRS-realism oval (plateau edge at q~1.0, thin collar just
+                # outside) with a stagnant quiet interior, so the hero-keyed
+                # detail treatments (calm depth, spiral lanes, collar
+                # streamlines, churn boosts) re-map to it. Variant per the
+                # project rule so the default program text is unchanged.
                 defines["HERO_EMERGENCE"] = "1"
             prog = self.gpu.compute(_KERNELS, "detail.comp", defines=defines or None)
             if fx:

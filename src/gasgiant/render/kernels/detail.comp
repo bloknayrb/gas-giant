@@ -260,7 +260,7 @@ void main() {
     // the full mask so calm/coverage still see the enlarged oval. Deepen calm
     // toward a floor so the interior drops to reference quietness.
     float heroQ = hero * (1.0 - u_hero_emergence);
-    calm = min(calm, 1.0 - clamp(0.9 * u_hero_emergence, 0.0, 1.0) * hero);
+    calm = min(calm, 1.0 - 0.9 * u_hero_emergence * hero);
 #endif
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the

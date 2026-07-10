@@ -211,15 +211,22 @@ class Solver:
 
         self._static_uniforms()
 
-    def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
-        gpu = self.gpu
+    def _domain_defines(self, kind: int) -> dict[str, str]:
+        """Preprocessor defines shared by every kernel of one domain.
+
+        hero_emergence compiles as a preprocessor VARIANT (project rule: gated
+        out, not branch-guarded) — the default program text is the pre-feature
+        kernel, byte-identical by construction. RESTART tier => a change
+        rebuilds the solver and re-selects the variant.
+        """
         defines = {"DOMAIN": str(kind)}
-        # hero_emergence compiles as a preprocessor VARIANT (project rule: gated
-        # out, not branch-guarded) — the default program text is the pre-feature
-        # kernel, byte-identical by construction. RESTART tier => a change
-        # rebuilds the solver and re-selects the variant.
         if self.params.storms.hero_emergence > 0.0:
             defines["HERO_EMERGENCE"] = "1"
+        return defines
+
+    def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
+        gpu = self.gpu
+        defines = self._domain_defines(kind)
         wrap = kind == DOMAIN_EQUIRECT
         # Zero-filled: with dev_steps == 0 the first derive runs before any
         # step has written these, and an undefined-content texture would feed
@@ -251,9 +258,7 @@ class Solver:
         """Build textures and kernels for the vorticity field of one domain."""
         gpu = self.gpu
         size = domain.size
-        dom_defines = {"DOMAIN": str(domain.kind)}
-        if self.params.storms.hero_emergence > 0.0:
-            dom_defines["HERO_EMERGENCE"] = "1"
+        dom_defines = self._domain_defines(domain.kind)
         # Patch textures do NOT wrap in x (AE patch clamps both axes).
         wrap = domain.kind == DOMAIN_EQUIRECT
 

@@ -29,21 +29,19 @@ HERO_LAT_DEG = -22.5
 
 
 def _params(
-    emergence: float | None = None,
+    emergence: float = 0.0,
     hero_count: int = 1,
-    dev_steps: int = 60,
     rim_tint: float = 0.0,
     rim_warp: float = 0.0,
 ) -> PlanetParams:
     p = PlanetParams(seed=42)
     p.sim.resolution = 512
-    p.sim.dev_steps = dev_steps
+    p.sim.dev_steps = 60
     p.storms.hero_count = hero_count
     p.storms.hero_latitude = HERO_LAT_DEG
     p.storms.hero_rim_tint = rim_tint
     p.storms.hero_rim_warp = rim_warp
-    if emergence is not None:
-        p.storms.hero_emergence = emergence
+    p.storms.hero_emergence = emergence
     return p
 
 
