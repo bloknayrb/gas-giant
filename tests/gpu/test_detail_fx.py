@@ -238,6 +238,21 @@ def test_fx_variant_build_passes_uniform_tripwire(gpu):
     assert prog is not None
 
 
+@pytest.mark.parametrize("fx", [True, False])
+@pytest.mark.parametrize("spread", [True, False])
+def test_hero_emergence_variant_compiles_against_every_combination(gpu, fx, spread):
+    """HERO_EMERGENCE is selected independently of DETAIL_FX/SPREAD (he_on is
+    `hero_emergence > 0 and heroes`), so all four combinations are reachable from
+    the GUI: zeroing every fx lever with emergence baked >0 (gas_giant_warm ships
+    0.8) selects fx=False + HERO_EMERGENCE. The emergence blocks in the pre-FX
+    path must therefore only read uniforms the pre-FX variant declares."""
+    from gasgiant.render.detail import DetailSynth
+
+    synth = DetailSynth(gpu)
+    prog = synth._program(fx=fx, spread=spread, hero_emergence=True)  # must not raise
+    assert prog is not None
+
+
 def test_fx_uniform_tripwire_fires_on_dropped_uniform(gpu, monkeypatch):
     """Deliberately extend the fx metadata list with a lever whose uniform does
     not exist in the kernel: the fx-program build must raise (loud), because the
