@@ -818,6 +818,14 @@ Wake filament structure: the downstream wake is stamped as a smooth wedge into t
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__hero_wake_detail__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
+### hero wake dir
+
+`storms.hero_wake_dir` &mdash; dropdown, one of `auto` / `east` / `west`, default **`auto`**, tier `restart`.
+
+Which way the hero's wake trails. auto = follow the strongest jet near the wake lane when hero_emergence is on (the wake is real fluid machinery there — folds advect with the flow), legacy authored westward otherwise. east/west force the direction; forcing AGAINST the local jet reads weaker, because the flow drains the folds out of the wake window. Flips the moat's torn-open arc too (it is keyed to the wake side).
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
+
 ### merge debris
 
 `storms.merge_debris` &mdash; range **0 to 2**, default **1**, tier `restart`.

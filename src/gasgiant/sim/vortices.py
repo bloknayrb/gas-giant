@@ -16,7 +16,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gasgiant.params.model import CastKind, PolesParams, StormsParams, hero_latitude_cap
+from gasgiant.params.model import (
+    CastKind,
+    PolesParams,
+    StormsParams,
+    WakeDir,
+    hero_latitude_cap,
+)
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
@@ -515,6 +521,14 @@ def generate_vortices(
         wdir = -1.0
         if storms.hero_emergence > 0.0:
             woff, wdir = _hero_wake_frame(profiles, lat, r)
+        # User override (storms.hero_wake_dir): auto = the frame above;
+        # east/west force the trailing direction (a forced direction against
+        # the local jet reads weaker — the flow drains the folds). The lane
+        # offset keeps tracking the jet: that is where the MATERIAL is.
+        if storms.hero_wake_dir == WakeDir.EAST:
+            wdir = 1.0
+        elif storms.hero_wake_dir == WakeDir.WEST:
+            wdir = -1.0
         reg.vortices.append(
             Vortex(lat, lon, r, s, KIND_HERO,
                    tint=storms.hero_tint, brightness=storms.hero_brightness,

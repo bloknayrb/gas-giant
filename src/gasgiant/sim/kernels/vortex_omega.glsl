@@ -246,7 +246,12 @@ float vortexOmegaAccum(vec3 p) {
                 // concentrated skirt shows any roll-up, revert the OUTER
                 // window toward (2.0,2.6); NEVER lower the amplitude (that
                 // reduces cancellation further).
-                ring += 0.9 * scale
+                // 0.9 -> 1.0 (cancellation 68% -> 76%): reference-anchored
+                // review found band edges still curving concentrically 1.5
+                // oval-widths out (the whirlpool signature) — the residual
+                // circulation's far field. Still PARTIAL (peak 17% of the
+                // ring's 6.0); watch for roll-up per the fallback note above.
+                ring += 1.0 * scale
                       * (smoothstep(1.05, 1.35, q) - smoothstep(1.8, 2.4, q));
                 disk = mix(disk, ring, u_hero_emergence);
             }

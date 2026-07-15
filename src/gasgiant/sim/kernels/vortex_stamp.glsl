@@ -220,8 +220,13 @@ vec3 vortexStamp(vec3 p) {
                     // ~0.3 = pale wash.
                     // Deep center via VALUE (T0 down at full salmon weight), not
                     // via T3: the weight coupling makes a lowered T3 fade pale.
+                    // 0.10 -> 0.05: reference-anchored review — the render's
+                    // core was the DARKEST large shape in frame, while the
+                    // reference core is the luminous element (value polarity
+                    // inverted). Half the darkening; the off-center knot
+                    // below supplies the bright patch.
                     float deep = 1.0 - smoothstep(0.19, 0.55, q);
-                    dT0 -= 0.10 * u_hero_emergence * deep;
+                    dT0 -= 0.05 * u_hero_emergence * deep;
                     dT3 -= 0.60 * u_hero_emergence * b.z
                          * smoothstep(0.45, 0.97, q) * plate;
                     dT0 += 0.06 * u_hero_emergence
@@ -236,7 +241,10 @@ vec3 vortexStamp(vec3 p) {
                         vec3 lph = u_hero_noise_offset * 9.42;
                         float lane = sin(q * 6.0 + hth
                                          + 1.1 * sin(hth + lph.x) + lph.y);
-                        dT0 += 0.07 * u_hero_emergence * lane * plate
+                        // 0.07 -> 0.09: ONE legible spiral (reference shows
+                        // faint but readable internal striation; at 0.07 the
+                        // interior read as unstructured noise).
+                        dT0 += 0.09 * u_hero_emergence * lane * plate
                              * smoothstep(0.16, 0.32, q);
                         // Off-center bright knot (HST/Cassini: the interior's
                         // brightest patch sits off-center): seeded azimuth,
@@ -295,9 +303,16 @@ vec3 vortexStamp(vec3 p) {
                 // basin — soften both the dark ring and the bright collar
                 // with the lever.
                 float quiet = 1.0 - 0.5 * u_hero_emergence;
+                // Collar base raised under emergence (0.22 -> 0.31 at e=1):
+                // with quiet, rim_contrast 1.3 and the ring/annulus overlap
+                // dilution, the flat 0.22 washed the thin annulus below the
+                // m5 hero-contrast tripwire (0.20 < 0.22) — user asked for
+                // more pop (Checkpoint 1). Raising THIS base, not
+                // rim_contrast, keeps the dark collar unamplified.
                 dT0 += b.w * fill
                      - 0.16 * quiet * u_rim_contrast * exp(-(qrim - ring_q) * (qrim - ring_q) * ring_k)
-                     + 0.22 * quiet * carve * u_rim_contrast * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
+                     + mix(0.22, 0.31, u_hero_emergence) * quiet * carve * u_rim_contrast
+                       * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
 #else
                 dT0 += b.w * core
                      - 0.16 * u_rim_contrast * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
@@ -362,8 +377,11 @@ vec3 vortexStamp(vec3 p) {
                     // the compaction so the texture keeps its proportions.
                     win = max(win, fill * (1.0 - smoothstep(0.78, 1.04, qrim)))
                         * (1.0 - 0.35 * u_hero_emergence);
+                    // fscale boost 0.9 -> 0.4: at x1.9 the churn was so fine
+                    // it read as sensor noise (reference-anchored review);
+                    // coarser wisps read as circulation.
                     float fscale = (a.w > 0.0 ? 9.0 / a.w : 9.0)
-                                 * (1.0 + 0.9 * u_hero_emergence);
+                                 * (1.0 + 0.4 * u_hero_emergence);
 #else
                     float fscale = a.w > 0.0 ? 9.0 / a.w : 9.0;
 #endif
@@ -557,18 +575,19 @@ float heroRelaxWeight(vec3 p) {
         // axes => exactly 0 in the far field (the locality byte-identity
         // tests assert_array_equal outside the neighborhood), with smooth
         // ramps strictly inside so no relax-weight arc prints.
+        vec4 wa = vortex_data[3 * i];
+        float rc_h = wa.w;
+        float asp_h = vortex_data[3 * i + 2].y;
+        float down = vortex_data[3 * i + 2].x;
+        float woff = vortex_data[3 * i + 2].z;
+        float vlat = asin(clamp(wa.y, -1.0, 1.0));
+        float vlon = atan(wa.z, wa.x);
+        float plat = asin(clamp(p.y, -1.0, 1.0));
+        float plon = atan(p.z, p.x);
+        float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
         {
-            vec4 wa = vortex_data[3 * i];
-            float rc = wa.w;
-            float down = vortex_data[3 * i + 2].x;
-            float woff = vortex_data[3 * i + 2].z;
-            float vlat = asin(clamp(wa.y, -1.0, 1.0));
-            float vlon = atan(wa.z, wa.x);
-            float plat = asin(clamp(p.y, -1.0, 1.0));
-            float plon = atan(p.z, p.x);
-            float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
-            float an = dlon * down / max(rc, 1e-4);
-            float across = (plat - (vlat + woff)) / max(rc * 1.8, 1e-4);
+            float an = dlon * down / max(rc_h, 1e-4);
+            float across = (plat - (vlat + woff)) / max(rc_h * 1.8, 1e-4);
             // along > 1.5 rc keeps the flush pincer's hollow rim clean (the
             // release starts where the wake lives, not at the collar).
             if (an > 1.5 && an < 9.0 && abs(across) < 2.0) {
@@ -581,6 +600,18 @@ float heroRelaxWeight(vec3 p) {
         }
         float q = heroEllipQ(p, i, 3.6);
         if (q > 3.6) continue;   // strictly local to the storm neighborhood
+        // Upstream (leading-side) weight, from the aspect-normalized azimuth
+        // in the wake frame: 1 on the arc the flow ARRIVES from, 0 downstream.
+        // The reference's leading side is smoothly compressed laminar flow —
+        // the belt parts around the oval and rejoins — while all the ragged
+        // shedding lives downstream. Used below to (a) suppress the rim-fade
+        // erosion (the boundary stays target-held = smooth) and (b) boost the
+        // flush (wound arcs on the approach are erased faster, so the belt
+        // reads band-parallel right up to the deflection).
+        float xe = dlon * down / max(asp_h, 1.0);
+        float yn = plat - vlat;
+        float upw = smoothstep(0.15, 0.7,
+                               -xe / max(length(vec2(xe, yn)), 1e-5));
         // Narrowed OFF the bright annulus (center 0.95, k 10 — was 1.0/3.8):
         // the fade must release the PLATEAU EDGE to the flow without also
         // releasing the thin annulus at ~1.16, which already fights the
@@ -593,11 +624,16 @@ float heroRelaxWeight(vec3 p) {
             // Flow-scale fbm on the seeded hero offset (deterministic). Only
             // evaluated where rim_bump is non-negligible (< 0.6% past q 2.2) —
             // the flush annulus beyond gets the smoothsteps only.
-            float rc = vortex_data[3 * i].w;
-            float fscale = rc > 0.0 ? 9.0 / rc : 9.0;
+            float fscale = rc_h > 0.0 ? 9.0 / rc_h : 9.0;
             float ero = clamp(0.15 + 1.4 * fbm(p * fscale + u_hero_noise_offset.zyx + 5.0,
                                                4, 2.0, 0.5),
                               0.0, 1.4);
+            // Leading side stays SMOOTH: the erosion (which hands rim arcs
+            // to the flow) is suppressed on the upstream arc, so the belt's
+            // approach meets a target-held, cleanly-deflected boundary
+            // instead of a ragged one (Checkpoint-1 feedback: "tighten up
+            // the leading side so the belt flows smoothly around the storm").
+            ero *= 1.0 - 0.65 * upw;
             infl = max(infl, rim_bump * ero);
         }
         // Tight-but-strong Hollow (user constraint): the flush rises just
@@ -618,15 +654,18 @@ float heroRelaxWeight(vec3 p) {
     // release preserves.
     infl = max(infl, 0.75 * wrel);
     flush *= 1.0 - wrel;
-    // Fade in the rim band (down to 0), boost in the flush annulus (up to x8:
-    // tau_eff ~ relax_tau/8 -> the wound arcs decay over the dev run while the
-    // bands re-assert; still << 1 per step, stability untouched). The boost is
-    // paired with the partial vorticity shield: the residual ~30% circulation
-    // still winds the annulus, just slowly enough for this flush to win —
-    // STRONGER (5->7) over the tighter window above, per the user's
-    // tight-but-strong Hollow constraint.
+    // Fade in the rim band (down to 0), boost in the flush annulus (up to
+    // x12: tau_eff ~ relax_tau/12 ~ 170 steps -> the wound arcs decay well
+    // within the dev run while the bands re-assert; still << 1 per step,
+    // stability untouched). The boost is paired with the partial vorticity
+    // shield: the residual circulation still winds the annulus, just slowly
+    // enough for this flush to win. NON-directional by design (an earlier
+    // upstream-only x1.6 was too subtle): the reference-anchored review
+    // wants bands re-asserting on EVERY azimuth — leading side laminar AND
+    // the belt visibly re-closing downstream — with the wake wedge the only
+    // exemption (the wrel release above already carves it out).
     return clamp(1.0 - u_hero_emergence * infl, 0.0, 1.0)
-         + 7.0 * u_hero_emergence * flush;
+         + 11.0 * u_hero_emergence * flush;
 }
 
 // Belt bowing (Red Spot Hollow geometry): pull the SAMPLED latitude of the
@@ -652,7 +691,10 @@ float heroBandDeflect(vec3 p, float lat) {
         if (q > 2.3) continue;
         vec4 a = vortex_data[3 * i];
         float vlat = asin(clamp(a.y, -1.0, 1.0));
-        float bw = smoothstep(0.8, 1.2, q) * (1.0 - smoothstep(1.6, 2.3, q));
+        // Outer fade tightened (1.6,2.3)->(1.45,2.0): only the collar zone
+        // bows; bands beyond stay horizontal (reference: nothing but the
+        // collar itself is circular).
+        float bw = smoothstep(0.8, 1.2, q) * (1.0 - smoothstep(1.45, 2.0, q));
         float pull = u_hero_emergence * 0.75 * bw * (lat - vlat);
         float cap = 1.1 * a.w;
         lat_s -= clamp(pull, -cap, cap);

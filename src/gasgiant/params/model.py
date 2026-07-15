@@ -497,6 +497,14 @@ class StormOverride(_Params):
     )
 
 
+class WakeDir(StrEnum):
+    """Hero wake trailing direction."""
+    AUTO = "auto"   # follow the strongest nearby jet under hero_emergence;
+                    # legacy authored westward otherwise (review F06)
+    EAST = "east"   # force east-trailing
+    WEST = "west"   # force west-trailing
+
+
 class StormsParams(_Params):
     """Field declaration order matches the panel's Hero / Ovals / Accents /
     Barges / Pearls / Outbreaks / Small storms / Mergers sub-groups (contiguous runs
@@ -609,6 +617,17 @@ class StormsParams(_Params):
                     "as ragged folded filaments. Scale-invariant (rc-normalized); "
                     "the velocity wake supplies the along-flow folding. 0 = smooth "
                     "wedge (byte-identical, the fbm is never evaluated)",
+    )
+    hero_wake_dir: WakeDir = pfield(
+        WakeDir.AUTO, tier=Tier.RESTART, adv=True, ui="Hero",
+        description="Which way the hero's wake trails. auto = follow the "
+                    "strongest jet near the wake lane when hero_emergence is "
+                    "on (the wake is real fluid machinery there — folds advect "
+                    "with the flow), legacy authored westward otherwise. "
+                    "east/west force the direction; forcing AGAINST the local "
+                    "jet reads weaker, because the flow drains the folds out "
+                    "of the wake window. Flips the moat's torn-open arc too "
+                    "(it is keyed to the wake side).",
     )
     hero_solid_core: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Hero",

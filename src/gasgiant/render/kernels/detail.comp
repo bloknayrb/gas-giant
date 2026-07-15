@@ -262,9 +262,16 @@ void main() {
     // the full mask so calm/coverage still see the enlarged oval. Deepen calm
     // toward a floor so the interior drops to reference quietness.
     float heroQ = hero * (1.0 - u_hero_emergence);
-    // 0.8 (was 0.9): re-admit ~3%-contrast interior wisps — the reference
-    // interior is quiet but GRANULAR, not glassy. Revert to 0.9 if busy.
-    calm = min(calm, 1.0 - 0.8 * u_hero_emergence * hero);
+    // SERENE MOAT (reference-anchored review): the GRS's strongest
+    // morphological cue is a three-way texture gradient — chaotic wake,
+    // near-FEATURELESS moat, laminar leading side — and a moat full of
+    // strands can never read calm. The smoothstep saturates the calm across
+    // the whole moat annulus (heroMask ~0.5 at the bright annulus, ~0.27 at
+    // 1.6 true-radii) instead of fading with the Gaussian, so the quiet
+    // region covers oval + moat and releases by ~2 radii. Floor ~0.24 at
+    // e=0.9 re-admits sparse ~3%-contrast wisps (quiet, not glassy).
+    calm = min(calm, 1.0 - 0.85 * u_hero_emergence
+                         * smoothstep(0.05, 0.45, hero));
 #endif
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the

@@ -528,10 +528,11 @@ class Solver:
         # Hero wake-wedge eddy injection (HERO_EMERGENCE variant only;
         # KeyError-guarded no-op otherwise). wake_turbulence's semantics
         # completed for vorticity mode; frequency tracks the hero radius so
-        # the churn scale is storm-relative (features ~rc/2 at the base
-        # octave — resolvable at dev res; finer octaves dissipate).
+        # the churn scale is storm-relative. 0.9/rc: reference-anchored
+        # review — the GRS wake is CHUNKY curd-like folded turbulence, and
+        # the 2.0/rc grain read thready; features ~rc at the base octave.
         _set(kf0, "u_hero_wake_turb", p.storms.wake_turbulence)
-        _set(kf0, "u_hero_wake_freq", 2.0 / max(p.storms.hero_radius, 0.01))
+        _set(kf0, "u_hero_wake_freq", 0.9 / max(p.storms.hero_radius, 0.01))
         # Spatial localization mask for eddy injection (0=global,1=belt,2=shear).
         self.profile_dyn.use(location=3)
         _set(kf0, "u_profile_dyn", 3)

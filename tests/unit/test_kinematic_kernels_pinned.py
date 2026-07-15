@@ -104,7 +104,18 @@ _PINNED: dict[str, str] = {
     # mottle mute 0.35/fscale 0.9. ALL inside HERO_EMERGENCE
     # mix-endpoints/arms; e=0 legacy endpoints and the default program text
     # unchanged; p05 9/9 verified same day.
-    "vortex_stamp.glsl": "751cb65872a1a9b98853636475d8851d1419394c",
+    # Re-pinned same day (Checkpoint-1 feedback): bright-collar base raised
+    # under emergence (0.22 -> mix to 0.31; m5 hero-contrast tripwire), and
+    # leading-side smoothing in heroRelaxWeight (upstream weight suppresses
+    # the rim-fade erosion x(1-0.65 upw) and boosts the flush x(1+0.6 upw) so
+    # the belt approaches the storm laminar and band-parallel, deflecting
+    # cleanly — "tighten up the leading side"). Variant-arm-only.
+    # Re-pinned same day (reference-anchored review round): flush boost made
+    # non-directional at x12 (leading laminar AND belt re-closing downstream;
+    # wake wedge stays the only exemption), bow window tightened (1.45,2.0),
+    # deep-center darkening halved (core value polarity), lane 0.09, mottle
+    # fscale boost 0.4. Variant-arm-only; default text unchanged.
+    "vortex_stamp.glsl": "75750878e8b6f318443d27871587a62e5d514f1c",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
