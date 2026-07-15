@@ -220,14 +220,15 @@ vec3 vortexStamp(vec3 p) {
                     // ~0.3 = pale wash.
                     // Deep center via VALUE (T0 down at full salmon weight), not
                     // via T3: the weight coupling makes a lowered T3 fade pale.
-                    // 0.10 -> 0.05: reference-anchored review — the render's
-                    // core was the DARKEST large shape in frame, while the
-                    // reference core is the luminous element (value polarity
-                    // inverted). Half the darkening; the off-center knot
-                    // below supplies the bright patch.
-                    float deep = 1.0 - smoothstep(0.19, 0.55, q);
-                    dT0 -= 0.05 * u_hero_emergence * deep;
-                    dT3 -= 0.60 * u_hero_emergence * b.z
+                    // CORE POLARITY (per-latitude reviews, 4/6 flagged, 2 as
+                    // the single worst deviation): the reference core is the
+                    // BRIGHTEST, warmest element in frame — ours read as a
+                    // recessed dull hole. The old radial 'deep' darkening is
+                    // GONE (it also drew a shared-center contour), replaced
+                    // by a uniform plateau lift; the off-center knot supplies
+                    // the hot patch, tint_var the mottle.
+                    dT0 += 0.10 * u_hero_emergence * plate;
+                    dT3 -= 0.30 * u_hero_emergence * b.z
                          * smoothstep(0.45, 0.97, q) * plate;
                     dT0 += 0.06 * u_hero_emergence
                          * smoothstep(0.45, 0.97, q) * plate;
@@ -253,8 +254,12 @@ vec3 vortexStamp(vec3 p) {
                         float q_off2 = q * q + 0.09
                                      - 0.6 * q * cos(hth - lph.z);
                         float knot = exp(-3.0 * q_off2);
-                        dT0 += 0.10 * u_hero_emergence * knot * plate;
-                        dT3 += 0.06 * u_hero_emergence * knot * plate;
+                        // Raised (0.10/0.06 -> 0.14/0.10): the knot is now
+                        // the interior's HOT spot — with the radial deep
+                        // darkening gone, it carries the reference's
+                        // off-center brightest-warmest identity alone.
+                        dT0 += 0.14 * u_hero_emergence * knot * plate;
+                        dT3 += 0.10 * u_hero_emergence * knot * plate;
                     }
                 }
                 // GRS annulus anatomy (mix so small lever values stay near
@@ -293,10 +298,23 @@ vec3 vortexStamp(vec3 p) {
                     // upstream = -wake_dir in east terms = +wdir on the
                     // anti-east h1 axis; downstream is the negation.
                     float eastw = max(cos(hth) * wdir, 0.0);
-                    float westw = smoothstep(0.3, 0.9, -cos(hth) * wdir);
+                    // Downstream opening WIDENED and DEEPENED (0.3,0.9/0.55
+                    // -> 0.1,0.8/0.8): the per-latitude reviews still read
+                    // the collar as a closed 360-degree ring — the moat must
+                    // visibly open into the wake, not just dim there.
+                    float westw = smoothstep(0.1, 0.8, -cos(hth) * wdir);
                     col_q += u_hero_emergence * (0.10 * polew + 0.06 * eastw);
                     col_k *= 1.0 + 0.9 * u_hero_emergence * equw;
-                    carve = 1.0 - 0.55 * u_hero_emergence * westw;
+                    carve = 1.0 - 0.8 * u_hero_emergence * westw;
+                    // Closure-breaking raggedness: seeded few-lobe modulation
+                    // of BOTH ring amplitudes (decorrelated from the rim_warp
+                    // lobes) so neither annulus holds constant width/value
+                    // around its arc — "constant gap = drawn ring".
+                    vec3 cph = u_hero_noise_offset * 17.3;
+                    carve *= 0.78 + 0.22 * sin(2.0 * hth + cph.x)
+                                  * sin(1.0 * hth + cph.y);
+                    ring_k *= 1.0 + 0.45 * u_hero_emergence
+                                    * sin(3.0 * hth + cph.z);
                 }
                 // Quiet hollow: the real Red Spot Hollow is only slightly
                 // brighter than the bands (Juno close-ups), not a glowing
@@ -687,6 +705,14 @@ float heroBandDeflect(vec3 p, float lat) {
     for (int i = 0; i < u_vortex_count; ++i) {
         vec4 b = vortex_data[3 * i + 1];
         if (b.y != VKIND_HERO) continue;
+        // Boundary gate (CPU-derived, vortices.py::_hero_bow_gain): 0 when no
+        // band boundary sits within the bow's reach. Without it the sampling
+        // displacement PAINTS a phantom wrap out of whatever latitude
+        // gradient exists — the per-latitude adversarial reviews found it as
+        // a sweep-invariant "red hook" at edge placements and a symmetric
+        // funnel deep in the zone.
+        float gate = vortex_data[3 * i + 2].w;
+        if (gate <= 0.0) continue;
         float q = heroEllipQ(p, i, 2.3);
         if (q > 2.3) continue;
         vec4 a = vortex_data[3 * i];
@@ -695,7 +721,37 @@ float heroBandDeflect(vec3 p, float lat) {
         // bows; bands beyond stay horizontal (reference: nothing but the
         // collar itself is circular).
         float bw = smoothstep(0.8, 1.2, q) * (1.0 - smoothstep(1.45, 2.0, q));
-        float pull = u_hero_emergence * 0.75 * bw * (lat - vlat);
+        // The painted wrap must not read authored: (a) downstream SHED — the
+        // bow opens toward the wake so the wrapped strand hands off to
+        // advected material instead of riding the collar at constant width
+        // through 180+ degrees (radius-locked ride = the stamp fingerprint);
+        // (b) seeded few-lobe raggedness so width/reach vary along the arc
+        // like torn cloud, not a drawn band.
+        {
+            float wdir = vortex_data[3 * i + 2].x;
+            float plat = asin(clamp(p.y, -1.0, 1.0));
+            float plon = atan(p.z, p.x);
+            float vlon = atan(a.z, a.x);
+            float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
+            float asp = vortex_data[3 * i + 2].y;
+            float xe = dlon * wdir / max(asp, 1.0);        // + = downstream
+            float yn = plat - vlat;
+            float az = atan(yn, xe);                       // 0 = downstream
+            // FLANK-ONLY modulation: |cos(az)| is 1 on the east/west arcs
+            // (the radius-locked "painted wrap ride" the reviews flagged)
+            // and exactly 0 at the north/south apexes — the load-bearing
+            // bow (the >=0.8 r_core boundary deflection the test pins) is
+            // never weakened. Downstream flank sheds into the wake (up to
+            // 0.6); upstream flank gets seeded raggedness (up to 0.35).
+            float flank = abs(cos(az));
+            float downw = smoothstep(0.2, 0.9,
+                                     xe / max(length(vec2(xe, yn)), 1e-5));
+            vec3 bph = u_hero_noise_offset * 11.7;
+            float lobes = 0.5 + 0.5 * (0.6 * sin(2.0 * az + bph.x)
+                                     + 0.4 * sin(3.0 * az + bph.y));
+            bw *= 1.0 - flank * (0.6 * downw + 0.35 * lobes * (1.0 - downw));
+        }
+        float pull = u_hero_emergence * 0.75 * gate * bw * (lat - vlat);
         float cap = 1.1 * a.w;
         lat_s -= clamp(pull, -cap, cap);
     }

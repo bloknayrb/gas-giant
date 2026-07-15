@@ -90,6 +90,12 @@ class Vortex:
     # Latitude offset of the wake wedge center (radians, signed toward the
     # equator for heroes; 0 = centered on the vortex).
     wake_lat_off: float = 0.0
+    # Belt-bow gate (emergence pack): boundary strength within heroBandDeflect's
+    # reach, in [0,1]. 0 = no band boundary to bow -> the deflection must not
+    # paint a phantom displaced-band wrap (the sweep-invariant "red hook" /
+    # symmetric funnel tells found by the per-latitude adversarial reviews).
+    # Computed at generation from profiles.t0_stamp; always 0 when emergence off.
+    bow_gain: float = 0.0
     # lon:lat elongation of the iso-contours (heroes only; 1.0 = round).
     aspect: float = 1.0
     # CPU-only (never packed into the SSBO): merger hysteresis countdown.
@@ -114,15 +120,18 @@ class VortexRegistry:
     def pack_ssbo(self) -> np.ndarray:
         """(N, 12) float32, three vec4 per vortex:
         [x, y, z, r_core], [strength, kind, tint, brightness],
-        [wake_dir, aspect, wake_lat_off, 0].
-        Vectorized: this runs every sim step."""
+        [wake_dir, aspect, wake_lat_off, bow_gain].
+        (bow_gain is 0 for every vortex unless hero_emergence is on — the
+        default programs never read the .w slot, so the previously-constant
+        zero stays byte-equivalent for them.) Vectorized: runs every sim step."""
         n = len(self.vortices)
         if n == 0:
             return np.zeros((1, 12), dtype=np.float32)
         fields = np.array(
             [
                 (v.lat, v.lon, v.r_core, v.strength, v.kind,
-                 v.tint, v.brightness, v.wake_dir, v.aspect, v.wake_lat_off)
+                 v.tint, v.brightness, v.wake_dir, v.aspect, v.wake_lat_off,
+                 v.bow_gain)
                 for v in self.vortices
             ],
             dtype=np.float64,
@@ -138,6 +147,7 @@ class VortexRegistry:
         out[:, 8] = fields[:, 7]
         out[:, 9] = fields[:, 8]
         out[:, 10] = fields[:, 9]
+        out[:, 11] = fields[:, 10]
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -353,6 +363,27 @@ def _age_transients(reg: VortexRegistry, storms: StormsParams) -> None:
         reg.vortices = [v for v in reg.vortices if v.ttl != 0]
 
 
+def _hero_bow_gain(profiles: LatProfiles, lat: float, r: float) -> float:
+    """Boundary strength within the belt-bow's reach, in [0,1].
+
+    heroBandDeflect paints its bow by displacing the band-target sampling —
+    with NO band boundary inside its q<2.3 window that displacement
+    manufactures a phantom wrap out of whatever latitude gradient exists
+    (the -28-deg symmetric funnel tell). Gate on the largest t0_stamp step
+    within +-1.6 r of the hero: a real belt/zone edge (step ~0.2) gives full
+    gain, a flat zone gives ~0. Deterministic, profile-derived.
+    """
+    lo, hi = lat - 1.6 * r, lat + 1.6 * r
+    win = (profiles.lat >= lo) & (profiles.lat <= hi)
+    if not win.any():
+        return 0.0
+    t0 = profiles.t0_stamp[win]
+    step = float(t0.max() - t0.min())
+    # 0 below 0.04 (banding noise), full gain by 0.14 (a real edge).
+    x = np.clip((step - 0.04) / 0.10, 0.0, 1.0)
+    return float(x * x * (3.0 - 2.0 * x))
+
+
 def _hero_wake_frame(profiles: LatProfiles, lat: float, r: float) -> tuple[float, float]:
     """(lane latitude offset, wake_dir) for the hero's DYNAMIC wake (emergence).
 
@@ -519,8 +550,10 @@ def generate_vortices(
             )
         woff = 0.5 * r * (1.0 if lat < 0.0 else -1.0)
         wdir = -1.0
+        bow = 0.0
         if storms.hero_emergence > 0.0:
             woff, wdir = _hero_wake_frame(profiles, lat, r)
+            bow = _hero_bow_gain(profiles, lat, r)
         # User override (storms.hero_wake_dir): auto = the frame above;
         # east/west force the trailing direction (a forced direction against
         # the local jet reads weaker — the flow drains the folds). The lane
@@ -534,6 +567,7 @@ def generate_vortices(
                    tint=storms.hero_tint, brightness=storms.hero_brightness,
                    wake_dir=wdir,
                    wake_lat_off=woff,
+                   bow_gain=bow,
                    aspect=storms.hero_aspect)
         )
 
@@ -797,10 +831,19 @@ def _add_cast(
             0.5 * entry.radius * (1.0 if lat < 0.0 else -1.0)
             if kind == CastKind.HERO else 0.0
         )
+        bow = 0.0
+        if kind == CastKind.HERO and storms.hero_emergence > 0.0:
+            wake_lat_off, wake_dir = _hero_wake_frame(profiles, lat, entry.radius)
+            bow = _hero_bow_gain(profiles, lat, entry.radius)
+            if storms.hero_wake_dir == WakeDir.EAST:
+                wake_dir = 1.0
+            elif storms.hero_wake_dir == WakeDir.WEST:
+                wake_dir = -1.0
         reg.vortices.append(
             Vortex(lat, lon, entry.radius, s, k,
                    tint=tint, brightness=brightness,
                    wake_dir=wake_dir, wake_lat_off=wake_lat_off,
+                   bow_gain=bow,
                    aspect=entry.aspect, origin="cast")
         )
 

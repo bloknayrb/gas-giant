@@ -58,6 +58,10 @@ GENERATION_VERSION = 8
 _REG_FIELDS = (
     "lat", "lon", "r_core", "strength", "kind", "tint", "brightness",
     "wake_dir", "wake_lat_off", "aspect",
+    # Trailing (added 2026-07-15, belt-bow gate): loads tolerantly by npz key
+    # presence — pre-existing checkpoints default it to 0 (bow disabled),
+    # matching its value in every emergence-off registry.
+    "bow_gain",
 )
 
 
@@ -150,7 +154,10 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
     # The registry was serialized at save time; the freshly generated one is
     # discarded (bands/profiles/jets/schedule do not depend on it).
     n = int(data["reg_lat"].shape[0])
-    cols = {name: data[f"reg_{name}"] for name in _REG_FIELDS}
+    cols = {
+        name: (data[f"reg_{name}"] if f"reg_{name}" in data else np.zeros(n))
+        for name in _REG_FIELDS
+    }
     cooldown = data["reg_cooldown"] if "reg_cooldown" in data else np.zeros(n, np.int32)
     ttl = data["reg_ttl"] if "reg_ttl" in data else np.full(n, -1, np.int32)
     origin_arr = data["reg_origin"] if "reg_origin" in data else np.zeros(n, np.int32)

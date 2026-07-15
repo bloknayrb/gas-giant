@@ -92,9 +92,13 @@ STORM_TINTS_JUPITER = [
     (0.00, (0.42, 0.50, 0.62)),  # cool blue-grey (deep cyclone / barge core)
     (0.50, (0.70, 0.58, 0.44)),  # neutral tan
     (0.72, (0.46, 0.30, 0.20)),  # brown notch, lifted so the hero anchor reads fuller
-    (1.00, (0.79, 0.45, 0.30)),  # Phase C: muted brick-orange (was salmon-red .86/.42/.24)
-                                 # to match the 2000-epoch reference GRS -- a defined oval,
-                                 # not a vivid red spot, but still distinct from its surrounds
+    (1.00, (0.86, 0.44, 0.20)),  # GRS-interaction pass 2026-07-15: saturated warm
+                                 # orange — partially reverts Phase C's muted brick
+                                 # (0.79/.45/.30, "2000-epoch defined oval"): the
+                                 # per-latitude adversarial reviews (4/6, two as the
+                                 # worst deviation) found the core reading as a dull
+                                 # recessed hole; the reference core is the frame's
+                                 # brightest, most chromatic element.
 ]
 
 

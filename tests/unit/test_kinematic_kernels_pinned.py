@@ -110,12 +110,17 @@ _PINNED: dict[str, str] = {
     # the rim-fade erosion x(1-0.65 upw) and boosts the flush x(1+0.6 upw) so
     # the belt approaches the storm laminar and band-parallel, deflecting
     # cleanly — "tighten up the leading side"). Variant-arm-only.
-    # Re-pinned same day (reference-anchored review round): flush boost made
-    # non-directional at x12 (leading laminar AND belt re-closing downstream;
-    # wake wedge stays the only exemption), bow window tightened (1.45,2.0),
-    # deep-center darkening halved (core value polarity), lane 0.09, mottle
-    # fscale boost 0.4. Variant-arm-only; default text unchanged.
-    "vortex_stamp.glsl": "75750878e8b6f318443d27871587a62e5d514f1c",
+    # Re-pinned 2026-07-15 (Round A, per-latitude adversarial reviews): belt
+    # bow gains a CPU boundary gate (bow_gain, SSBO slot [3i+2].w — no phantom
+    # wrap where no boundary exists) plus FLANK-only shed/raggedness (|cos az|
+    # weighting: the E/W painted-ride arcs open and vary, the load-bearing
+    # N/S apex bow is untouched — an un-weighted first cut zeroed the apex
+    # and the bow test caught it); collar closure-breaking (downstream carve
+    # 0.8 over a wider arc + seeded amplitude/width lobes on both rings);
+    # core polarity (radial deep-darkening REMOVED, uniform plateau lift
+    # +0.10e, hot off-center knot 0.14/0.10, T3 rim fade 0.60->0.30).
+    # Variant-arm-only; default text unchanged; p05 9/9 same day.
+    "vortex_stamp.glsl": "cf5581474e80391e51e9b3a9db6533375f342dbc",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
