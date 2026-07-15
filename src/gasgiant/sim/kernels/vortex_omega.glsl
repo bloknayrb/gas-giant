@@ -231,16 +231,23 @@ float vortexOmegaAccum(vec3 p) {
                 // signed annulus cancels ~70% of it, taming the far-field
                 // winding; the tracer-side band-flush (heroRelaxWeight) erases
                 // the slower residual. Deliberately PARTIAL and WIDE/WEAK
-                // (peak 0.7 vs the ring's 6.0): a full-strength concentrated
+                // (peak 0.9 vs the ring's 6.0): a full-strength concentrated
                 // shield rolls up into its own companion cyclone and the
                 // resulting near-dipole self-propels off the anchor (observed:
                 // a second creamy swirl displacing the core). Enclosed
                 // circulation at the rim — the peripheral wind speed — is
                 // untouched. Physically: the counter-flowing jets deflected
                 // around the Hollow; Cassini shows bands running parallel
-                // again by ~1.5-2 spot radii.
-                ring += 0.7 * scale
-                      * (smoothstep(1.05, 1.4, q) - smoothstep(2.0, 2.6, q));
+                // again by ~1.5-2 spot radii — hence this PULL-IN (was
+                // 0.7 x [1.4..2.0,2.6]): the skirt now ends by 2.4 with the
+                // amplitude raised so net cancellation stays ~68% by
+                // int(w*q dq) — plan review caught that the naive pull-in
+                // dropped it to 54%, STRENGTHENING the pinwheel 42%. If the
+                // concentrated skirt shows any roll-up, revert the OUTER
+                // window toward (2.0,2.6); NEVER lower the amplitude (that
+                // reduces cancellation further).
+                ring += 0.9 * scale
+                      * (smoothstep(1.05, 1.35, q) - smoothstep(1.8, 2.4, q));
                 disk = mix(disk, ring, u_hero_emergence);
             }
 #endif

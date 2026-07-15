@@ -53,15 +53,40 @@ def main():
     # coherent (solid_core=1.0 preserved) and everything beyond the storm is
     # byte-identical. 0.8 = strong effect, still a distinct storm (calibrated by
     # emergence x solid_core sweep, 2026-07-09).
+    # GRS interaction pass (2026-07-15, plan ancient-snuggling-meadow): the
+    # hero must READ as embedded in the flow, not sitting on it.
+    # - hero_latitude -21.0 FORKS from jupiter_vorticity's -22.5 (deliberate):
+    #   warm's belt spans -7.31..-19.41 deg, so at -21.0 the oval's north rim
+    #   PROTRUDES into the belt (the Red Spot Hollow straddle) and the wake
+    #   lane (equatorward-biased) folds dark belt material instead of
+    #   invisible zone-on-zone cream.
+    # - hero_radius 0.062 (~3.6 deg lat semi-axis; the real GRS is ~4-4.5):
+    #   absolute presence; the fill RATIO is fixed kernel-side (q-normalized).
+    # - rim_contrast 2.0 -> 1.3: the doubled ring/collar amplitude was a main
+    #   driver of the etched-rings look; the real Hollow is only slightly
+    #   brighter than the bands.
+    # - wake_turbulence 3.2: now LIVE in vorticity mode (omega_force wake-wedge
+    #   injection); 1.593 was calibrated when the lever was feather-only inert.
+    # - hero_wake_detail 1.0, hero_mottle 0.9, hero_tint_var 0.55: full fray on
+    #   the dimmed wake stamp; granular (still muted) interior.
+    # - hero_emergence 0.8 -> 0.9: the retuned pack endpoints land at 90%.
     p.storms = p.storms.model_copy(update={
-        "hero_radius": 0.05,
-        "hero_emergence": 0.8,
+        "hero_radius": 0.062,
+        "hero_latitude": -21.0,
+        "hero_emergence": 0.9,
+        "rim_contrast": 1.3,
+        "wake_turbulence": 3.2,
+        "hero_wake_detail": 1.0,
+        "hero_mottle": 0.9,
+        "hero_tint_var": 0.55,
     })
 
     # Uniform detail coverage: apply the flow-folded detail-FX texture at EVEN
     # density across latitude instead of leaving zones detail-starved. 0.36 was
     # the calibrated value (user sign-off 2026-07-07) — even, fluid, not patchy.
-    p.detail = p.detail.model_copy(update={"spread": 0.36})
+    # hero_collar_wrap 0.5 -> 0.85: the thin bright annulus should read as
+    # STREAKED along-flow (wound collar lanes), not as a smooth painted ring.
+    p.detail = p.detail.model_copy(update={"spread": 0.36, "hero_collar_wrap": 0.85})
 
     # The frost fix: high-contrast warm palette, uniform across latitude rows
     # (color follows T0 structure, not a per-latitude stamp). chroma_scale 1.0 —

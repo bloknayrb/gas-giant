@@ -262,7 +262,9 @@ void main() {
     // the full mask so calm/coverage still see the enlarged oval. Deepen calm
     // toward a floor so the interior drops to reference quietness.
     float heroQ = hero * (1.0 - u_hero_emergence);
-    calm = min(calm, 1.0 - 0.9 * u_hero_emergence * hero);
+    // 0.8 (was 0.9): re-admit ~3%-contrast interior wisps — the reference
+    // interior is quiet but GRANULAR, not glassy. Revert to 0.9 if busy.
+    calm = min(calm, 1.0 - 0.8 * u_hero_emergence * hero);
 #endif
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the
@@ -570,8 +572,8 @@ void main() {
             // outer edge in with the lever so the streamlines hug it instead of
             // ringing out to 1.85 (part of the oversized-footprint fix).
             float wino = smoothstep(0.98, 1.12, q)
-                       * (1.0 - smoothstep(mix(1.5, 1.32, u_hero_emergence),
-                                           mix(1.85, 1.52, u_hero_emergence), q));
+                       * (1.0 - smoothstep(mix(1.5, 1.26, u_hero_emergence),
+                                           mix(1.85, 1.40, u_hero_emergence), q));
 #else
             float wino = smoothstep(0.98, 1.12, q) * (1.0 - smoothstep(1.5, 1.85, q));
 #endif

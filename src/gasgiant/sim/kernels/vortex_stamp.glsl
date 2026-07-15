@@ -249,14 +249,22 @@ vec3 vortexStamp(vec3 p) {
                         dT3 += 0.06 * u_hero_emergence * knot * plate;
                     }
                 }
-                // Ring at the plateau edge, THIN pale collar hugging just outside
-                // (mix so small lever values stay near the legacy anatomy). The
-                // widths sharpen with the lever — the real Red Spot Hollow is a
-                // thin margin, not a broad bright basin around the oval.
-                float ring_q = mix(1.0, 1.05, u_hero_emergence);
-                float col_q  = mix(1.55, 1.30, u_hero_emergence);
-                float ring_k = mix(16.0, 38.0, u_hero_emergence);
-                float col_k  = mix(5.0, 12.0, u_hero_emergence);
+                // GRS annulus anatomy (mix so small lever values stay near
+                // the legacy anatomy): a THIN bright annulus hugging the
+                // plateau edge (the real Hollow margin is ~0.2 R), then ONE
+                // diffuse dark collar outside it — the reference order. The
+                // pre-pass anatomy inverted this (etched dark ring at 1.05
+                // sharpening to k~38 = the "onion ring" tell, bright basin at
+                // 1.30): the dark ring is repurposed as the outer diffuse
+                // collar (out to 1.30, softened toward k 12 — its tail ends
+                // ~1.54, clear of the 1.55 flush rise) and the bright ring
+                // tightens onto the plateau (1.12, k toward 34). Endpoints
+                // start-values from plan review (fill ~79% of the hollow at
+                // e=0.9; 1.42 read as low-60s% perceived); calibration-owned.
+                float ring_q = mix(1.0, 1.30, u_hero_emergence);
+                float col_q  = mix(1.55, 1.12, u_hero_emergence);
+                float ring_k = mix(16.0, 12.0, u_hero_emergence);
+                float col_k  = mix(5.0, 34.0, u_hero_emergence);
                 // Moat shear-asymmetry (deterministic, reference-keyed — NOT
                 // the seeded-random azw lobes below): the GRS moat is wider
                 // poleward and upstream, pinched equatorward, and torn open on
@@ -353,9 +361,9 @@ vec3 vortexStamp(vec3 p) {
                     // ~3%-contrast wisps, not loud churn). Wisp frequency rides
                     // the compaction so the texture keeps its proportions.
                     win = max(win, fill * (1.0 - smoothstep(0.78, 1.04, qrim)))
-                        * (1.0 - 0.6 * u_hero_emergence);
+                        * (1.0 - 0.35 * u_hero_emergence);
                     float fscale = (a.w > 0.0 ? 9.0 / a.w : 9.0)
-                                 * (1.0 + 0.55 * u_hero_emergence);
+                                 * (1.0 + 0.9 * u_hero_emergence);
 #else
                     float fscale = a.w > 0.0 ? 9.0 / a.w : 9.0;
 #endif
@@ -573,7 +581,12 @@ float heroRelaxWeight(vec3 p) {
         }
         float q = heroEllipQ(p, i, 3.6);
         if (q > 3.6) continue;   // strictly local to the storm neighborhood
-        float rim_bump = exp(-(q - 1.0) * (q - 1.0) * 3.8);
+        // Narrowed OFF the bright annulus (center 0.95, k 10 — was 1.0/3.8):
+        // the fade must release the PLATEAU EDGE to the flow without also
+        // releasing the thin annulus at ~1.16, which already fights the
+        // plateau fray and the collar carve (three shredders on one
+        // 0.15-q-wide feature washed it out).
+        float rim_bump = exp(-(q - 0.95) * (q - 0.95) * 10.0);
         if (q < 2.2) {
             // Per-azimuth erosion: some arcs keep the ring, others dissolve ->
             // the boundary is ragged, not a uniformly-softened circle.
@@ -587,7 +600,16 @@ float heroRelaxWeight(vec3 p) {
                               0.0, 1.4);
             infl = max(infl, rim_bump * ero);
         }
-        flush = max(flush, smoothstep(1.55, 2.1, q) * (1.0 - smoothstep(2.7, 3.4, q)));
+        // Tight-but-strong Hollow (user constraint): the flush rises just
+        // past the dark collar's tail (~1.54) — a steeper rise than the old
+        // (1.55,2.1) so the bands re-assert hard right outside the collar.
+        // The OUTER fade deliberately stays WIDE (2.7,3.4): the flush is
+        // CLEANUP — it erases the residual-circulation winding — so pulling
+        // it in lets wound arcs survive in the 2.8-3.4 shell (measured: the
+        // upstream fold variance rose to parity with the wake sector, the
+        // exact pale-pinwheel tell). Visible tightness comes from the
+        // anatomy + skirt + this strong inner rise, not from a short reach.
+        flush = max(flush, smoothstep(1.55, 1.9, q) * (1.0 - smoothstep(2.7, 3.4, q)));
     }
     // Wake release: fade relaxation inside the wedge (CAPPED at 0.75 — the
     // floor prevents long-run homogenization into mud; through-flow refreshes
@@ -596,13 +618,15 @@ float heroRelaxWeight(vec3 p) {
     // release preserves.
     infl = max(infl, 0.75 * wrel);
     flush *= 1.0 - wrel;
-    // Fade in the rim band (down to 0), boost in the flush annulus (up to x6:
-    // tau_eff ~ relax_tau/6 -> the wound arcs decay over the dev run while the
+    // Fade in the rim band (down to 0), boost in the flush annulus (up to x8:
+    // tau_eff ~ relax_tau/8 -> the wound arcs decay over the dev run while the
     // bands re-assert; still << 1 per step, stability untouched). The boost is
     // paired with the partial vorticity shield: the residual ~30% circulation
-    // still winds the annulus, just slowly enough for this flush to win.
+    // still winds the annulus, just slowly enough for this flush to win —
+    // STRONGER (5->7) over the tighter window above, per the user's
+    // tight-but-strong Hollow constraint.
     return clamp(1.0 - u_hero_emergence * infl, 0.0, 1.0)
-         + 5.0 * u_hero_emergence * flush;
+         + 7.0 * u_hero_emergence * flush;
 }
 
 // Belt bowing (Red Spot Hollow geometry): pull the SAMPLED latitude of the

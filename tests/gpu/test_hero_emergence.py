@@ -154,11 +154,12 @@ def _lonlat_grids(shape):
 
 def test_emergence_moat_asymmetry_carves_downstream_arc(gpu):
     """The moat shear-asymmetry is deterministic and wake-keyed: the collar's
-    downstream (west, wake_dir=-1) arc is carved down, the upstream (east) arc
-    is not. Probed at dev_steps=0 (the pure stamp) on the SOUTH half of the
-    collar annulus, where the two sectors sample identical latitudes (band
-    background cancels in the comparison) and the wake wedge's own stamp is
-    negligible (|across| >= 1 and it decays as exp(-across^2))."""
+    DOWNSTREAM arc (the side wake_dir points to — flow-derived under
+    emergence, see _hero_wake_frame) is carved down, the upstream arc is not.
+    Probed at dev_steps=0 (the pure stamp) on the SOUTH half of the collar
+    annulus, where the two sectors sample identical latitudes (band background
+    cancels in the comparison) and the wake wedge's own stamp is negligible
+    (|across| >= 1 and it decays as exp(-across^2))."""
     p = _solo_hero_params(emergence=0.9)
     p.sim.dev_steps = 0
     p.storms.rim_contrast = 1.5
@@ -175,12 +176,13 @@ def test_emergence_moat_asymmetry_carves_downstream_arc(gpu):
 
     annulus = (q > 1.15) & (q < 1.6)
     south = np.sin(hth) < -0.3
-    sw = annulus & south & (np.cos(hth) < -0.5)   # downstream (carved) arc
-    se = annulus & south & (np.cos(hth) > 0.5)    # upstream arc
+    # Test hth: 0 = east. Downstream = the direction wake_dir points.
+    down = annulus & south & (np.cos(hth) * hero.wake_dir > 0.5)
+    up = annulus & south & (np.cos(hth) * hero.wake_dir < -0.5)
     t0 = tr[..., 0]
-    assert t0[sw].mean() < t0[se].mean() - 0.02, (
-        f"downstream collar arc (mean {t0[sw].mean():.3f}) is not carved below "
-        f"the upstream arc (mean {t0[se].mean():.3f})"
+    assert t0[down].mean() < t0[up].mean() - 0.02, (
+        f"downstream collar arc (mean {t0[down].mean():.3f}) is not carved "
+        f"below the upstream arc (mean {t0[up].mean():.3f})"
     )
 
 
@@ -314,9 +316,13 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
                 vals.append(v - v.mean())
         return float(np.concatenate(vals).std())
 
+    # Windows start at an=4 (q ~ 1.8 at aspect 2.2): the diffuse dark collar
+    # (ring_q 1.30, k 12) has a stamped radial tail to q ~ 1.7 that the
+    # row-mean removal cannot kill (q varies along a row), and a window
+    # overlapping it measures anatomy, not folds.
     lane = np.abs(across) < 1.2
-    wake_std = hp_std(lane & (an > 3.0) & (an < 6.5))
-    up_std = hp_std(lane & (an < -3.0) & (an > -6.5))
+    wake_std = hp_std(lane & (an > 4.0) & (an < 7.0))
+    up_std = hp_std(lane & (an < -4.0) & (an > -7.0))
     assert wake_std > 1.3 * up_std, (
         f"wake sector fold variance ({wake_std:.4f}) does not exceed the "
         f"upstream sector ({up_std:.4f}) — the wake is not folding downstream"

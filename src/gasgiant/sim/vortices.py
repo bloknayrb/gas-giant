@@ -347,6 +347,34 @@ def _age_transients(reg: VortexRegistry, storms: StormsParams) -> None:
         reg.vortices = [v for v in reg.vortices if v.ttl != 0]
 
 
+def _hero_wake_frame(profiles: LatProfiles, lat: float, r: float) -> tuple[float, float]:
+    """(lane latitude offset, wake_dir) for the hero's DYNAMIC wake (emergence).
+
+    The emergence wake is real fluid machinery (wedge eddy injection in
+    omega_force + relaxation release in heroRelaxWeight), so the wedge must
+    sit where the flow actually carries material: the lane goes to the
+    strongest jet within [0.4 r, 2.5 r] equatorward of the hero, and the wake
+    trails DOWNSTREAM of that jet (wake_dir = sign(u): +1 east, -1 west). The
+    legacy authored frame (0.5 r equatorward, hardwired westward — review
+    F06) is decorative: on gas_giant_warm the whole hero band flows EAST, so
+    a west-authored wedge injects into flow that immediately drains the folds
+    out the back. Falls back to the legacy frame when the search band has no
+    real flow (|u| < 0.05). Deterministic (profile-derived, no RNG);
+    latitude-ordering independent.
+    """
+    eq = 1.0 if lat < 0.0 else -1.0
+    legacy = (0.5 * r * eq, -1.0)
+    lo, hi = sorted((lat + eq * 0.4 * r, lat + eq * 2.5 * r))
+    win = (profiles.lat >= lo) & (profiles.lat <= hi)
+    if not win.any():
+        return legacy
+    u = profiles.u[win]
+    i = int(np.argmax(np.abs(u)))
+    if abs(u[i]) < 0.05:
+        return legacy
+    return float(profiles.lat[win][i] - lat), (1.0 if u[i] > 0.0 else -1.0)
+
+
 def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
     """Sign of the ambient relative vorticity (~ -du/dphi) at a latitude."""
     lats = profiles.lat
@@ -467,9 +495,15 @@ def generate_vortices(
             lat = float(np.deg2rad(storms.hero_latitude))
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
         s = _ambient_sign(profiles, lat) * storms.hero_strength * 0.045
-        # Wake trails WNW (review F06): westward, biased half a core radius
-        # toward the equator. Not jet-derived — the ambient jet is eastward
-        # across the entire hero band, so sampling it put the wake due east.
+        # Legacy wake frame (review F06): authored WNW — westward, biased half
+        # a core radius toward the equator. NOT jet-derived (the ambient jet
+        # is eastward across warm's entire hero band; the real GRS's WNW wake
+        # rides Jupiter's westward SEBs jet, which this planet does not have).
+        # Under emergence the wake is DYNAMIC (wedge eddy injection +
+        # relaxation release), so the frame must follow the actual flow —
+        # _hero_wake_frame puts the lane in the strongest nearby jet and
+        # trails downstream of it. Emergence-gated so legacy presets keep
+        # byte-identical registries.
         # Consume the seeded longitude draw unconditionally (RNG-stream
         # position must not depend on the pin), then override for a pin.
         lon = float(rng.uniform(-np.pi, np.pi))
@@ -477,11 +511,15 @@ def generate_vortices(
             lon = drift_compensated_lon(
                 profiles, lat, storms.hero_longitude, dt, dev_steps
             )
+        woff = 0.5 * r * (1.0 if lat < 0.0 else -1.0)
+        wdir = -1.0
+        if storms.hero_emergence > 0.0:
+            woff, wdir = _hero_wake_frame(profiles, lat, r)
         reg.vortices.append(
             Vortex(lat, lon, r, s, KIND_HERO,
                    tint=storms.hero_tint, brightness=storms.hero_brightness,
-                   wake_dir=-1.0,
-                   wake_lat_off=0.5 * r * (1.0 if lat < 0.0 else -1.0),
+                   wake_dir=wdir,
+                   wake_lat_off=woff,
                    aspect=storms.hero_aspect)
         )
 

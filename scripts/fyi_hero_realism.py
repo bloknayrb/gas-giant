@@ -29,7 +29,7 @@ from gasgiant.params.presets import load_factory_preset
 
 OUT = Path("out/audit/fyi_hero_realism")
 PRESET = "gas_giant_warm"
-HERO_LAT = -22.5
+HERO_LAT = -21.0  # tracks gas_giant_warm's belt-straddle placement (2026-07-15)
 LON_HALF, LAT_HALF = 24.0, 15.0   # crop half-extents (deg) around the hero
 
 

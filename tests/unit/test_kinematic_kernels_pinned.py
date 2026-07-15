@@ -95,7 +95,16 @@ _PINNED: dict[str, str] = {
     # wrong frame reading (h1 = cross(j, c) points ANTI-east, so hth=0 is
     # local west) — the carve landed on the upstream arc; caught by the new
     # collar-arc asymmetry GPU test. Variant-arm-only fix.
-    "vortex_stamp.glsl": "b423947367371135041eafe4c74c54e0549f04d4",
+    # Re-pinned 2026-07-15 (Phase 2 retune, same pass): anatomy inversion
+    # (bright annulus 1.12/k34 hugging the plateau, diffuse dark collar
+    # 1.30/k12 outside), rim relax fade narrowed off the annulus (0.95/k10),
+    # flush rise steepened (1.55,1.9) at x8 with the outer fade kept WIDE at
+    # (2.7,3.4) — a pulled-in outer let wound arcs survive in the 2.8-3.4
+    # shell (measured as upstream fold variance at parity with the wake) —
+    # mottle mute 0.35/fscale 0.9. ALL inside HERO_EMERGENCE
+    # mix-endpoints/arms; e=0 legacy endpoints and the default program text
+    # unchanged; p05 9/9 verified same day.
+    "vortex_stamp.glsl": "751cb65872a1a9b98853636475d8851d1419394c",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
