@@ -38,6 +38,11 @@ uniform float u_kh_wavenumber;
 uniform float u_kh_phase;
 
 uniform float u_wake_gain;        // turbulence boost in hero wakes
+#ifdef HERO_EMERGENCE
+// GRS-realism pack strength: extends the wake wedge below (variant-compiled;
+// the default program text is the pre-feature kernel, byte-identical).
+uniform float u_hero_emergence;
+#endif
 
 #if DOMAIN != 0
 // Polygonal polar jet (Saturn hexagon class): a jet ridge in psi along
@@ -122,11 +127,22 @@ void main() {
             // e^-7-scale turbulence boost into the polar feather 40 deg away
             // from the storm (found as a -60..-62 deg change lobe in the F06
             // render diff). Zero beyond |across| 2.5, smooth from 2.0.
+#ifdef HERO_EMERGENCE
+            // Emergence: extend the velocity wedge to match the extended
+            // tracer wedge (vortex_stamp.glsl). Verbatim pre-feature #else.
+            float hwlen = mix(7.0, 10.0, u_hero_emergence);
+            if (along > 0.0 && along < rc * hwlen && abs(across) < 2.5) {
+                float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
+                float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
+                wake += exp(-across * across) * win * (1.0 - along / (rc * hwlen)) * ramp;
+            }
+#else
             if (along > 0.0 && along < rc * 7.0 && abs(across) < 2.5) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
                 float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
                 wake += exp(-across * across) * win * (1.0 - along / (rc * 7.0)) * ramp;
             }
+#endif
         }
     }
 

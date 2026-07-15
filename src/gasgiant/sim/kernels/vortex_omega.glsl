@@ -103,6 +103,44 @@ float heroAnchorWindow(vec3 p) {
     }
     return w;
 }
+
+// Hero wake-wedge window in [0,1]: the turbulent-wake sector west of each
+// hero (same frame the tracer wedge in vortex_stamp.glsl uses: wake_dir
+// hardwired westward, wake_lat_off the equatorward lane bias — review F06).
+// Used by omega_force SUBPASS 0 to localize wake eddy-vorticity injection:
+// psi.comp's velocity wake is FEATHER-ONLY in vorticity mode (the definitive
+// psi at storm latitudes is SOR-solved from prognostic q), so without a
+// q-side source the wake sector has no folding velocity at all and the
+// tracer-side relaxation release preserves nothing but laminar shear. Hard
+// windows on both axes => exactly 0 in the far field.
+float heroWakeWindow(vec3 p) {
+    float w = 0.0;
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 b = vortex_data[3 * i + 1];
+        if (b.y != VKIND_HERO) continue;
+        vec4 a = vortex_data[3 * i];
+        float rc = a.w;
+        float down = vortex_data[3 * i + 2].x;
+        float woff = vortex_data[3 * i + 2].z;
+        float vlat = asin(clamp(a.y, -1.0, 1.0));
+        float vlon = atan(a.z, a.x);
+        float plat = asin(clamp(p.y, -1.0, 1.0));
+        float plon = atan(p.z, p.x);
+        float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
+        float an = dlon * down / max(rc, 1e-4);
+        float across = (plat - (vlat + woff)) / max(rc * 1.8, 1e-4);
+        // Rises just off the collar (the ring's own shear folds the boundary;
+        // the injection owns the wedge beyond), decays to exactly 0 by 9 rc.
+        if (an > 0.8 && an < 9.0 && abs(across) < 2.0) {
+            float rise = smoothstep(0.8, 1.8, an);
+            float fall = 1.0 - smoothstep(6.0, 9.0, an);
+            float aw = (1.0 - smoothstep(1.4, 2.0, abs(across)))
+                     * exp(-across * across);
+            w = max(w, rise * fall * aw);
+        }
+    }
+    return w;
+}
 #endif  // HERO_EMERGENCE
 
 float vortexOmegaAccum(vec3 p) {

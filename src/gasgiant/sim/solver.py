@@ -525,6 +525,13 @@ class Solver:
         _set(kf0, "u_hypervisc", p.solver.vort_hypervisc)
         _set(kf0, "u_vort_inject", p.solver.vort_inject)
         _set(kf0, "u_inject_freq", p.bands.detail_freq * p.solver.vort_inject_scale)
+        # Hero wake-wedge eddy injection (HERO_EMERGENCE variant only;
+        # KeyError-guarded no-op otherwise). wake_turbulence's semantics
+        # completed for vorticity mode; frequency tracks the hero radius so
+        # the churn scale is storm-relative (features ~rc/2 at the base
+        # octave — resolvable at dev res; finer octaves dissipate).
+        _set(kf0, "u_hero_wake_turb", p.storms.wake_turbulence)
+        _set(kf0, "u_hero_wake_freq", 2.0 / max(p.storms.hero_radius, 0.01))
         # Spatial localization mask for eddy injection (0=global,1=belt,2=shear).
         self.profile_dyn.use(location=3)
         _set(kf0, "u_profile_dyn", 3)
@@ -739,6 +746,8 @@ class Solver:
             _set(k, "u_kh_wavenumber", float(p.turbulence.kh_wavenumber))
             _set(k, "u_kh_phase", self._kh_phase)
             _set(k, "u_wake_gain", p.storms.wake_turbulence)
+            # Extended wake wedge (HERO_EMERGENCE variant; guarded no-op else).
+            _set(k, "u_hero_emergence", p.storms.hero_emergence)
 
     def set_profiles(self, profiles: LatProfiles) -> None:
         self.profiles = profiles

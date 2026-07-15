@@ -226,12 +226,27 @@ vec3 vortexStamp(vec3 p) {
                          * smoothstep(0.45, 0.97, q) * plate;
                     dT0 += 0.06 * u_hero_emergence
                          * smoothstep(0.45, 0.97, q) * plate;
-                    // Concentric wrapped lanes, windowed off the very center.
+                    // OPEN wrapped lanes, windowed off the very center. The
+                    // integer +hth term (m=1, 2pi-periodic => branch-cut safe
+                    // at th=+-pi) turns the q-only phase — closed concentric
+                    // ellipses by functional form, the "etched onion ring"
+                    // tell — into one continuous wound spiral arm, matching
+                    // the GRS's open low-contrast internal banding.
                     if (hth_ok) {
                         vec3 lph = u_hero_noise_offset * 9.42;
-                        float lane = sin(q * 10.0 + 1.1 * sin(hth + lph.x) + lph.y);
+                        float lane = sin(q * 6.0 + hth
+                                         + 1.1 * sin(hth + lph.x) + lph.y);
                         dT0 += 0.07 * u_hero_emergence * lane * plate
                              * smoothstep(0.16, 0.32, q);
+                        // Off-center bright knot (HST/Cassini: the interior's
+                        // brightest patch sits off-center): seeded azimuth,
+                        // 0.3-rc offset, one open Gaussian — no closed
+                        // contour. Law of cosines in the (q, hth) polar frame.
+                        float q_off2 = q * q + 0.09
+                                     - 0.6 * q * cos(hth - lph.z);
+                        float knot = exp(-3.0 * q_off2);
+                        dT0 += 0.10 * u_hero_emergence * knot * plate;
+                        dT3 += 0.06 * u_hero_emergence * knot * plate;
                     }
                 }
                 // Ring at the plateau edge, THIN pale collar hugging just outside
@@ -242,6 +257,31 @@ vec3 vortexStamp(vec3 p) {
                 float col_q  = mix(1.55, 1.30, u_hero_emergence);
                 float ring_k = mix(16.0, 38.0, u_hero_emergence);
                 float col_k  = mix(5.0, 12.0, u_hero_emergence);
+                // Moat shear-asymmetry (deterministic, reference-keyed — NOT
+                // the seeded-random azw lobes below): the GRS moat is wider
+                // poleward and upstream, pinched equatorward, and torn open on
+                // the downstream (wake) arc. Directions come from the hero
+                // frame: h1 = cross(j, c) points ANTI-east, so hth=0 is local
+                // WEST and +cos(hth) is the west component; wake_dir supplies
+                // the downstream sign (east-positive), a.y the hemisphere.
+                // carve hands the downstream collar arc to the wake instead of
+                // leaving a uniform drawn ring; it also fades the rim-tint
+                // moat below (same tear).
+                float carve = 1.0;
+                if (hth_ok) {
+                    float wdir  = vortex_data[3 * i + 2].x;
+                    float polew = (a.y < 0.0) ? max(-sin(hth), 0.0)
+                                              : max(sin(hth), 0.0);
+                    float equw  = (a.y < 0.0) ? max(sin(hth), 0.0)
+                                              : max(-sin(hth), 0.0);
+                    // upstream = -wake_dir in east terms = +wdir on the
+                    // anti-east h1 axis; downstream is the negation.
+                    float eastw = max(cos(hth) * wdir, 0.0);
+                    float westw = smoothstep(0.3, 0.9, -cos(hth) * wdir);
+                    col_q += u_hero_emergence * (0.10 * polew + 0.06 * eastw);
+                    col_k *= 1.0 + 0.9 * u_hero_emergence * equw;
+                    carve = 1.0 - 0.55 * u_hero_emergence * westw;
+                }
                 // Quiet hollow: the real Red Spot Hollow is only slightly
                 // brighter than the bands (Juno close-ups), not a glowing
                 // basin — soften both the dark ring and the bright collar
@@ -249,7 +289,7 @@ vec3 vortexStamp(vec3 p) {
                 float quiet = 1.0 - 0.5 * u_hero_emergence;
                 dT0 += b.w * fill
                      - 0.16 * quiet * u_rim_contrast * exp(-(qrim - ring_q) * (qrim - ring_q) * ring_k)
-                     + 0.22 * quiet * u_rim_contrast * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
+                     + 0.22 * quiet * carve * u_rim_contrast * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
 #else
                 dT0 += b.w * core
                      - 0.16 * u_rim_contrast * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
@@ -287,8 +327,10 @@ vec3 vortexStamp(vec3 p) {
 #ifdef HERO_EMERGENCE
                     // Under emergence the moat sits ON the enlarged pale margin —
                     // the real hollow boundary is subtle wisps, not a heavy dark
-                    // ring — so both moat terms soften with the lever.
-                    float moat = 1.0 - 0.6 * u_hero_emergence;
+                    // ring — so both moat terms soften with the lever. carve
+                    // (declared with the collar above) tears the downstream arc
+                    // open the same way it tears the bright collar.
+                    float moat = (1.0 - 0.6 * u_hero_emergence) * carve;
                     dT3 += u_hero_rim_tint * 0.55 * rring * moat;     // redden
                     dT0 -= u_hero_rim_tint * 0.16 * rring * azw * moat;  // darken + broken
 #else
@@ -410,6 +452,35 @@ vec3 vortexStamp(vec3 p) {
             }
             // Same latitude window as psi.comp's wedge: keep the stamp
             // strictly local (the raw Gaussian tail never truly reaches zero).
+#ifdef HERO_EMERGENCE
+            // Emergence: the wedge extends toward 9 rc (the reference wake
+            // stays identifiable 2-3 oval diameters west) and the painted
+            // gray-white DIMS — under the pack the wake's brightness should
+            // come from REAL advected belt/zone material folded by the wake
+            // forcing (omega_force) inside the relaxation release
+            // (heroRelaxWeight), not from this stamp. Variant arm only; the
+            // #else arm below is the pre-feature text verbatim.
+            float wlen = mix(6.0, 9.0, u_hero_emergence);
+            float wdim = 1.0 - 0.6 * u_hero_emergence;
+            if (along > 0.0 && along < rc * wlen && abs(across) < 2.5) {
+                float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
+                float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
+                float w = exp(-across * across) * win * (1.0 - along / (rc * wlen)) * ramp;
+                if (u_hero_wake_detail > 0.0) {
+                    // (2) Intermittent flow-aligned filaments: anisotropic fbm (low
+                    // along-freq, higher across-freq => downstream streaks), sheared so
+                    // they fan along the curving flow, thresholded so there are clear
+                    // lanes between filaments (not uniform mottle). Clamped so the
+                    // factor stays in [0,1] (snoise can exceed +/-1 -> would sign-flip w).
+                    float sh  = across + 0.25 * an;
+                    float fil = fbm(vec3(an * 0.30, sh * 1.7, wseed), 4, 2.0, 0.5);
+                    float streak = clamp(smoothstep(-0.2, 0.6, fil), 0.0, 1.0);
+                    w *= mix(1.0, streak, u_hero_wake_detail);
+                }
+                dT0 += 0.16 * w * wdim;   // bright churned clouds (dimmed)
+                dT3 -= 0.20 * w * wdim;   // cool gray-white, not belt-colored
+            }
+#else
             if (along > 0.0 && along < rc * 6.0 && abs(across) < 2.5) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
                 float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
@@ -428,6 +499,7 @@ vec3 vortexStamp(vec3 p) {
                 dT0 += 0.16 * w;   // bright churned clouds
                 dT3 -= 0.20 * w;   // cool gray-white, not belt-colored
             }
+#endif
         }
     }
     return vec3(dT0, dT1, dT3);
@@ -463,9 +535,42 @@ vec3 vortexStamp(vec3 p) {
 float heroRelaxWeight(vec3 p) {
     float infl = 0.0;    // strongest rim-band fade at this pixel, in [0,1.4]
     float flush = 0.0;   // strongest neighborhood-flush boost, in [0,1]
+    float wrel = 0.0;    // strongest wake-sector release window, in [0,1]
     for (int i = 0; i < u_vortex_count; ++i) {
         vec4 b = vortex_data[3 * i + 1];
         if (b.y != VKIND_HERO) continue;
+        // Wake-sector relaxation RELEASE. Advection must OWN the wake: the
+        // smooth stamped wedge is the relaxation TARGET, so full-rate
+        // relaxation (and the flush boost below) actively erases every fold
+        // the wake forcing creates each step — the old "single laminar hook"
+        // was this mechanism's designed steady state, not an undertuned
+        // lever. Computed BEFORE the q cull: at aspect 2.2 the 9-rc wake tail
+        // sits at q~4.1, past the 3.6 rim/flush cull. Hard windows on both
+        // axes => exactly 0 in the far field (the locality byte-identity
+        // tests assert_array_equal outside the neighborhood), with smooth
+        // ramps strictly inside so no relax-weight arc prints.
+        {
+            vec4 wa = vortex_data[3 * i];
+            float rc = wa.w;
+            float down = vortex_data[3 * i + 2].x;
+            float woff = vortex_data[3 * i + 2].z;
+            float vlat = asin(clamp(wa.y, -1.0, 1.0));
+            float vlon = atan(wa.z, wa.x);
+            float plat = asin(clamp(p.y, -1.0, 1.0));
+            float plon = atan(p.z, p.x);
+            float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
+            float an = dlon * down / max(rc, 1e-4);
+            float across = (plat - (vlat + woff)) / max(rc * 1.8, 1e-4);
+            // along > 1.5 rc keeps the flush pincer's hollow rim clean (the
+            // release starts where the wake lives, not at the collar).
+            if (an > 1.5 && an < 9.0 && abs(across) < 2.0) {
+                float rise = smoothstep(1.5, 2.5, an);
+                float fall = 1.0 - smoothstep(6.0, 9.0, an);  // relaminarize
+                float aw = (1.0 - smoothstep(1.4, 2.0, abs(across)))
+                         * exp(-across * across);
+                wrel = max(wrel, rise * fall * aw);
+            }
+        }
         float q = heroEllipQ(p, i, 3.6);
         if (q > 3.6) continue;   // strictly local to the storm neighborhood
         float rim_bump = exp(-(q - 1.0) * (q - 1.0) * 3.8);
@@ -484,6 +589,13 @@ float heroRelaxWeight(vec3 p) {
         }
         flush = max(flush, smoothstep(1.55, 2.1, q) * (1.0 - smoothstep(2.7, 3.4, q)));
     }
+    // Wake release: fade relaxation inside the wedge (CAPPED at 0.75 — the
+    // floor prevents long-run homogenization into mud; through-flow refreshes
+    // the wedge ~4x per dev run at the measured jet speed) and exempt the
+    // wake sector from the flush so the boost cannot stomp the very folds the
+    // release preserves.
+    infl = max(infl, 0.75 * wrel);
+    flush *= 1.0 - wrel;
     // Fade in the rim band (down to 0), boost in the flush annulus (up to x6:
     // tau_eff ~ relax_tau/6 -> the wound arcs decay over the dev run while the
     // bands re-assert; still << 1 per step, stability untouched). The boost is
@@ -491,5 +603,36 @@ float heroRelaxWeight(vec3 p) {
     // still winds the annulus, just slowly enough for this flush to win.
     return clamp(1.0 - u_hero_emergence * infl, 0.0, 1.0)
          + 5.0 * u_hero_emergence * flush;
+}
+
+// Belt bowing (Red Spot Hollow geometry): pull the SAMPLED latitude of the
+// band-target lookup toward the hero inside an annular window, so every band
+// boundary within ~2.3 core radii bows tightly around the oval and recovers
+// within ~one storm width — instead of being painted STRAIGHT through the
+// hollow, which the flush would then re-impose every step. With the
+// deflection the flush COOPERATES: it re-imposes the bowed band. Applied
+// identically by init.comp and advect.comp (both must shape the SAME target,
+// the band_mod.glsl rule); ordering pinned here: deflect the true latitude
+// FIRST, the caller adds its fbm band warp after. Amplitude: pull 0.75 at
+// e=1 bows a boundary ~1.6 deg from the hero center by ~1 core radius (solve
+// lat_s(L)=L_b) — the reference's tight-but-strong bow; displacement capped
+// at 1.1 rc. The jet velocity profile is deliberately NOT deflected (the
+// vorticity solver's jets already respond dynamically; warping the analytic
+// profile would double-count).
+float heroBandDeflect(vec3 p, float lat) {
+    float lat_s = lat;
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 b = vortex_data[3 * i + 1];
+        if (b.y != VKIND_HERO) continue;
+        float q = heroEllipQ(p, i, 2.3);
+        if (q > 2.3) continue;
+        vec4 a = vortex_data[3 * i];
+        float vlat = asin(clamp(a.y, -1.0, 1.0));
+        float bw = smoothstep(0.8, 1.2, q) * (1.0 - smoothstep(1.6, 2.3, q));
+        float pull = u_hero_emergence * 0.75 * bw * (lat - vlat);
+        float cap = 1.1 * a.w;
+        lat_s -= clamp(pull, -cap, cap);
+    }
+    return lat_s;
 }
 #endif  // HERO_EMERGENCE

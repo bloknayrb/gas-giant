@@ -21,7 +21,7 @@ _PKG = "gasgiant.sim.kernels"
 # To regenerate: uv run python -c "
 #   import hashlib, importlib.resources as ir
 #   pkg = 'gasgiant.sim.kernels'
-#   for f in ['psi.comp','velocity.comp','advect.comp',
+#   for f in ['psi.comp','velocity.comp','advect.comp','init.comp',
 #             'noise3d.glsl','common.glsl','vortex_stamp.glsl',
 #             'band_mod.glsl','wave_stamp.glsl','hero_q.glsl']:
 #       t = ir.files(pkg).joinpath(f).read_text(encoding='utf-8')
@@ -32,7 +32,11 @@ _PINNED: dict[str, str] = {
     # montage user-approved 2026-07-03): hero wake wedge reads the new
     # wake_lat_off lane, defaults westward, and is windowed to |across| 2.5
     # so it can no longer leak into the psi_feather polar band.
-    "psi.comp":          "4e905a61164cea74991442622d38742482f0edeb",
+    # Updated 2026-07-15 (GRS hero-interaction pass, Phase 1): the hero wake
+    # wedge gains a HERO_EMERGENCE variant arm extending its length (rc*7 ->
+    # mix to rc*10) with the pre-feature text verbatim in #else — default
+    # program text unchanged after preprocessing; p05 9/9 verified same day.
+    "psi.comp":          "4abc2ea619b72c8181a83d2d081b34d4c15623ce",
     "velocity.comp":     "a5edeb117303788431b9d1ab686f0dddae402fd6",
     # Updated 2026-07-10 (hero_emergence, GRS-realism pack): pass 2's relaxation
     # lines compile as a HERO_EMERGENCE preprocessor VARIANT (define selected when
@@ -41,7 +45,16 @@ _PINNED: dict[str, str] = {
     # byte-identical by construction. (An earlier runtime-guarded cut moved the
     # jupiter@1024 p05 hash via FMA-contraction changes on shared expressions;
     # the variant conversion is the fix, per the CLAUDE.md gated-out rule.)
-    "advect.comp":       "239d5022eeab06c8ea747a1614e9f00c55d04040",
+    # Updated 2026-07-15 (GRS hero-interaction pass, Phase 1): the band-target
+    # lookup gains a HERO_EMERGENCE variant arm sampling the hero-deflected
+    # latitude (heroBandDeflect — belt bowing around the oval), verbatim
+    # pre-feature #else => default program text unchanged after preprocessing.
+    "advect.comp":       "c76ee3ba979c656e5751bd4a3890bdef04708b5b",
+    # New pin 2026-07-15: init.comp gained the SAME heroBandDeflect variant
+    # arm as advect.comp (both must shape the SAME relaxation target). It was
+    # never pinned before this pass; it is a kinematic kernel and #includes
+    # vortex_stamp.glsl, so it belongs here.
+    "init.comp":         "ea86b0344a599329f458096adddbe6ff7608bc0c",
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
     "common.glsl":       "48c13b438e4e893b32b594234ef965bdfeac1cad",
     # Updated 2026-06-29 for the convective white-plume outbreak stamp branch
@@ -71,7 +84,18 @@ _PINNED: dict[str, str] = {
     # claimed advect.comp runtime-guards the call; the guard is variant
     # compilation). Zero code change — the compiled default program and the
     # p05 hashes are untouched.
-    "vortex_stamp.glsl": "0ab171fa175e7243e6382ea81f884f9ced50072b",
+    # Updated 2026-07-15 (GRS hero-interaction pass, Phase 1 — plan
+    # ancient-snuggling-meadow): all inside HERO_EMERGENCE arms (open-spiral
+    # interior lane + off-center knot, deterministic moat shear-asymmetry with
+    # the west-arc carve, wake-sector relaxation release in heroRelaxWeight,
+    # the new heroBandDeflect helper) or a new variant arm around the wake
+    # wedge (extended + dimmed; verbatim pre-feature #else). Default program
+    # text unchanged after preprocessing; p05 9/9 verified same day.
+    # Re-pinned same day: the moat-asymmetry east/west weights were built on a
+    # wrong frame reading (h1 = cross(j, c) points ANTI-east, so hth=0 is
+    # local west) — the carve landed on the upstream arc; caught by the new
+    # collar-arc asymmetry GPU test. Variant-arm-only fix.
+    "vortex_stamp.glsl": "b423947367371135041eafe4c74c54e0549f04d4",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
