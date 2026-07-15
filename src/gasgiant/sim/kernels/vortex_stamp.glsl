@@ -289,6 +289,7 @@ vec3 vortexStamp(vec3 p) {
                 // leaving a uniform drawn ring; it also fades the rim-tint
                 // moat below (same tear).
                 float carve = 1.0;
+                float ringmod = 1.0;
                 if (hth_ok) {
                     float wdir  = vortex_data[3 * i + 2].x;
                     float polew = (a.y < 0.0) ? max(-sin(hth), 0.0)
@@ -315,6 +316,13 @@ vec3 vortexStamp(vec3 p) {
                                   * sin(1.0 * hth + cph.y);
                     ring_k *= 1.0 + 0.45 * u_hero_emergence
                                     * sin(3.0 * hth + cph.z);
+                    // The DARK collar needs its own break-up: with the detail
+                    // overlay off it read as a crisp CLOSED ellipse — width
+                    // lobes alone don't open it. Decorrelated amplitude lobes
+                    // + the same downstream tear the bright collar gets.
+                    ringmod = (0.72 + 0.28 * sin(2.0 * hth + cph.y + 2.1)
+                                    * sin(3.0 * hth + cph.x + 0.7))
+                            * (1.0 - 0.6 * u_hero_emergence * westw);
                 }
                 // Quiet hollow: the real Red Spot Hollow is only slightly
                 // brighter than the bands (Juno close-ups), not a glowing
@@ -328,7 +336,8 @@ vec3 vortexStamp(vec3 p) {
                 // more pop (Checkpoint 1). Raising THIS base, not
                 // rim_contrast, keeps the dark collar unamplified.
                 dT0 += b.w * fill
-                     - 0.16 * quiet * u_rim_contrast * exp(-(qrim - ring_q) * (qrim - ring_q) * ring_k)
+                     - mix(0.16, 0.125, u_hero_emergence) * quiet * ringmod * u_rim_contrast
+                       * exp(-(qrim - ring_q) * (qrim - ring_q) * ring_k)
                      + mix(0.22, 0.31, u_hero_emergence) * quiet * carve * u_rim_contrast
                        * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
 #else
@@ -343,10 +352,17 @@ vec3 vortexStamp(vec3 p) {
                 // Guarded => byte-identical when off.
                 if (u_hero_rim_tint > 0.0) {
 #ifdef HERO_EMERGENCE
-                    // Hugs the plateau edge; thinner with the lever (the real
-                    // moat is a narrow margin on the oval, not a wide annulus).
-                    float rt_q = mix(1.08, 1.09, u_hero_emergence);
-                    float rt_k = mix(11.0, 26.0, u_hero_emergence);
+                    // DE-DOUBLED under emergence: co-located with the dark
+                    // collar (ring_q endpoint 1.30) so the reddening and the
+                    // darkening form ONE diffuse boundary — the reference has
+                    // a single reddish edge dissolving into shear, and the old
+                    // inner line at 1.09 + collar at 1.27 pair read as "two
+                    // inky concentric drawn ellipses" (adversarial re-check;
+                    // the inner ring sampled continuous, value 127-153, no
+                    // gap). Sharpness matches the diffuse collar (k 12), not
+                    // the old etched 26.
+                    float rt_q = mix(1.08, 1.30, u_hero_emergence);
+                    float rt_k = mix(11.0, 12.0, u_hero_emergence);
                     float rring = exp(-(qrim - rt_q) * (qrim - rt_q) * rt_k);
 #else
                     float rring = exp(-(qrim - 1.08) * (qrim - 1.08) * 11.0);

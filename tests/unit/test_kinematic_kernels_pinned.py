@@ -120,7 +120,16 @@ _PINNED: dict[str, str] = {
     # core polarity (radial deep-darkening REMOVED, uniform plateau lift
     # +0.10e, hot off-center knot 0.14/0.10, T3 rim fade 0.60->0.30).
     # Variant-arm-only; default text unchanged; p05 9/9 same day.
-    "vortex_stamp.glsl": "cf5581474e80391e51e9b3a9db6533375f342dbc",
+    # Re-pinned same day (A2): dark collar gains its own amplitude lobes +
+    # downstream tear (ringmod) and eases -0.16 -> mix to -0.125; rim-tint
+    # ring DE-DOUBLED (co-located with the dark collar at 1.30/k12 — the old
+    # 1.09 inner line + 1.27 collar pair read as two drawn ellipses).
+    # NOTE the residual visible boundary ring was subsequently ROOT-CAUSED as
+    # EMERGENT wound tracer (controlled renders with rim_contrast=0 AND
+    # rim_tint=0 keep it; palette-notch warming does not remove it) — the
+    # stamps are exonerated; regularity of the wound boundary is a
+    # texture/fray question, not a stamp one. Variant-arm-only.
+    "vortex_stamp.glsl": "d7106afb3632096a92f00c5a8bb9162e24ed030c",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

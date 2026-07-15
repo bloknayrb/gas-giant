@@ -91,14 +91,26 @@ CONTRAST_STOPS_JUPITER = [
 STORM_TINTS_JUPITER = [
     (0.00, (0.42, 0.50, 0.62)),  # cool blue-grey (deep cyclone / barge core)
     (0.50, (0.70, 0.58, 0.44)),  # neutral tan
-    (0.72, (0.46, 0.30, 0.20)),  # brown notch, lifted so the hero anchor reads fuller
-    (1.00, (0.86, 0.44, 0.20)),  # GRS-interaction pass 2026-07-15: saturated warm
-                                 # orange — partially reverts Phase C's muted brick
-                                 # (0.79/.45/.30, "2000-epoch defined oval"): the
-                                 # per-latitude adversarial reviews (4/6, two as the
-                                 # worst deviation) found the core reading as a dull
-                                 # recessed hole; the reference core is the frame's
-                                 # brightest, most chromatic element.
+    (0.72, (0.56, 0.31, 0.19)),  # brown notch — warmed + lifted 2026-07-15: the
+                                 # hero plateau edge TRANSITS this stop as T3 falls
+                                 # from ~0.9 to ambient 0, painting an unavoidable
+                                 # boundary ring in notch color; at (0.46,0.30,0.20)
+                                 # it read as an inky closed drawn ellipse (three
+                                 # rounds of T0-ring edits could not move it — the
+                                 # ring is palette-structural, root-caused by radial
+                                 # color sampling). Redder + brighter keeps the
+                                 # reference's subtle darker inner boundary without
+                                 # the ink. Barges (tint 0.35, idx ~0.68) brighten
+                                 # slightly — verify at rollout.
+    (0.85, (0.80, 0.40, 0.18)),  # GRS-interaction pass 2026-07-15: bright-orange
+                                 # SHOULDER — without it the hero interior (T3~0.9,
+                                 # LUT idx ~0.95) interpolates out of the 0.72 brown
+                                 # notch and reads dusky brown, the "dull recessed
+                                 # hole" 4/6 per-latitude reviewers flagged. The
+                                 # 0.85..1.0 segment now plateaus chromatic orange.
+    (1.00, (0.86, 0.44, 0.20)),  # saturated warm orange top (partially reverts
+                                 # Phase C's muted brick 0.79/.45/.30 — the reference
+                                 # core is the frame's brightest, warmest element).
 ]
 
 
