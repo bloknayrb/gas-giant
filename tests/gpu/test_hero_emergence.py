@@ -333,6 +333,11 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     # is LOAD-BEARING at the preset bake: the scene loads warm, and a baked
     # K > 1 would re-roll the whole frozen fold pattern without it.
     p.storms.hero_flow_aspect = 1.0
+    # hero_aspect shapes the ring/skirt AND this probe's own geometry (the
+    # window-start comment above derives q from aspect 2.2), so it is part of
+    # the frozen scene contract too: pinned at the pre-aspect-pass value so
+    # the warm bake of 2.9 (2026-07-16) does not re-roll the fold pattern.
+    p.storms.hero_aspect = 2.2
     sim, tr = _sim_and_tracers(p, gpu)
     hero = sim.vortices.heroes()[0]
 
@@ -736,11 +741,17 @@ def test_hero_flow_aspect_widens_flow_ew_only(gpu):
 
     # Net circulation invariance: sum of the (K - 1) difference over the hero
     # neighborhood, cos-lat weighted, relative to the ring's own mass. A 1/K
-    # renorm bug reads ~0.02 on this statistic; the spherical renorm ~1e-3.
+    # renorm bug reads ~0.02 on this statistic; the spherical renorm ~1e-4.
+    # The box must COVER the K-widened skirt's EW support (outer edge at
+    # widened-q 2.4, i.e. ~2.4*aspect*K*r_core of longitude at this latitude)
+    # or the truncation itself reads as a ~0.03 circulation error — a fixed
+    # 0.65 rad half-width did exactly that when warm's bake moved hero_aspect
+    # 2.2 -> 2.9 (support 0.71 rad), while the renorm was in fact at 1e-4.
     lat_g = (0.5 - (np.arange(h) + 0.5) / h) * np.pi
     cosw = np.cos(lat_g)[:, None]
     rows = slice(max(row - int(0.16 / dlat_px), 0), row + int(0.16 / dlat_px))
-    cs = int(0.65 / dlon_px)
+    cs = int(2.4 * hero.aspect * K * hero.r_core / np.cos(hero.lat) * 1.15
+             / dlon_px)
     cols = slice(max(col - cs, 0), min(col + cs, w))
     box = (rows, cols)
     net_diff = ((qk - q1) * cosw)[box].sum()

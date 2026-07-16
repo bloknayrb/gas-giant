@@ -71,6 +71,17 @@ def main():
     #   stamp; granular (still muted) interior.
     # - hero_emergence 0.8 -> 0.9: the retuned pack endpoints land at 90%.
     # Round B (de-bullseye + populate the neighborhood, same plan):
+    # Aspect pass (2026-07-16, same plan): the reference GRS's RED CORE is
+    # MORE elongated (~2.9) than its pale envelope (~1.8); ours rendered the
+    # core at ~2.0. The deficit is anatomy-side (psi rounds any authored
+    # geometry, but every erasure window is aspect-normalized, so raising the
+    # AUTHORED aspect moves the flow and the anatomy windows together — no
+    # metric mismatch, no dye dilution). storms.hero_flow_aspect stays at its
+    # 1.0 default: K>1 widens the ENVELOPE (the wrong component — it inverts
+    # the reference's core>envelope hierarchy) and pays the dilution.
+    # - hero_aspect 2.2 -> 2.9: measured dye-core aspect 3.04 vs reference
+    #   2.9, core saturation unchanged from the 2.2 bake; 2.6 was a dead zone
+    #   (no core gain — the response is nonlinear, 2.9 punches through).
     # - hero_tint_var 0.55 -> 0.35: the interior now carries a deterministic
     #   T3 spiral lane; the isotropic tint fbm was the same magnitude as the
     #   lane signal (S/N ~ 1) and must come down for the banding to read.
@@ -85,6 +96,7 @@ def main():
     p.storms = p.storms.model_copy(update={
         "hero_radius": 0.062,
         "hero_latitude": -21.0,
+        "hero_aspect": 2.9,
         "hero_emergence": 0.9,
         "rim_contrast": 1.3,
         "wake_turbulence": 3.2,

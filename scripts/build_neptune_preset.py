@@ -120,6 +120,15 @@ STORMS_HERO = {
     "rim_contrast": 2.0,
     "wake_turbulence": 1.593,
     "companion_brightness": 0.32,  # the pre-lever constant; warm bakes 0.55
+    # Aspect-pass pins (2026-07-16): warm bakes hero_aspect 2.9 (the GRS red
+    # core is more elongated than its envelope); the Voyager GDS (~2.0) is
+    # legitimately rounder, and the signed-off GDS scene was calibrated at
+    # 2.2 — it must not silently stretch on regen. hero_taper / hero_flow_
+    # aspect are pinned at their inert defaults so a future warm bake of
+    # either GRS lever cannot leak into the GDS.
+    "hero_aspect": 2.2,
+    "hero_taper": 0.0,
+    "hero_flow_aspect": 1.0,
 }
 
 # Remove the planet-girdling Jupiter storm field -- only the hero + companions remain, plus
@@ -241,6 +250,11 @@ def build() -> None:
     assert reloaded.storms.accent_latitude is None
     assert reloaded.storms.oval_solid_core == 0.0
     assert reloaded.waves.festoon_hero_strength == 0.0
+    # Aspect-pass pins (warm bakes hero_aspect 2.9; taper/flow_aspect are the
+    # inert defaults today but the pin + assert survive a future warm bake).
+    assert reloaded.storms.hero_aspect == 2.2
+    assert reloaded.storms.hero_taper == 0.0
+    assert reloaded.storms.hero_flow_aspect == 1.0
     assert reloaded.storms.oval_density == 0.0
     assert reloaded.storms.accent_count == 1
     assert reloaded.storms.accent_aspect == 4.0
