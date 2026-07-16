@@ -15,6 +15,26 @@ uniform float u_rib_lat;
 uniform float u_rib_k;
 uniform float u_rib_phase;
 
+#ifdef FESTOON2
+// Hero-adjacent festoon train (waves.festoon_hero_strength): a SECOND train
+// rooted on the interior band edge nearest the hero storm, so its streamers
+// weave through the hero's wake lane with tails brushing the collar (the
+// reference's SEB-edge streamers next to the GRS). PLUMES ONLY, T3 ONLY:
+// the hot-spot hole would center exactly on the root edge — INSIDE the hero
+// plateau for a hollow-straddling hero — and T0/T1 writes would also
+// pollute the wake-fold T0 statistics. Compiled as a preprocessor variant
+// (predicate in solver._domain_defines: strength > 0 AND a facade-selected
+// root edge exists) so the default program text is unchanged —
+// byte-identical by construction. NOTE: unlike the primary train there is
+// no psi-side meander for this one (deliberate: at storm latitudes the
+// meander is feather-inert in vorticity mode anyway; the belt-edge jet
+// supplies the shear that hooks the plumes).
+uniform float u_fest2_amp;
+uniform float u_fest2_lat;
+uniform float u_fest2_k;
+uniform float u_fest2_phase;
+#endif
+
 // Returns (dT0, dT1, dT3) at (lon, lat).
 vec3 waveStamp(vec2 ll) {
     vec3 d = vec3(0.0);
@@ -35,6 +55,24 @@ vec3 waveStamp(vec2 ll) {
         d.y -= 0.5 * spot;
         d.x -= 0.35 * spot;
     }
+
+#ifdef FESTOON2
+    {
+        float crest2 = sin(u_fest2_k * ll.x + u_fest2_phase);
+        // Per-plume seeded amplitude jitter (slow longitude envelope,
+        // decorrelated from the crests by the 1.7x phase reuse): some plumes
+        // assert, some nearly vanish — an even train reads as a mechanical
+        // comb (the falsified-baroclinic tell this train must not repeat).
+        float pj = 0.4 + 0.6 * pow(0.5 + 0.5 * sin(3.0 * ll.x
+                                                   + u_fest2_phase * 1.7), 2.0);
+        // Same dip convention as the primary train: plume center sits
+        // equatorward of the root edge — INTO the belt and the wake lane.
+        float pc2 = u_fest2_lat - sign(u_fest2_lat) * 0.045;
+        float plume2 = exp(-pow((ll.y - pc2) / 0.05, 2.0));
+        float c2 = max(crest2, 0.0);
+        d.z -= u_fest2_amp * 0.7 * pj * plume2 * c2 * c2;
+    }
+#endif
 
     if (u_rib_amp > 0.0) {
         // Ribbon: a thin dark line riding the meandering jet; the meander in

@@ -957,6 +957,20 @@ class WavesParams(_Params):
         12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
         description="Wavenumber of the Saturn-style ribbon wave",
     )
+    festoon_hero_strength: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, adv=True, ui="Waves",
+        description="Second festoon train rooted on the band edge nearest the "
+                    "hero storm (plumes only, no hot spots): streamers weaving "
+                    "through the hero's wake lane, tails brushing the collar. "
+                    "0 = off; a silent no-op without a hero or without a band "
+                    "edge within 0.15 rad of it",
+    )
+    festoon_hero_wavenumber: int = pfield(
+        11, tier=Tier.RESTART, lo=4, hi=24, adv=True, ui="Waves",
+        description="Wavenumber of the hero-adjacent festoon train (the "
+                    "default deliberately differs from festoon_wavenumber — "
+                    "twin wavenumbers read as a mechanical comb)",
+    )
 
 
 class DetailParams(_Params):

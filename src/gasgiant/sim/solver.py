@@ -160,6 +160,7 @@ class Solver:
         wave_lats: tuple[float, float] = (0.12, 0.82),
         events: object | None = None,
         profile_omega_tex: moderngl.Texture | None = None,
+        hero_wave_lat: float | None = None,
     ) -> None:
         self.gpu = gpu
         self.params = params
@@ -168,6 +169,10 @@ class Solver:
         self.profile_dyn = profile_dyn_tex
         self.profile_stamp = profile_stamp_tex
         self.wave_lats = wave_lats
+        # Root latitude of the hero-adjacent festoon train (facade-selected;
+        # None = no train). Must be set BEFORE self.domains is built —
+        # _domain_defines reads it for the FESTOON2 variant predicate.
+        self.hero_wave_lat = hero_wave_lat
         self.events = events
         self.profile_omega = profile_omega_tex
 
@@ -233,6 +238,15 @@ class Solver:
             s.hero_count > 0 or any(c.kind == CastKind.HERO for c in s.cast)
         ):
             defines["HERO_EMERGENCE"] = "1"
+        # Hero-adjacent festoon train: same variant discipline. The facade
+        # passes hero_wave_lat=None when there is no hero or no band edge
+        # within reach, so a strength>0 config without a usable root latitude
+        # still compiles the default program (predicate pin).
+        if (
+            self.params.waves.festoon_hero_strength > 0.0
+            and self.hero_wave_lat is not None
+        ):
+            defines["FESTOON2"] = "1"
         return defines
 
     def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
@@ -602,6 +616,12 @@ class Solver:
         _set(prog, "u_rib_lat", rib_lat)
         _set(prog, "u_rib_k", float(p.waves.ribbon_wavenumber))
         _set(prog, "u_rib_phase", self._rib_phase)
+        # FESTOON2 uniforms exist only in the variant program; _set suppresses
+        # the KeyError on the default one.
+        _set(prog, "u_fest2_amp", p.waves.festoon_hero_strength)
+        _set(prog, "u_fest2_lat", self.hero_wave_lat or 0.0)
+        _set(prog, "u_fest2_k", float(p.waves.festoon_hero_wavenumber))
+        _set(prog, "u_fest2_phase", self._fest2_phase)
 
     def _poly_uniforms(self, prog: moderngl.ComputeShader, pole: PoleParams) -> None:
         enabled = pole.style == PoleStyle.POLYGON_JET and pole.strength > 0.0
@@ -637,6 +657,10 @@ class Solver:
         wave_rng = subseed(p.seed, "eq-waves")
         self._fest_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
         self._rib_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
+        # Third draw APPENDED after the existing two (fest/rib phases stay
+        # byte-identical) and drawn UNCONDITIONALLY (stream position must not
+        # depend on the FESTOON2 toggle).
+        self._fest2_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
 
         relax_k = 1.0 / max(p.turbulence.relax_tau, 1.0)
         for dom in self.domains:

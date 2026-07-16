@@ -744,6 +744,22 @@ def _add_accent_ovals(
         if storms.accent_longitude is not None
         else None
     )
+    # Hero-relative default (round B): a pinned-LATITUDE accent is an authored
+    # neighbor of the hero (the Oval-BA-passing-south recipe), and an unpinned
+    # longitude puts it anywhere on the circle — out of any hero-framed view
+    # ~90% of the time. When the latitude is pinned, no explicit longitude is
+    # given, and a hero exists, root the accent a seeded 0.3-0.55 rad
+    # DOWNSTREAM of the hero instead of the Poisson draw. The draw is
+    # unconditional and APPENDED after the existing ones (stream position and
+    # the seeded-zone path — e.g. neptune's Scooter, accent_latitude None —
+    # stay byte-identical).
+    rel_off = float(rng.uniform(0.3, 0.55))
+    heroes = [v for v in reg.vortices if v.kind == KIND_HERO]
+    if storms.accent_latitude is not None and pin_base is None and heroes:
+        pin_base = float(
+            (heroes[0].lon + heroes[0].wake_dir * rel_off + np.pi) % (2.0 * np.pi)
+            - np.pi
+        )
     for k, lon in enumerate(lons):
         if pin_base is not None:
             lon = float((pin_base + k * min_sep + np.pi) % (2.0 * np.pi) - np.pi)

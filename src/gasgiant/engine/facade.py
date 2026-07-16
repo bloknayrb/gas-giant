@@ -25,7 +25,12 @@ from gasgiant.render.detail import DetailSynth
 from gasgiant.render.maps import MapDeriver
 from gasgiant.sim.bands import generate_bands
 from gasgiant.sim.events import EventSchedule
-from gasgiant.sim.profiles import build_profiles, select_lanes, select_wave_latitudes
+from gasgiant.sim.profiles import (
+    build_profiles,
+    select_hero_festoon_latitude,
+    select_lanes,
+    select_wave_latitudes,
+)
 from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver, compute_dt
 from gasgiant.sim.vortices import generate_vortices
 
@@ -89,11 +94,23 @@ class Simulation:
         self.profile_stamp = self.gpu.lut_texture(self.profiles.stamp_lut())
         self.profile_omega = self.gpu.lut_texture(self.profiles.omega_lut())
 
+        wave_lats = select_wave_latitudes(self.bands, self.profiles)
+        # Hero-adjacent festoon train (FESTOON2): latitude selection needs the
+        # generated vortices (the hero's placement), which exist before the
+        # Solver — None keeps the variant unselected (default program).
+        hero_wave_lat = None
+        if p.waves.festoon_hero_strength > 0.0:
+            heroes = self.vortices.heroes()
+            if heroes:
+                hero_wave_lat = select_hero_festoon_latitude(
+                    self.bands, heroes[0].lat, wave_lats[0]
+                )
         self.solver = Solver(
             self.gpu, p, self.profiles, self.vortices, self.profile_dyn, self.profile_stamp,
-            wave_lats=select_wave_latitudes(self.bands, self.profiles),
+            wave_lats=wave_lats,
             events=EventSchedule.generate(p, self.bands, self.profiles, dt),
             profile_omega_tex=self.profile_omega,
+            hero_wave_lat=hero_wave_lat,
         )
         self.solver.init_tracers()
         self._init_baroclinic()

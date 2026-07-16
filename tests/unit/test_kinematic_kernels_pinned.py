@@ -147,7 +147,14 @@ _PINNED: dict[str, str] = {
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
     "hero_q.glsl": "0d116e76423ac56301e74907bf2b2a81aaa659fa",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
-    "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
+    # Updated 2026-07-15 (waves.festoon_hero_strength, Round B of the GRS
+    # hero-interaction pass): a second festoon train rooted on the band edge
+    # nearest the hero — plumes only, T3 only, per-plume amplitude jitter.
+    # Entirely `#ifdef FESTOON2` (predicate in solver._domain_defines:
+    # strength > 0 AND a facade-selected root edge exists), so the default
+    # program text is unchanged after preprocessing — byte-identical by
+    # construction; p05 9/9 verified same day.
+    "wave_stamp.glsl":   "97e01d66d370e640867619e083f69610505cfd7e",
 }
 
 

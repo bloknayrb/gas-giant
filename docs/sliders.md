@@ -981,6 +981,26 @@ Turbulence boost in the wake wedge downstream of hero storms
 
 ## Waves
 
+### festoon hero strength
+
+`waves.festoon_hero_strength` &mdash; range **0 to 3**, default **0**, tier `restart`.
+
+Second festoon train rooted on the band edge nearest the hero storm (plumes only, no hot spots): streamers weaving through the hero's wake lane, tails brushing the collar. 0 = off; a silent no-op without a hero or without a band edge within 0.15 rad of it
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+</tr></table>
+
+### festoon hero wavenumber
+
+`waves.festoon_hero_wavenumber` &mdash; range **4 to 24**, default **11**, tier `restart`.
+
+Wavenumber of the hero-adjacent festoon train (the default deliberately differs from festoon_wavenumber — twin wavenumbers read as a mechanical comb)
+
+<table><tr>
+<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 11</sub></td><td align="center"><sub>high &middot; 24<br>(not rendered)</sub></td>
+</tr></table>
+
 ### festoon strength
 
 `waves.festoon_strength` &mdash; range **0 to 3**, default **0.8**, tier `restart`.

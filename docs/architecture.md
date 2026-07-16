@@ -250,7 +250,10 @@ tile-apron-free contract as the analytic passes.
 cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX, MASK)
 plus the independent BAND_TINT (per-band RGB tint via
 `appearance.band_tint_stops`/`_strength`) and PROJECTION_CUBE (cube-face
-sampling) variants; detail.comp per (DETAIL_FX, SPREAD). Each new variant's
+sampling) variants; detail.comp per (DETAIL_FX, SPREAD, HERO_EMERGENCE); the
+sim kernels per (HERO_EMERGENCE — hero present and `storms.hero_emergence >
+0`; FESTOON2 — `waves.festoon_hero_strength > 0` and a facade-selected root
+edge near the hero). Each new variant's
 default is a no-op that preprocesses OUT (MASK only when a mask is bound and a
 gain is nonzero; BAND_TINT only when `band_tint_strength > 0`; PROJECTION_CUBE
 only on a cube export — guarded by the default-projection byte-identity test),

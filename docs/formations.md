@@ -167,6 +167,20 @@ Equatorial Zone, quasi-periodic (Jupiter's NEB south edge).
 plumes rooted at the wave crests, continually regenerated and sheared into
 the characteristic hooks (`wave_stamp.glsl`).
 
+### Hero-adjacent streamers
+Festoon-like streamers rooting on the belt edge next to a great oval, weaving
+through its wake and brushing the collar (the SEB edge beside the GRS).
+*Implementation:* STAMP — a second plume train on the interior band edge
+nearest the hero (`waves.festoon_hero_strength/festoon_hero_wavenumber`,
+default off; `FESTOON2` preprocessor variant of `wave_stamp.glsl`). Plumes
+only — no hot spots (the trough hole would land inside the hero plateau) and
+no ψ meander (feather-inert at storm latitudes in vorticity mode; the
+belt-edge jet supplies the shear that hooks the plumes). Per-plume seeded
+amplitude jitter keeps the train from reading as an even comb. Because the
+plumes are part of the relaxation TARGET, they survive the hero emergence
+pack's anchor nudge and band flush — the sanctioned route for incident
+weather near the hero.
+
 ### 5-µm hot spots
 Compact cloud-free holes between festoons at the wave troughs — the deepest
 visible levels. *Implementation:* STAMP — sharp T1/T0 depressions at the
