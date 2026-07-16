@@ -240,6 +240,7 @@ float vortexOmegaAccum(vec3 p) {
                 // calibrated ~76% skirt cancellation, far from the falsified
                 // full-shield regime; watch for roll-up per the note below.
                 float qh = q;
+                float tcomp = 1.0;
                 if (u_hero_shape > 0.0 || u_hero_taper > 0.0) {
                     vec3 hcs = a.xyz;
                     vec3 hews = cross(vec3(0.0, 1.0, 0.0), hcs);
@@ -278,6 +279,20 @@ float vortexOmegaAccum(vec3 p) {
                             // Same slider-space clamp, same guard placement
                             // as the tracer sites.
                             Rrs = max(Rrs, 0.4);
+                            // CIRCULATION CONSERVATION: the wedge shrinks
+                            // the ring/skirt area by mean(Rrs^2) ~ 1 -
+                            // 2*0.25*t*e*mean(w) (mean(w) = 0.21 over the
+                            // circle) -> net circulation would drop ~7-10%
+                            // and the FAR FIELD with it — measured as a
+                            // coherent band shift 25+ deg away at all
+                            // longitudes (corr 0.988 across doses) plus a
+                            // chaotic north-jet re-roll, both through the
+                            // global Poisson solve. Renormalize ring+skirt
+                            // UNIFORMLY (cancellation fraction untouched);
+                            // the local deficit stays where the wedge is,
+                            // the planet-scale moment does not move.
+                            tcomp = 1.0 / (1.0 - 0.105 * u_hero_taper
+                                                 * u_hero_emergence);
                         }
                         qh = q / Rrs;
                     }
