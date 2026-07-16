@@ -47,17 +47,26 @@ def _profile(qh: np.ndarray) -> np.ndarray:
 
 def _net_circulation(r_core: float, aspect: float, k: float, n: int) -> float:
     """Integral of the ring+skirt profile over the sphere (orthographic
-    tangent-plane quadrature; support is well inside the near hemisphere for
-    every legal r_core/aspect/K, so no hemisphere clipping is needed)."""
+    tangent-plane quadrature). The profile support can outgrow the near
+    hemisphere inside legal slider bounds (asp*K*r_core*2.4 > 1 already at
+    jupiter_vorticity's r_core 0.16 with K ~ 1.2): points beyond the
+    orthographic rim x^2+y^2 = 1 do not exist on the sphere — the shader's
+    metric gates them out via `dot(p, hcs) > 0` — so they are MASKED here,
+    never weight-clamped (a clamped 1/sqrt(z2) puts ~1e6 weight on nonexistent
+    cells and returns sign-flipped garbage; found by the PR-43 silent-failure
+    review, 2026-07-16). The 1/sqrt rim singularity on real cells is
+    integrable and converges at the working n."""
     aspf = aspect * k
-    hx = min(_SUPPORT_Q * aspf * r_core * 1.02, 0.99)
-    hy = min(_SUPPORT_Q * r_core * 1.02, 0.99)
+    hx = min(_SUPPORT_Q * aspf * r_core * 1.02, 0.999)
+    hy = min(_SUPPORT_Q * r_core * 1.02, 0.999)
     x = np.linspace(-hx, hx, n)
     y = np.linspace(-hy, hy, n // 2 * 2 + 1)
     xx, yy = np.meshgrid(x, y)
-    z2 = np.clip(1.0 - xx * xx - yy * yy, 1e-12, 1.0)
+    z2 = 1.0 - xx * xx - yy * yy
+    on_sphere = z2 > 1e-9
     qh = np.sqrt((xx / aspf) ** 2 + yy ** 2) / r_core
-    integ = (_profile(qh) / np.sqrt(z2)).sum() * (x[1] - x[0]) * (y[1] - y[0])
+    vals = np.where(on_sphere, _profile(qh) / np.sqrt(np.where(on_sphere, z2, 1.0)), 0.0)
+    integ = vals.sum() * (x[1] - x[0]) * (y[1] - y[0])
     return float(integ)
 
 
@@ -67,11 +76,29 @@ def hero_flow_renorm(
     """Uniform amplitude factor that keeps the ring+skirt NET circulation
     invariant in K (the planet-scale moment must not move — taper lesson);
     the local cancellation FRACTION shifts only by the curvature differential
-    (0.774 -> 0.807 at K=2, warm scale), which is the safe direction.
-    Returns exactly 1.0 at K == 1 (the lever's off state never reaches the
-    shader anyway — the uniform is consumed only inside the K != 1 branch)."""
+    (0.774 -> 0.807 at K=2 on the S1 calibration scene, r_core 0.062 /
+    aspect 2.2 — warm has since baked aspect 2.9, where the 1/K gap is
+    larger), which is the safe direction. Returns exactly 1.0 at K == 1 (the
+    lever's off state never reaches the shader anyway — the uniform is
+    consumed only inside the K != 1 branch).
+
+    SANE BAND + FALLBACK: on the sphere the well-conditioned result lies in
+    (1/K, 1] — widening adds skirt area, curvature under-cancels. Once the
+    K-widened support truncates against the hemisphere rim (legal at big
+    hero_radius: jupiter_vorticity's 0.16 crosses it near K ~ 1.2) the
+    truncated net passes through ZERO and net1/netk degenerates — sign flips
+    and 20x+ blowups that would erase or explode the emergence ring (PR-43
+    silent-failure review). Outside the band the objective is ill-conditioned,
+    so the factor falls back to the bounded tangent-plane 1/K: at such scales
+    a residual far-field moment is a lesser evil than a destroyed hero."""
     if flow_aspect == 1.0:
         return 1.0
     net1 = _net_circulation(r_core, aspect, 1.0, n)
     netk = _net_circulation(r_core, aspect, flow_aspect, n)
-    return net1 / netk
+    fallback = 1.0 / flow_aspect
+    if netk == 0.0:
+        return fallback
+    raw = net1 / netk
+    if not (0.95 * fallback <= raw <= 1.0):
+        return fallback
+    return raw

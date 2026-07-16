@@ -291,8 +291,9 @@ def test_emergence_bows_band_boundary_around_hero(gpu):
 def test_emergence_wake_sector_folds_downstream_only(gpu):
     """Vorticity mode: the wake forcing (omega_force wedge injection) plus the
     relaxation release (heroRelaxWeight) must leave persistent folded tracer
-    structure DOWNSTREAM (west) of the hero that the upstream side does not
-    have — the reference wake asymmetry. Belt-straddling placement per plan
+    structure DOWNSTREAM of the hero (east on this scene — the axis follows
+    hero.wake_dir, flow-derived under emergence) that the upstream side does
+    not have — the reference wake asymmetry. Belt-straddling placement per plan
     review: at the zone-centered legacy latitude the wedge sits in uniform
     zone material and this probe would only measure noise. Tolerance-based
     (vorticity path, never byte-compared); other storm populations are zeroed
@@ -338,12 +339,21 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     # the frozen scene contract too: pinned at the pre-aspect-pass value so
     # the warm bake of 2.9 (2026-07-16) does not re-roll the fold pattern.
     p.storms.hero_aspect = 2.2
+    # Every remaining stamp-side lever that shapes the relax target is pinned
+    # at its current warm bake (PR-43 review: the contract's immunity to
+    # preset drift was only partial — the NEXT warm retune of any of these
+    # would re-roll the chaotic fold pattern into a confusing far-field red).
+    p.storms.hero_radius = 0.062
+    p.storms.rim_contrast = 1.3
+    p.storms.hero_mottle = 0.9
+    p.storms.hero_rim_warp = 1.0
+    p.storms.hero_wake_detail = 1.0
     sim, tr = _sim_and_tracers(p, gpu)
     hero = sim.vortices.heroes()[0]
 
     lon_g, lat_g = _lonlat_grids(tr.shape)
     dlon = np.mod(lon_g - hero.lon + 3.0 * np.pi, 2.0 * np.pi) - np.pi
-    an = dlon * hero.wake_dir / hero.r_core          # + = downstream (west)
+    an = dlon * hero.wake_dir / hero.r_core          # + = downstream (wake_dir)
     across = (lat_g - (hero.lat + hero.wake_lat_off)) / (hero.r_core * 1.8)
 
     def hp_std(mask: np.ndarray) -> float:
@@ -757,9 +767,53 @@ def test_hero_flow_aspect_widens_flow_ew_only(gpu):
     net_diff = ((qk - q1) * cosw)[box].sum()
     anom1 = q1 - q1.mean(axis=1, keepdims=True)
     ring_mass = (np.abs(anom1) * cosw)[box].sum()
-    assert abs(net_diff) / ring_mass < 0.01, (
+    # 3e-3 floor (PR-43 test review): the full 1/K-instead-of-spherical bug
+    # reads ~0.02 on this statistic and healthy ~1e-4 — the old 0.01 floor
+    # left only 2x separation, letting a half-broken renorm through.
+    assert abs(net_diff) / ring_mass < 3e-3, (
         f"net circulation moved by {abs(net_diff) / ring_mass:.4f} of the "
         f"ring mass — the u_hero_flow_renorm compensation is off"
+    )
+
+
+def test_hero_taper_preserves_net_circulation(gpu):
+    """The taper's omega-side compensation (`tcomp *= 1/(1 - 0.105*t*e)`) is
+    the constant with planet-wide blast radius: this exact mechanism shipped
+    computed-but-never-applied once (ca76f00), and its ~9% deficit class
+    measurably shifted bands 25+ degrees through the global Poisson solve.
+    The linearization is validated against wedge quadrature GL-free
+    (test_hero_shape_constants); THIS probe proves the shader actually
+    applies it: the taper-vs-base dev-0 difference field (jets and f cancel
+    exactly) must carry no net circulation beyond the documented +0.8%
+    over-compensation residual at warm defaults (~0.2% of ring mass; floor
+    0.01 with margin)."""
+    def scene(taper: float):
+        p = _solo_warm_params(hero_taper=taper, hero_emergence=0.9)
+        p.sim.resolution = 1024
+        return _dev0_omega(p, gpu)
+
+    sim0, q0 = scene(0.0)
+    _, qt = scene(1.0)
+    hero = sim0.vortices.heroes()[0]
+    h, w = q0.shape
+    row = int(round((0.5 - hero.lat / np.pi) * h - 0.5))
+    col = int(round((hero.lon + np.pi) / (2.0 * np.pi) * w - 0.5))
+    dlat_px = np.pi / h
+    dlon_px = 2.0 * np.pi / w
+    lat_g = (0.5 - (np.arange(h) + 0.5) / h) * np.pi
+    cosw = np.cos(lat_g)[:, None]
+    rows = slice(max(row - int(0.16 / dlat_px), 0), row + int(0.16 / dlat_px))
+    # The wedge only pulls the boundary IN, so the K=1 support bound suffices.
+    cs = int(2.4 * hero.aspect * hero.r_core / np.cos(hero.lat) * 1.15 / dlon_px)
+    cols = slice(max(col - cs, 0), min(col + cs, w))
+    box = (rows, cols)
+    net_diff = ((qt - q0) * cosw)[box].sum()
+    anom0 = q0 - q0.mean(axis=1, keepdims=True)
+    ring_mass = (np.abs(anom0) * cosw)[box].sum()
+    assert abs(net_diff) / ring_mass < 0.01, (
+        f"net circulation moved by {abs(net_diff) / ring_mass:.4f} of the "
+        f"ring mass under hero_taper=1 — the 0.105 omega compensation is "
+        f"stale or unapplied (the ca76f00 class)"
     )
 
 

@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import dataclasses
 
-from gasgiant.engine.checkpoint import _REG_FIELDS
+import numpy as np
+import pytest
+
+from gasgiant.engine.checkpoint import _REG_FIELDS, GENERATION_VERSION, load_checkpoint
 from gasgiant.sim.vortices import Vortex
 
 _SEPARATELY_SERIALIZED = {"cooldown", "ttl", "origin"}
@@ -28,3 +31,17 @@ def test_every_vortex_field_has_a_serialization_home():
     )
     phantom = set(_REG_FIELDS) - all_fields
     assert not phantom, f"_REG_FIELDS names non-existent field(s): {sorted(phantom)}"
+
+
+def test_stale_generation_version_is_refused_loudly(tmp_path):
+    """A checkpoint from an older generation must be REFUSED, not resumed with
+    zero-defaulted registry columns: the v9 bump (GRS pass, 2026-07-16) changed
+    generation output for every emergence-on preset (jet-derived wake frame,
+    bow_gain, hero-relative accents), so a v8 warm checkpoint resuming here
+    would silently mix old-generation tracers with new-generation stamps. The
+    version gate fires before any GL work, so gpu=None proves the refusal is
+    unconditional."""
+    stale = tmp_path / "stale.npz"
+    np.savez(stale, generation_version=np.int64(GENERATION_VERSION - 1))
+    with pytest.raises(ValueError, match="generation_version"):
+        load_checkpoint(stale, None)

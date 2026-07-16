@@ -48,7 +48,12 @@ if TYPE_CHECKING:
 # without it, resume->export was not byte-identical when detail was enabled.
 # Pre-v8 kinematic checkpoints lack the velocity, so they are refused rather
 # than silently rendering a wrong detail layer.
-GENERATION_VERSION = 8
+# 9 = GRS hero-interaction pass (2026-07-16): generation output changed for
+# every emergence-on registry (jet-derived wake frame flips warm's wake_dir
+# east, bow_gain gates the belt bow, the accent roots hero-relative), the
+# same class as the v6 bump. A v8 warm checkpoint resuming here would mix
+# old-generation tracers with new-generation stamps/registry silently.
+GENERATION_VERSION = 9
 
 # Registry scalar fields serialized per vortex. float64: the "restored
 # registry is identical" guarantee is exact-round-trip, and pack_ssbo computes
@@ -58,9 +63,9 @@ GENERATION_VERSION = 8
 _REG_FIELDS = (
     "lat", "lon", "r_core", "strength", "kind", "tint", "brightness",
     "wake_dir", "wake_lat_off", "aspect",
-    # Trailing (added 2026-07-15, belt-bow gate): loads tolerantly by npz key
-    # presence — pre-existing checkpoints default it to 0 (bow disabled),
-    # matching its value in every emergence-off registry.
+    # bow_gain (added 2026-07-15, belt-bow gate) rode the v9 version bump, so
+    # every loadable checkpoint carries it — loads are STRICT (a missing
+    # registry column is data corruption, not a schema skew, and must raise).
     "bow_gain",
 )
 
@@ -154,10 +159,10 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
     # The registry was serialized at save time; the freshly generated one is
     # discarded (bands/profiles/jets/schedule do not depend on it).
     n = int(data["reg_lat"].shape[0])
-    cols = {
-        name: (data[f"reg_{name}"] if f"reg_{name}" in data else np.zeros(n))
-        for name in _REG_FIELDS
-    }
+    # STRICT: the version gate above guarantees every _REG_FIELDS column is
+    # present in a loadable checkpoint; a missing one is a truncated/corrupt
+    # npz and must raise, not resume as zero-strength/zero-radius storms.
+    cols = {name: data[f"reg_{name}"] for name in _REG_FIELDS}
     cooldown = data["reg_cooldown"] if "reg_cooldown" in data else np.zeros(n, np.int32)
     ttl = data["reg_ttl"] if "reg_ttl" in data else np.full(n, -1, np.int32)
     origin_arr = data["reg_origin"] if "reg_origin" in data else np.zeros(n, np.int32)

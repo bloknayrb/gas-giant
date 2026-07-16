@@ -720,9 +720,12 @@ class StormsParams(_Params):
                     "perfect ellipse: equatorward flattening (the belt presses "
                     "the rim flat) plus seeded lobes so aspect and curvature "
                     "drift around the arc. 0 = exact analytic oval, 1 = the "
-                    "calibrated GRS egg. Rides the emergence variant — inert "
-                    "at hero_emergence 0. Past ~1.4 the ragged-release band "
-                    "drifts onto the bright annulus",
+                    "calibrated GRS egg (the ships-at-1.0 exception to the "
+                    "default=off lever convention: the deformation is part of "
+                    "the emergence pack's calibration; the OFF state is 0). "
+                    "Rides the emergence variant — inert at hero_emergence 0. "
+                    "Past ~1.4 the ragged-release band drifts onto the bright "
+                    "annulus",
     )
     hero_shape_seed: int = pfield(
         0, tier=Tier.RESTART, lo=0, hi=99999, adv=True, ui="Hero",
@@ -736,7 +739,9 @@ class StormsParams(_Params):
                     "converges toward a point on the side the flow arrives "
                     "from (measured 20-40% of local radius), while the wake "
                     "end stays blunt. Deterministic (no seed), follows "
-                    "hero_wake_dir, deepest at ~35 deg off the upstream tip; "
+                    "hero_wake_dir, deepest at ~35 deg off the upstream tip "
+                    "in the aspect-squashed frame (physically closer to the "
+                    "tip on an elongated hero — ~14 deg at aspect 2.9); "
                     "the tip, the flanks and the whole downstream half are "
                     "untouched. Inert at hero_emergence 0",
     )
@@ -745,11 +750,14 @@ class StormsParams(_Params):
         description="Flow-field elongation multiplier over hero_aspect: the "
                     "streamfunction the vorticity ring induces is intrinsically "
                     "rounder than the ring (Poisson low-pass), so the developed "
-                    "storm reads rounder than authored; >1 pre-compensates by "
-                    "authoring the flow wider than the visible anatomy (2.0 "
-                    "lands a 2.2-anatomy hero at the reference GRS's dye "
-                    "aspect). Vorticity mode only; inert in kinematic mode and "
-                    "at hero_emergence 0 / hero_solid_core 0",
+                    "storm reads rounder than authored; >1 widens only the "
+                    "FLOW's east-west footprint. Calibration verdict: raising "
+                    "this stretches the pale ENVELOPE while the interior "
+                    "erasure machinery (still sized to the anatomy) dilutes "
+                    "the red core — for a more elongated STORM raise "
+                    "hero_aspect itself. Vorticity mode only; inert in "
+                    "kinematic mode and at hero_emergence 0 / hero_solid_core "
+                    "0",
     )
 
     # -- Ovals ------------------------------------------------------------
@@ -1007,8 +1015,10 @@ class WavesParams(_Params):
         description="Second festoon train rooted on the band edge nearest the "
                     "hero storm (plumes only, no hot spots): streamers weaving "
                     "through the hero's wake lane, tails brushing the collar. "
-                    "0 = off; a silent no-op without a hero or without a band "
-                    "edge within 0.15 rad of it",
+                    "0 = off; a silent no-op without a hero, without a band "
+                    "edge within 0.15 rad of it, or when that edge IS the "
+                    "primary festoon's root (one edge is never double-"
+                    "trained)",
     )
     festoon_hero_wavenumber: int = pfield(
         11, tier=Tier.RESTART, lo=4, hi=24, adv=True, ui="Waves",

@@ -181,7 +181,7 @@ class Solver:
         shape_rng = subseed(params.seed,
                             f"hero-shape:{params.storms.hero_shape_seed}")
         self._shape_phase = tuple(shape_rng.uniform(0.0, 2.0 * np.pi, 3))
-        # u_hero_flow_renorm cache: the quadrature is a ~1M-point numpy
+        # u_hero_flow_renorm cache: the quadrature is a ~2.6M-point numpy
         # integral and the value is static per build; _omega_static_uniforms
         # runs once per domain. None = not yet computed.
         self._flow_renorm: float | None = None
@@ -322,6 +322,22 @@ class Solver:
         ]
         k_force0 = gpu.compute(_KERNELS, "omega_force.comp",
                                defines={**dom_defines, "SUBPASS": "0"})
+        if "HERO_EMERGENCE" in dom_defines:
+            # Loud at build (the render/detail.py tripwire pattern): these two
+            # are NEUTRAL-AT-1.0 uniforms, so an unset/renamed one reads 0.0,
+            # which ENTERS the `u_hero_flow_aspect != 1.0` branch with
+            # aspf = 0 and tcomp = 0 — destroying the emergence ring silently
+            # while every KeyError-guarded _set "succeeds". Both programs that
+            # run vortexOmegaAccum must carry them.
+            for prog, src in ((k_init, "omega_init.comp"), (k_force0, "omega_force.comp")):
+                for name in ("u_hero_flow_aspect", "u_hero_flow_renorm"):
+                    try:
+                        prog[name]
+                    except KeyError:
+                        raise RuntimeError(
+                            f"{src} HERO_EMERGENCE variant is missing {name}: the "
+                            f"flow-aspect path would read 0.0 and zero the ring."
+                        ) from None
         k_lap    = gpu.compute(_KERNELS, "omega_lap.comp",  defines=dom_defines)
         k_force1 = gpu.compute(_KERNELS, "omega_force.comp",
                                defines={**dom_defines, "SUBPASS": "1"})
@@ -374,9 +390,15 @@ class Solver:
         more than one (mean-field; no shipped preset has hero_count > 1).
         1.0 whenever the lever is off or no hero exists."""
         if self._flow_renorm is None:
-            k = self.params.storms.hero_flow_aspect
+            p = self.params.storms
+            k = p.hero_flow_aspect
             heroes = self.vortices.heroes()
-            if k == 1.0 or not heroes:
+            # The shader consumes the factor only inside the K arm of the
+            # solid-core emergence branch — skip the quadrature whenever that
+            # branch cannot run (also keeps the sane-band fallback from ever
+            # firing for a config where the lever is documented inert).
+            if (k == 1.0 or not heroes
+                    or p.hero_solid_core <= 0.0 or p.hero_emergence <= 0.0):
                 self._flow_renorm = 1.0
             else:
                 rc = float(np.mean([h.r_core for h in heroes]))

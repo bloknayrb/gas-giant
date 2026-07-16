@@ -392,7 +392,9 @@ vec3 vortexStamp(vec3 p) {
                 // sharpening to k~38 = the "onion ring" tell, bright basin at
                 // 1.30): the dark ring is repurposed as the outer diffuse
                 // collar (out to 1.30, softened toward k 12 — its tail ends
-                // ~1.54, clear of the 1.55 flush rise) and the bright ring
+                // ~1.54, clear of the non-belt 1.55 flush rise; the round-B
+                // belt-side pinch starts at 1.19, where the overlap is
+                // deliberate and paired with the equw collar cut) and the bright ring
                 // tightens onto the plateau (1.12, k toward 34). Endpoints
                 // start-values from plan review (fill ~79% of the hollow at
                 // e=0.9; 1.42 read as low-60s% perceived); calibration-owned.
@@ -425,10 +427,10 @@ vec3 vortexStamp(vec3 p) {
                     // -> 0.1,0.8/0.8): the per-latitude reviews still read
                     // the collar as a closed 360-degree ring — the moat must
                     // visibly open into the wake, not just dim there.
-                    float westw = smoothstep(0.1, 0.8, -cos(hth) * wdir);
+                    float wakew = smoothstep(0.1, 0.8, -cos(hth) * wdir);
                     col_q += u_hero_emergence * (0.10 * polew + 0.06 * eastw);
                     col_k *= 1.0 + 0.9 * u_hero_emergence * equw;
-                    carve = 1.0 - 0.8 * u_hero_emergence * westw;
+                    carve = 1.0 - 0.8 * u_hero_emergence * wakew;
                     // Closure-breaking raggedness: seeded few-lobe modulation
                     // of BOTH ring amplitudes (decorrelated from the rim_warp
                     // lobes) so neither annulus holds constant width/value
@@ -452,7 +454,7 @@ vec3 vortexStamp(vec3 p) {
                     // re-imposes hardest.
                     ringmod = (0.55 + 0.45 * sin(2.0 * hth + cph.y + 2.1)
                                     * sin(3.0 * hth + cph.x + 0.7))
-                            * (1.0 - 0.6 * u_hero_emergence * westw)
+                            * (1.0 - 0.6 * u_hero_emergence * wakew)
                             * (1.0 - 0.55 * u_hero_emergence * equw);
                 }
                 // Quiet hollow: the real Red Spot Hollow is only slightly
@@ -1000,7 +1002,10 @@ float heroBandDeflect(vec3 p, float lat) {
         float asp = vortex_data[3 * i + 2].y;
         float xe = dlon * wdir / max(asp, 1.0);            // + = downstream
         float yn = plat - vlat;
-        float az = atan(yn, xe);                           // 0 = downstream
+        // atan(0,0) is GLSL-undefined at the exact hero-center texel (the
+        // heroRelaxWeight guard's lesson: a NaN would ride the target into
+        // the tracers even though bw masks the center). Same q > 0.05 gate.
+        float az = (q > 0.05) ? atan(yn, xe) : 0.0;        // 0 = downstream
         // Belt-side (equatorward) recovery tightened, FLANKS unchanged —
         // round-B review: the flush relaxes toward THIS deflected target, so
         // wherever the bow reaches, the re-imposed tone is the displaced

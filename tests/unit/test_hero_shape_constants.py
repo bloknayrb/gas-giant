@@ -24,6 +24,8 @@ import importlib.resources as ir
 import re
 from pathlib import Path
 
+import numpy as np
+
 _KERNELS = "gasgiant.sim.kernels"
 _MIRROR = Path(__file__).parents[1] / "gpu" / "test_hero_emergence.py"
 
@@ -114,4 +116,47 @@ def test_flow_renorm_mirrors_ring_skirt_windows():
         assert got == expect, (
             f"{label} profile diverged: vortex_omega.glsl has {got}, "
             f"flow_renorm.py mirror has {expect}"
+        )
+
+
+# ------------------------------------------- taper circulation compensation
+
+# The omega wedge's net-circulation compensation, as written in
+# vortex_omega.glsl: `tcomp *= 1.0 / (1.0 - <c> * u_hero_taper * ...)`.
+# Anchored on the full division chain so prose cannot match.
+_TAPER_COMP = re.compile(
+    r"1\.0\s*/\s*\(1\.0\s*-\s*([\d.]+)\s*\*\s*u_hero_taper\s*\*\s*u_hero_emergence\)"
+)
+
+
+def test_taper_circulation_compensation_matches_wedge_quadrature():
+    """The taper's 0.105 net-circulation compensation is the one deformation
+    constant with PLANET-WIDE blast radius (this exact mechanism shipped
+    computed-but-never-applied once — commit ca76f00 — and its deficit class
+    measurably shifted bands 25+ degrees through the global Poisson solve),
+    and unlike the flow-aspect renorm it has no CPU quadrature module backing
+    it. Pin the constant at its single omega site AND validate the
+    linearization against direct wedge quadrature: each azimuthal slice of
+    the ring+skirt scales by R(theta)^2 under the q-division, so the net
+    scales by mean(R^2), and 1/(1 - c*t*e) must invert that to first order.
+    Measured residuals: +0.8% at warm defaults (t=1, e=0.9), +2.0% at the
+    t=1.5 hi bound — over-compensation, the safe (weaker-far-field) side. A
+    wedge-window retune that silently stales the constant fails the residual
+    band here."""
+    found = _TAPER_COMP.findall(_source("vortex_omega.glsl"))
+    assert found == ["0.105"], (
+        f"taper compensation constant drifted or moved: matched {found}, "
+        f"expected exactly ['0.105']"
+    )
+    c = float(found[0])
+    th = np.linspace(0.0, 2.0 * np.pi, 200000, endpoint=False)
+    cos_up = np.maximum(np.cos(th), 0.0)
+    w = 6.75 * cos_up ** 4 * (1.0 - cos_up * cos_up)
+    for t, e in ((1.0, 0.9), (1.5, 0.9), (1.0, 0.5), (0.5, 0.9)):
+        ratio = float(((1.0 - 0.25 * t * e * w) ** 2).mean())
+        resid = ratio / (1.0 - c * t * e) - 1.0
+        assert 0.0 <= resid < 0.03, (
+            f"t={t} e={e}: compensation residual {resid:+.4f} outside the "
+            f"[0, 3%) over-compensation band — the 0.105 linearization is "
+            f"stale against the wedge window"
         )

@@ -195,7 +195,29 @@ _PINNED: dict[str, str] = {
     # the stagnation point; the percept lives on THIS contour, measured).
     # All under u_hero_taper > 0 guards / twr = 0 off; cross-commit capture
     # 4/4 byte-identical, p05 9/9 unchanged.
-    "vortex_stamp.glsl": "452464a9f89f2904553e316b2cd07307ca84fb08",
+    # Re-pinned 2026-07-16 (PR-43 review fixes): heroBandDeflect gains the
+    # heroRelaxWeight-style q > 0.05 atan(0,0) guard (GLSL-undefined at the
+    # exact hero-center texel; bw masks the center so output is unchanged on
+    # atan(0,0)==0 GPUs); stale `westw` renamed `wakew` (it keys off wdir —
+    # the downstream arc, east on warm — not compass west); one flush-window
+    # comment qualified. Comment/rename + emergence-arm-only guard; default
+    # program text unchanged, p05 9/9 same day.
+    "vortex_stamp.glsl": "d9846442cac3316fccb1752c8bae8469ce523994",
+    # NOT kinematic — pinned for the opposite reason (PR-43 test review,
+    # 2026-07-16): vortex_omega.glsl hosts the vorticity-only hero levers
+    # (solid core, emergence ring/skirt, shape/taper/flow-aspect arms), whose
+    # levers-OFF output NO byte gate can observe (p05 renders kinematic-only
+    # configs; SOR noise forbids byte asserts on developed vorticity output;
+    # the dev-0 omega byte-captures live in session scratchpads and die with
+    # the session). The source pin is the standing off-state gate: any edit
+    # here is a CONSCIOUS re-pin whose author re-runs the dev-0 omega capture
+    # discipline (see tests/gpu/test_hero_emergence.py::_dev0_omega).
+    # Pinned 2026-07-16 (PR-43 review fixes commit): comment-only corrections
+    # same day (wake window frame note — wake_dir is flow-derived under
+    # emergence, east on warm; K>1 GRS-recipe claim replaced with the S2
+    # falsified verdict; skirt peak 0.9 -> 1.0 and ~70% -> ~76% cancellation
+    # prose; renorm figures re-qualified to the S1 calibration scene).
+    "vortex_omega.glsl": "7fea1e1e83e998cf9c0c6faa53ac2f41765db113",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

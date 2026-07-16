@@ -70,8 +70,14 @@ searchable auto-generated panels, per-slider help, undo/redo, and playback contr
   The vorticity path is NOT: its SOR Poisson solve carries ~1e-3 cross-instance / ~0.004
   cross-session LSB noise, so vorticity-touching GPU tests assert within documented floors
   (`GPU_NOISE_ATOL = 1e-2`, `_VORT_SOR_ATOL = 1e-3` — see tests/gpu/test_checkpoint.py).
-  Never write a byte-exact assertion for vorticity-mode output; never "fix" a kinematic
-  hash mismatch by adding tolerance — update the pin deliberately instead.
+  ONE documented carve-out: the dev-0 OMEGA TEXTURE is byte-exact-legal even in vorticity
+  mode (omega_init is a single analytic per-pixel dispatch, read back before any SOR or
+  advection touches it; comparisons same-process only — see
+  tests/gpu/test_hero_emergence.py::_dev0_omega). It is the binding no-op gate for
+  vorticity-only levers, which p05 and the kinematic captures cannot see; vortex_omega.glsl
+  is source-pinned for the same reason. Never write any other byte-exact assertion for
+  vorticity-mode output; never "fix" a kinematic hash mismatch by adding tolerance —
+  update the pin deliberately instead.
 - **Establish a baseline before editing**: run the relevant subset (or the p05 --check) first.
   Byte-identity/no-op gates fail whenever tracked default output moves, including from
   someone else's uncommitted work — know what was red before you touched anything.

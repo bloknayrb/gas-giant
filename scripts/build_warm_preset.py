@@ -126,10 +126,11 @@ def main():
 
     # Hero-adjacent festoon train (FESTOON2): streamers rooting on the belt
     # edge the hero straddles (-19.4 deg), weaving through the wake lane —
-    # the "neighborhood busy with unrelated weather" reference cue. Amplitude
-    # subordinate to the primary +7-deg train (1.6); wavenumber deliberately
-    # != the primary's 20 (twin wavenumbers read as a mechanical comb).
-    # Amplitude 1.6 (match the primary train) + wavenumber 14: at 1.0/k11 the
+    # the "neighborhood busy with unrelated weather" reference cue.
+    # Wavenumber deliberately != the primary's 20 (twin wavenumbers read as
+    # a mechanical comb). Originally planned subordinate to the primary
+    # train; raised to parity in round B —
+    # amplitude 1.6 (match the primary train) + wavenumber 14: at 1.0/k11 the
     # per-plume jitter left whole 30-deg windows plumeless and nothing read at
     # the root latitude (round-B adversarial review).
     p.waves = p.waves.model_copy(update={

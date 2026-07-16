@@ -77,15 +77,23 @@ uniform float u_hero_taper;
 // low-pass: boundary streamlines measure 1.24-1.40 from a ring held at 2.2),
 // the dye rides psi, and ambient shear is ~6x below the Kida requirement —
 // so the developed dye reads ~1.5 no matter what the stamps say. Widening
-// only the ring/skirt EW metric by K pre-compensates: at K=2 a 2.2-anatomy
-// hero develops dye core ~2.9 / envelope ~1.8 (the reference GRS).
+// only the ring/skirt EW metric by K pre-compensates the FLOW — but the S2
+// calibration (2026-07-16) falsified K>1 as a GRS recipe: every erasure
+// window stays anatomy-metric, so the widened eddy dilutes its own dye and
+// the ENVELOPE stretches while the reference wants the CORE more elongated
+// (2.9) than the envelope (1.8). The shipped recipe raises authored
+// hero_aspect instead (build_warm_preset.py); K stays a default-1.0
+// envelope-trim lever with the dilution documented in
+// test_hero_flow_aspect_flow_stays_anchored_at_hi.
 uniform float u_hero_flow_aspect;
 // Net-circulation renorm for the widened ring+skirt, CPU-computed by
 // spherical quadrature (sim/flow_renorm.py) from the ACTUAL hero r_core.
 // The tangent-plane 1/K under-corrects: the curvature weight inflates the
 // wide skirt more than the ring, and the net is the ~24% residual of a ~76%
-// cancellation — plain 1/K leaves a 16% net deficit at K=2 (the taper's
-// visible band-shift class). Exactly 1.0 whenever the lever is off.
+// cancellation — plain 1/K leaves a 16% net deficit at K=2 on the S1
+// calibration scene (r_core 0.062 / aspect 2.2; larger at warm's baked 2.9)
+// — the taper's visible band-shift class. Exactly 1.0 whenever the lever is
+// off.
 uniform float u_hero_flow_renorm;
 #endif
 // heroEllipQ for the variant-only heroAnchorWindow below (include-once, and
@@ -129,9 +137,15 @@ float heroAnchorWindow(vec3 p) {
     return w;
 }
 
-// Hero wake-wedge window in [0,1]: the turbulent-wake sector west of each
-// hero (same frame the tracer wedge in vortex_stamp.glsl uses: wake_dir
-// hardwired westward, wake_lat_off the equatorward lane bias — review F06).
+// Hero wake-wedge window in [0,1]: the turbulent-wake sector DOWNSTREAM of
+// each hero (same frame the tracer wedge in vortex_stamp.glsl uses). This
+// function compiles only under HERO_EMERGENCE, where wake_dir is flow-
+// derived by vortices.py::_hero_wake_frame — EAST on gas_giant_warm — or
+// forced by storms.hero_wake_dir; "hardwired westward" is only the
+// emergence-off legacy fallback, a configuration this code never runs in.
+// wake_lat_off likewise tracks the jet under emergence. (A west-assuming
+// read of this window already mis-measured one taper review — judge in
+// wake_dir terms, never compass terms.)
 // Used by omega_force SUBPASS 0 to localize wake eddy-vorticity injection:
 // psi.comp's velocity wake is FEATHER-ONLY in vorticity mode (the definitive
 // psi at storm latitudes is SOR-solved from prognostic q), so without a
@@ -345,10 +359,10 @@ float vortexOmegaAccum(vec3 p) {
                 // pinwheel many spot-radii wide — the "effect much bigger than
                 // the storm" tell. (The kinematic Gaussian never had this: a
                 // Laplacian-of-Gaussian is self-shielded.) A gentle opposite-
-                // signed annulus cancels ~70% of it, taming the far-field
+                // signed annulus cancels ~76% of it, taming the far-field
                 // winding; the tracer-side band-flush (heroRelaxWeight) erases
                 // the slower residual. Deliberately PARTIAL and WIDE/WEAK
-                // (peak 0.9 vs the ring's 6.0): a full-strength concentrated
+                // (peak 1.0 vs the ring's 6.0): a full-strength concentrated
                 // shield rolls up into its own companion cyclone and the
                 // resulting near-dipole self-propels off the anchor (observed:
                 // a second creamy swirl displacing the core). Enclosed

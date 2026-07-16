@@ -41,11 +41,17 @@ def _net_polar(rc: float, asp: float, k: float, nq: int = 4000,
     t = np.linspace(0.0, 2.0 * np.pi, nt, endpoint=False)[:, None]
     x = aspf * rc * q * np.cos(t)
     y = rc * q * np.sin(t)
-    z = np.sqrt(np.clip(1.0 - x * x - y * y, 1e-12, 1.0))
+    # Same rim discipline as _net_circulation: points past the orthographic
+    # rim do not exist on the sphere — MASK them (a clamped weight was this
+    # cross-check's own copy of the C1 garbage-integral bug).
+    z2 = 1.0 - x * x - y * y
+    on_sphere = z2 > 1e-9
+    z = np.sqrt(np.where(on_sphere, z2, 1.0))
     qg = np.broadcast_to(q, z.shape)
     dq = float(q[0, 1] - q[0, 0])
     dt = 2.0 * np.pi / nt
-    return float((_profile(qg) / z * qg).sum() * dq * dt * aspf * rc * rc)
+    vals = np.where(on_sphere, _profile(qg) / z * qg, 0.0)
+    return float(vals.sum() * dq * dt * aspf * rc * rc)
 
 
 def test_matches_independent_polar_quadrature():
@@ -69,3 +75,30 @@ def test_warm_scale_regression_values():
         assert r < prev, f"renorm not monotone at K={k}"
         assert r * k > 1.0, f"curvature correction inverted at K={k}"
         prev = r
+
+
+def test_rim_truncating_scales_stay_in_the_sane_band():
+    """The C1 regression corpus (PR-43 silent-failure review): big heroes push
+    the K-widened support past the orthographic rim, where the raw
+    net-circulation ratio degenerates (sign flips, 20x+ blowups — the
+    pre-fix values were -1.9e-4 on jupiter_vorticity at K=1.5 and +90 on
+    jittered warm at K=2.5, silently erasing or exploding the emergence
+    ring). Every legal (r_core*1.2 jitter, aspect, K) corner must come back
+    inside (0, 1] with renorm*K >= ~1 — the ill-conditioned cases via the
+    documented tangent-plane 1/K fallback."""
+    corpus = [
+        (0.16, 2.2, 1.5),   # jupiter_vorticity authored
+        (0.16, 2.2, 2.0),
+        (0.16, 2.2, 2.5),
+        (0.13, 2.2, 2.0),   # neptune authored
+        (0.074, 2.9, 2.5),  # warm +20% jitter at the K hi bound
+        (0.30, 3.0, 2.5),   # absolute pfield corner (hi radius * jitter)
+        (0.062, 2.9, 2.0),  # warm baked aspect (in-band, no fallback)
+    ]
+    for rc, asp, k in corpus:
+        r = hero_flow_renorm(rc, asp, k)
+        assert 0.0 < r <= 1.0, f"({rc},{asp},{k}): renorm {r} out of band"
+        assert r * k > 0.94, f"({rc},{asp},{k}): renorm*K {r * k} below floor"
+    # The well-conditioned baked-warm case must use the REAL spherical value,
+    # not the fallback (renorm*K well above 1 = the curvature correction).
+    assert hero_flow_renorm(0.062, 2.9, 2.0) * 2.0 > 1.3

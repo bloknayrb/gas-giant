@@ -137,12 +137,17 @@ def test_warm_recipe_survives_the_population_cap():
     assert len(comps) >= 2, "the baked hero companions were trimmed"
 
 
-def test_seeded_zone_path_is_deterministic():
+def test_seeded_zone_path_is_byte_compatible_with_pre_rule_placement():
     """accent_latitude None (the seeded-zone path — e.g. neptune's Scooter)
-    stays deterministic; the rule's appended draw must not perturb it
-    run-to-run."""
-    _, _, _, reg1 = _warm_scene(accent_count=1, accent_tint=0.77)
-    _, _, _, reg2 = _warm_scene(accent_count=1, accent_tint=0.77)
-    a1 = [v for v in reg1.vortices if v.kind == KIND_OVAL and v.tint == 0.77][0]
-    a2 = [v for v in reg2.vortices if v.kind == KIND_OVAL and v.tint == 0.77][0]
-    assert a1.lat == a2.lat and a1.lon == a2.lon
+    must be BYTE-identical to the pre-hero-relative-rule placement: the
+    rule's rel_off draw is appended after the zone draws, so the None path's
+    stream position is untouched. The old form of this test compared two
+    runs of the same code (vacuously true — PR-43 review); these literals
+    were measured on master c472933 and on this branch, byte-equal. A
+    mismatch here means the accent stream position moved — the neptune
+    Scooter re-rolls."""
+    _, _, _, reg = _warm_scene(accent_count=1, accent_tint=0.77,
+                               accent_latitude=None)
+    a = [v for v in reg.vortices if v.kind == KIND_OVAL and v.tint == 0.77][0]
+    assert a.lat == -0.49087387323379517
+    assert a.lon == -2.820095884806601

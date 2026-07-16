@@ -62,7 +62,9 @@ uniform float u_vort_psi_drag;  // scale-selective drag ∝ eddy ψ − ⟨ψ⟩
 uniform sampler2D u_psi;        // this step's streamfunction ψ (for the psi-drag)
 #ifdef HERO_EMERGENCE
 // Hero wake turbulence (emergence pack): wedge-localized eddy-vorticity
-// injection west of each hero — storms.wake_turbulence's stated semantics
+// injection DOWNSTREAM of each hero (wake_dir is flow-derived under
+// emergence — east on gas_giant_warm; see heroWakeWindow's frame note) —
+// storms.wake_turbulence's stated semantics
 // completed for vorticity mode (its psi.comp wedge only reaches the polar
 // feather blend there, i.e. it is inert at storm latitudes). Frequency is
 // set hero-radius-relative by the solver so the churn scale tracks the storm.
