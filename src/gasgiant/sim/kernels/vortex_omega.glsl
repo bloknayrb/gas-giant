@@ -330,6 +330,10 @@ float vortexOmegaAccum(vec3 p) {
                 // ring's 6.0); watch for roll-up per the fallback note above.
                 ring += 1.0 * scale
                       * (smoothstep(1.05, 1.35, qh) - smoothstep(1.8, 2.4, qh));
+                // Apply the circulation renorm to ring+skirt TOGETHER
+                // (cancellation fraction untouched). tcomp = 1.0 exactly
+                // whenever taper is off -> byte-identical.
+                ring *= tcomp;
                 disk = mix(disk, ring, u_hero_emergence);
             }
 #endif
