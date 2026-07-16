@@ -740,6 +740,17 @@ class StormsParams(_Params):
                     "the tip, the flanks and the whole downstream half are "
                     "untouched. Inert at hero_emergence 0",
     )
+    hero_flow_aspect: float = pfield(
+        1.0, tier=Tier.RESTART, lo=1.0, hi=2.5, adv=True, ui="Hero",
+        description="Flow-field elongation multiplier over hero_aspect: the "
+                    "streamfunction the vorticity ring induces is intrinsically "
+                    "rounder than the ring (Poisson low-pass), so the developed "
+                    "storm reads rounder than authored; >1 pre-compensates by "
+                    "authoring the flow wider than the visible anatomy (2.0 "
+                    "lands a 2.2-anatomy hero at the reference GRS's dye "
+                    "aspect). Vorticity mode only; inert in kinematic mode and "
+                    "at hero_emergence 0 / hero_solid_core 0",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(

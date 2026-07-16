@@ -108,8 +108,9 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
 - **Solver modes**: `solver.type` = kinematic (v1.5 analytic ψ, default for legacy presets)
   or vorticity (v1.6 prognostic q, used by gas_giant_warm/jupiter_vorticity). Some levers are
   mode-specific: `psi.comp` params are feather-only in vorticity mode; `storms.hero_solid_core`
-  is a no-op in kinematic mode. Opt-in baroclinic coupling (`engine/baroclinic_coupling.py`)
-  requires vorticity mode; off = byte-identical.
+  and `storms.hero_flow_aspect` are no-ops in kinematic mode (both live on the omega path;
+  flow_aspect additionally needs solid_core > 0 + emergence > 0). Opt-in baroclinic coupling
+  (`engine/baroclinic_coupling.py`) requires vorticity mode; off = byte-identical.
 - **Export levers (all default-off / byte-identical when off)**: `export.projection` =
   equirect (default; manifest schema_version 1) or cube (6-face map, per-face `width/4`,
   manifest schema_version 2 with a per-map `faces` block — cube OMITS synthesized detail and

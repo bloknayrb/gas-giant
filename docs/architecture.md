@@ -104,6 +104,13 @@ field q (absolute vorticity) that is advected by the flow, nudged toward a targe
 derived from the same jet profile and vortex registry, and then used to recover ψ
 by inverting the Poisson equation ∇²ψ = +ω. The jet shear folds q into filaments
 between nudge corrections, producing the belt morphology the kinematic path cannot.
+One consequence: ψ = ∇⁻²ω is intrinsically ROUNDER than the vorticity that sources
+it (Poisson low-pass — a hero ring held at aspect 2.2 induces boundary streamlines
+of only ~1.3, and the dye rides streamlines), so `storms.hero_flow_aspect` (K)
+pre-compensates by authoring the emergence ring/skirt on a K-widened EW metric
+while every tracer stamp keeps the authored anatomy; the widened ring's net
+circulation is held invariant by a CPU-computed spherical renorm
+(`sim/flow_renorm.py`). Vorticity-mode only; inert at K = 1.
 
 **Absolute vorticity formulation.** The prognostic variable is q = ω + f where
 ω = ζ is the relative vorticity (sign convention ζ = +∇²ψ, consistent with the

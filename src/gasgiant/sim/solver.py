@@ -29,6 +29,7 @@ from gasgiant.params.model import (
 )
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
+from gasgiant.sim.flow_renorm import hero_flow_renorm
 from gasgiant.sim.profiles import LatProfiles
 from gasgiant.sim.tracers import TracerState
 from gasgiant.sim.vortices import VortexRegistry
@@ -180,6 +181,10 @@ class Solver:
         shape_rng = subseed(params.seed,
                             f"hero-shape:{params.storms.hero_shape_seed}")
         self._shape_phase = tuple(shape_rng.uniform(0.0, 2.0 * np.pi, 3))
+        # u_hero_flow_renorm cache: the quadrature is a ~1M-point numpy
+        # integral and the value is static per build; _omega_static_uniforms
+        # runs once per domain. None = not yet computed.
+        self._flow_renorm: float | None = None
         self.events = events
         self.profile_omega = profile_omega_tex
 
@@ -362,6 +367,23 @@ class Solver:
         self._omega_init(state, domain)
         return state
 
+    def _hero_flow_renorm(self) -> float:
+        """u_hero_flow_renorm: net-circulation renorm for the K-widened
+        emergence ring/skirt (sim/flow_renorm.py). Computed from the ACTUAL
+        (seeded-jittered) hero r_core/aspect — mean over heroes when there is
+        more than one (mean-field; no shipped preset has hero_count > 1).
+        1.0 whenever the lever is off or no hero exists."""
+        if self._flow_renorm is None:
+            k = self.params.storms.hero_flow_aspect
+            heroes = self.vortices.heroes()
+            if k == 1.0 or not heroes:
+                self._flow_renorm = 1.0
+            else:
+                rc = float(np.mean([h.r_core for h in heroes]))
+                asp = float(np.mean([h.aspect for h in heroes]))
+                self._flow_renorm = hero_flow_renorm(rc, asp, k)
+        return self._flow_renorm
+
     def _omega_static_uniforms(self, state: _OmegaState, domain: Domain) -> None:
         """Set size / f0 uniforms that never change after build."""
         size = domain.size
@@ -385,6 +407,8 @@ class Solver:
             _set(k, "u_hero_shape", p.storms.hero_shape)
             _set(k, "u_hero_shape_phase", self._shape_phase)
             _set(k, "u_hero_taper", p.storms.hero_taper)
+            _set(k, "u_hero_flow_aspect", p.storms.hero_flow_aspect)
+            _set(k, "u_hero_flow_renorm", self._hero_flow_renorm())
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # Eddy-only drag (equirect only): the reduction kernel's grid size and the

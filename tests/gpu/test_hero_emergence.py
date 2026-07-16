@@ -329,6 +329,10 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     # exact analytic oval.
     p.storms.hero_shape = 0.0
     p.storms.hero_taper = 0.0
+    # hero_flow_aspect widens the ring/skirt (the streamlines) too. This pin
+    # is LOAD-BEARING at the preset bake: the scene loads warm, and a baked
+    # K > 1 would re-roll the whole frozen fold pattern without it.
+    p.storms.hero_flow_aspect = 1.0
     sim, tr = _sim_and_tracers(p, gpu)
     hero = sim.vortices.heroes()[0]
 
@@ -601,3 +605,194 @@ def test_emergence_changes_hero_neighborhood_only(gpu):
     h = off.shape[0]
     far = slice(0, h // 4)                       # top quarter = far north
     np.testing.assert_array_equal(on[far], off[far])
+
+
+# ------------------------------------------------------------ hero_flow_aspect
+
+def _solo_warm_params(**storms_over) -> PlanetParams:
+    """gas_giant_warm — VORTICITY: hero_flow_aspect lives on the omega path
+    only (vortex_omega.glsl is compiled by omega_init/omega_force alone, so
+    the lever cannot touch kinematic output at all) — with every non-hero
+    population zeroed and the hero pinned, for omega-texture geometry probes
+    against the pure jet background."""
+    from gasgiant.params.presets import load_factory_preset
+
+    p = load_factory_preset("gas_giant_warm").model_copy(update={"seed": 7})
+    p.sim.resolution = 512
+    p.sim.dev_steps = 0
+    p.storms.hero_latitude = -21.0
+    p.storms.hero_longitude = 0.0
+    p.storms.oval_density = 0.0
+    p.storms.barge_density = 0.0
+    p.storms.pearls_count = 0
+    p.storms.accent_count = 0
+    p.storms.hero_companions = 0
+    p.storms.small_density = 0.0
+    p.storms.outbreak_count = 0
+    p.storms.hero_shape = 0.0
+    p.storms.hero_taper = 0.0
+    for key, val in storms_over.items():
+        setattr(p.storms, key, val)
+    assert p.solver.type == SolverType.VORTICITY
+    return p
+
+
+def _dev0_omega(p: PlanetParams, gpu):
+    """BYTE-EXACT asserts on this texture are a documented CARVE-OUT from the
+    vorticity-tolerance rule: the dev-0 omega state is a single analytic
+    per-pixel dispatch (omega_init: jets + vortex stamps + f, confined) —
+    read back BEFORE any SOR or advection pass touches it. Comparisons must
+    stay same-process (shared program cache); like the other byte-exact GPU
+    classes this may join the RTX session-flake list — rerun once before
+    investigating."""
+    sim = Simulation(p, gpu)
+    sim.run_to_completion(chunk=64)
+    q = np.asarray(sim.gpu.read_texture(sim.solver._omega_state.cur))
+    return sim, np.squeeze(q).astype(np.float64).copy()
+
+
+def test_hero_flow_aspect_lever(gpu):
+    """storms.hero_flow_aspect: K=1 is deterministic (byte-equal reruns —
+    determinism, NOT a no-op claim: the cross-commit two-tier capture is the
+    no-op evidence, see the S1 commit); K=2 changes the flow; and it composes
+    with the shape lobes and the taper wedge (which ride the K-widened metric
+    by design — the deforms live in the ring's own frame)."""
+    def omega(k: float, shape: float = 0.0, taper: float = 0.0) -> np.ndarray:
+        p = _solo_warm_params(
+            hero_flow_aspect=k, hero_shape=shape, hero_taper=taper)
+        return _dev0_omega(p, gpu)[1]
+
+    base = omega(1.0)
+    np.testing.assert_array_equal(base, omega(1.0))     # determinism at K=1
+    wide = omega(2.0)
+    assert np.abs(wide - base).max() > 1e-2, "K=2 did not change the flow"
+    with_lobes = omega(2.0, shape=1.0)
+    assert np.abs(with_lobes - wide).max() > 1e-3, "lobes inert on top of K"
+    with_taper = omega(2.0, taper=1.0)
+    assert np.abs(with_taper - wide).max() > 1e-3, "taper inert on top of K"
+
+
+def _trough_radius(prof: np.ndarray, center: int, lo: int, hi: int) -> float:
+    """Distance (in samples) from `center` to the minimum of `prof` within
+    [center+lo, center+hi], refined to sub-sample by parabolic interpolation
+    (the NS ring trough sits ~5 samples out even at 1024 — argmin quantization
+    alone would eat the tolerance)."""
+    seg = prof[center + lo: center + hi]
+    i = int(np.argmin(seg))
+    if 0 < i < len(seg) - 1:
+        a, b, c = seg[i - 1], seg[i], seg[i + 1]
+        denom = a - 2.0 * b + c
+        if denom > 1e-12:
+            i += 0.5 * (a - c) / denom
+    return float(abs(i + lo))
+
+
+def test_hero_flow_aspect_widens_flow_ew_only(gpu):
+    """K widens the vorticity ring's EW extent by ~K, leaves its NS extent
+    unchanged, and preserves the ring+skirt NET circulation via the
+    CPU-computed spherical renorm (sim/flow_renorm.py — plain tangent-plane
+    1/K would leave a ~16% net deficit at K=2, the taper's measured
+    planet-wide band-shift class). The circulation probe uses the K-vs-1
+    DIFFERENCE field, which cancels the (identical) jets and f exactly."""
+    K = 2.0
+
+    def scene(k: float):
+        p = _solo_warm_params(hero_flow_aspect=k)
+        p.sim.resolution = 1024
+        return _dev0_omega(p, gpu)
+
+    sim1, q1 = scene(1.0)
+    _, qk = scene(K)
+    hero = sim1.vortices.heroes()[0]
+    h, w = q1.shape
+    row = int(round((0.5 - hero.lat / np.pi) * h - 0.5))
+    col = int(round((hero.lon + np.pi) / (2.0 * np.pi) * w - 0.5))
+
+    # Ring trough radius along each axis (min of the zonal anomaly).
+    dlon_px = 2.0 * np.pi / w
+    dlat_px = np.pi / h
+    ew_r, ns_r = {}, {}
+    for k, q in ((1.0, q1), (K, qk)):
+        anom = q - q.mean(axis=1, keepdims=True)
+        lo_e = 2
+        hi_e = int(1.3 * hero.aspect * k * hero.r_core / np.cos(hero.lat)
+                   / dlon_px)
+        east = _trough_radius(anom[row], col, lo_e, hi_e)
+        west = _trough_radius(anom[row][::-1], w - 1 - col, lo_e, hi_e)
+        ew_r[k] = 0.5 * (east + west)
+        hi_n = int(1.3 * hero.r_core / dlat_px)
+        north = _trough_radius(anom[:, col][::-1], h - 1 - row, 1, hi_n)
+        south = _trough_radius(anom[:, col], row, 1, hi_n)
+        ns_r[k] = 0.5 * (north + south)
+
+    ew_ratio = ew_r[K] / ew_r[1.0]
+    ns_ratio = ns_r[K] / ns_r[1.0]
+    assert abs(ew_ratio / K - 1.0) < 0.06, (
+        f"EW ring trough scaled x{ew_ratio:.3f}, expected ~x{K}"
+    )
+    assert abs(ns_ratio - 1.0) < 0.05, (
+        f"NS ring trough moved x{ns_ratio:.3f}, expected unchanged"
+    )
+
+    # Net circulation invariance: sum of the (K - 1) difference over the hero
+    # neighborhood, cos-lat weighted, relative to the ring's own mass. A 1/K
+    # renorm bug reads ~0.02 on this statistic; the spherical renorm ~1e-3.
+    lat_g = (0.5 - (np.arange(h) + 0.5) / h) * np.pi
+    cosw = np.cos(lat_g)[:, None]
+    rows = slice(max(row - int(0.16 / dlat_px), 0), row + int(0.16 / dlat_px))
+    cs = int(0.65 / dlon_px)
+    cols = slice(max(col - cs, 0), min(col + cs, w))
+    box = (rows, cols)
+    net_diff = ((qk - q1) * cosw)[box].sum()
+    anom1 = q1 - q1.mean(axis=1, keepdims=True)
+    ring_mass = (np.abs(anom1) * cosw)[box].sum()
+    assert abs(net_diff) / ring_mass < 0.01, (
+        f"net circulation moved by {abs(net_diff) / ring_mass:.4f} of the "
+        f"ring mass — the u_hero_flow_renorm compensation is off"
+    )
+
+
+def test_hero_flow_aspect_flow_stays_anchored_at_hi(gpu):
+    """K=2.5 (the pfield hi bound) is where the UNWIDENED anchor basin has
+    its thinnest coverage of the widened ring (wings at anatomy-q 2.6 vs the
+    window's 1.6-2.8 fade — partial boost ~0.17). The capture basin was
+    deliberately NOT widened with K (widening it drops the ~44x nudge damping
+    onto the whole wake wedge); this test is the standing evidence that the
+    unwidened basin still holds the widened OMEGA ring across the slider
+    range: deep-ring latitude centroid glued to the registry (the historical
+    wander bug was ~0.2 rad ~ 11 deg) and the ring's longitude span
+    bracketing the registry. Deliberately probes OMEGA, not the dye: the
+    S1 investigation measured the flow anchored at every K (lat centroid
+    +0.1 deg at K=2) while the RED FILL dilutes with K (T3 at registry,
+    K=1 -> K=2: 0.62 -> 0.35 at 2048/dev700, 0.44 -> 0.10 at 512/dev300 —
+    grid-diffusion + the anatomy-metric flush stripping dye on every EW
+    transit of the widened eddy). Dye containment vs K is an S2 calibration
+    item and caps the PRESET bake (the plain anchor test above guards that
+    at whatever K warm ships); it is not this lever's kernel contract."""
+    p = _solo_warm_params(hero_flow_aspect=2.5, hero_emergence=1.0)
+    p.sim.dev_steps = 300
+    sim, _ = _sim_and_tracers(p, gpu)
+    q = np.squeeze(np.asarray(
+        sim.gpu.read_texture(sim.solver._omega_state.cur))).astype(np.float64)
+    hero = sim.vortices.heroes()[0]
+    h, w = q.shape
+    row = int((0.5 - hero.lat / np.pi) * h)
+    col = int((hero.lon + np.pi) / (2.0 * np.pi) * w)
+    anom = q - q.mean(axis=1, keepdims=True)
+    rr = int(0.15 / (np.pi / h))
+    cc = int(0.75 / (2.0 * np.pi / w))
+    box = anom[row - rr: row + rr, col - cc: col + cc]
+    deep = box < 0.5 * box.min()
+    ys, xs = np.where(deep)
+    assert deep.sum() > 50, "no deep vorticity ring near the registry at all"
+    wgt = -box[deep]
+    lat_off = ((ys - rr) * wgt).sum() / wgt.sum() * (np.pi / h)
+    assert abs(np.degrees(lat_off)) < 1.5, (
+        f"deep-ring latitude centroid {np.degrees(lat_off):+.2f} deg off the "
+        f"registry at hero_flow_aspect 2.5 — the widened ring escaped the "
+        f"anchor basin (measured +0.44 deg when healthy)"
+    )
+    assert xs.min() < cc < xs.max(), (
+        "the deep ring's longitude span no longer brackets the registry — "
+        "the storm slid along the band"
+    )

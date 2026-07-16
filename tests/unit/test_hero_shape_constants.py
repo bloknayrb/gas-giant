@@ -79,3 +79,39 @@ def test_hero_shape_blocks_agree():
         "heroRelaxWeight, the omega ring/skirt and the moat-test mirror must "
         "carry ONE R(theta)):\n  " + "\n  ".join(problems)
     )
+
+
+# ------------------------------------------------- flow_renorm profile mirror
+
+# The emergence ring/skirt smoothstep windows + amplitudes, as written in
+# vortex_omega.glsl: `<amp> * scale * (smoothstep(i0, i1, qh) -
+# smoothstep(o0, o1, qh))`. Anchored on `scale` and `qh` so prose comments
+# (which quote several of these numbers) cannot match.
+_RING_SKIRT = re.compile(
+    r"(-?[\d.]+)\s*\*\s*scale\s*\*\s*\(smoothstep\((-?[\d.]+),\s*(-?[\d.]+),"
+    r"\s*qh\)\s*-\s*smoothstep\((-?[\d.]+),\s*(-?[\d.]+),\s*qh\)\)"
+)
+
+
+def test_flow_renorm_mirrors_ring_skirt_windows():
+    """sim/flow_renorm.py computes u_hero_flow_renorm (the hero_flow_aspect
+    net-circulation renorm) by quadrature over a NUMPY MIRROR of the omega
+    ring/skirt profile. A retune of the GLSL windows or amplitudes without the
+    mirror silently mis-normalizes the widened ring's circulation — the exact
+    stale-mirror class this file exists for. Exactly two profile terms must
+    exist (ring, then skirt) and both must equal the mirror tuples."""
+    from gasgiant.sim.flow_renorm import RING_WINDOW, SKIRT_WINDOW
+
+    found = _RING_SKIRT.findall(_source("vortex_omega.glsl"))
+    assert len(found) == 2, (
+        f"expected exactly 2 ring/skirt profile terms in vortex_omega.glsl, "
+        f"matched {len(found)} — the anchored pattern or the kernel drifted"
+    )
+    for (amp, i0, i1, o0, o1), expect, label in zip(
+        found, (RING_WINDOW, SKIRT_WINDOW), ("ring", "skirt"), strict=True
+    ):
+        got = (float(i0), float(i1), float(o0), float(o1), float(amp))
+        assert got == expect, (
+            f"{label} profile diverged: vortex_omega.glsl has {got}, "
+            f"flow_renorm.py mirror has {expect}"
+        )

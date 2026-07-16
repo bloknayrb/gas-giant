@@ -72,6 +72,21 @@ uniform vec3 u_hero_shape_phase;
 // storms.hero_taper: the upstream wedge deforms the ring/skirt too, for the
 // same reason as the lobes above (the flow owns the outline).
 uniform float u_hero_taper;
+// storms.hero_flow_aspect (K): author the FLOW wider than the tracer anatomy.
+// psi = inv-Laplacian(omega) is intrinsically rounder than the ring (Poisson
+// low-pass: boundary streamlines measure 1.24-1.40 from a ring held at 2.2),
+// the dye rides psi, and ambient shear is ~6x below the Kida requirement —
+// so the developed dye reads ~1.5 no matter what the stamps say. Widening
+// only the ring/skirt EW metric by K pre-compensates: at K=2 a 2.2-anatomy
+// hero develops dye core ~2.9 / envelope ~1.8 (the reference GRS).
+uniform float u_hero_flow_aspect;
+// Net-circulation renorm for the widened ring+skirt, CPU-computed by
+// spherical quadrature (sim/flow_renorm.py) from the ACTUAL hero r_core.
+// The tangent-plane 1/K under-corrects: the curvature weight inflates the
+// wide skirt more than the ring, and the net is the ~24% residual of a ~76%
+// cancellation — plain 1/K leaves a 16% net deficit at K=2 (the taper's
+// visible band-shift class). Exactly 1.0 whenever the lever is off.
+uniform float u_hero_flow_renorm;
 #endif
 // heroEllipQ for the variant-only heroAnchorWindow below (include-once, and
 // the include's whole body is #ifdef HERO_EMERGENCE). Needs vortex_data,
@@ -241,12 +256,35 @@ float vortexOmegaAccum(vec3 p) {
                 // full-shield regime; watch for roll-up per the note below.
                 float qh = q;
                 float tcomp = 1.0;
-                if (u_hero_shape > 0.0 || u_hero_taper > 0.0) {
+                if (u_hero_shape > 0.0 || u_hero_taper > 0.0
+                        || u_hero_flow_aspect != 1.0) {
                     vec3 hcs = a.xyz;
                     vec3 hews = cross(vec3(0.0, 1.0, 0.0), hcs);
                     float hewls = length(hews);
+                    // Pole fallback: flow_aspect silently no-ops here too —
+                    // fine, the 60-deg jet confine leaves no hero near a pole.
                     if (hewls > 1e-4) {
                         vec3 hs1 = hews / hewls;
+                        // Flow-metric base: the shape/taper deforms below ride
+                        // whatever metric the ring is authored on.
+                        float qb = q;
+                        float aspf = asp;
+                        if (u_hero_flow_aspect != 1.0) {
+                            // Rebuild the hero q on the K-widened ellipse (EW
+                            // component only; same tangent-plane construction
+                            // and hemisphere gate as the loop head). NOTE at
+                            // hero_aspect 1.0 the loop-head q is great-circle
+                            // while qb is tangent-plane: the ~10%-weight
+                            // solid-disk residual and the ring then differ by
+                            // O(d^2/6) ~ 0.4% at the skirt edge — accepted.
+                            aspf = asp * u_hero_flow_aspect;
+                            vec3 hs2b = cross(hcs, hs1);
+                            float xq = dot(p, hs1) / aspf;
+                            float yq = dot(p, hs2b);
+                            qb = (dot(p, hcs) > 0.0)
+                               ? length(vec2(xq, yq)) / r_core : 1e3;
+                            tcomp = u_hero_flow_renorm;
+                        }
                         float Rrs = 1.0;
                         if (u_hero_shape > 0.0) {
                             vec3 hs2 = cross(hcs, hs1);
@@ -261,16 +299,18 @@ float vortexOmegaAccum(vec3 p) {
                                       - 0.055 * sin(3.0 * thps + sphs.y));
                         }
                         if (u_hero_taper > 0.0) {
-                            // Upstream-signed SQUASHED cosine over r_core*q
-                            // = |squashed offset|; raw hero-metric q from
-                            // the loop head. hs1 = cross(j, c) points
-                            // ANTI-east (the F06 chirality trap), so
+                            // Upstream-signed SQUASHED cosine over r_core*qb
+                            // = |squashed offset| in the FLOW metric (aspf,
+                            // qb): the wedge deforms the ring it rides, so it
+                            // lives in the ring's metric; at K=1 these are
+                            // the loop-head asp/q exactly. hs1 = cross(j, c)
+                            // points ANTI-east (the F06 chirality trap), so
                             // +wdir * dot = upstream. Matches the stamp and
                             // relax wedges exactly (constants pinned by the
                             // blocks-agree unit test).
                             float wdir_h = vortex_data[3 * i + 2].x;
                             float uct = clamp(wdir_h * dot(p, hs1)
-                                              / (asp * max(r_core * q, 1e-5)),
+                                              / (aspf * max(r_core * qb, 1e-5)),
                                               -1.0, 1.0);
                             float tc = max(uct, 0.0);
                             float tc2 = tc * tc;
@@ -291,10 +331,10 @@ float vortexOmegaAccum(vec3 p) {
                             // UNIFORMLY (cancellation fraction untouched);
                             // the local deficit stays where the wedge is,
                             // the planet-scale moment does not move.
-                            tcomp = 1.0 / (1.0 - 0.105 * u_hero_taper
-                                                 * u_hero_emergence);
+                            tcomp *= 1.0 / (1.0 - 0.105 * u_hero_taper
+                                                  * u_hero_emergence);
                         }
-                        qh = q / Rrs;
+                        qh = qb / Rrs;
                     }
                 }
                 float ring = -6.0 * scale
