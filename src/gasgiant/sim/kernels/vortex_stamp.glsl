@@ -247,6 +247,21 @@ vec3 vortexStamp(vec3 p) {
                         // interior read as unstructured noise).
                         dT0 += 0.09 * u_hero_emergence * lane * plate
                              * smoothstep(0.16, 0.32, q);
+                        // T3-space internal spiral banding: the T0 lane above
+                        // is swamped by derive's |T3|~0.9 tint blend (measured
+                        // — interior structure MUST ride T3, which moves the
+                        // LUT index AND the blend weight). Rectified DIP —
+                        // crests pull T3 from ~0.9 toward the palette's
+                        // bright-orange shoulder (raising T3 saturates at the
+                        // top stop). Tighter pitch than the T0 lane (~3 wound
+                        // arcs across the plateau); fresh inner phase lph.y —
+                        // lph.x already drives the T0 lane and would correlate.
+                        float lane3 = sin(q * 13.0 + hth
+                                          + 1.1 * sin(hth + lph.y) + lph.z);
+                        float wq = smoothstep(0.12, 0.28, q)
+                                 * (1.0 - smoothstep(0.82, 1.0, q));
+                        dT3 -= 0.22 * u_hero_emergence * b.z
+                             * (0.5 + 0.5 * lane3) * plate * wq;
                         // Off-center bright knot (HST/Cassini: the interior's
                         // brightest patch sits off-center): seeded azimuth,
                         // 0.3-rc offset, one open Gaussian — no closed
@@ -254,12 +269,21 @@ vec3 vortexStamp(vec3 p) {
                         float q_off2 = q * q + 0.09
                                      - 0.6 * q * cos(hth - lph.z);
                         float knot = exp(-3.0 * q_off2);
-                        // Raised (0.10/0.06 -> 0.14/0.10): the knot is now
-                        // the interior's HOT spot — with the radial deep
-                        // darkening gone, it carries the reference's
-                        // off-center brightest-warmest identity alone.
-                        dT0 += 0.14 * u_hero_emergence * knot * plate;
-                        dT3 += 0.10 * u_hero_emergence * knot * plate;
+                        // T3 carries the knot (0.10 -> 0.24: fully saturated
+                        // salmon at raised blend weight); the T0 lift rides
+                        // along (0.14 -> 0.18).
+                        dT0 += 0.18 * u_hero_emergence * knot * plate;
+                        dT3 += 0.24 * u_hero_emergence * knot * plate;
+                        // Storm-within-a-storm nucleus: a compact dark inner
+                        // eye at 0.25 rc, decorrelated from the bright knot
+                        // (phase offset -2.6), dipping T3 toward the brown
+                        // notch — the reference core's visible sub-storm.
+                        // Never max this AND lane3 together (stacked dips
+                        // past the notch read as a pale wash).
+                        float q_off2b = q * q + 0.0625
+                                      - 0.5 * q * cos(hth - lph.z - 2.6);
+                        dT3 -= 0.30 * u_hero_emergence * b.z
+                             * exp(-6.0 * q_off2b) * plate;
                     }
                 }
                 // GRS annulus anatomy (mix so small lever values stay near
@@ -320,9 +344,18 @@ vec3 vortexStamp(vec3 p) {
                     // overlay off it read as a crisp CLOSED ellipse — width
                     // lobes alone don't open it. Decorrelated amplitude lobes
                     // + the same downstream tear the bright collar gets.
-                    ringmod = (0.72 + 0.28 * sin(2.0 * hth + cph.y + 2.1)
+                    // Lobe depth 0.28 -> 0.45 with floor 0.10 (round-B review:
+                    // at 0.28 the collar only dimmed to 0.33x — it must
+                    // visibly FAIL on some arcs, not thin), plus an
+                    // equatorward amplitude cut paired with the belt-side
+                    // flush pinch (heroRelaxWeight): the pinched contact must
+                    // be belt-against-bright-rim, not belt-against-etched-
+                    // dark-ring, so the collar yields on the arc the flush
+                    // re-imposes hardest.
+                    ringmod = (0.55 + 0.45 * sin(2.0 * hth + cph.y + 2.1)
                                     * sin(3.0 * hth + cph.x + 0.7))
-                            * (1.0 - 0.6 * u_hero_emergence * westw);
+                            * (1.0 - 0.6 * u_hero_emergence * westw)
+                            * (1.0 - 0.55 * u_hero_emergence * equw);
                 }
                 // Quiet hollow: the real Red Spot Hollow is only slightly
                 // brighter than the bands (Juno close-ups), not a glowing
@@ -646,12 +679,49 @@ float heroRelaxWeight(vec3 p) {
         float yn = plat - vlat;
         float upw = smoothstep(0.15, 0.7,
                                -xe / max(length(vec2(xe, yn)), 1e-5));
+        // Hero-local meridional/azimuthal frame, shared by the boundary
+        // raggedness and the flush shaping below. m ~ sin(hero-frame
+        // azimuth) via the squashed elliptical metric (heroEllipQ divides
+        // only the east axis by aspect, so yn/(rc*q) is exact); eqs points
+        // equatorward — the belt side for a hollow-straddling hero. az uses
+        // dlon, NOT the wdir-flipped xe: seeded lobes must not mirror when
+        // the wake direction flips. The ternary guards atan(0,0)
+        // (GLSL-undefined) at the exact center pixel — a NaN here would
+        // advect outward through the relax weight.
+        float m     = clamp(yn / max(rc_h * q, 1e-5), -1.0, 1.0);
+        float eqs   = (wa.y < 0.0) ? 1.0 : -1.0;
+        float beltw = smoothstep(0.15, 0.7,  m * eqs);
+        float zonew = smoothstep(0.15, 0.7, -m * eqs);
+        float az    = (q > 0.05) ? atan(yn, dlon) : 0.0;
+        vec3  fph   = u_hero_noise_offset * 23.1;
         // Narrowed OFF the bright annulus (center 0.95, k 10 — was 1.0/3.8):
         // the fade must release the PLATEAU EDGE to the flow without also
         // releasing the thin annulus at ~1.16, which already fights the
         // plateau fray and the collar carve (three shredders on one
         // 0.15-q-wide feature washed it out).
-        float rim_bump = exp(-(q - 0.95) * (q - 0.95) * 10.0);
+        // Low-order raggedness of the emergent WOUND boundary (the dark
+        // ellipse is root-caused as wound tracer in this released band —
+        // stamps exonerated): the fbm fray below is per-pixel with a
+        // uniform azimuthal MEAN, so the wound band kept constant
+        // width/strength around the ellipse and read as drawn. Three seeded
+        // low-order terms break the mean: WIDTH lobes (primary, +-40% on
+        // the release sharpness), a one-sided INWARD radius wobble (inward
+        // only — pushing the center outward re-admits the bright annulus at
+        // 1.12 to the flow, undoing the narrowed-off-the-annulus retune;
+        // rim_bump(1.12) <= 0.8 off the break arc holds by construction),
+        // and ONE seeded break arc where the boundary is handed to the flow
+        // outright — lobed dimming alone never breaks the closed-curve
+        // squint read; the reference boundary visibly fails on arcs.
+        float rl  = 0.55 * sin(2.0 * az + fph.z)
+                  + 0.45 * sin(3.0 * az + fph.x + 1.9);
+        float rl2 = 0.6 * sin(2.0 * az + fph.y + 0.8)
+                  + 0.4 * sin(4.0 * az + fph.z + 2.4);
+        float rq  = 0.95 - 0.10 * u_hero_emergence * max(rl, 0.0);
+        float rk  = 10.0 * (1.0 + 0.4 * u_hero_emergence * rl2);
+        float rim_bump = exp(-(q - rq) * (q - rq) * rk);
+        float brk = smoothstep(0.5, 0.9, sin(az + fph.y * 1.3));
+        rim_bump = max(rim_bump,
+                       brk * exp(-(q - 1.14) * (q - 1.14) * 14.0));
         if (q < 2.2) {
             // Per-azimuth erosion: some arcs keep the ring, others dissolve ->
             // the boundary is ragged, not a uniformly-softened circle.
@@ -662,24 +732,49 @@ float heroRelaxWeight(vec3 p) {
             float ero = clamp(0.15 + 1.4 * fbm(p * fscale + u_hero_noise_offset.zyx + 5.0,
                                                4, 2.0, 0.5),
                               0.0, 1.4);
+            // Per-arc erosion DEPTH (low-order, same rl2 lobes as the width
+            // mod): some arcs hand the boundary to the flow, others stay
+            // target-held — the wound band's mean strength varies around
+            // the ellipse instead of only its pixel-scale fray.
+            ero = clamp(ero * (0.95 + 0.30 * u_hero_emergence * rl2),
+                        0.0, 1.4);
             // Leading side stays SMOOTH: the erosion (which hands rim arcs
             // to the flow) is suppressed on the upstream arc, so the belt's
             // approach meets a target-held, cleanly-deflected boundary
             // instead of a ragged one (Checkpoint-1 feedback: "tighten up
             // the leading side so the belt flows smoothly around the storm").
+            // This suppression stays LAST.
             ero *= 1.0 - 0.65 * upw;
             infl = max(infl, rim_bump * ero);
         }
-        // Tight-but-strong Hollow (user constraint): the flush rises just
-        // past the dark collar's tail (~1.54) — a steeper rise than the old
-        // (1.55,2.1) so the bands re-assert hard right outside the collar.
-        // The OUTER fade deliberately stays WIDE (2.7,3.4): the flush is
-        // CLEANUP — it erases the residual-circulation winding — so pulling
-        // it in lets wound arcs survive in the 2.8-3.4 shell (measured: the
-        // upstream fold variance rose to parity with the wake sector, the
-        // exact pale-pinwheel tell). Visible tightness comes from the
-        // anatomy + skirt + this strong inner rise, not from a short reach.
-        flush = max(flush, smoothstep(1.55, 1.9, q) * (1.0 - smoothstep(2.7, 3.4, q)));
+        // Tight-but-strong Hollow (user constraint), now MERIDIONALLY
+        // SHAPED (round-B de-bullseye): a radially-uniform flush halo was
+        // the bullseye's outermost ring. Belt-side (equatorward) the inner
+        // rise pulls IN to ~1.19 with a shorter rise — the band tone
+        // asserts right against the bright rim, the reference's hard pinch
+        // (paired with the equw dark-collar cut in the stamp, so the
+        // re-imposed contact is belt-against-bright-rim). Zone-side widens
+        // only MODESTLY (+0.12: a wider clean south moat reads emptier, not
+        // more natural — its structure comes from occupants, not less
+        // erasure). Seeded 2/3-lobe wobble on the non-belt arcs keeps the
+        // inner boundary off an analytic curve.
+        // The wound-arc cleanup role is protected two ways: the OUTER fade
+        // stays WIDE (2.7,3.4) on every azimuth (pulling it in let wound
+        // arcs survive in the 2.8-3.4 shell — measured), and a uniform
+        // full-strength FLOOR from q 2.05-2.35 caps how far out any
+        // azimuthal reduction reaches — poleward survival is confined to
+        // the q<~2.35 moat where it reads as structure, not pinwheel arcs.
+        float fl   = 0.6 * sin(2.0 * az + fph.x)
+                   + 0.4 * sin(3.0 * az + fph.y);
+        float qin  = 1.55 + u_hero_emergence
+                          * (-0.40 * beltw + 0.12 * zonew
+                             + 0.08 * fl * (1.0 - beltw));
+        float rise = mix(0.35, 0.20, beltw);
+        float shaped = smoothstep(qin, qin + rise, q)
+                     * (1.0 - smoothstep(2.7, 3.4, q));
+        float floorf = smoothstep(2.05, 2.35, q)
+                     * (1.0 - smoothstep(2.7, 3.4, q));
+        flush = max(flush, max(shaped, floorf));
     }
     // Wake release: fade relaxation inside the wedge (CAPPED at 0.75 — the
     // floor prevents long-run homogenization into mud; through-flow refreshes

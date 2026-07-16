@@ -129,7 +129,19 @@ _PINNED: dict[str, str] = {
     # rim_tint=0 keep it; palette-notch warming does not remove it) — the
     # stamps are exonerated; regularity of the wound boundary is a
     # texture/fray question, not a stamp one. Variant-arm-only.
-    "vortex_stamp.glsl": "d7106afb3632096a92f00c5a8bb9162e24ed030c",
+    # Re-pinned 2026-07-15 (Round B de-bullseye + interior legibility, plan
+    # ancient-snuggling-meadow): heroRelaxWeight gains a hero-local
+    # meridional frame — belt-side flush pinch (inner rise to ~1.19,
+    # protected by a uniform full-strength floor q 2.05-2.35 + the wide
+    # outer fade), low-order wound-boundary raggedness (width lobes +
+    # one-sided inward radius wobble + one seeded ring-break arc + per-arc
+    # erosion depth); the dark collar's lobes deepen (floor 0.10) and gain
+    # an equatorward cut paired with the pinch; the interior gains T3-space
+    # spiral banding (lane3, pitch 13), a hotter knot (T3 0.24), and a
+    # storm-within-a-storm dark nucleus. ALL inside HERO_EMERGENCE arms;
+    # default program text unchanged after preprocessing; p05 9/9 verified
+    # same day.
+    "vortex_stamp.glsl": "98a4458331c43df5cc50da2e9a11bb271a33eb20",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

@@ -329,6 +329,100 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     )
 
 
+# ------------------------------------------- Round-B behavior (same plan:
+# de-bullseye flush pinch, interior T3 banding)
+
+def test_emergence_flush_pinches_belt_side(gpu):
+    """The meridionally shaped flush must erase wound deviations HARDER on the
+    equatorward (belt) side than poleward — the reference's hollow is pinched
+    hard against the belt, and a radially-uniform flush halo was the bullseye's
+    outermost ring. Probed on the developed kinematic field as the residual
+    from the far-longitude zonal profile in the q 1.6-2.0 shell (where the
+    poleward inner rise 1.66 vs the belt-side 1.19 gives the maximum flush
+    differential). Probe hygiene, both learned from a first failing draft:
+    the band VALUE contrast is dropped to 0.08 — below the CPU bow gate's
+    0.04-step floor over +-1.6 r, so heroBandDeflect is OFF by construction
+    (asserted on the registry; at a gated placement the designed bow
+    dominates the equatorward residual and the statistic reads a feature as
+    un-flushed material) while ~8% of the latitudinal T0 gradient survives
+    as wound-material signal (the residual scales linearly, the ratio does
+    not); and the shell is restricted to the strictly-UPSTREAM half (an < 0)
+    because the stamped wake wedge is active from along = 0."""
+    p = _solo_hero_params(emergence=0.9)
+    p.sim.dev_steps = 150
+    p.bands.warp_amount = 0.0
+    p.bands.value_contrast = 0.08
+    # Radius 0.05: at the default 0.10 the gate's +-1.6 r window spans ~19 deg
+    # = several bands, and even 8% contrast accumulates a step past the gate
+    # floor. One band's worth of window keeps the flattened step under it.
+    p.storms.hero_radius = 0.05
+    sim, tr = _sim_and_tracers(p, gpu)
+    hero = sim.vortices.heroes()[0]
+    h, w = tr.shape[:2]
+    assert hero.bow_gain == 0.0, (
+        "bow gate engaged despite the flattened bands — the probe would read "
+        "the designed belt bow as residual (did the gate thresholds change?)"
+    )
+
+    lon_g, lat_g = _lonlat_grids(tr.shape)
+    dlat = lat_g - hero.lat
+    dlon = np.mod(lon_g - hero.lon + 3.0 * np.pi, 2.0 * np.pi) - np.pi
+    x_east = dlon * np.cos(hero.lat) / hero.aspect
+    q = np.hypot(x_east, dlat) / hero.r_core
+    m = (dlat / hero.r_core) / np.maximum(q, 1e-9)   # sin(hero azimuth), N=+
+    an = dlon * hero.wake_dir / hero.r_core          # + = downstream
+
+    ref = tr[:, w // 8 : 3 * w // 8, 0].mean(axis=1)  # quarter turn away
+    resid = np.abs(tr[..., 0] - ref[:, None])
+
+    shell = (q > 1.6) & (q < 2.0) & (an < 0.0)
+    # Hero is in the southern hemisphere: equatorward = north = m > 0 (matches
+    # the shader's eqs sign from the center-y hemisphere test).
+    eq_res = resid[shell & (m > 0.8)].mean()
+    pol_res = resid[shell & (m < -0.8)].mean()
+    assert pol_res > 3e-5, (
+        "poleward shell residual is ~zero — the probe premise broke (nothing "
+        "left to compare; did the flush windows or dev_steps change?)"
+    )
+    assert eq_res < 0.75 * pol_res, (
+        f"equatorward shell residual ({eq_res:.4f}) is not pinched below the "
+        f"poleward residual ({pol_res:.4f}) — the belt-side flush pinch is "
+        "not asserting the band harder than the zone-side moat"
+    )
+
+
+def test_emergence_interior_t3_banding(gpu):
+    """Interior circulation legibility rides T3 (the |T3|~0.9 tint blend swamps
+    T0 — measured root cause): the T3 spiral lane + knot + nucleus must give
+    the pure stamp visible interior T3 structure, while the anchored plateau
+    keeps its strongly-warm MEAN (co-pin of the anchor property at stamp level
+    so the banding can never be 'satisfied' by washing the interior out).
+    Mottle and tint_var are zeroed so only the deterministic structure terms
+    contribute."""
+    p = _solo_hero_params(emergence=0.9)
+    p.sim.dev_steps = 0
+    p.storms.hero_mottle = 0.0
+    p.storms.hero_tint_var = 0.0
+    sim, tr = _sim_and_tracers(p, gpu)
+    hero = sim.vortices.heroes()[0]
+
+    lon_g, lat_g = _lonlat_grids(tr.shape)
+    dlat = lat_g - hero.lat
+    dlon = np.mod(lon_g - hero.lon + 3.0 * np.pi, 2.0 * np.pi) - np.pi
+    x_east = dlon * np.cos(hero.lat) / hero.aspect
+    q = np.hypot(x_east, dlat) / hero.r_core
+
+    t3 = tr[..., 3][(q > 0.35) & (q < 0.8)]
+    assert t3.std() > 0.04, (
+        f"interior T3 std {t3.std():.4f} — the spiral banding / knot / nucleus "
+        "are not producing visible interior tint structure"
+    )
+    assert t3.mean() > 0.3, (
+        f"interior T3 mean {t3.mean():.2f} — the banding dips washed out the "
+        "plateau's warm identity"
+    )
+
+
 def test_emergence_locality_far_south(gpu):
     """Extended locality (plan review: the far-north check alone would miss a
     SOUTHERN leak from the new wake windows, which reach equatorward AND
