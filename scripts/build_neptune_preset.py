@@ -119,6 +119,7 @@ STORMS_HERO = {
     "hero_latitude": -22.5,
     "rim_contrast": 2.0,
     "wake_turbulence": 1.593,
+    "companion_brightness": 0.32,  # the pre-lever constant; warm bakes 0.55
 }
 
 # Remove the planet-girdling Jupiter storm field -- only the hero + companions remain, plus

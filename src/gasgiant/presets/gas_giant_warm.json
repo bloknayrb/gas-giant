@@ -136,13 +136,14 @@
       "hero_brightness": 0.05,
       "hero_companions": 2,
       "companion_aspect": 1.0,
-      "oval_density": 3.0,
+      "companion_brightness": 0.55,
+      "oval_density": 3.5,
       "oval_solid_core": 1.0,
       "accent_count": 1,
       "accent_latitude": -29.0,
       "accent_longitude": null,
-      "accent_tint": 0.75,
-      "accent_brightness": 0.2,
+      "accent_tint": 0.65,
+      "accent_brightness": 0.05,
       "accent_radius": 0.05,
       "accent_aspect": 1.0,
       "barge_density": 2.989,
@@ -153,7 +154,7 @@
       "outbreak_longitude": null,
       "outbreak_phase": null,
       "outbreak_lat_min": 0.2,
-      "small_density": 3.0,
+      "small_density": 3.5,
       "stamp_contrast": 2.4,
       "stamp_tint_contrast": null,
       "merge_rate": 0.219,
@@ -166,8 +167,8 @@
       "hotspot_depth": 1.0,
       "ribbon_strength": 0.0,
       "ribbon_wavenumber": 12,
-      "festoon_hero_strength": 1.0,
-      "festoon_hero_wavenumber": 11
+      "festoon_hero_strength": 1.6,
+      "festoon_hero_wavenumber": 14
     },
     "poles": {
       "north": {

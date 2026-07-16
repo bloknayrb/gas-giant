@@ -136,6 +136,7 @@
       "hero_brightness": -0.3,
       "hero_companions": 3,
       "companion_aspect": 3.5,
+      "companion_brightness": 0.32,
       "oval_density": 0.0,
       "oval_solid_core": 0.0,
       "accent_count": 1,
@@ -167,7 +168,7 @@
       "ribbon_strength": 0.0,
       "ribbon_wavenumber": 12,
       "festoon_hero_strength": 0.0,
-      "festoon_hero_wavenumber": 11
+      "festoon_hero_wavenumber": 14
     },
     "poles": {
       "north": {

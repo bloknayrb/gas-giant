@@ -297,6 +297,15 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     p.storms.pearls_count = 0
     p.storms.accent_count = 0
     p.storms.hero_companions = 0
+    # The background SCENE is part of this test's premise and is FROZEN:
+    # small storms + outbreaks stay at the values the E/W statistic was
+    # calibrated against (they shape the chaotic vorticity field everywhere,
+    # so ANY registry change re-rolls the fold pattern — zeroing them parked
+    # a belt-edge inject eddy in the upstream window; the round-B density
+    # bump to 3.5 dropped a small storm there). Pinning them makes the probe
+    # immune to preset population drift without re-rolling the scene.
+    p.storms.small_density = 3.0
+    p.storms.outbreak_count = 2
     sim, tr = _sim_and_tracers(p, gpu)
     hero = sim.vortices.heroes()[0]
 

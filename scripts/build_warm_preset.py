@@ -93,12 +93,20 @@ def main():
         "hero_tint_var": 0.35,
         "hero_rim_warp": 1.0,
         "hero_companions": 2,
+        "companion_brightness": 0.55,   # reference flank clouds are among the
+                                        # brightest pixels; 0.32 read as a
+                                        # faint smudge on the pale moat
         "accent_count": 1,
         "accent_latitude": -29.0,
         "accent_radius": 0.05,
-        "accent_tint": 0.75,
-        "accent_brightness": 0.20,
+        "accent_tint": 0.65,            # 0.75 + brightness 0.20 read as
+        "accent_brightness": 0.05,      # another pale oval (redness 52 vs the
+                                        # ~80 of belt material); deeper tint +
+                                        # near-zero brightness = red-brown
         "oval_solid_core": 1.0,
+        "oval_density": 3.5,            # bounds raised 3.0 -> 4.0: the SW/S
+        "small_density": 3.5,           # neighborhood counted ~0.2x the
+                                        # reference's incident density
     })
 
     # Hero-adjacent festoon train (FESTOON2): streamers rooting on the belt
@@ -106,9 +114,12 @@ def main():
     # the "neighborhood busy with unrelated weather" reference cue. Amplitude
     # subordinate to the primary +7-deg train (1.6); wavenumber deliberately
     # != the primary's 20 (twin wavenumbers read as a mechanical comb).
+    # Amplitude 1.6 (match the primary train) + wavenumber 14: at 1.0/k11 the
+    # per-plume jitter left whole 30-deg windows plumeless and nothing read at
+    # the root latitude (round-B adversarial review).
     p.waves = p.waves.model_copy(update={
-        "festoon_hero_strength": 1.0,
-        "festoon_hero_wavenumber": 11,
+        "festoon_hero_strength": 1.6,
+        "festoon_hero_wavenumber": 14,
     })
 
     # Uniform detail coverage: apply the flow-folded detail-FX texture at EVEN

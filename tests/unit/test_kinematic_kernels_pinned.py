@@ -141,7 +141,17 @@ _PINNED: dict[str, str] = {
     # storm-within-a-storm dark nucleus. ALL inside HERO_EMERGENCE arms;
     # default program text unchanged after preprocessing; p05 9/9 verified
     # same day.
-    "vortex_stamp.glsl": "98a4458331c43df5cc50da2e9a11bb271a33eb20",
+    # Re-pinned same day (round-B calibration fix pass, reference-anchored
+    # review): heroBandDeflect outer fade azimuth-BLENDED — equatorward arc
+    # recovers by q~1.6 (the flush relaxes toward the DEFLECTED target, so
+    # the bow's reach WAS the pale moat's width and the belt-side pinch
+    # measured as a no-op), flanks keep (1.45,2.0) (an all-azimuth tighten
+    # broke the bow/flush co-design there — the wake-fold test's upstream
+    # window read the target-vs-flow disagreement annulus as folds); interior
+    # amplitudes to their calibration bounds (lane3 0.30, knot T3 0.32,
+    # nucleus 0.45 — measured interior luminance std 4.5 vs reference 18.9).
+    # Variant-arm-only; default text unchanged; p05 9/9.
+    "vortex_stamp.glsl": "8c1a7ec5c51125fc86077002511736b4f6a3813e",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

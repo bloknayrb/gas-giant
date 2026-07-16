@@ -662,6 +662,16 @@ East-west elongation (lon:lat) of the bright companion clouds; 1.0 = round. Stre
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__companion_aspect__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
+### companion brightness
+
+`storms.companion_brightness` &mdash; range **0 to 0.8**, default **0.32**, tier `restart`.
+
+T0 brightness of the hero companion clouds. 0.32 = the pre-lever constant (byte-identical). Reference flank clouds are among the brightest pixels in the GRS neighborhood — on a pale-moat placement the default reads as a faint smudge
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.32</sub></td><td align="center"><sub>high &middot; 0.8<br>(not rendered)</sub></td>
+</tr></table>
+
 ### hero aspect
 
 `storms.hero_aspect` &mdash; range **1 to 3**, default **1**, tier `restart`.
@@ -902,12 +912,12 @@ Convective outbreak vorticity amplitude
 
 ### oval density
 
-`storms.oval_density` &mdash; range **0 to 3**, default **1**, tier `restart`.
+`storms.oval_density` &mdash; range **0 to 4**, default **1**, tier `restart`.
 
 White-oval anticyclone population multiplier
 
 <table><tr>
-<td align="center"><img src="img/sliders/storms__oval_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td>
+<td align="center"><img src="img/sliders/storms__oval_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
 </tr></table>
 
 ### oval solid core
@@ -942,12 +952,12 @@ Scales the hero storm's dark perimeter ring + bright collar (the Red Spot Hollow
 
 ### small density
 
-`storms.small_density` &mdash; range **0 to 3**, default **0**, tier `restart`.
+`storms.small_density` &mdash; range **0 to 4**, default **0**, tier `restart`.
 
 Small-storm field: sub-oval white spots and dark spots scattered in loose latitude rows (0 = off, the pre-v1.1 look)
 
 <table><tr>
-<td align="center"><img src="img/sliders/storms__small_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td>
+<td align="center"><img src="img/sliders/storms__small_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
 </tr></table>
 
 ### stamp contrast

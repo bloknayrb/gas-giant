@@ -260,7 +260,12 @@ vec3 vortexStamp(vec3 p) {
                                           + 1.1 * sin(hth + lph.y) + lph.z);
                         float wq = smoothstep(0.12, 0.28, q)
                                  * (1.0 - smoothstep(0.82, 1.0, q));
-                        dT3 -= 0.22 * u_hero_emergence * b.z
+                        // 0.22 -> 0.30 (upper bound): at 0.22 the measured
+                        // interior luminance std was BELOW the pre-lane
+                        // render (4.5 vs 5.0; reference 18.9) — the dips must
+                        // reach toward the dark notch to move luminance, not
+                        // just hue.
+                        dT3 -= 0.30 * u_hero_emergence * b.z
                              * (0.5 + 0.5 * lane3) * plate * wq;
                         // Off-center bright knot (HST/Cassini: the interior's
                         // brightest patch sits off-center): seeded azimuth,
@@ -273,7 +278,7 @@ vec3 vortexStamp(vec3 p) {
                         // salmon at raised blend weight); the T0 lift rides
                         // along (0.14 -> 0.18).
                         dT0 += 0.18 * u_hero_emergence * knot * plate;
-                        dT3 += 0.24 * u_hero_emergence * knot * plate;
+                        dT3 += 0.32 * u_hero_emergence * knot * plate;
                         // Storm-within-a-storm nucleus: a compact dark inner
                         // eye at 0.25 rc, decorrelated from the bright knot
                         // (phase offset -2.6), dipping T3 toward the brown
@@ -282,7 +287,7 @@ vec3 vortexStamp(vec3 p) {
                         // past the notch read as a pale wash).
                         float q_off2b = q * q + 0.0625
                                       - 0.5 * q * cos(hth - lph.z - 2.6);
-                        dT3 -= 0.30 * u_hero_emergence * b.z
+                        dT3 -= 0.45 * u_hero_emergence * b.z
                              * exp(-6.0 * q_off2b) * plate;
                     }
                 }
@@ -828,10 +833,35 @@ float heroBandDeflect(vec3 p, float lat) {
         if (q > 2.3) continue;
         vec4 a = vortex_data[3 * i];
         float vlat = asin(clamp(a.y, -1.0, 1.0));
-        // Outer fade tightened (1.6,2.3)->(1.45,2.0): only the collar zone
-        // bows; bands beyond stay horizontal (reference: nothing but the
-        // collar itself is circular).
-        float bw = smoothstep(0.8, 1.2, q) * (1.0 - smoothstep(1.45, 2.0, q));
+        // Frame hoisted above bw: the outer fade is now azimuth-blended.
+        float wdir = vortex_data[3 * i + 2].x;
+        float plat = asin(clamp(p.y, -1.0, 1.0));
+        float plon = atan(p.z, p.x);
+        float vlon = atan(a.z, a.x);
+        float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
+        float asp = vortex_data[3 * i + 2].y;
+        float xe = dlon * wdir / max(asp, 1.0);            // + = downstream
+        float yn = plat - vlat;
+        float az = atan(yn, xe);                           // 0 = downstream
+        // Belt-side (equatorward) recovery tightened, FLANKS unchanged —
+        // round-B review: the flush relaxes toward THIS deflected target, so
+        // wherever the bow reaches, the re-imposed tone is the displaced
+        // pale hollow, not the belt; with the reach at 2.0 on every azimuth
+        // the belt could never contact the collar (the "north pinch"
+        // measured as a no-op: N-halo luminance unchanged). Tightening on
+        // ALL azimuths instead broke the bow/flush co-design on the flanks
+        // (a target-vs-flow disagreement annulus at q 1.7-2.0 that the
+        // wake-fold test's upstream window reads as folds). Blend: on the
+        // equatorward arc the boundary recovers by ~q 1.6 (apparent belt
+        // contact ~q 1.35 — a thin bright hollow rim, the reference pinch;
+        // apex bow stays >= 0.8 r, solve x(1-0.75 bw(x)) = 0.45); the
+        // flank/poleward window keeps (1.45, 2.0).
+        float eqs2 = (a.y < 0.0) ? 1.0 : -1.0;
+        float mm = clamp(yn / max(a.w * q, 1e-5), -1.0, 1.0);
+        float beltw2 = smoothstep(0.15, 0.7, mm * eqs2);
+        float bw = smoothstep(0.8, 1.2, q)
+                 * (1.0 - smoothstep(mix(1.45, 1.25, beltw2),
+                                     mix(2.0, 1.6, beltw2), q));
         // The painted wrap must not read authored: (a) downstream SHED — the
         // bow opens toward the wake so the wrapped strand hands off to
         // advected material instead of riding the collar at constant width
@@ -839,15 +869,6 @@ float heroBandDeflect(vec3 p, float lat) {
         // (b) seeded few-lobe raggedness so width/reach vary along the arc
         // like torn cloud, not a drawn band.
         {
-            float wdir = vortex_data[3 * i + 2].x;
-            float plat = asin(clamp(p.y, -1.0, 1.0));
-            float plon = atan(p.z, p.x);
-            float vlon = atan(a.z, a.x);
-            float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
-            float asp = vortex_data[3 * i + 2].y;
-            float xe = dlon * wdir / max(asp, 1.0);        // + = downstream
-            float yn = plat - vlat;
-            float az = atan(yn, xe);                       // 0 = downstream
             // FLANK-ONLY modulation: |cos(az)| is 1 on the east/west arcs
             // (the radius-locked "painted wrap ride" the reviews flagged)
             // and exactly 0 at the north/south apexes — the load-bearing

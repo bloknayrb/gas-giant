@@ -706,10 +706,18 @@ class StormsParams(_Params):
                     "via the same generic aspect path as hero_aspect. "
                     "1.0 = round (byte-identical)",
     )
+    companion_brightness: float = pfield(
+        0.32, tier=Tier.RESTART, lo=0.0, hi=0.8, adv=True, ui="Hero",
+        description="T0 brightness of the hero companion clouds. 0.32 = the "
+                    "pre-lever constant (byte-identical). Reference flank "
+                    "clouds are among the brightest pixels in the GRS "
+                    "neighborhood — on a pale-moat placement the default "
+                    "reads as a faint smudge",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(
-        1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), ui="Ovals",
+        1.0, tier=Tier.RESTART, lo=0.0, hi=4.0, rand=(0.4, 1.8), ui="Ovals",
         description="White-oval anticyclone population multiplier",
     )
     oval_solid_core: float = pfield(
@@ -846,7 +854,7 @@ class StormsParams(_Params):
 
     # -- Small storms ---------------------------------------------------
     small_density: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.4, 1.8), adv=True, ui="Small storms",
+        0.0, tier=Tier.RESTART, lo=0.0, hi=4.0, rand=(0.4, 1.8), adv=True, ui="Small storms",
         description="Small-storm field: sub-oval white spots and dark spots scattered "
                     "in loose latitude rows (0 = off, the pre-v1.1 look)",
     )
