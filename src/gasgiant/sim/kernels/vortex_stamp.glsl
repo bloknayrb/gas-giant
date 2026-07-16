@@ -32,6 +32,13 @@ uniform float u_hero_emergence;
 // every use is in a HERO_EMERGENCE arm (declare/use matrix rule).
 uniform float u_hero_shape;
 uniform vec3 u_hero_shape_phase;
+// storms.hero_taper: deterministic upstream-end wedge taper (the measured
+// reference departure-from-ellipse: the boundary converges toward a point on
+// the arc the flow arrives from, ~20-40% of local radius at its deepest;
+// the wake end stays blunt — the wake tear owns that end's drawn look).
+// No seed: the wedge is a fixed shape keyed to wake_dir. Declared inside
+// the variant: every use is in a HERO_EMERGENCE arm (declare/use matrix rule).
+uniform float u_hero_taper;
 #endif
 // Seeded noise offset for the hero interior fbm. Declared here (not reusing the
 // includer's u_detail_offset) because this file is #included BEFORE that uniform
@@ -158,31 +165,75 @@ vec3 vortexStamp(vec3 p) {
                 // "too perfect an oval" fix): every prior asymmetry modulated
                 // amplitude or ring radius AROUND an exact elliptical frame,
                 // so the eye still fits one clean ellipse through the storm.
-                // R(theta) multiplies the outline radius itself: equatorward
-                // FLATTENING (the belt presses the north rim flat — the
-                // reference GRS is egg-shaped, fuller poleward) plus seeded
-                // m=2/3 breathing so aspect and curvature drift around the
-                // arc. q/qrim/qcol all divide by R, so plateau, rings,
-                // collar, mottle and tint windows inherit ONE imperfect
-                // envelope (deforming only the rings would put a wobbly ring
-                // around a still-perfect plateau). heroRelaxWeight applies
-                // the SAME R (matched seeds; its az equals PI - hth) so the
-                // release band, flush and break arc follow the deformed
-                // envelope; the vorticity ring/skirt/anchor (vortex_omega)
-                // stay elliptical — the flow's envelope is smoother than the
-                // cloud outline, and the anchor basin must not wander.
-                if (hth_ok && u_hero_emergence > 0.0 && u_hero_shape > 0.0) {
-                    float thp = PI - hth;              // 0 = local EAST
-                    float neq = (a.y < 0.0) ? max(sin(hth), 0.0)
-                                            : max(-sin(hth), 0.0);
-                    vec3 sph = u_hero_shape_phase;
-                    // Seeded lobes 0.075/0.055 (raised from 0.05/0.04: at
-                    // ~2 px the seed dial was sub-perceptual — the flatten
-                    // is deterministic, so the lobes ARE the re-roll).
-                    float Rr = 1.0 - u_hero_shape * u_hero_emergence
-                                     * (0.11 * neq * neq
-                                        - 0.075 * sin(2.0 * thp + sph.x)
-                                        - 0.055 * sin(3.0 * thp + sph.y));
+                // R(theta) multiplies the outline radius itself. Two guarded
+                // contributions, each independently byte-identical-off:
+                //  - hero_shape: equatorward FLATTENING (the belt presses the
+                //    north rim flat; the reference GRS is fuller poleward)
+                //    plus seeded m=2/3 breathing so aspect and curvature
+                //    drift around the arc;
+                //  - hero_taper: deterministic UPSTREAM WEDGE — w peaks 1.0
+                //    at squashed-frame azimuth ~35 deg on the arriving-flow
+                //    side (6.75 = 27/4 normalizes c^4(1-c^2), max 4/27 at
+                //    c^2 = 2/3) and is exactly 0 at the tip, the sides and
+                //    the whole downstream half. Computed from the SQUASHED
+                //    cosine (east/asp), NOT hth: hth is the raw sphere
+                //    azimuth, and at aspect 2.2 it would mislocate the wedge
+                //    peak to ~17 deg physical, squeezed against the tip.
+                // q/qrim/qcol all divide by R, so plateau, rings, collar,
+                // mottle and tint windows inherit ONE imperfect envelope
+                // (deforming only the rings would put a wobbly ring around a
+                // still-perfect plateau). heroRelaxWeight applies the SAME R
+                // (matched seeds; its az equals PI - hth) and the vorticity
+                // ring/skirt (vortex_omega) carry it too — the boundary is
+                // emergent wound tracer riding the FLOW, so a tracer-only
+                // deformation is invisible (measured: the 3-seed strip).
+                // Only heroAnchorWindow and heroBandDeflect stay elliptical:
+                // capture-basin stability and bow calibration.
+                if (hth_ok && u_hero_emergence > 0.0
+                    && (u_hero_shape > 0.0 || u_hero_taper > 0.0)) {
+                    float Rr = 1.0;
+                    if (u_hero_shape > 0.0) {
+                        float thp = PI - hth;          // 0 = local EAST
+                        float neq = (a.y < 0.0) ? max(sin(hth), 0.0)
+                                                : max(-sin(hth), 0.0);
+                        vec3 sph = u_hero_shape_phase;
+                        // Seeded lobes 0.075/0.055 (raised from 0.05/0.04: at
+                        // ~2 px the seed dial was sub-perceptual — the
+                        // flatten is deterministic, so the lobes ARE the
+                        // re-roll).
+                        Rr -= u_hero_shape * u_hero_emergence
+                              * (0.11 * neq * neq
+                                 - 0.075 * sin(2.0 * thp + sph.x)
+                                 - 0.055 * sin(3.0 * thp + sph.y));
+                    }
+                    if (u_hero_taper > 0.0) {
+                        // Upstream-signed squashed cosine from a locally
+                        // rebuilt axis (h1 above is scoped to its frame
+                        // block). cross(j, c) points ANTI-east (the F06
+                        // chirality trap — hth 0 is local WEST), so
+                        // +wdir * dot = -wdir * east = upstream. a.w*q =
+                        // |squashed offset| exactly (the aspect-path metric
+                        // at the top of the loop). RAW q: this runs before
+                        // the divide below.
+                        vec3 tew = cross(vec3(0.0, 1.0, 0.0), a.xyz);
+                        float tewl = length(tew);
+                        float wdir_h = vortex_data[3 * i + 2].x;
+                        if (tewl > 1e-4) {
+                            float uct = clamp(wdir_h * dot(p, tew / tewl)
+                                              / (asp * max(a.w * q, 1e-5)),
+                                              -1.0, 1.0);
+                            float tc = max(uct, 0.0);
+                            float tc2 = tc * tc;
+                            float tw = 6.75 * tc2 * tc2 * (1.0 - tc2);
+                            Rr -= 0.25 * u_hero_taper * u_hero_emergence * tw;
+                            // Slider-space safety at the max lobes+taper
+                            // stack (worst Rr ~0.27); inert at defaults
+                            // (Rr_min ~0.58). Inside the taper guard: the
+                            // lobe-only path must stay byte-identical to the
+                            // pre-taper program.
+                            Rr = max(Rr, 0.4);
+                        }
+                    }
                     q /= Rr;
                     qrim /= Rr;
                     qcol /= Rr;
@@ -753,14 +804,30 @@ float heroRelaxWeight(vec3 p) {
         // flush and break arc must follow the deformed envelope, or the
         // relaxation would fight the stamped shape on every step. m/beltw
         // keep the raw q (directional weights — the R correction is
-        // second-order there).
-        if (u_hero_shape > 0.0) {
-            float neq = max(m * eqs, 0.0);
-            vec3 sph = u_hero_shape_phase;
-            float Rr = 1.0 - u_hero_shape * u_hero_emergence
-                             * (0.11 * neq * neq
-                                - 0.075 * sin(2.0 * az + sph.x)
-                                - 0.055 * sin(3.0 * az + sph.y));
+        // second-order there). The taper's uct comes from xe, which is
+        // already aspect-normalized AND downstream-signed (so -xe/(rc*q) is
+        // the upstream-signed SQUASHED cosine — same construction as the
+        // exact squashed sine m above).
+        if (u_hero_shape > 0.0 || u_hero_taper > 0.0) {
+            float Rr = 1.0;
+            if (u_hero_shape > 0.0) {
+                float neq = max(m * eqs, 0.0);
+                vec3 sph = u_hero_shape_phase;
+                Rr -= u_hero_shape * u_hero_emergence
+                      * (0.11 * neq * neq
+                         - 0.075 * sin(2.0 * az + sph.x)
+                         - 0.055 * sin(3.0 * az + sph.y));
+            }
+            if (u_hero_taper > 0.0) {
+                float uct = clamp(-xe / max(rc_h * q, 1e-5), -1.0, 1.0);
+                float tc = max(uct, 0.0);
+                float tc2 = tc * tc;
+                float tw = 6.75 * tc2 * tc2 * (1.0 - tc2);
+                Rr -= 0.25 * u_hero_taper * u_hero_emergence * tw;
+                // Same slider-space clamp as the stamp site, same guard
+                // placement (lobe-only path stays byte-identical).
+                Rr = max(Rr, 0.4);
+            }
             q /= Rr;
         }
         // Narrowed OFF the bright annulus (center 0.95, k 10 — was 1.0/3.8):

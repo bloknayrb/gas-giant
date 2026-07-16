@@ -170,7 +170,20 @@ _PINNED: dict[str, str] = {
     # heroRelaxWeight cull 3.6 -> 4.2 so the deformed flush fade COMPLETES on
     # max-bulge azimuths instead of truncating with a relax-rate step arc.
     # Far field beyond raw ~4.0 still returns exactly 1.0. Variant-arm-only.
-    "vortex_stamp.glsl": "edb879da3e3fc28b521f81e7bcce9adf75026461",
+    # Updated 2026-07-16 (storms.hero_taper, plan ancient-snuggling-meadow):
+    # both shape blocks restructured from a single-expression Rr to guarded
+    # accumulate (`Rr = 1.0; if shape>0 ...; if taper>0 ...`) and gained the
+    # deterministic upstream WEDGE term (0.25 amp, 6.75*c^4*(1-c^2) window on
+    # the squashed upstream cosine, Rr floor 0.4 inside the taper guard).
+    # Variant-arm-only; taper=0 output verified BYTE-identical across the
+    # restructure by the cross-commit capture (4 kinematic emergence scenes,
+    # dev 0+60, shape 1.0 and 0.0 — p05 cannot see HERO_EMERGENCE, so the
+    # capture is the binding gate; p05 9/9 unchanged same day). Constants
+    # cross-pinned by tests/unit/test_hero_shape_constants.py. Re-pinned same
+    # day: uct sign — cross(j, c) points ANTI-east (the F06 chirality trap),
+    # the first cut put the wedge downstream; caught by the new
+    # test_hero_taper_is_upstream_wedge before commit. Taper-guard-only.
+    "vortex_stamp.glsl": "ee7e31df6c4c2890efd3c361dbb84cc883d2f34a",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

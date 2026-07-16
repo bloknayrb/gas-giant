@@ -185,8 +185,8 @@ def test_emergence_moat_asymmetry_carves_downstream_arc(gpu):
     sph = np.asarray(sim.solver._shape_phase)
     neq = np.maximum(np.sin(hth), 0.0)   # southern hero: equatorward = north
     rr = 1.0 - p.storms.hero_shape * 0.9 * (0.11 * neq * neq
-                                            - 0.05 * np.sin(2.0 * hth + sph[0])
-                                            - 0.04 * np.sin(3.0 * hth + sph[1]))
+                                            - 0.075 * np.sin(2.0 * hth + sph[0])
+                                            - 0.055 * np.sin(3.0 * hth + sph[1]))
     q = q / rr
 
     annulus = (q > 1.15) & (q < 1.6)
@@ -321,11 +321,14 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     # immune to preset population drift without re-rolling the scene.
     p.storms.small_density = 3.0
     p.storms.outbreak_count = 2
-    # hero_shape deforms the vorticity ring/skirt (the streamlines) — part of
-    # the frozen scene contract: with it live, every shape retune re-rolls
-    # the chaotic fold pattern and the E/W margin with it. Wake physics is
-    # orthogonal to the outline deformation; pin the exact analytic oval.
+    # hero_shape/hero_taper deform the vorticity ring/skirt (the streamlines)
+    # — part of the frozen scene contract: with them live, every shape retune
+    # re-rolls the chaotic fold pattern and the E/W margin with it. The taper
+    # pin matters doubly: its wedge lives ON the upstream arc this statistic
+    # samples. Wake physics is orthogonal to the outline deformation; pin the
+    # exact analytic oval.
     p.storms.hero_shape = 0.0
+    p.storms.hero_taper = 0.0
     sim, tr = _sim_and_tracers(p, gpu)
     hero = sim.vortices.heroes()[0]
 
@@ -448,6 +451,80 @@ def test_hero_shape_lever_and_seed(gpu):
     np.testing.assert_array_equal(oval_b, oval)
 
 
+def test_hero_taper_lever(gpu):
+    """storms.hero_taper (the upstream wedge): taper=0 is deterministic
+    (byte-equal reruns — determinism, NOT a no-op claim: the restructured
+    guard's no-op is proven by the cross-commit capture, see the S1 commit);
+    taper=1 deforms; it works with the lobes at 0 AND composes with them.
+    Kinematic dev-0 path (byte-exact asserts legal)."""
+    def render(shape: float, taper: float) -> np.ndarray:
+        p = _solo_hero_params(emergence=0.9)
+        p.sim.dev_steps = 0
+        p.storms.hero_shape = shape
+        p.storms.hero_taper = taper
+        return _sim_and_tracers(p, gpu)[1]
+
+    base = render(0.0, 0.0)
+    base2 = render(0.0, 0.0)
+    np.testing.assert_array_equal(base, base2)          # determinism at 0
+
+    wedge = render(0.0, 1.0)
+    assert np.abs(wedge - base).max() > 1e-3, "hero_taper=1 did not deform"
+
+    lobes = render(1.0, 0.0)
+    both = render(1.0, 1.0)
+    assert np.abs(both - lobes).max() > 1e-3, "taper inert on top of the lobes"
+    assert np.abs(both - wedge).max() > 1e-3, "lobes inert on top of the taper"
+
+
+def test_hero_taper_is_upstream_wedge(gpu):
+    """The taper is a wdir-keyed UPSTREAM wedge: at dev 0 (pure stamp; lobes
+    and rim warp zeroed so the outline is otherwise analytic) the tapered
+    stamp differs from the untapered one ONLY on the upstream half — the
+    wedge weight 6.75*c^4*(1-c^2) with c = max(upstream_cos, 0) is exactly 0
+    downstream, and there Rr stays exactly 1.0 (q /= 1.0 is IEEE-exact), so
+    downstream texels are BYTE-identical. The bite lands in the ~35 deg
+    shoulder band, and both forced wake directions place it on their own
+    upstream side (the mirror pin: wdir is the one frame ingredient the
+    seeded lobes never used)."""
+    from gasgiant.params.model import WakeDir
+
+    def render(taper: float, wake: WakeDir):
+        p = _solo_hero_params(emergence=0.9, rim_warp=0.0)
+        p.sim.dev_steps = 0
+        p.storms.hero_shape = 0.0
+        p.storms.hero_taper = taper
+        p.storms.hero_wake_dir = wake
+        return _sim_and_tracers(p, gpu)
+
+    for wake in (WakeDir.WEST, WakeDir.EAST):
+        sim0, base = render(0.0, wake)
+        _, tap = render(1.0, wake)
+        hero = sim0.vortices.heroes()[0]
+        assert hero.wake_dir == (-1.0 if wake == WakeDir.WEST else 1.0)
+
+        lon_g, lat_g = _lonlat_grids(base.shape)
+        dlat = lat_g - hero.lat
+        dlon = np.mod(lon_g - hero.lon + 3.0 * np.pi, 2.0 * np.pi) - np.pi
+        x_east = dlon * np.cos(hero.lat) / hero.aspect
+        q = np.hypot(x_east, dlat) / hero.r_core
+        # Upstream-signed squashed cosine — the same construction as the
+        # shader's uct (test frame vs shader chord metric differ at O(q^2)
+        # near the storm; the mask margins below absorb that).
+        uct = -hero.wake_dir * x_east / np.maximum(hero.r_core * q, 1e-9)
+        diff = np.abs(tap.astype(np.float64) - base.astype(np.float64)).max(axis=-1)
+
+        down = uct < -0.02
+        assert diff[down].max() == 0.0, (
+            f"wake={wake}: taper leaked onto the downstream half "
+            f"(max diff {diff[down].max():.3e})"
+        )
+        shoulder = (uct > 0.6) & (uct < 0.95) & (q > 0.3) & (q < 2.0)
+        assert diff[shoulder].max() > 1e-3, (
+            f"wake={wake}: no wedge bite in the upstream shoulder band"
+        )
+
+
 def test_emergence_interior_t3_banding(gpu):
     """Interior circulation legibility rides T3 (the |T3|~0.9 tint blend swamps
     T0 — measured root cause): the T3 spiral lane + knot + nucleus must give
@@ -509,7 +586,7 @@ def test_emergence_changes_hero_neighborhood_only(gpu):
     compiled, and it must (a) measurably change the developed tracers near the
     hero (the relaxation there is faded so advection folds the field) while
     (b) leaving the far field byte-identical — heroRelaxWeight returns exactly
-    1.0 outside q<3.6, so rk == u_relax_k bit-for-bit out there."""
+    1.0 outside its q 4.2 cull, so rk == u_relax_k bit-for-bit out there."""
     off = _developed_tracers(_params(emergence=0.0), gpu)
     on = _developed_tracers(_params(emergence=0.8), gpu)
 
@@ -519,8 +596,8 @@ def test_emergence_changes_hero_neighborhood_only(gpu):
 
     # Locality: the far NORTH quarter (hero is at -22.5 deg south, i.e. the
     # southern half) is byte-identical. heroRelaxWeight returns exactly 1.0 there
-    # (no hero within q<3.6), so rk is unchanged and the relaxation math matches
-    # bit-for-bit. A real leak would be obvious given the hero is far south.
+    # (no hero within its q 4.2 cull), so rk is unchanged and the relaxation math
+    # matches bit-for-bit. A real leak would be obvious given the hero is far south.
     h = off.shape[0]
     far = slice(0, h // 4)                       # top quarter = far north
     np.testing.assert_array_equal(on[far], off[far])

@@ -69,6 +69,9 @@ uniform float u_hero_emergence;
 // rendered near-identical until the flow deformed too).
 uniform float u_hero_shape;
 uniform vec3 u_hero_shape_phase;
+// storms.hero_taper: the upstream wedge deforms the ring/skirt too, for the
+// same reason as the lobes above (the flow owns the outline).
+uniform float u_hero_taper;
 #endif
 // heroEllipQ for the variant-only heroAnchorWindow below (include-once, and
 // the include's whole body is #ifdef HERO_EMERGENCE). Needs vortex_data,
@@ -237,22 +240,45 @@ float vortexOmegaAccum(vec3 p) {
                 // calibrated ~76% skirt cancellation, far from the falsified
                 // full-shield regime; watch for roll-up per the note below.
                 float qh = q;
-                if (u_hero_shape > 0.0) {
+                if (u_hero_shape > 0.0 || u_hero_taper > 0.0) {
                     vec3 hcs = a.xyz;
                     vec3 hews = cross(vec3(0.0, 1.0, 0.0), hcs);
                     float hewls = length(hews);
                     if (hewls > 1e-4) {
                         vec3 hs1 = hews / hewls;
-                        vec3 hs2 = cross(hcs, hs1);
-                        float hths = atan(dot(p, hs2), dot(p, hs1));
-                        float thps = 3.14159265 - hths;   // 0 = local EAST
-                        float neqs = (a.y < 0.0) ? max(sin(hths), 0.0)
-                                                 : max(-sin(hths), 0.0);
-                        vec3 sphs = u_hero_shape_phase;
-                        float Rrs = 1.0 - u_hero_shape * u_hero_emergence
-                                          * (0.11 * neqs * neqs
-                                             - 0.075 * sin(2.0 * thps + sphs.x)
-                                             - 0.055 * sin(3.0 * thps + sphs.y));
+                        float Rrs = 1.0;
+                        if (u_hero_shape > 0.0) {
+                            vec3 hs2 = cross(hcs, hs1);
+                            float hths = atan(dot(p, hs2), dot(p, hs1));
+                            float thps = 3.14159265 - hths;   // 0 = local EAST
+                            float neqs = (a.y < 0.0) ? max(sin(hths), 0.0)
+                                                     : max(-sin(hths), 0.0);
+                            vec3 sphs = u_hero_shape_phase;
+                            Rrs -= u_hero_shape * u_hero_emergence
+                                   * (0.11 * neqs * neqs
+                                      - 0.075 * sin(2.0 * thps + sphs.x)
+                                      - 0.055 * sin(3.0 * thps + sphs.y));
+                        }
+                        if (u_hero_taper > 0.0) {
+                            // Upstream-signed SQUASHED cosine over r_core*q
+                            // = |squashed offset|; raw hero-metric q from
+                            // the loop head. hs1 = cross(j, c) points
+                            // ANTI-east (the F06 chirality trap), so
+                            // +wdir * dot = upstream. Matches the stamp and
+                            // relax wedges exactly (constants pinned by the
+                            // blocks-agree unit test).
+                            float wdir_h = vortex_data[3 * i + 2].x;
+                            float uct = clamp(wdir_h * dot(p, hs1)
+                                              / (asp * max(r_core * q, 1e-5)),
+                                              -1.0, 1.0);
+                            float tc = max(uct, 0.0);
+                            float tc2 = tc * tc;
+                            float tw = 6.75 * tc2 * tc2 * (1.0 - tc2);
+                            Rrs -= 0.25 * u_hero_taper * u_hero_emergence * tw;
+                            // Same slider-space clamp, same guard placement
+                            // as the tracer sites.
+                            Rrs = max(Rrs, 0.4);
+                        }
                         qh = q / Rrs;
                     }
                 }

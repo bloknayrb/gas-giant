@@ -384,6 +384,7 @@ class Solver:
             _set(k, "u_hero_emergence", p.storms.hero_emergence)
             _set(k, "u_hero_shape", p.storms.hero_shape)
             _set(k, "u_hero_shape_phase", self._shape_phase)
+            _set(k, "u_hero_taper", p.storms.hero_taper)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # Eddy-only drag (equirect only): the reduction kernel's grid size and the
@@ -706,6 +707,7 @@ class Solver:
                     _set(prog, "u_hero_noise_offset", self._detail_offset)
                     _set(prog, "u_hero_shape", p.storms.hero_shape)
                     _set(prog, "u_hero_shape_phase", self._shape_phase)
+                    _set(prog, "u_hero_taper", p.storms.hero_taper)
                     _set(prog, "u_warp_offset", self._warp_offset)
                     _set(prog, "u_warp_amount", p.bands.warp_amount)
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
@@ -747,6 +749,7 @@ class Solver:
             _set(k, "u_hero_noise_offset", self._detail_offset)
             _set(k, "u_hero_shape", p.storms.hero_shape)
             _set(k, "u_hero_shape_phase", self._shape_phase)
+            _set(k, "u_hero_taper", p.storms.hero_taper)
             _set(k, "u_warp_offset", self._warp_offset)
             _set(k, "u_warp_amount", p.bands.warp_amount)
             _set(k, "u_warp_freq", p.bands.warp_freq)

@@ -730,6 +730,16 @@ class StormsParams(_Params):
                     "substream of the master seed — changing it never "
                     "perturbs any other seeded draw",
     )
+    hero_taper: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=1.5, adv=True, ui="Hero",
+        description="Upstream-end wedge taper: the reference GRS's boundary "
+                    "converges toward a point on the side the flow arrives "
+                    "from (measured 20-40% of local radius), while the wake "
+                    "end stays blunt. Deterministic (no seed), follows "
+                    "hero_wake_dir, deepest at ~35 deg off the upstream tip; "
+                    "the tip, the flanks and the whole downstream half are "
+                    "untouched. Inert at hero_emergence 0",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(

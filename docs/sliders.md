@@ -818,6 +818,16 @@ GRS-class hero storm vorticity amplitude
 <td align="center"><img src="img/sliders/storms__hero_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
+### hero taper
+
+`storms.hero_taper` &mdash; range **0 to 1.5**, default **0**, tier `restart`.
+
+Upstream-end wedge taper: the reference GRS's boundary converges toward a point on the side the flow arrives from (measured 20-40% of local radius), while the wake end stays blunt. Deterministic (no seed), follows hero_wake_dir, deepest at ~35 deg off the upstream tip; the tip, the flanks and the whole downstream half are untouched. Inert at hero_emergence 0
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1.5<br>(not rendered)</sub></td>
+</tr></table>
+
 ### hero tint
 
 `storms.hero_tint` &mdash; range **-1 to 1**, default **0.9**, tier `restart`.
