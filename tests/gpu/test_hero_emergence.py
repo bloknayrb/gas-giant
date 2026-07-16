@@ -321,6 +321,11 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     # immune to preset population drift without re-rolling the scene.
     p.storms.small_density = 3.0
     p.storms.outbreak_count = 2
+    # hero_shape deforms the vorticity ring/skirt (the streamlines) — part of
+    # the frozen scene contract: with it live, every shape retune re-rolls
+    # the chaotic fold pattern and the E/W margin with it. Wake physics is
+    # orthogonal to the outline deformation; pin the exact analytic oval.
+    p.storms.hero_shape = 0.0
     sim, tr = _sim_and_tracers(p, gpu)
     hero = sim.vortices.heroes()[0]
 

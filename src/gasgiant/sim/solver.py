@@ -173,6 +173,13 @@ class Solver:
         # None = no train). Must be set BEFORE self.domains is built —
         # _domain_defines reads it for the FESTOON2 variant predicate.
         self.hero_wave_lat = hero_wave_lat
+        # Hero shape lobes: a DEDICATED substream keyed by the user-facing
+        # hero_shape_seed, so re-rolling the outline never perturbs any other
+        # seeded draw. Created HERE (not in _static_uniforms): the omega-state
+        # builder consumes it, and that runs before _static_uniforms.
+        shape_rng = subseed(params.seed,
+                            f"hero-shape:{params.storms.hero_shape_seed}")
+        self._shape_phase = tuple(shape_rng.uniform(0.0, 2.0 * np.pi, 3))
         self.events = events
         self.profile_omega = profile_omega_tex
 
@@ -375,6 +382,8 @@ class Solver:
             _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
             _set(k, "u_oval_solid_core", p.storms.oval_solid_core)
             _set(k, "u_hero_emergence", p.storms.hero_emergence)
+            _set(k, "u_hero_shape", p.storms.hero_shape)
+            _set(k, "u_hero_shape_phase", self._shape_phase)
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # Eddy-only drag (equirect only): the reduction kernel's grid size and the
@@ -661,11 +670,6 @@ class Solver:
         # byte-identical) and drawn UNCONDITIONALLY (stream position must not
         # depend on the FESTOON2 toggle).
         self._fest2_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
-        # Hero shape lobes: a DEDICATED substream keyed by the user-facing
-        # hero_shape_seed, so re-rolling the outline never perturbs any other
-        # seeded draw (and every other draw never perturbs the outline).
-        shape_rng = subseed(p.seed, f"hero-shape:{p.storms.hero_shape_seed}")
-        self._shape_phase = tuple(shape_rng.uniform(0.0, 2.0 * np.pi, 3))
 
         relax_k = 1.0 / max(p.turbulence.relax_tau, 1.0)
         for dom in self.domains:

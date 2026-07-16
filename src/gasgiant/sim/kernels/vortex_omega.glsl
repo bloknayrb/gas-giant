@@ -62,6 +62,13 @@ uniform float u_oval_solid_core;
 // GRS-realism pack strength (annular-ring morph + core anchor). Compiled as a
 // preprocessor variant: the default program text is the pre-feature kernel.
 uniform float u_hero_emergence;
+// storms.hero_shape (+ its dedicated seed substream): the hero ring/skirt
+// carry the SAME low-order outline deformation as the tracer anatomy — the
+// visible boundary is wound material riding THESE streamlines, so a tracer-
+// only deformation is invisible at develop time (measured: a 3-seed strip
+// rendered near-identical until the flow deformed too).
+uniform float u_hero_shape;
+uniform vec3 u_hero_shape_phase;
 #endif
 // heroEllipQ for the variant-only heroAnchorWindow below (include-once, and
 // the include's whole body is #ifdef HERO_EMERGENCE). Needs vortex_data,
@@ -220,8 +227,37 @@ float vortexOmegaAccum(vec3 p) {
             // rim in the same league as the calibrated disk (CFL-safe — the
             // advection CFL is velocity-based, and v_peak is unchanged).
             {
+                // Outline shape deformation on the FLOW: same R(theta), same
+                // seeds as vortex_stamp.glsl, applied to the ring/skirt q so
+                // the streamlines themselves are egg-shaped and the emergent
+                // wound boundary inherits the deformed outline. The anchor
+                // window (heroAnchorWindow) deliberately stays elliptical —
+                // capture-basin stability. R modulates radius by <=~13% at
+                // shape 1: net circulation moves a few percent around the
+                // calibrated ~76% skirt cancellation, far from the falsified
+                // full-shield regime; watch for roll-up per the note below.
+                float qh = q;
+                if (u_hero_shape > 0.0) {
+                    vec3 hcs = a.xyz;
+                    vec3 hews = cross(vec3(0.0, 1.0, 0.0), hcs);
+                    float hewls = length(hews);
+                    if (hewls > 1e-4) {
+                        vec3 hs1 = hews / hewls;
+                        vec3 hs2 = cross(hcs, hs1);
+                        float hths = atan(dot(p, hs2), dot(p, hs1));
+                        float thps = 3.14159265 - hths;   // 0 = local EAST
+                        float neqs = (a.y < 0.0) ? max(sin(hths), 0.0)
+                                                 : max(-sin(hths), 0.0);
+                        vec3 sphs = u_hero_shape_phase;
+                        float Rrs = 1.0 - u_hero_shape * u_hero_emergence
+                                          * (0.11 * neqs * neqs
+                                             - 0.075 * sin(2.0 * thps + sphs.x)
+                                             - 0.055 * sin(3.0 * thps + sphs.y));
+                        qh = q / Rrs;
+                    }
+                }
                 float ring = -6.0 * scale
-                           * (smoothstep(0.29, 0.55, q) - smoothstep(0.78, 1.04, q));
+                           * (smoothstep(0.29, 0.55, qh) - smoothstep(0.78, 1.04, qh));
                 // PARTIAL SHIELD skirt: the single-signed ring (like the solid
                 // disk it morphs from) carries NET circulation, so its velocity
                 // decays like 1/r and winds the whole neighborhood into a
@@ -252,7 +288,7 @@ float vortexOmegaAccum(vec3 p) {
                 // circulation's far field. Still PARTIAL (peak 17% of the
                 // ring's 6.0); watch for roll-up per the fallback note above.
                 ring += 1.0 * scale
-                      * (smoothstep(1.05, 1.35, q) - smoothstep(1.8, 2.4, q));
+                      * (smoothstep(1.05, 1.35, qh) - smoothstep(1.8, 2.4, qh));
                 disk = mix(disk, ring, u_hero_emergence);
             }
 #endif
