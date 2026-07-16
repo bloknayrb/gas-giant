@@ -164,7 +164,13 @@ _PINNED: dict[str, str] = {
     # hero_shape_seed (dedicated "hero-shape:<seed>" substream), via new
     # variant-declared uniforms u_hero_shape / u_hero_shape_phase replacing
     # the hard-coded amplitudes' shared noise-offset phases. Variant-arm-only.
-    "vortex_stamp.glsl": "11f7ee3b61659bb3d5723a68b8eb827da4d51bbd",
+    # Re-pinned same day: seeded lobes 0.05/0.04 -> 0.075/0.055 (at ~2 px the
+    # seed dial was sub-perceptual — a 3-seed strip rendered near-identical;
+    # the flatten is deterministic, so the lobes ARE the re-roll), and the
+    # heroRelaxWeight cull 3.6 -> 4.2 so the deformed flush fade COMPLETES on
+    # max-bulge azimuths instead of truncating with a relax-rate step arc.
+    # Far field beyond raw ~4.0 still returns exactly 1.0. Variant-arm-only.
+    "vortex_stamp.glsl": "edb879da3e3fc28b521f81e7bcce9adf75026461",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

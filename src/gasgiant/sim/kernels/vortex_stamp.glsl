@@ -176,10 +176,13 @@ vec3 vortexStamp(vec3 p) {
                     float neq = (a.y < 0.0) ? max(sin(hth), 0.0)
                                             : max(-sin(hth), 0.0);
                     vec3 sph = u_hero_shape_phase;
+                    // Seeded lobes 0.075/0.055 (raised from 0.05/0.04: at
+                    // ~2 px the seed dial was sub-perceptual — the flatten
+                    // is deterministic, so the lobes ARE the re-roll).
                     float Rr = 1.0 - u_hero_shape * u_hero_emergence
                                      * (0.11 * neq * neq
-                                        - 0.05 * sin(2.0 * thp + sph.x)
-                                        - 0.04 * sin(3.0 * thp + sph.y));
+                                        - 0.075 * sin(2.0 * thp + sph.x)
+                                        - 0.055 * sin(3.0 * thp + sph.y));
                     q /= Rr;
                     qrim /= Rr;
                     qcol /= Rr;
@@ -709,8 +712,15 @@ float heroRelaxWeight(vec3 p) {
                 wrel = max(wrel, rise * fall * aw);
             }
         }
-        float q = heroEllipQ(p, i, 3.6);
-        if (q > 3.6) continue;   // strictly local to the storm neighborhood
+        // Cull 3.6 -> 4.2: the outline deformation divides q below, so on
+        // max-bulge azimuths the flush's outer fade (deformed 3.4) needs raw
+        // q up to ~4.0 to COMPLETE — the old cull truncated it with a
+        // relax-rate step arc on the cull ellipse. Beyond raw ~4.0 the weight
+        // is exactly 1.0 again, so the far-field byte-identity contract is
+        // unchanged (locality tests' margins hold: meridional reach is
+        // unchanged at ~4.2 lat-radii only for max jitter).
+        float q = heroEllipQ(p, i, 4.2);
+        if (q > 4.2) continue;   // strictly local to the storm neighborhood
         // Upstream (leading-side) weight, from the aspect-normalized azimuth
         // in the wake frame: 1 on the arc the flow ARRIVES from, 0 downstream.
         // The reference's leading side is smoothly compressed laminar flow —
@@ -749,8 +759,8 @@ float heroRelaxWeight(vec3 p) {
             vec3 sph = u_hero_shape_phase;
             float Rr = 1.0 - u_hero_shape * u_hero_emergence
                              * (0.11 * neq * neq
-                                - 0.05 * sin(2.0 * az + sph.x)
-                                - 0.04 * sin(3.0 * az + sph.y));
+                                - 0.075 * sin(2.0 * az + sph.x)
+                                - 0.055 * sin(3.0 * az + sph.y));
             q /= Rr;
         }
         // Narrowed OFF the bright annulus (center 0.95, k 10 — was 1.0/3.8):
