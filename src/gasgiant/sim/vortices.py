@@ -755,7 +755,7 @@ def _add_accent_ovals(
     # the seeded-zone path — e.g. neptune's Scooter, accent_latitude None —
     # stay byte-identical).
     rel_off = float(rng.uniform(0.3, 0.55))
-    heroes = [v for v in reg.vortices if v.kind == KIND_HERO]
+    heroes = reg.heroes()
     if storms.accent_latitude is not None and pin_base is None and heroes:
         pin_base = float(
             (heroes[0].lon + heroes[0].wake_dir * rel_off + np.pi) % (2.0 * np.pi)
@@ -853,6 +853,11 @@ def _add_cast(
         if kind == CastKind.HERO and storms.hero_emergence > 0.0:
             wake_lat_off, wake_dir = _hero_wake_frame(profiles, lat, entry.radius)
             bow = _hero_bow_gain(profiles, lat, entry.radius)
+        if kind == CastKind.HERO:
+            # User override applies UNCONDITIONALLY, exactly like the seeded
+            # hero path above (PR-43 simplify-pass finding: the override was
+            # emergence-gated only here, so a cast hero at emergence 0
+            # silently ignored a forced direction a seeded hero honors).
             if storms.hero_wake_dir == WakeDir.EAST:
                 wake_dir = 1.0
             elif storms.hero_wake_dir == WakeDir.WEST:

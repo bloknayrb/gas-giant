@@ -109,6 +109,25 @@ def test_cast_hero_frame_matches_seeded_hero():
     assert abs(cast.bow_gain - seeded.bow_gain) < 1e-12
 
 
+def test_cast_hero_honors_forced_wake_dir_with_emergence_off():
+    """The EAST/WEST override applies unconditionally on the seeded path; the
+    cast path had it emergence-gated (simplify-pass finding), so a cast hero
+    at emergence 0 silently ignored a forced direction a seeded hero honors.
+    Both paths must agree."""
+    from gasgiant.params.model import WakeDir
+
+    p = load_factory_preset("gas_giant_warm")
+    p.storms.hero_count = 0
+    p.storms.hero_emergence = 0.0
+    p.storms.hero_wake_dir = WakeDir.EAST
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-21.0,
+                                   lon_deg=0.0, radius=0.062)]
+    bands = generate_bands(p.seed, p.bands)
+    prof = build_profiles(p.seed, bands, p.bands, p.jets)
+    reg = generate_vortices(p.seed, bands, prof, p.storms, p.poles)
+    assert reg.heroes()[0].wake_dir == 1.0
+
+
 # ------------------------------------------------------ companion_brightness
 
 def test_companion_brightness_reaches_the_companions():
