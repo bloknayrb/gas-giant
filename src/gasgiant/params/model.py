@@ -714,6 +714,22 @@ class StormsParams(_Params):
                     "neighborhood — on a pale-moat placement the default "
                     "reads as a faint smudge",
     )
+    hero_shape: float = pfield(
+        1.0, tier=Tier.RESTART, lo=0.0, hi=1.5, adv=True, ui="Hero",
+        description="Low-order deformation of the hero's outline away from a "
+                    "perfect ellipse: equatorward flattening (the belt presses "
+                    "the rim flat) plus seeded lobes so aspect and curvature "
+                    "drift around the arc. 0 = exact analytic oval, 1 = the "
+                    "calibrated GRS egg. Rides the emergence variant — inert "
+                    "at hero_emergence 0. Past ~1.4 the ragged-release band "
+                    "drifts onto the bright annulus",
+    )
+    hero_shape_seed: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=99999, adv=True, ui="Hero",
+        description="Re-rolls the hero's seeded shape lobes on their own "
+                    "substream of the master seed — changing it never "
+                    "perturbs any other seeded draw",
+    )
 
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(

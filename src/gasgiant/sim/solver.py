@@ -661,6 +661,11 @@ class Solver:
         # byte-identical) and drawn UNCONDITIONALLY (stream position must not
         # depend on the FESTOON2 toggle).
         self._fest2_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
+        # Hero shape lobes: a DEDICATED substream keyed by the user-facing
+        # hero_shape_seed, so re-rolling the outline never perturbs any other
+        # seeded draw (and every other draw never perturbs the outline).
+        shape_rng = subseed(p.seed, f"hero-shape:{p.storms.hero_shape_seed}")
+        self._shape_phase = tuple(shape_rng.uniform(0.0, 2.0 * np.pi, 3))
 
         relax_k = 1.0 / max(p.turbulence.relax_tau, 1.0)
         for dom in self.domains:
@@ -695,6 +700,8 @@ class Solver:
                     _set(prog, "u_hero_wake_detail", p.storms.hero_wake_detail)
                     _set(prog, "u_hero_emergence", p.storms.hero_emergence)
                     _set(prog, "u_hero_noise_offset", self._detail_offset)
+                    _set(prog, "u_hero_shape", p.storms.hero_shape)
+                    _set(prog, "u_hero_shape_phase", self._shape_phase)
                     _set(prog, "u_warp_offset", self._warp_offset)
                     _set(prog, "u_warp_amount", p.bands.warp_amount)
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
@@ -734,6 +741,8 @@ class Solver:
             _set(k, "u_hero_rim_tint", p.storms.hero_rim_tint)
             _set(k, "u_hero_wake_detail", p.storms.hero_wake_detail)
             _set(k, "u_hero_noise_offset", self._detail_offset)
+            _set(k, "u_hero_shape", p.storms.hero_shape)
+            _set(k, "u_hero_shape_phase", self._shape_phase)
             _set(k, "u_warp_offset", self._warp_offset)
             _set(k, "u_warp_amount", p.bands.warp_amount)
             _set(k, "u_warp_freq", p.bands.warp_freq)

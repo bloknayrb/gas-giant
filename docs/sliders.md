@@ -778,6 +778,26 @@ Lumpy-oval boundary: warps the hero's dark perimeter ring + bright collar with a
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__hero_rim_warp__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
+### hero shape
+
+`storms.hero_shape` &mdash; range **0 to 1.5**, default **1**, tier `restart`.
+
+Low-order deformation of the hero's outline away from a perfect ellipse: equatorward flattening (the belt presses the rim flat) plus seeded lobes so aspect and curvature drift around the arc. 0 = exact analytic oval, 1 = the calibrated GRS egg. Rides the emergence variant — inert at hero_emergence 0. Past ~1.4 the ragged-release band drifts onto the bright annulus
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 1.5<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero shape seed
+
+`storms.hero_shape_seed` &mdash; range **0 to 99999**, default **0**, tier `restart`.
+
+Re-rolls the hero's seeded shape lobes on their own substream of the master seed — changing it never perturbs any other seeded draw
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 99999<br>(not rendered)</sub></td>
+</tr></table>
+
 ### hero solid core
 
 `storms.hero_solid_core` &mdash; range **0 to 1**, default **0**, tier `restart`.

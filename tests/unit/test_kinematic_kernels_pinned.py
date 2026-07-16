@@ -159,7 +159,12 @@ _PINNED: dict[str, str] = {
     # collar and the release/flush windows share ONE imperfect envelope.
     # heroBandDeflect and the vorticity-side windows deliberately stay
     # elliptical (bow calibration + anchor basin). Variant-arm-only.
-    "vortex_stamp.glsl": "0f9e17595e923a38236906c74b51f2b5e6aeccc5",
+    # Re-pinned same day: the deformation became a user lever —
+    # storms.hero_shape (intensity, default 1.0 = the calibrated egg) +
+    # hero_shape_seed (dedicated "hero-shape:<seed>" substream), via new
+    # variant-declared uniforms u_hero_shape / u_hero_shape_phase replacing
+    # the hard-coded amplitudes' shared noise-offset phases. Variant-arm-only.
+    "vortex_stamp.glsl": "11f7ee3b61659bb3d5723a68b8eb827da4d51bbd",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

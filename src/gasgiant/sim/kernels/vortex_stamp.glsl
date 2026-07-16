@@ -25,6 +25,13 @@ uniform float u_hero_wake_detail;  // wake filament structure; 0 disables (byte-
 // the default program text is the pre-feature kernel — byte-identical by
 // construction, per the project rule (gated out, not branch-guarded).
 uniform float u_hero_emergence;
+// storms.hero_shape: intensity of the low-order outline deformation (0 =
+// exact analytic oval); u_hero_shape_phase = seeded lobe phases from the
+// DEDICATED "hero-shape:<hero_shape_seed>" substream — user-re-rollable
+// without perturbing any other seeded draw. Declared inside the variant:
+// every use is in a HERO_EMERGENCE arm (declare/use matrix rule).
+uniform float u_hero_shape;
+uniform vec3 u_hero_shape_phase;
 #endif
 // Seeded noise offset for the hero interior fbm. Declared here (not reusing the
 // includer's u_detail_offset) because this file is #included BEFORE that uniform
@@ -164,12 +171,12 @@ vec3 vortexStamp(vec3 p) {
                 // envelope; the vorticity ring/skirt/anchor (vortex_omega)
                 // stay elliptical — the flow's envelope is smoother than the
                 // cloud outline, and the anchor basin must not wander.
-                if (hth_ok && u_hero_emergence > 0.0) {
+                if (hth_ok && u_hero_emergence > 0.0 && u_hero_shape > 0.0) {
                     float thp = PI - hth;              // 0 = local EAST
                     float neq = (a.y < 0.0) ? max(sin(hth), 0.0)
                                             : max(-sin(hth), 0.0);
-                    vec3 sph = u_hero_noise_offset * 29.7;
-                    float Rr = 1.0 - u_hero_emergence
+                    vec3 sph = u_hero_shape_phase;
+                    float Rr = 1.0 - u_hero_shape * u_hero_emergence
                                      * (0.11 * neq * neq
                                         - 0.05 * sin(2.0 * thp + sph.x)
                                         - 0.04 * sin(3.0 * thp + sph.y));
@@ -737,10 +744,10 @@ float heroRelaxWeight(vec3 p) {
         // relaxation would fight the stamped shape on every step. m/beltw
         // keep the raw q (directional weights — the R correction is
         // second-order there).
-        {
+        if (u_hero_shape > 0.0) {
             float neq = max(m * eqs, 0.0);
-            vec3 sph = u_hero_noise_offset * 29.7;
-            float Rr = 1.0 - u_hero_emergence
+            vec3 sph = u_hero_shape_phase;
+            float Rr = 1.0 - u_hero_shape * u_hero_emergence
                              * (0.11 * neq * neq
                                 - 0.05 * sin(2.0 * az + sph.x)
                                 - 0.04 * sin(3.0 * az + sph.y));

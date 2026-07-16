@@ -174,18 +174,19 @@ def test_emergence_moat_asymmetry_carves_downstream_arc(gpu):
     q = np.hypot(x_east, dlat) / hero.r_core
     hth = np.arctan2(dlat, x_east)   # 0 = east, +pi/2 = north, +-pi = west
     # Probe in the DEFORMED outline frame: the shape deformation (equatorward
-    # flatten + seeded m=2/3 breathing) moves the collar's test-frame radius
-    # by up to ~9% per azimuth, so a rigid-ellipse annulus catches different
-    # anatomy per azimuth and dilutes the carve margin (measured 0.02 ->
-    # 0.008). Mirror of the shader's R(theta) (vortex_stamp.glsl; this hth
-    # equals the shader's PI - hth, and the seeds are the solver's hero noise
-    # offset); e = 0.9 from the config above. The pinned kernel hash forces a
-    # conscious update here if the shader constants move.
-    sph = np.asarray(sim.solver._detail_offset) * 29.7
+    # flatten + seeded m=2/3 breathing, storms.hero_shape) moves the collar's
+    # test-frame radius by up to ~9% per azimuth, so a rigid-ellipse annulus
+    # catches different anatomy per azimuth and dilutes the carve margin
+    # (measured 0.02 -> 0.008). Mirror of the shader's R(theta)
+    # (vortex_stamp.glsl; this hth equals the shader's PI - hth, and the
+    # phases are the solver's dedicated hero-shape substream); e = 0.9 and
+    # hero_shape = default 1.0 from the config above. The pinned kernel hash
+    # forces a conscious update here if the shader constants move.
+    sph = np.asarray(sim.solver._shape_phase)
     neq = np.maximum(np.sin(hth), 0.0)   # southern hero: equatorward = north
-    rr = 1.0 - 0.9 * (0.11 * neq * neq
-                      - 0.05 * np.sin(2.0 * hth + sph[0])
-                      - 0.04 * np.sin(3.0 * hth + sph[1]))
+    rr = 1.0 - p.storms.hero_shape * 0.9 * (0.11 * neq * neq
+                                            - 0.05 * np.sin(2.0 * hth + sph[0])
+                                            - 0.04 * np.sin(3.0 * hth + sph[1]))
     q = q / rr
 
     annulus = (q > 1.15) & (q < 1.6)
@@ -412,6 +413,34 @@ def test_emergence_flush_pinches_belt_side(gpu):
         f"poleward residual ({pol_res:.4f}) — the belt-side flush pinch is "
         "not asserting the band harder than the zone-side moat"
     )
+
+
+def test_hero_shape_lever_and_seed(gpu):
+    """storms.hero_shape / hero_shape_seed (the outline-deformation lever):
+    shape=0 is a deterministic exact oval distinct from shape=1; the seed
+    re-rolls the lobes on its own substream (different outline, same
+    everything else at stamp level); same seed reproduces bit-for-bit.
+    Kinematic path (byte-exact asserts legal)."""
+    def render(shape: float, seed: int) -> np.ndarray:
+        p = _solo_hero_params(emergence=0.9)
+        p.sim.dev_steps = 0
+        p.storms.hero_shape = shape
+        p.storms.hero_shape_seed = seed
+        return _sim_and_tracers(p, gpu)[1]
+
+    oval = render(0.0, 0)
+    oval2 = render(0.0, 0)
+    np.testing.assert_array_equal(oval, oval2)          # determinism at 0
+
+    egg = render(1.0, 0)
+    assert np.abs(egg - oval).max() > 1e-3, "hero_shape=1 did not deform"
+
+    egg_b = render(1.0, 7)
+    assert np.abs(egg_b - egg).max() > 1e-3, "hero_shape_seed did not re-roll"
+    # The seed must be inert while the deformation is OFF (own substream,
+    # consumed only by the shape terms).
+    oval_b = render(0.0, 7)
+    np.testing.assert_array_equal(oval_b, oval)
 
 
 def test_emergence_interior_t3_banding(gpu):

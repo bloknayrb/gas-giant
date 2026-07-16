@@ -137,6 +137,8 @@
       "hero_companions": 2,
       "companion_aspect": 1.0,
       "companion_brightness": 0.55,
+      "hero_shape": 1.0,
+      "hero_shape_seed": 0,
       "oval_density": 3.5,
       "oval_solid_core": 1.0,
       "accent_count": 1,
