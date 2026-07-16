@@ -151,7 +151,15 @@ _PINNED: dict[str, str] = {
     # amplitudes to their calibration bounds (lane3 0.30, knot T3 0.32,
     # nucleus 0.45 — measured interior luminance std 4.5 vs reference 18.9).
     # Variant-arm-only; default text unchanged; p05 9/9.
-    "vortex_stamp.glsl": "8c1a7ec5c51125fc86077002511736b4f6a3813e",
+    # Re-pinned same day (user: "is it too perfect of an oval?" — yes): a
+    # low-order SHAPE deformation of the hero outline itself. R(theta)
+    # divides q/qrim/qcol in the stamp anatomy AND q in heroRelaxWeight
+    # (matched seeds): equatorward flattening 0.11 e (belt presses the north
+    # rim flat) + seeded m=2/3 breathing 0.05/0.04 e, so plateau, rings,
+    # collar and the release/flush windows share ONE imperfect envelope.
+    # heroBandDeflect and the vorticity-side windows deliberately stay
+    # elliptical (bow calibration + anchor basin). Variant-arm-only.
+    "vortex_stamp.glsl": "0f9e17595e923a38236906c74b51f2b5e6aeccc5",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

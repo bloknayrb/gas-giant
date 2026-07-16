@@ -146,6 +146,38 @@ vec3 vortexStamp(vec3 p) {
                         hth_ok = true;
                     }
                 }
+#ifdef HERO_EMERGENCE
+                // Low-order SHAPE deformation of the whole hero outline (the
+                // "too perfect an oval" fix): every prior asymmetry modulated
+                // amplitude or ring radius AROUND an exact elliptical frame,
+                // so the eye still fits one clean ellipse through the storm.
+                // R(theta) multiplies the outline radius itself: equatorward
+                // FLATTENING (the belt presses the north rim flat — the
+                // reference GRS is egg-shaped, fuller poleward) plus seeded
+                // m=2/3 breathing so aspect and curvature drift around the
+                // arc. q/qrim/qcol all divide by R, so plateau, rings,
+                // collar, mottle and tint windows inherit ONE imperfect
+                // envelope (deforming only the rings would put a wobbly ring
+                // around a still-perfect plateau). heroRelaxWeight applies
+                // the SAME R (matched seeds; its az equals PI - hth) so the
+                // release band, flush and break arc follow the deformed
+                // envelope; the vorticity ring/skirt/anchor (vortex_omega)
+                // stay elliptical — the flow's envelope is smoother than the
+                // cloud outline, and the anchor basin must not wander.
+                if (hth_ok && u_hero_emergence > 0.0) {
+                    float thp = PI - hth;              // 0 = local EAST
+                    float neq = (a.y < 0.0) ? max(sin(hth), 0.0)
+                                            : max(-sin(hth), 0.0);
+                    vec3 sph = u_hero_noise_offset * 29.7;
+                    float Rr = 1.0 - u_hero_emergence
+                                     * (0.11 * neq * neq
+                                        - 0.05 * sin(2.0 * thp + sph.x)
+                                        - 0.04 * sin(3.0 * thp + sph.y));
+                    q /= Rr;
+                    qrim /= Rr;
+                    qcol /= Rr;
+                }
+#endif
                 if (u_hero_rim_warp > 0.0 && hth_ok) {
                     // Seeded phases from the hero noise offset (deterministic).
                     vec3 ph = u_hero_noise_offset * 6.2831853;
@@ -699,6 +731,21 @@ float heroRelaxWeight(vec3 p) {
         float zonew = smoothstep(0.15, 0.7, -m * eqs);
         float az    = (q > 0.05) ? atan(yn, dlon) : 0.0;
         vec3  fph   = u_hero_noise_offset * 23.1;
+        // Same low-order outline deformation as the stamp anatomy (matched
+        // seeds; az here equals the stamp's PI - hth): the release band,
+        // flush and break arc must follow the deformed envelope, or the
+        // relaxation would fight the stamped shape on every step. m/beltw
+        // keep the raw q (directional weights — the R correction is
+        // second-order there).
+        {
+            float neq = max(m * eqs, 0.0);
+            vec3 sph = u_hero_noise_offset * 29.7;
+            float Rr = 1.0 - u_hero_emergence
+                             * (0.11 * neq * neq
+                                - 0.05 * sin(2.0 * az + sph.x)
+                                - 0.04 * sin(3.0 * az + sph.y));
+            q /= Rr;
+        }
         // Narrowed OFF the bright annulus (center 0.95, k 10 — was 1.0/3.8):
         // the fade must release the PLATEAU EDGE to the flow without also
         // releasing the thin annulus at ~1.16, which already fights the

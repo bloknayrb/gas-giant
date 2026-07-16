@@ -173,6 +173,20 @@ def test_emergence_moat_asymmetry_carves_downstream_arc(gpu):
     x_east = dlon * np.cos(hero.lat) / hero.aspect
     q = np.hypot(x_east, dlat) / hero.r_core
     hth = np.arctan2(dlat, x_east)   # 0 = east, +pi/2 = north, +-pi = west
+    # Probe in the DEFORMED outline frame: the shape deformation (equatorward
+    # flatten + seeded m=2/3 breathing) moves the collar's test-frame radius
+    # by up to ~9% per azimuth, so a rigid-ellipse annulus catches different
+    # anatomy per azimuth and dilutes the carve margin (measured 0.02 ->
+    # 0.008). Mirror of the shader's R(theta) (vortex_stamp.glsl; this hth
+    # equals the shader's PI - hth, and the seeds are the solver's hero noise
+    # offset); e = 0.9 from the config above. The pinned kernel hash forces a
+    # conscious update here if the shader constants move.
+    sph = np.asarray(sim.solver._detail_offset) * 29.7
+    neq = np.maximum(np.sin(hth), 0.0)   # southern hero: equatorward = north
+    rr = 1.0 - 0.9 * (0.11 * neq * neq
+                      - 0.05 * np.sin(2.0 * hth + sph[0])
+                      - 0.04 * np.sin(3.0 * hth + sph[1]))
+    q = q / rr
 
     annulus = (q > 1.15) & (q < 1.6)
     south = np.sin(hth) < -0.3
