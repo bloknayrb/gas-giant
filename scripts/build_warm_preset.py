@@ -99,10 +99,13 @@ def main():
         "accent_count": 1,
         "accent_latitude": -29.0,
         "accent_radius": 0.05,
-        "accent_tint": 0.65,            # 0.75 + brightness 0.20 read as
-        "accent_brightness": 0.05,      # another pale oval (redness 52 vs the
-                                        # ~80 of belt material); deeper tint +
-                                        # near-zero brightness = red-brown
+        "accent_tint": 0.65,            # round-2 review: a salmon canvas has
+        "accent_brightness": -0.18,     # NO chroma headroom — "redder" is
+                                        # invisible (R-B delta ~0-11). The
+                                        # accent must read via VALUE, like the
+                                        # reference's brown ovals and the
+                                        # Neptune GDS (negative brightness =
+                                        # dark storm, the W5 lever's dark path)
         "oval_solid_core": 1.0,
         "oval_density": 3.5,            # bounds raised 3.0 -> 4.0: the SW/S
         "small_density": 3.5,           # neighborhood counted ~0.2x the

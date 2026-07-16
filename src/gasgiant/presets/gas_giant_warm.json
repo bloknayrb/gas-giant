@@ -143,7 +143,7 @@
       "accent_latitude": -29.0,
       "accent_longitude": null,
       "accent_tint": 0.65,
-      "accent_brightness": 0.05,
+      "accent_brightness": -0.18,
       "accent_radius": 0.05,
       "accent_aspect": 1.0,
       "barge_density": 2.989,
