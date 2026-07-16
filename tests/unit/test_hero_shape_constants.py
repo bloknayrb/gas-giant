@@ -46,7 +46,10 @@ _EXPECT = [
     (_LOBE_M2, "0.075", {"vortex_stamp.glsl": 2, "vortex_omega.glsl": 1, "mirror": 1}),
     (_LOBE_M3, "0.055", {"vortex_stamp.glsl": 2, "vortex_omega.glsl": 1, "mirror": 1}),
     (_TAPER_AMP, "0.25", {"vortex_stamp.glsl": 2, "vortex_omega.glsl": 1}),
-    (_TAPER_NORM, "6.75", {"vortex_stamp.glsl": 2, "vortex_omega.glsl": 1}),
+    # THREE wedge windows in vortex_stamp: stamp anatomy, heroRelaxWeight,
+    # and the heroBandDeflect convergence (the bow's outer recovery pulls in
+    # on the wedge arc — the stagnation-point closure).
+    (_TAPER_NORM, "6.75", {"vortex_stamp.glsl": 3, "vortex_omega.glsl": 1}),
     (_TAPER_FLOOR, "0.4", {"vortex_stamp.glsl": 2, "vortex_omega.glsl": 1}),
 ]
 

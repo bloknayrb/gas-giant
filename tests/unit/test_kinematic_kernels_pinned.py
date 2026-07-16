@@ -183,7 +183,19 @@ _PINNED: dict[str, str] = {
     # day: uct sign — cross(j, c) points ANTI-east (the F06 chirality trap),
     # the first cut put the wedge downstream; caught by the new
     # test_hero_taper_is_upstream_wedge before commit. Taper-guard-only.
-    "vortex_stamp.glsl": "ee7e31df6c4c2890efd3c361dbb84cc883d2f34a",
+    # Re-pinned 2026-07-16 (taper equilibrium mechanisms, S2 calibration):
+    # geometric deformation alone measured ~0 at dev 700 (psi low-passes the
+    # wedge harmonics; wound material re-parks on smooth streamlines; the
+    # dev-60 field shows the wedge plainly). Three taper-guarded holds so
+    # the equilibrium keeps it: erosion hold on the wedge arc (release
+    # suppressed x(1-0.7*e*twr)), wedge flush (x12 fast-relax from just
+    # outside the DEFORMED annulus — only the flush rate outruns advective
+    # re-supply), and the heroBandDeflect CONVERGENCE (the bow's outer
+    # recovery pulls in up to 35% on the wedge arc — the hollow closes at
+    # the stagnation point; the percept lives on THIS contour, measured).
+    # All under u_hero_taper > 0 guards / twr = 0 off; cross-commit capture
+    # 4/4 byte-identical, p05 9/9 unchanged.
+    "vortex_stamp.glsl": "452464a9f89f2904553e316b2cd07307ca84fb08",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

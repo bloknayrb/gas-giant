@@ -808,6 +808,7 @@ float heroRelaxWeight(vec3 p) {
         // already aspect-normalized AND downstream-signed (so -xe/(rc*q) is
         // the upstream-signed SQUASHED cosine — same construction as the
         // exact squashed sine m above).
+        float twr = 0.0;
         if (u_hero_shape > 0.0 || u_hero_taper > 0.0) {
             float Rr = 1.0;
             if (u_hero_shape > 0.0) {
@@ -827,6 +828,10 @@ float heroRelaxWeight(vec3 p) {
                 // Same slider-space clamp as the stamp site, same guard
                 // placement (lobe-only path stays byte-identical).
                 Rr = max(Rr, 0.4);
+                // Exported for the erosion hold below: the wedge window
+                // scaled to slider 1 (past 1 the hold saturates — deeper
+                // geometry, not more hold).
+                twr = min(u_hero_taper, 1.0) * tw;
             }
             q /= Rr;
         }
@@ -874,6 +879,16 @@ float heroRelaxWeight(vec3 p) {
             // the ellipse instead of only its pixel-scale fray.
             ero = clamp(ero * (0.95 + 0.30 * u_hero_emergence * rl2),
                         0.0, 1.4);
+            // Taper HOLD: the wedge geometry decays at equilibrium if the
+            // boundary there is released — psi = inv-Laplacian(omega)
+            // low-passes the wedge harmonics, so the streamlines re-round
+            // what the release hands them (measured: 22% stamp wedge ->
+            // ~3% visible at dev 700, while dev 60 shows it plainly). On
+            // the wedge arc the boundary must stay TARGET-held at the
+            // deformed geometry — the exact mechanism that keeps the
+            // leading side clean. twr = 0 whenever taper is off (declared
+            // outside the guard, assigned inside) -> byte-identical off.
+            ero *= 1.0 - 0.7 * u_hero_emergence * twr;
             // Leading side stays SMOOTH: the erosion (which hands rim arcs
             // to the flow) is suppressed on the upstream arc, so the belt's
             // approach meets a target-held, cleanly-deflected boundary
@@ -911,6 +926,18 @@ float heroRelaxWeight(vec3 p) {
         float floorf = smoothstep(2.05, 2.35, q)
                      * (1.0 - smoothstep(2.7, 3.4, q));
         flush = max(flush, max(shaped, floorf));
+        // Taper WEDGE FLUSH: only the x12 flush rate ever asserts target
+        // geometry against advective re-supply (relax_tau at normal rate is
+        // hundreds of steps; the wound band re-parks on the psi-smoothed
+        // streamlines faster — measured: the erosion hold alone moved the
+        // equilibrium boundary ~0%). On the wedge arc, fast-relax from just
+        // outside the DEFORMED annulus (q here is already deformed) so the
+        // moat asserts down to the wedge boundary and the dark ring prints
+        // AT the deformed radius — the same mechanism as the belt-side
+        // pinch, which is the measured super-threshold mover. twr = 0 when
+        // taper is off -> byte-identical.
+        flush = max(flush, twr * smoothstep(1.02, 1.25, q)
+                               * (1.0 - smoothstep(2.7, 3.4, q)));
     }
     // Wake release: fade relaxation inside the wedge (CAPPED at 0.75 — the
     // floor prevents long-run homogenization into mud; through-flow refreshes
@@ -990,9 +1017,30 @@ float heroBandDeflect(vec3 p, float lat) {
         float eqs2 = (a.y < 0.0) ? 1.0 : -1.0;
         float mm = clamp(yn / max(a.w * q, 1e-5), -1.0, 1.0);
         float beltw2 = smoothstep(0.15, 0.7, mm * eqs2);
+        float ob1 = mix(1.45, 1.25, beltw2);
+        float ob2 = mix(2.0, 1.6, beltw2);
+        // Taper CONVERGENCE — the percept lives HERE, not in the vortex
+        // ring: the reference's pointed upstream end is stagnation-point
+        // geometry (the hollow closing where the ambient jets rejoin), and
+        // this bow window IS the hollow width. Deforming the ring/targets
+        // alone measured ~0 at equilibrium (psi low-passes the wedge
+        // harmonics; wound material re-parks on smooth streamlines). On the
+        // wedge arc the outer recovery pulls IN (up to 35% at the shoulder
+        // peak): the band boundary runs ~straight there, pressing the
+        // hollow closed onto the (target-held, wedge-deformed) boundary.
+        // Deterministic + upstream-only: the lobes' bow EXCLUSION (seeded
+        // noise must not perturb the calibrated bow) does not apply.
+        if (u_hero_taper > 0.0) {
+            float uct = clamp(-xe / max(a.w * q, 1e-5), -1.0, 1.0);
+            float tc = max(uct, 0.0);
+            float tc2 = tc * tc;
+            float tw = 6.75 * tc2 * tc2 * (1.0 - tc2);
+            float hold = 0.35 * min(u_hero_taper, 1.0) * u_hero_emergence * tw;
+            ob1 *= 1.0 - hold;
+            ob2 *= 1.0 - hold;
+        }
         float bw = smoothstep(0.8, 1.2, q)
-                 * (1.0 - smoothstep(mix(1.45, 1.25, beltw2),
-                                     mix(2.0, 1.6, beltw2), q));
+                 * (1.0 - smoothstep(ob1, ob2, q));
         // The painted wrap must not read authored: (a) downstream SHED — the
         // bow opens toward the wake so the wrapped strand hands off to
         // advected material instead of riding the collar at constant width
