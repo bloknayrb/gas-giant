@@ -110,6 +110,33 @@ def test_explicit_longitude_pin_still_wins():
     assert np.isclose(acc.lon, np.deg2rad(1.0))
 
 
+def test_warm_recipe_survives_the_population_cap():
+    """accents/companions seed LAST and the kind-aware trim drops newest
+    non-cast first — a silent-drop hazard for the baked round-B recipe. The
+    shipped warm registry must retain the accent AND both companions, with
+    headroom under the cap."""
+    p, _bands, _prof, reg = _warm_scene()   # shipped values, no overrides
+    assert p.storms.accent_count == 1 and p.storms.hero_companions == 2
+    assert len(reg.vortices) < 395
+    hero = reg.heroes()[0]
+    accents = [
+        v for v in reg.vortices
+        if v.kind == KIND_OVAL and v.tint == p.storms.accent_tint
+        and np.isclose(v.lat, np.deg2rad(p.storms.accent_latitude))
+    ]
+    assert len(accents) == 1, "the baked accent was trimmed or never placed"
+    from gasgiant.sim.vortices import KIND_PEARL
+
+    comps = [
+        v for v in reg.vortices
+        if v.kind == KIND_PEARL
+        and abs(v.lat - hero.lat) < 3.0 * hero.r_core
+        and abs((v.lon - hero.lon + np.pi) % (2.0 * np.pi) - np.pi)
+        < 4.0 * hero.r_core
+    ]
+    assert len(comps) >= 2, "the baked hero companions were trimmed"
+
+
 def test_seeded_zone_path_is_deterministic():
     """accent_latitude None (the seeded-zone path — e.g. neptune's Scooter)
     stays deterministic; the rule's appended draw must not perturb it

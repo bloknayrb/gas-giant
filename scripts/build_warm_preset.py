@@ -67,9 +67,21 @@ def main():
     #   brighter than the bands.
     # - wake_turbulence 3.2: now LIVE in vorticity mode (omega_force wake-wedge
     #   injection); 1.593 was calibrated when the lever was feather-only inert.
-    # - hero_wake_detail 1.0, hero_mottle 0.9, hero_tint_var 0.55: full fray on
-    #   the dimmed wake stamp; granular (still muted) interior.
+    # - hero_wake_detail 1.0, hero_mottle 0.9: full fray on the dimmed wake
+    #   stamp; granular (still muted) interior.
     # - hero_emergence 0.8 -> 0.9: the retuned pack endpoints land at 90%.
+    # Round B (de-bullseye + populate the neighborhood, same plan):
+    # - hero_tint_var 0.55 -> 0.35: the interior now carries a deterministic
+    #   T3 spiral lane; the isotropic tint fbm was the same magnitude as the
+    #   lane signal (S/N ~ 1) and must come down for the banding to read.
+    # - hero_rim_warp 0.65 -> 1.0: geometry-level radius lobes on the stamped
+    #   rings (sub-sigma at 0.65 against the k=34 annulus = "amplitude-level").
+    # - hero_companions 2: bright clouds hugging the wake-free flank
+    #   (reference: white clouds packed against the GRS's leading side).
+    # - accent_count 1 at -29 deg: an Oval-BA analog shearing past south of
+    #   the hero; longitude auto-roots 0.3-0.55 rad downstream (hero-relative
+    #   placement rule). oval_solid_core 1.0 keeps it (and the larger white
+    #   ovals) coherent through the dev run (the F07 pairing).
     p.storms = p.storms.model_copy(update={
         "hero_radius": 0.062,
         "hero_latitude": -21.0,
@@ -78,7 +90,25 @@ def main():
         "wake_turbulence": 3.2,
         "hero_wake_detail": 1.0,
         "hero_mottle": 0.9,
-        "hero_tint_var": 0.55,
+        "hero_tint_var": 0.35,
+        "hero_rim_warp": 1.0,
+        "hero_companions": 2,
+        "accent_count": 1,
+        "accent_latitude": -29.0,
+        "accent_radius": 0.05,
+        "accent_tint": 0.75,
+        "accent_brightness": 0.20,
+        "oval_solid_core": 1.0,
+    })
+
+    # Hero-adjacent festoon train (FESTOON2): streamers rooting on the belt
+    # edge the hero straddles (-19.4 deg), weaving through the wake lane —
+    # the "neighborhood busy with unrelated weather" reference cue. Amplitude
+    # subordinate to the primary +7-deg train (1.6); wavenumber deliberately
+    # != the primary's 20 (twin wavenumbers read as a mechanical comb).
+    p.waves = p.waves.model_copy(update={
+        "festoon_hero_strength": 1.0,
+        "festoon_hero_wavenumber": 11,
     })
 
     # Uniform detail coverage: apply the flow-folded detail-FX texture at EVEN

@@ -165,7 +165,9 @@
       "festoon_wavenumber": 20,
       "hotspot_depth": 1.0,
       "ribbon_strength": 0.0,
-      "ribbon_wavenumber": 12
+      "ribbon_wavenumber": 12,
+      "festoon_hero_strength": 0.0,
+      "festoon_hero_wavenumber": 11
     },
     "poles": {
       "north": {
