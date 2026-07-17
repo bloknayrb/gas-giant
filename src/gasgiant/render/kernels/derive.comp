@@ -62,12 +62,27 @@ uniform float u_polar_tint_strength;
 uniform float u_polar_tint_start;  // |lat| radians
 uniform float u_polar_canvas_value;  // darken the cap canvas (teal floor); 0 = off
 
+#if defined(CHROMA_FX) || defined(DETAIL_CHROMA)
+// oklab.glsl serves two INDEPENDENT variant axes from ONE include site with a
+// compound guard. It must not be included twice under separate guards: the
+// flattener's include-once guard is filename-keyed and #ifdef-blind, so a
+// second guarded #include expands to nothing and the (CHROMA_FX off,
+// DETAIL_CHROMA on) program would lose the functions.
+#include "oklab.glsl"
+#endif
+#ifdef DETAIL_CHROMA
+// appearance.detail_chroma: two-material tint for the synthesized detail
+// field. Compiled as its own variant so every pre-existing program's text is
+// byte-identical; runtime body sits at the dsyn consumption site below.
+// (No blank line above/below these guard blocks: inter-block blanks live
+// OUTSIDE every guard and would move the no-defines golden hash.)
+uniform float u_detail_chroma;
+#endif
 #ifdef CHROMA_FX
 // Oklab chroma scaling + longitudinal within-band chroma drift. The
-// non-CHROMA_FX variant strips this whole block (including the inlined
-// oklab.glsl), so neutral-default output stays identical at the
-// GLSL-preprocessor level — the same mechanism as EMISSION.
-#include "oklab.glsl"
+// non-CHROMA_FX variant strips this whole block, so neutral-default output
+// stays identical at the GLSL-preprocessor level — the same mechanism as
+// EMISSION. (oklab.glsl arrives via the compound-guard include above.)
 uniform float u_chroma_scale;
 uniform float u_chroma_variance;
 uniform vec3 u_chroma_offset;      // subseed("chroma-variance")
@@ -209,6 +224,34 @@ void main() {
     if (u_detail_intensity > 0.0) {
         dsyn = texture(u_detail, (vec2(px) + 0.5) / vec2(u_size)).r;
         col *= 1.0 + u_detail_intensity * 0.55 * (dsyn - 0.5);
+#ifdef DETAIL_CHROMA
+        // Two-material read for synthesized detail: bright excursions shade
+        // toward a designed COOL material, dark toward warm. L-preserving
+        // (Oklab a/b push), so detail.intensity keeps sole ownership of value
+        // and this lever owns material color — no double-counting. The cool
+        // push is palette-INDEPENDENT by design: warm-family palettes contain
+        // no cool color at any index, so resampling the palette cannot
+        // produce the pale blue-gray material (measured on the PIA07782 wake
+        // crop: luminance-vs-warmth r = -0.81, 81% of strand-scale structure
+        // is bright-cool/dark-warm — method in commit 408e4fc). Asymmetric
+        // warm side (0.3x): dark filaments are already warm from the palette
+        // and chroma_aging pushes the same direction downstream.
+        if (u_detail_chroma > 0.0) {
+            float ex = clamp((dsyn - 0.5) * 2.0, -1.0, 1.0);
+            // Signed asymmetric push (magnitude 0.3x on the warm/dark side).
+            // S2-calibrated (commit d0eec48): the measured response is
+            // superlinear in the lever — at these constants lever 1.0 lands
+            // warmness-modulation std 0.038 (reference wake 0.034) and 0.6
+            // reproduces the first-cut 0.008/0.028 full-lever look, leaving
+            // headroom above the warm bake for detail levers that stack
+            // stronger excursions (a planned wake-braid lever).
+            float s = u_detail_chroma * ((ex > 0.0) ? 1.0 : 0.3) * ex;
+            vec3 lab = srgb_to_oklab(col);
+            lab.y -= s * 0.013;
+            lab.z -= s * 0.045;
+            col = oklab_to_srgb(lab);
+        }
+#endif
     }
 #ifdef MASK
     // Mask-driven luminance/detail modulation: factor = mix(1.0, mask, gain)

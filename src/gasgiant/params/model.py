@@ -1485,6 +1485,17 @@ class AppearanceParams(_Params):
                     "luminance-keyed palette gradient cannot express -- the "
                     "hue-diversity lever the realism metrics name",
     )
+    detail_chroma: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="Two-material tint for synthesized detail: bright detail "
+                    "excursions shade toward a cool pale-cloud material, dark "
+                    "excursions (weaker) toward warm belt material -- the "
+                    "reference's interleaved cool/warm texture read, which a "
+                    "luminance-only detail multiply cannot express. "
+                    "L-preserving (Oklab a/b push), palette-independent. "
+                    "Needs detail.intensity > 0 (the Detail panel); inert "
+                    "without it. 0 = off (byte-identical)",
+    )
     chroma_aging: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=0.6, adv=True, ui="Appearance",
         description="Chromophore aging: ties color saturation to the dynamical "

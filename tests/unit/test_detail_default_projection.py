@@ -41,11 +41,33 @@ from gasgiant.gl.context import _load_flattened
 
 def _eval_if(expr: str, defines: set[str]) -> bool:
     expr = expr.strip()
+    # Flat boolean combinations of defined() terms (no parenthesized grouping
+    # in any kernel): || binds looser than &&, so split on it first.
+    if "||" in expr:
+        return any(_eval_if(t, defines) for t in expr.split("||"))
+    if "&&" in expr:
+        return all(_eval_if(t, defines) for t in expr.split("&&"))
     if expr.startswith("defined(") and expr.endswith(")"):
         return expr[len("defined("):-1].strip() in defines
     if expr.startswith("defined "):
         return expr[len("defined "):].strip() in defines
     raise ValueError(f"unsupported #if expression: {expr!r}")
+
+
+def test_eval_if_boolean_operators():
+    """Direct coverage of the ||/&& extension: it guards golden hashes, so the
+    first kernel author to write a form only exercised transitively (today no
+    kernel uses &&) must not be trusting an untested evaluator. Split order
+    (|| before &&) implements C precedence: a && b || c == (a && b) || c."""
+    d = {"A", "B"}
+    assert _eval_if("defined(A) || defined(Z)", d)
+    assert not _eval_if("defined(Y) || defined(Z)", d)
+    assert _eval_if("defined(A) && defined(B)", d)
+    assert not _eval_if("defined(A) && defined(Z)", d)
+    assert _eval_if("defined(Y) && defined(Z) || defined(A)", d)  # (Y&&Z)||A
+    assert not _eval_if("defined(A) && defined(Z) || defined(Y)", d)
+    with pytest.raises(ValueError):
+        _eval_if("(defined(A) || defined(B)) && defined(C)", d)  # no grouping
 
 
 def _preprocess(source: str, defines: set[str]) -> str:
@@ -117,7 +139,7 @@ def test_variant_only_symbols_absent_from_default_projection():
 _VARIANT_AXES: dict[tuple[str, str], tuple[str, ...]] = {
     ("gasgiant.render.kernels", "detail.comp"): ("DETAIL_FX", "SPREAD", "HERO_EMERGENCE"),
     ("gasgiant.render.kernels", "derive.comp"): (
-        "EMISSION", "CHROMA_FX", "MASK", "BAND_TINT", "PROJECTION_CUBE",
+        "EMISSION", "CHROMA_FX", "MASK", "BAND_TINT", "PROJECTION_CUBE", "DETAIL_CHROMA",
     ),
 }
 
@@ -165,7 +187,7 @@ def test_variant_axes_are_complete(pkg: str, name: str):
 def test_every_variant_declares_the_uniforms_it_uses(pkg: str, name: str):
     """Every reachable define combination must declare every ``u_*`` it uses.
 
-    Exhaustive over the cartesian product (detail.comp 8, derive.comp 32) rather
+    Exhaustive over the cartesian product (detail.comp 8, derive.comp 64) rather
     than the combinations shipped by presets: the crash this guards against was
     reachable only from an unshipped combination, which is exactly why per-feature
     tests -- each exercising its own feature at the 'normal' combination -- missed it.

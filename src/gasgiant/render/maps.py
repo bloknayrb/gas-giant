@@ -89,7 +89,9 @@ class MapDeriver:
         # sides of an off/on comparison). The two default variants compile
         # eagerly (their absence would only surface at first use);
         # FX variants compile lazily on first selection.
-        self._progs: dict[tuple[bool, bool, bool, bool, bool], moderngl.ComputeShader] = {}
+        self._progs: dict[
+            tuple[bool, bool, bool, bool, bool, bool], moderngl.ComputeShader
+        ] = {}
         self.prog = self._program(emission=False, chroma_fx=False)
         self.prog_emission = self._program(emission=True, chroma_fx=False)
         self._palette_tex: moderngl.Texture | None = None
@@ -101,9 +103,9 @@ class MapDeriver:
 
     def _program(
         self, emission: bool, chroma_fx: bool, mask: bool = False, band_tint: bool = False,
-        projection_cube: bool = False,
+        projection_cube: bool = False, detail_chroma: bool = False,
     ) -> moderngl.ComputeShader:
-        key = (emission, chroma_fx, mask, band_tint, projection_cube)
+        key = (emission, chroma_fx, mask, band_tint, projection_cube, detail_chroma)
         if key not in self._progs:
             defines: dict[str, str] = {}
             if emission:
@@ -119,7 +121,21 @@ class MapDeriver:
                 # shared with equirect (the block is verbatim-#else). Compiles
                 # lazily on first cube export -- the default program is untouched.
                 defines["PROJECTION_CUBE"] = "1"
-            self._progs[key] = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
+            if detail_chroma:
+                defines["DETAIL_CHROMA"] = "1"
+            prog = self.gpu.compute(_KERNELS, "derive.comp", defines=defines)
+            if detail_chroma:
+                # Build tripwire: the lever must never ship dead. An unset
+                # uniform reads 0.0 (the no-op) so a pruned/renamed uniform
+                # would fail SILENTLY at runtime -- fail the build instead.
+                try:
+                    prog["u_detail_chroma"]
+                except KeyError:
+                    raise RuntimeError(
+                        "DETAIL_CHROMA variant compiled without u_detail_chroma -- "
+                        "the lever would be silently dead"
+                    ) from None
+            self._progs[key] = prog
         return self._progs[key]
 
     def release(self) -> None:
@@ -224,10 +240,15 @@ class MapDeriver:
         # non-neutral stops with strength 0 select the default program and stay
         # byte-identical (strength 0 is an exact no-op in the shader).
         band_tint_on = appearance.band_tint_strength > 0.0
+        # Silent-no-op trap: its own axis (NOT part of chroma_on) -- 0 selects
+        # the prior program and stays byte-identical.
+        detail_chroma_on = appearance.detail_chroma > 0.0
         prog = self._program(
             emission=emission_on, chroma_fx=chroma_on, mask=mask_on, band_tint=band_tint_on,
-            projection_cube=projection_cube,
+            projection_cube=projection_cube, detail_chroma=detail_chroma_on,
         )
+        if detail_chroma_on:
+            _set(prog, "u_detail_chroma", appearance.detail_chroma)
         if projection_cube:
             _set(prog, "u_cube_face", int(cube_face))
         size = color_out.size

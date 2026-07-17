@@ -88,3 +88,29 @@ def test_band_tint_symbols_present_in_band_tint_projection():
     proj = _preprocess(source, {"BAND_TINT"})
     for sym in ("u_band_tint", "u_band_tint_strength", "tintColor"):
         assert sym in proj, f"{sym} missing from the BAND_TINT projection"
+
+
+def test_detail_chroma_symbols_absent_from_default_projection():
+    """appearance.detail_chroma: uniform + Oklab material push must strip from
+    the default (no-defines) program -- byte-identity when off is by
+    construction, not by hope."""
+    proj = _no_defines_projection()
+    for sym in ("u_detail_chroma", "DETAIL_CHROMA"):
+        assert sym not in proj, f"{sym} leaked into the default (no-defines) program"
+
+
+def test_detail_chroma_symbols_present_in_detail_chroma_projection():
+    """Sanity both ways: (a) forcing DETAIL_CHROMA alone compiles the uniform,
+    the push body, AND the oklab functions -- oklab.glsl arrives through ONE
+    compound-guard include (``#if defined(CHROMA_FX) || defined(DETAIL_CHROMA)``)
+    because the flattener's include-once guard is filename-keyed and
+    #ifdef-blind: a second guarded #include would expand to nothing and this
+    exact variant would fail to compile at runtime; (b) CHROMA_FX alone still
+    gets the oklab functions after the hoist."""
+    source, _ = _load_flattened("gasgiant.render.kernels", "derive.comp", {})
+    proj = _preprocess(source, {"DETAIL_CHROMA"})
+    for sym in ("u_detail_chroma", "srgb_to_oklab", "oklab_to_srgb"):
+        assert sym in proj, f"{sym} missing from the DETAIL_CHROMA projection"
+    proj_cfx = _preprocess(source, {"CHROMA_FX"})
+    for sym in ("srgb_to_oklab", "u_chroma_scale"):
+        assert sym in proj_cfx, f"{sym} missing from the CHROMA_FX projection post-hoist"
