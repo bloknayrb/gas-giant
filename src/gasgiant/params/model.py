@@ -449,7 +449,7 @@ class CastKind(StrEnum):
     (``sim/vortices.py::_add_cast``)."""
     HERO = "hero"     # GRS-class giant anticyclone (wake + solid-core capable)
     OVAL = "oval"     # white-oval anticyclone
-    BARGE = "barge"   # brown-barge cyclone (opposes the ambient shear sign)
+    BARGE = "barge"   # brown-barge cyclone (co-rotates with the ambient shear)
     PEARL = "pearl"   # small bright string-of-pearls oval
 
 
@@ -550,9 +550,10 @@ class StormsParams(_Params):
     hero_count: int = pfield(
         1, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Hero",
         description="Giant anticyclones of Great Red Spot (GRS) class — the"
-                    " planet-dominating bright/red oval storms (anticyclone ="
-                    " high-pressure vortex spinning against the local cyclonic"
-                    " sense)",
+                    " planet-dominating bright/red oval storms (co-rotates with"
+                    " the local ambient shear vorticity of the zone it sits in,"
+                    " which is what lets it persist against differential shear"
+                    " instead of getting torn apart)",
     )
     hero_radius: float = pfield(
         0.10, tier=Tier.RESTART, lo=0.03, hi=0.25, rand=(0.06, 0.16), ui="Hero",

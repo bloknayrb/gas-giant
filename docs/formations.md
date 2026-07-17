@@ -102,9 +102,12 @@ longitude spacing; STAMP — bright disc + darker collar annulus.
 
 ### Brown barges
 Dark cigar-shaped cyclones, classically in Jupiter's NEB.
-*Implementation:* VEL — weak vortices in belts with rotation sign OPPOSED to
-the ambient shear; the mismatch lets the jets stretch them into dark
-elongated cigars (EMERGE); STAMP — dark T0, warm T3.
+*Implementation:* VEL — weak vortices in belts, rotation sign matched to
+(co-rotating with) the local belt shear like every other seeded storm class
+— that is what lets them persist rather than being sheared apart outright;
+what stretches them into dark elongated cigars is the jets' shear GRADIENT
+across the barge's own footprint (EMERGE), not an opposed rotation sense;
+STAMP — dark T0, warm T3.
 
 ### Vortex street / string of pearls
 A chain of 6–9 similar small white ovals evenly spaced around one latitude
@@ -314,8 +317,10 @@ peaking mid-radius around a calm bright center.
 *Implementation:* DETAIL — analytic log-spiral lanes (m=2, ~6–7 lane
 crossings along a radius) + collar streamlines between the perimeter ring
 and the bright collar, windowed to the hero and wound in the hero's actual
-rotation sense (sign of its strength, carried per hero into the detail
-pass); fbm jig breaks the geometric regularity (`detail.hero_spiral`).
+rotation sense (the NEGATION of the sign of its strength — the psi-amplitude
+trap, omega = -sign(strength), see `sim/vortices.py`'s module docstring —
+carried per hero into the detail pass); fbm jig breaks the geometric
+regularity (`detail.hero_spiral`).
 The lanes are stationary in the hero frame — correct for stills; a time
 phase term is the one-line extension if an animation release needs it.
 *v1.5:* the collar streamline carries an integer odd azimuthal wavenumber

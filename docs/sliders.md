@@ -736,7 +736,7 @@ Bright companion clouds pinned beside each hero storm (Neptune GDS companion / S
 
 `storms.hero_count` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
-Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating bright/red oval storms (anticyclone = high-pressure vortex spinning against the local cyclonic sense)
+Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating bright/red oval storms (co-rotates with the local ambient shear vorticity of the zone it sits in, which is what lets it persist against differential shear instead of getting torn apart)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
