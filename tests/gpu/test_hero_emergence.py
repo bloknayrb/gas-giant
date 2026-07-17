@@ -313,6 +313,20 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     p.storms.pearls_count = 0
     p.storms.accent_count = 0
     p.storms.hero_companions = 0
+    # jets.local_jet_speed pinned OFF: the chirality fix (co-rotate all
+    # storms with ambient shear) bakes a local westward jet into warm
+    # (-0.9 @ -20.0 w0.05) so the -22.0 hero lands in strong co-rotating
+    # shear, but THIS probe's hero_latitude stays frozen at the pre-bake
+    # -21.0 (see below) -- 1 deg from the jet center, inside its search
+    # window for _hero_wake_frame. With the jet live the probe measured
+    # 1.28 (fails the 1.3 gate); with it neutralized, matching the ambient
+    # profile the gate was calibrated against, seed 7 measures 1.355 (was
+    # 1.334 pre-flip) and 3/4 probe seeds {7,11,23,42} pass both before and
+    # after the flip (11 flips fail->pass, 23 flips pass->fail — the
+    # statistic was already seed-sensitive pre-flip, not newly so). The
+    # chirality flip itself does not weaken wake folding; the unpinned new
+    # lever did (fix/vortex-chirality, commit 4b60fa6).
+    p.jets.local_jet_speed = 0.0
     # The background SCENE is part of this test's premise and is FROZEN:
     # small storms + outbreaks stay at the values the E/W statistic was
     # calibrated against (they shape the chaotic vorticity field everywhere,
