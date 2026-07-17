@@ -1257,7 +1257,7 @@ Color contrast multiplier about mid-gray
 
 `appearance.detail_chroma` &mdash; range **0 to 1**, default **0**, tier `post`.
 
-Two-material tint for synthesized detail: bright detail excursions shade toward a cool pale-cloud material, dark excursions (weaker) toward warm belt material -- the reference's interleaved cool/warm texture read, which a luminance-only detail multiply cannot express. L-preserving (Oklab hue push), palette-independent. Needs detail.intensity > 0 (the Detail panel); inert without it. 0 = off (byte-identical)
+Two-material tint for synthesized detail: bright detail excursions shade toward a cool pale-cloud material, dark excursions (weaker) toward warm belt material -- the reference's interleaved cool/warm texture read, which a luminance-only detail multiply cannot express. L-preserving (Oklab a/b push), palette-independent. Needs detail.intensity > 0 (the Detail panel); inert without it. 0 = off (byte-identical)
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/appearance__detail_chroma__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
