@@ -70,8 +70,14 @@ searchable auto-generated panels, per-slider help, undo/redo, and playback contr
   The vorticity path is NOT: its SOR Poisson solve carries ~1e-3 cross-instance / ~0.004
   cross-session LSB noise, so vorticity-touching GPU tests assert within documented floors
   (`GPU_NOISE_ATOL = 1e-2`, `_VORT_SOR_ATOL = 1e-3` — see tests/gpu/test_checkpoint.py).
-  Never write a byte-exact assertion for vorticity-mode output; never "fix" a kinematic
-  hash mismatch by adding tolerance — update the pin deliberately instead.
+  ONE documented carve-out: the dev-0 OMEGA TEXTURE is byte-exact-legal even in vorticity
+  mode (omega_init is a single analytic per-pixel dispatch, read back before any SOR or
+  advection touches it; comparisons same-process only — see
+  tests/gpu/test_hero_emergence.py::_dev0_omega). It is the binding no-op gate for
+  vorticity-only levers, which p05 and the kinematic captures cannot see; vortex_omega.glsl
+  is source-pinned for the same reason. Never write any other byte-exact assertion for
+  vorticity-mode output; never "fix" a kinematic hash mismatch by adding tolerance —
+  update the pin deliberately instead.
 - **Establish a baseline before editing**: run the relevant subset (or the p05 --check) first.
   Byte-identity/no-op gates fail whenever tracked default output moves, including from
   someone else's uncommitted work — know what was red before you touched anything.
@@ -108,8 +114,9 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
 - **Solver modes**: `solver.type` = kinematic (v1.5 analytic ψ, default for legacy presets)
   or vorticity (v1.6 prognostic q, used by gas_giant_warm/jupiter_vorticity). Some levers are
   mode-specific: `psi.comp` params are feather-only in vorticity mode; `storms.hero_solid_core`
-  is a no-op in kinematic mode. Opt-in baroclinic coupling (`engine/baroclinic_coupling.py`)
-  requires vorticity mode; off = byte-identical.
+  and `storms.hero_flow_aspect` are no-ops in kinematic mode (both live on the omega path;
+  flow_aspect additionally needs solid_core > 0 + emergence > 0). Opt-in baroclinic coupling
+  (`engine/baroclinic_coupling.py`) requires vorticity mode; off = byte-identical.
 - **Export levers (all default-off / byte-identical when off)**: `export.projection` =
   equirect (default; manifest schema_version 1) or cube (6-face map, per-face `width/4`,
   manifest schema_version 2 with a per-map `faces` block — cube OMITS synthesized detail and

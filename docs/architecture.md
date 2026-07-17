@@ -104,6 +104,13 @@ field q (absolute vorticity) that is advected by the flow, nudged toward a targe
 derived from the same jet profile and vortex registry, and then used to recover ψ
 by inverting the Poisson equation ∇²ψ = +ω. The jet shear folds q into filaments
 between nudge corrections, producing the belt morphology the kinematic path cannot.
+One consequence: ψ = ∇⁻²ω is intrinsically ROUNDER than the vorticity that sources
+it (Poisson low-pass — a hero ring held at aspect 2.2 induces boundary streamlines
+of only ~1.3, and the dye rides streamlines), so `storms.hero_flow_aspect` (K)
+pre-compensates by authoring the emergence ring/skirt on a K-widened EW metric
+while every tracer stamp keeps the authored anatomy; the widened ring's net
+circulation is held invariant by a CPU-computed spherical renorm
+(`sim/flow_renorm.py`). Vorticity-mode only; inert at K = 1.
 
 **Absolute vorticity formulation.** The prognostic variable is q = ω + f where
 ω = ζ is the relative vorticity (sign convention ζ = +∇²ψ, consistent with the
@@ -250,7 +257,10 @@ tile-apron-free contract as the analytic passes.
 cached per combination: derive.comp compiles per (EMISSION, CHROMA_FX, MASK)
 plus the independent BAND_TINT (per-band RGB tint via
 `appearance.band_tint_stops`/`_strength`) and PROJECTION_CUBE (cube-face
-sampling) variants; detail.comp per (DETAIL_FX, SPREAD). Each new variant's
+sampling) variants; detail.comp per (DETAIL_FX, SPREAD, HERO_EMERGENCE); the
+sim kernels per (HERO_EMERGENCE — hero present and `storms.hero_emergence >
+0`; FESTOON2 — `waves.festoon_hero_strength > 0` and a facade-selected root
+edge near the hero). Each new variant's
 default is a no-op that preprocesses OUT (MASK only when a mask is bound and a
 gain is nonzero; BAND_TINT only when `band_tint_strength > 0`; PROJECTION_CUBE
 only on a cube export — guarded by the default-projection byte-identity test),

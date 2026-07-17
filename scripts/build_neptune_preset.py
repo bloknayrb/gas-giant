@@ -112,6 +112,23 @@ STORMS_HERO = {
                             # anchor keeps it on its stamp, and the band-flush stops
                             # the neighborhood from winding around it. Companions ride
                             # the flush target (they are stamps) and survive.
+    # Inheritance pins (Round B, 2026-07-15): warm's GRS-interaction pass
+    # moved ITS hero placement/rim/wake values; the neptune GDS scene was
+    # calibrated against the pre-pass inheritance and must not silently move
+    # on regen. Any neptune retune is a deliberate Round-D verify+touchup.
+    "hero_latitude": -22.5,
+    "rim_contrast": 2.0,
+    "wake_turbulence": 1.593,
+    "companion_brightness": 0.32,  # the pre-lever constant; warm bakes 0.55
+    # Aspect-pass pins (2026-07-16): warm bakes hero_aspect 2.9 (the GRS red
+    # core is more elongated than its envelope); the Voyager GDS (~2.0) is
+    # legitimately rounder, and the signed-off GDS scene was calibrated at
+    # 2.2 — it must not silently stretch on regen. hero_taper / hero_flow_
+    # aspect are pinned at their inert defaults so a future warm bake of
+    # either GRS lever cannot leak into the GDS.
+    "hero_aspect": 2.2,
+    "hero_taper": 0.0,
+    "hero_flow_aspect": 1.0,
 }
 
 # Remove the planet-girdling Jupiter storm field -- only the hero + companions remain, plus
@@ -132,6 +149,15 @@ STORMS_FIELD = {
     "accent_brightness": 0.32,
     "accent_radius": 0.06,
     "accent_aspect": 4.0,     # elongate into a wispy east-west cirrus streak
+    # Explicit inheritance pins (neptune derives FROM gas_giant_warm, which
+    # bakes the Round-B GRS-neighborhood recipe; these must NOT leak):
+    # accent_latitude None keeps the Scooter on its seeded-zone placement
+    # (warm pins -29 and the hero-relative longitude rule keys off a pinned
+    # latitude); oval_solid_core 0 keeps the Scooter's calibrated soft-streak
+    # rendering (its 0.06 radius is past the 0.035 solid-core gate, so warm's
+    # 1.0 would byte-change the GDS scene).
+    "accent_latitude": None,
+    "oval_solid_core": 0.0,
 }
 
 TURBULENCE = {
@@ -146,6 +172,9 @@ TURBULENCE = {
 WAVES = {
     "festoon_strength": 0.0,
     "ribbon_strength": 0.0,
+    # Inheritance pin: warm bakes a hero-adjacent festoon train (Round B);
+    # Neptune's band boundaries are SMOOTH (Voyager 2) — no train.
+    "festoon_hero_strength": 0.0,
 }
 
 # Deep methane-blue look: bluish haze, no polar tint/canvas (the Juno dark cap is a Jupiter
@@ -217,6 +246,15 @@ def build() -> None:
     assert reloaded.storms.hero_tint == -0.9
     assert reloaded.storms.hero_companions == 3
     assert reloaded.storms.companion_aspect == 3.5
+    # Round-B inheritance pins actually landed (warm bakes the opposite).
+    assert reloaded.storms.accent_latitude is None
+    assert reloaded.storms.oval_solid_core == 0.0
+    assert reloaded.waves.festoon_hero_strength == 0.0
+    # Aspect-pass pins (warm bakes hero_aspect 2.9; taper/flow_aspect are the
+    # inert defaults today but the pin + assert survive a future warm bake).
+    assert reloaded.storms.hero_aspect == 2.2
+    assert reloaded.storms.hero_taper == 0.0
+    assert reloaded.storms.hero_flow_aspect == 1.0
     assert reloaded.storms.oval_density == 0.0
     assert reloaded.storms.accent_count == 1
     assert reloaded.storms.accent_aspect == 4.0

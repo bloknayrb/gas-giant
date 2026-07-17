@@ -195,7 +195,16 @@ void main() {
     vec2 ll = lonlatAt(px, u_size);
     vec3 p = spherePoint(ll);
     float warp = fbm(p * u_warp_freq + u_warp_offset, 4, 2.0, 0.5) * u_warp_amount;
+#ifdef HERO_EMERGENCE
+    // Belt bowing: sample the band target at the hero-deflected latitude
+    // (heroBandDeflect in vortex_stamp.glsl — shared with init.comp so both
+    // shape the SAME target) so band boundaries bow around the oval; the fbm
+    // band warp rides on top (ordering pinned in the helper's docs).
+    vec4 stamp = texture(u_profile_stamp,
+                         latProfileUV(heroBandDeflect(p, ll.y) + warp));
+#else
     vec4 stamp = texture(u_profile_stamp, latProfileUV(ll.y + warp));
+#endif
     float s0 = stamp.r;
     float s1 = stamp.g;
     bandStampMod(s0, s1, p, ll);

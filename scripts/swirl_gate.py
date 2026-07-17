@@ -144,7 +144,7 @@ def build_cfg(seed: int, drag: float, width: int, raw: bool = False,
     p.storms = p.storms.model_copy(update={
         "hero_count": 1, "hero_radius": 0.12, "hero_strength": 1.2, "hero_solid_core": 0.85,
         "hero_mottle": 0.35, "hero_tint_var": 0.35, "hero_aspect": 2.2, "rim_contrast": 1.3,
-        "hero_latitude": -22.5, "oval_density": 3.0, "barge_density": 2.989, "pearls_count": 14,
+        "hero_latitude": -21.0, "oval_density": 3.0, "barge_density": 2.989, "pearls_count": 14,
         "wake_turbulence": 1.593, "small_density": 3.0, "stamp_contrast": 2.0,
         "merge_rate": 0.219, "merge_debris": 2.0})
     return p

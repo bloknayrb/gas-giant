@@ -33,6 +33,17 @@ def _shrunk(preset: str, seed: int = 7, steps: int = 60, res: int = 512):
     return p
 
 
+def _neutral_populations(p):
+    """gas_giant_warm ships hero_companions=2 / accent_count=1 since the
+    round-B neighborhood recipe (2026-07-15), so 'forced defaults' (both 0) is
+    no longer output-equivalent to the shipped preset. Zero the populations on
+    BOTH sides of the comparison: the no-op test exercises the appearance /
+    coupling levers, not the baked recipe."""
+    p.storms.hero_companions = 0
+    p.storms.accent_count = 0
+    return p
+
+
 def _force_defaults(p):
     """Set every W5 lever to its default-equivalent forced variant: values that
     MUST reproduce the pre-lever output exactly (the lever-author checklist's
@@ -93,9 +104,17 @@ def _disc_mean(img: np.ndarray, lat: float, lon: float, rad: float) -> np.ndarra
 
 @pytest.mark.parametrize("preset", ["gas_giant_warm", "jupiter_vorticity"])
 def test_forced_defaults_noop_vorticity(gpu, preset):
-    """Vorticity presets: forced-default variant within the GPU noise floor."""
-    base = _render(_shrunk(preset), gpu)
-    forced = _render(_force_defaults(_shrunk(preset)), gpu)
+    """Vorticity presets: forced-default variant within the GPU noise floor.
+
+    Populations are neutralized on BOTH sides (see _neutral_populations) so
+    warm's baked round-B companions/accent don't turn the comparison into a
+    feature diff. KNOWN machine-local flake (RTX session-context class,
+    CLAUDE.md): base-vs-base of this very config diverges up to ~0.5 at
+    filament edges once other GL work has run in the session — measured
+    2026-07-15, identical on master. CI (LP_NUM_THREADS=1 llvmpipe) is
+    authoritative."""
+    base = _render(_neutral_populations(_shrunk(preset)), gpu)
+    forced = _render(_force_defaults(_neutral_populations(_shrunk(preset))), gpu)
     assert np.abs(forced - base).max() < GPU_NOISE_ATOL, (
         f"W5 levers at forced defaults perturbed {preset} beyond the noise floor"
     )

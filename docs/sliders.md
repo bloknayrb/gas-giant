@@ -662,6 +662,16 @@ East-west elongation (lon:lat) of the bright companion clouds; 1.0 = round. Stre
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__companion_aspect__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
+### companion brightness
+
+`storms.companion_brightness` &mdash; range **0 to 0.8**, default **0.32**, tier `restart`.
+
+T0 brightness of the hero companion clouds. 0.32 = the pre-lever constant (byte-identical). Reference flank clouds are among the brightest pixels in the GRS neighborhood — on a pale-moat placement the default reads as a faint smudge
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.32</sub></td><td align="center"><sub>high &middot; 0.8<br>(not rendered)</sub></td>
+</tr></table>
+
 ### hero aspect
 
 `storms.hero_aspect` &mdash; range **1 to 3**, default **1**, tier `restart`.
@@ -710,6 +720,16 @@ GRS-realism pack for hero storms (Juno/Voyager-anchored). Morphs the hero from a
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__hero_emergence__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
+</tr></table>
+
+### hero flow aspect
+
+`storms.hero_flow_aspect` &mdash; range **1 to 2.5**, default **1**, tier `restart`.
+
+Flow-field elongation multiplier over hero_aspect: the streamfunction the vorticity ring induces is intrinsically rounder than the ring (Poisson low-pass), so the developed storm reads rounder than authored; >1 widens only the FLOW's east-west footprint. Calibration verdict: raising this stretches the pale ENVELOPE while the interior erasure machinery (still sized to the anatomy) dilutes the red core — for a more elongated STORM raise hero_aspect itself. Vorticity mode only; inert in kinematic mode and at hero_emergence 0 / hero_solid_core 0
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2.5<br>(not rendered)</sub></td>
 </tr></table>
 
 ### hero latitude
@@ -768,6 +788,26 @@ Lumpy-oval boundary: warps the hero's dark perimeter ring + bright collar with a
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__hero_rim_warp__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
+### hero shape
+
+`storms.hero_shape` &mdash; range **0 to 1.5**, default **1**, tier `restart`.
+
+Low-order deformation of the hero's outline away from a perfect ellipse: equatorward flattening (the belt presses the rim flat) plus seeded lobes so aspect and curvature drift around the arc. 0 = exact analytic oval, 1 = the calibrated GRS egg (the ships-at-1.0 exception to the default=off lever convention: the deformation is part of the emergence pack's calibration; the OFF state is 0). Rides the emergence variant — inert at hero_emergence 0. Past ~1.4 the ragged-release band drifts onto the bright annulus
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 1.5<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero shape seed
+
+`storms.hero_shape_seed` &mdash; range **0 to 99999**, default **0**, tier `restart`.
+
+Re-rolls the hero's seeded shape lobes on their own substream of the master seed — changing it never perturbs any other seeded draw
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 99999<br>(not rendered)</sub></td>
+</tr></table>
+
 ### hero solid core
 
 `storms.hero_solid_core` &mdash; range **0 to 1**, default **0**, tier `restart`.
@@ -786,6 +826,16 @@ GRS-class hero storm vorticity amplitude
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
+</tr></table>
+
+### hero taper
+
+`storms.hero_taper` &mdash; range **0 to 1.5**, default **0**, tier `restart`.
+
+Upstream-end wedge taper: the reference GRS's boundary converges toward a point on the side the flow arrives from (measured 20-40% of local radius), while the wake end stays blunt. Deterministic (no seed), follows hero_wake_dir, deepest at ~35 deg off the upstream tip in the aspect-squashed frame (physically closer to the tip on an elongated hero — ~14 deg at aspect 2.9); the tip, the flanks and the whole downstream half are untouched. Inert at hero_emergence 0
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1.5<br>(not rendered)</sub></td>
 </tr></table>
 
 ### hero tint
@@ -817,6 +867,14 @@ Wake filament structure: the downstream wake is stamped as a smooth wedge into t
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__hero_wake_detail__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
+
+### hero wake dir
+
+`storms.hero_wake_dir` &mdash; dropdown, one of `auto` / `east` / `west`, default **`auto`**, tier `restart`.
+
+Which way the hero's wake trails. auto = follow the strongest jet near the wake lane when hero_emergence is on (the wake is real fluid machinery there — folds advect with the flow), legacy authored westward otherwise. east/west force the direction; forcing AGAINST the local jet reads weaker, because the flow drains the folds out of the wake window. Flips the moat's torn-open arc too (it is keyed to the wake side).
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 ### merge debris
 
@@ -894,12 +952,12 @@ Convective outbreak vorticity amplitude
 
 ### oval density
 
-`storms.oval_density` &mdash; range **0 to 3**, default **1**, tier `restart`.
+`storms.oval_density` &mdash; range **0 to 4**, default **1**, tier `restart`.
 
 White-oval anticyclone population multiplier
 
 <table><tr>
-<td align="center"><img src="img/sliders/storms__oval_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td>
+<td align="center"><img src="img/sliders/storms__oval_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
 </tr></table>
 
 ### oval solid core
@@ -934,12 +992,12 @@ Scales the hero storm's dark perimeter ring + bright collar (the Red Spot Hollow
 
 ### small density
 
-`storms.small_density` &mdash; range **0 to 3**, default **0**, tier `restart`.
+`storms.small_density` &mdash; range **0 to 4**, default **0**, tier `restart`.
 
 Small-storm field: sub-oval white spots and dark spots scattered in loose latitude rows (0 = off, the pre-v1.1 look)
 
 <table><tr>
-<td align="center"><img src="img/sliders/storms__small_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td>
+<td align="center"><img src="img/sliders/storms__small_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
 </tr></table>
 
 ### stamp contrast
@@ -972,6 +1030,26 @@ Turbulence boost in the wake wedge downstream of hero storms
 
 
 ## Waves
+
+### festoon hero strength
+
+`waves.festoon_hero_strength` &mdash; range **0 to 3**, default **0**, tier `restart`.
+
+Second festoon train rooted on the band edge nearest the hero storm (plumes only, no hot spots): streamers weaving through the hero's wake lane, tails brushing the collar. 0 = off; a silent no-op without a hero, without a band edge within 0.15 rad of it, or when that edge IS the primary festoon's root (one edge is never double-trained)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+</tr></table>
+
+### festoon hero wavenumber
+
+`waves.festoon_hero_wavenumber` &mdash; range **4 to 24**, default **11**, tier `restart`.
+
+Wavenumber of the hero-adjacent festoon train (the default deliberately differs from festoon_wavenumber — twin wavenumbers read as a mechanical comb)
+
+<table><tr>
+<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 11</sub></td><td align="center"><sub>high &middot; 24<br>(not rendered)</sub></td>
+</tr></table>
 
 ### festoon strength
 

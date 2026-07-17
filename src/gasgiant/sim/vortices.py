@@ -16,7 +16,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gasgiant.params.model import CastKind, PolesParams, StormsParams, hero_latitude_cap
+from gasgiant.params.model import (
+    CastKind,
+    PolesParams,
+    StormsParams,
+    WakeDir,
+    hero_latitude_cap,
+)
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
@@ -84,6 +90,12 @@ class Vortex:
     # Latitude offset of the wake wedge center (radians, signed toward the
     # equator for heroes; 0 = centered on the vortex).
     wake_lat_off: float = 0.0
+    # Belt-bow gate (emergence pack): boundary strength within heroBandDeflect's
+    # reach, in [0,1]. 0 = no band boundary to bow -> the deflection must not
+    # paint a phantom displaced-band wrap (the sweep-invariant "red hook" /
+    # symmetric funnel tells found by the per-latitude adversarial reviews).
+    # Computed at generation from profiles.t0_stamp; always 0 when emergence off.
+    bow_gain: float = 0.0
     # lon:lat elongation of the iso-contours (heroes only; 1.0 = round).
     aspect: float = 1.0
     # CPU-only (never packed into the SSBO): merger hysteresis countdown.
@@ -108,15 +120,18 @@ class VortexRegistry:
     def pack_ssbo(self) -> np.ndarray:
         """(N, 12) float32, three vec4 per vortex:
         [x, y, z, r_core], [strength, kind, tint, brightness],
-        [wake_dir, aspect, wake_lat_off, 0].
-        Vectorized: this runs every sim step."""
+        [wake_dir, aspect, wake_lat_off, bow_gain].
+        (bow_gain is 0 for every vortex unless hero_emergence is on — the
+        default programs never read the .w slot, so the previously-constant
+        zero stays byte-equivalent for them.) Vectorized: runs every sim step."""
         n = len(self.vortices)
         if n == 0:
             return np.zeros((1, 12), dtype=np.float32)
         fields = np.array(
             [
                 (v.lat, v.lon, v.r_core, v.strength, v.kind,
-                 v.tint, v.brightness, v.wake_dir, v.aspect, v.wake_lat_off)
+                 v.tint, v.brightness, v.wake_dir, v.aspect, v.wake_lat_off,
+                 v.bow_gain)
                 for v in self.vortices
             ],
             dtype=np.float64,
@@ -132,6 +147,7 @@ class VortexRegistry:
         out[:, 8] = fields[:, 7]
         out[:, 9] = fields[:, 8]
         out[:, 10] = fields[:, 9]
+        out[:, 11] = fields[:, 10]
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -347,6 +363,55 @@ def _age_transients(reg: VortexRegistry, storms: StormsParams) -> None:
         reg.vortices = [v for v in reg.vortices if v.ttl != 0]
 
 
+def _hero_bow_gain(profiles: LatProfiles, lat: float, r: float) -> float:
+    """Boundary strength within the belt-bow's reach, in [0,1].
+
+    heroBandDeflect paints its bow by displacing the band-target sampling —
+    with NO band boundary inside its q<2.3 window that displacement
+    manufactures a phantom wrap out of whatever latitude gradient exists
+    (the -28-deg symmetric funnel tell). Gate on the largest t0_stamp step
+    within +-1.6 r of the hero: a real belt/zone edge (step ~0.2) gives full
+    gain, a flat zone gives ~0. Deterministic, profile-derived.
+    """
+    lo, hi = lat - 1.6 * r, lat + 1.6 * r
+    win = (profiles.lat >= lo) & (profiles.lat <= hi)
+    if not win.any():
+        return 0.0
+    t0 = profiles.t0_stamp[win]
+    step = float(t0.max() - t0.min())
+    # 0 below 0.04 (banding noise), full gain by 0.14 (a real edge).
+    x = np.clip((step - 0.04) / 0.10, 0.0, 1.0)
+    return float(x * x * (3.0 - 2.0 * x))
+
+
+def _hero_wake_frame(profiles: LatProfiles, lat: float, r: float) -> tuple[float, float]:
+    """(lane latitude offset, wake_dir) for the hero's DYNAMIC wake (emergence).
+
+    The emergence wake is real fluid machinery (wedge eddy injection in
+    omega_force + relaxation release in heroRelaxWeight), so the wedge must
+    sit where the flow actually carries material: the lane goes to the
+    strongest jet within [0.4 r, 2.5 r] equatorward of the hero, and the wake
+    trails DOWNSTREAM of that jet (wake_dir = sign(u): +1 east, -1 west). The
+    legacy authored frame (0.5 r equatorward, hardwired westward — review
+    F06) is decorative: on gas_giant_warm the whole hero band flows EAST, so
+    a west-authored wedge injects into flow that immediately drains the folds
+    out the back. Falls back to the legacy frame when the search band has no
+    real flow (|u| < 0.05). Deterministic (profile-derived, no RNG);
+    latitude-ordering independent.
+    """
+    eq = 1.0 if lat < 0.0 else -1.0
+    legacy = (0.5 * r * eq, -1.0)
+    lo, hi = sorted((lat + eq * 0.4 * r, lat + eq * 2.5 * r))
+    win = (profiles.lat >= lo) & (profiles.lat <= hi)
+    if not win.any():
+        return legacy
+    u = profiles.u[win]
+    i = int(np.argmax(np.abs(u)))
+    if abs(u[i]) < 0.05:
+        return legacy
+    return float(profiles.lat[win][i] - lat), (1.0 if u[i] > 0.0 else -1.0)
+
+
 def _ambient_sign(profiles: LatProfiles, lat: float) -> float:
     """Sign of the ambient relative vorticity (~ -du/dphi) at a latitude."""
     lats = profiles.lat
@@ -467,9 +532,15 @@ def generate_vortices(
             lat = float(np.deg2rad(storms.hero_latitude))
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
         s = _ambient_sign(profiles, lat) * storms.hero_strength * 0.045
-        # Wake trails WNW (review F06): westward, biased half a core radius
-        # toward the equator. Not jet-derived — the ambient jet is eastward
-        # across the entire hero band, so sampling it put the wake due east.
+        # Legacy wake frame (review F06): authored WNW — westward, biased half
+        # a core radius toward the equator. NOT jet-derived (the ambient jet
+        # is eastward across warm's entire hero band; the real GRS's WNW wake
+        # rides Jupiter's westward SEBs jet, which this planet does not have).
+        # Under emergence the wake is DYNAMIC (wedge eddy injection +
+        # relaxation release), so the frame must follow the actual flow —
+        # _hero_wake_frame puts the lane in the strongest nearby jet and
+        # trails downstream of it. Emergence-gated so legacy presets keep
+        # byte-identical registries.
         # Consume the seeded longitude draw unconditionally (RNG-stream
         # position must not depend on the pin), then override for a pin.
         lon = float(rng.uniform(-np.pi, np.pi))
@@ -477,11 +548,26 @@ def generate_vortices(
             lon = drift_compensated_lon(
                 profiles, lat, storms.hero_longitude, dt, dev_steps
             )
+        woff = 0.5 * r * (1.0 if lat < 0.0 else -1.0)
+        wdir = -1.0
+        bow = 0.0
+        if storms.hero_emergence > 0.0:
+            woff, wdir = _hero_wake_frame(profiles, lat, r)
+            bow = _hero_bow_gain(profiles, lat, r)
+        # User override (storms.hero_wake_dir): auto = the frame above;
+        # east/west force the trailing direction (a forced direction against
+        # the local jet reads weaker — the flow drains the folds). The lane
+        # offset keeps tracking the jet: that is where the MATERIAL is.
+        if storms.hero_wake_dir == WakeDir.EAST:
+            wdir = 1.0
+        elif storms.hero_wake_dir == WakeDir.WEST:
+            wdir = -1.0
         reg.vortices.append(
             Vortex(lat, lon, r, s, KIND_HERO,
                    tint=storms.hero_tint, brightness=storms.hero_brightness,
-                   wake_dir=-1.0,
-                   wake_lat_off=0.5 * r * (1.0 if lat < 0.0 else -1.0),
+                   wake_dir=wdir,
+                   wake_lat_off=woff,
+                   bow_gain=bow,
                    aspect=storms.hero_aspect)
         )
 
@@ -588,7 +674,8 @@ def generate_vortices(
                           dt, dev_steps)
     if storms.hero_companions > 0:
         _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
-                             storms.hero_companions, storms.companion_aspect)
+                             storms.hero_companions, storms.companion_aspect,
+                             storms.companion_brightness)
     # Cast list (art-directed storms): stamped LAST, after the cap and every
     # seeded population, so they are byte-identical no-ops when the list is
     # empty and never perturb a seeded draw when present.
@@ -658,6 +745,22 @@ def _add_accent_ovals(
         if storms.accent_longitude is not None
         else None
     )
+    # Hero-relative default (round B): a pinned-LATITUDE accent is an authored
+    # neighbor of the hero (the Oval-BA-passing-south recipe), and an unpinned
+    # longitude puts it anywhere on the circle — out of any hero-framed view
+    # ~90% of the time. When the latitude is pinned, no explicit longitude is
+    # given, and a hero exists, root the accent a seeded 0.3-0.55 rad
+    # DOWNSTREAM of the hero instead of the Poisson draw. The draw is
+    # unconditional and APPENDED after the existing ones (stream position and
+    # the seeded-zone path — e.g. neptune's Scooter, accent_latitude None —
+    # stay byte-identical).
+    rel_off = float(rng.uniform(0.3, 0.55))
+    heroes = reg.heroes()
+    if storms.accent_latitude is not None and pin_base is None and heroes:
+        pin_base = float(
+            (heroes[0].lon + heroes[0].wake_dir * rel_off + np.pi) % (2.0 * np.pi)
+            - np.pi
+        )
     for k, lon in enumerate(lons):
         if pin_base is not None:
             lon = float((pin_base + k * min_sep + np.pi) % (2.0 * np.pi) - np.pi)
@@ -674,6 +777,7 @@ def _add_hero_companions(
     profiles: LatProfiles,
     count: int,
     aspect: float = 1.0,
+    brightness: float = 0.32,
 ) -> None:
     """Bright companion clouds beside each hero (review B5-5: the Neptune GDS
     companion / Scooter class). KIND_PEARL stamps — bright spot with a slight
@@ -696,7 +800,7 @@ def _add_hero_companions(
             r = float(np.clip(0.30 * hero.r_core, 0.015, 0.035))
             s = _ambient_sign(profiles, lat) * 0.008
             reg.vortices.append(
-                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=0.32,
+                Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=brightness,
                        aspect=aspect)
             )
 
@@ -745,10 +849,24 @@ def _add_cast(
             0.5 * entry.radius * (1.0 if lat < 0.0 else -1.0)
             if kind == CastKind.HERO else 0.0
         )
+        bow = 0.0
+        if kind == CastKind.HERO and storms.hero_emergence > 0.0:
+            wake_lat_off, wake_dir = _hero_wake_frame(profiles, lat, entry.radius)
+            bow = _hero_bow_gain(profiles, lat, entry.radius)
+        if kind == CastKind.HERO:
+            # User override applies UNCONDITIONALLY, exactly like the seeded
+            # hero path above (PR-43 simplify-pass finding: the override was
+            # emergence-gated only here, so a cast hero at emergence 0
+            # silently ignored a forced direction a seeded hero honors).
+            if storms.hero_wake_dir == WakeDir.EAST:
+                wake_dir = 1.0
+            elif storms.hero_wake_dir == WakeDir.WEST:
+                wake_dir = -1.0
         reg.vortices.append(
             Vortex(lat, lon, entry.radius, s, k,
                    tint=tint, brightness=brightness,
                    wake_dir=wake_dir, wake_lat_off=wake_lat_off,
+                   bow_gain=bow,
                    aspect=entry.aspect, origin="cast")
         )
 

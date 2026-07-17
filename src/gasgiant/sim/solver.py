@@ -29,6 +29,7 @@ from gasgiant.params.model import (
 )
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
+from gasgiant.sim.flow_renorm import hero_flow_renorm
 from gasgiant.sim.profiles import LatProfiles
 from gasgiant.sim.tracers import TracerState
 from gasgiant.sim.vortices import VortexRegistry
@@ -160,6 +161,7 @@ class Solver:
         wave_lats: tuple[float, float] = (0.12, 0.82),
         events: object | None = None,
         profile_omega_tex: moderngl.Texture | None = None,
+        hero_wave_lat: float | None = None,
     ) -> None:
         self.gpu = gpu
         self.params = params
@@ -168,6 +170,21 @@ class Solver:
         self.profile_dyn = profile_dyn_tex
         self.profile_stamp = profile_stamp_tex
         self.wave_lats = wave_lats
+        # Root latitude of the hero-adjacent festoon train (facade-selected;
+        # None = no train). Must be set BEFORE self.domains is built —
+        # _domain_defines reads it for the FESTOON2 variant predicate.
+        self.hero_wave_lat = hero_wave_lat
+        # Hero shape lobes: a DEDICATED substream keyed by the user-facing
+        # hero_shape_seed, so re-rolling the outline never perturbs any other
+        # seeded draw. Created HERE (not in _static_uniforms): the omega-state
+        # builder consumes it, and that runs before _static_uniforms.
+        shape_rng = subseed(params.seed,
+                            f"hero-shape:{params.storms.hero_shape_seed}")
+        self._shape_phase = tuple(shape_rng.uniform(0.0, 2.0 * np.pi, 3))
+        # u_hero_flow_renorm cache: the quadrature is a ~2.6M-point numpy
+        # integral and the value is static per build; _omega_static_uniforms
+        # runs once per domain. None = not yet computed.
+        self._flow_renorm: float | None = None
         self.events = events
         self.profile_omega = profile_omega_tex
 
@@ -233,6 +250,15 @@ class Solver:
             s.hero_count > 0 or any(c.kind == CastKind.HERO for c in s.cast)
         ):
             defines["HERO_EMERGENCE"] = "1"
+        # Hero-adjacent festoon train: same variant discipline. The facade
+        # passes hero_wave_lat=None when there is no hero or no band edge
+        # within reach, so a strength>0 config without a usable root latitude
+        # still compiles the default program (predicate pin).
+        if (
+            self.params.waves.festoon_hero_strength > 0.0
+            and self.hero_wave_lat is not None
+        ):
+            defines["FESTOON2"] = "1"
         return defines
 
     def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
@@ -296,6 +322,22 @@ class Solver:
         ]
         k_force0 = gpu.compute(_KERNELS, "omega_force.comp",
                                defines={**dom_defines, "SUBPASS": "0"})
+        if "HERO_EMERGENCE" in dom_defines:
+            # Loud at build (the render/detail.py tripwire pattern): these two
+            # are NEUTRAL-AT-1.0 uniforms, so an unset/renamed one reads 0.0,
+            # which ENTERS the `u_hero_flow_aspect != 1.0` branch with
+            # aspf = 0 and tcomp = 0 — destroying the emergence ring silently
+            # while every KeyError-guarded _set "succeeds". Both programs that
+            # run vortexOmegaAccum must carry them.
+            for prog, src in ((k_init, "omega_init.comp"), (k_force0, "omega_force.comp")):
+                for name in ("u_hero_flow_aspect", "u_hero_flow_renorm"):
+                    try:
+                        prog[name]
+                    except KeyError:
+                        raise RuntimeError(
+                            f"{src} HERO_EMERGENCE variant is missing {name}: the "
+                            f"flow-aspect path would read 0.0 and zero the ring."
+                        ) from None
         k_lap    = gpu.compute(_KERNELS, "omega_lap.comp",  defines=dom_defines)
         k_force1 = gpu.compute(_KERNELS, "omega_force.comp",
                                defines={**dom_defines, "SUBPASS": "1"})
@@ -341,6 +383,29 @@ class Solver:
         self._omega_init(state, domain)
         return state
 
+    def _hero_flow_renorm(self) -> float:
+        """u_hero_flow_renorm: net-circulation renorm for the K-widened
+        emergence ring/skirt (sim/flow_renorm.py). Computed from the ACTUAL
+        (seeded-jittered) hero r_core/aspect — mean over heroes when there is
+        more than one (mean-field; no shipped preset has hero_count > 1).
+        1.0 whenever the lever is off or no hero exists."""
+        if self._flow_renorm is None:
+            p = self.params.storms
+            k = p.hero_flow_aspect
+            heroes = self.vortices.heroes()
+            # The shader consumes the factor only inside the K arm of the
+            # solid-core emergence branch — skip the quadrature whenever that
+            # branch cannot run (also keeps the sane-band fallback from ever
+            # firing for a config where the lever is documented inert).
+            if (k == 1.0 or not heroes
+                    or p.hero_solid_core <= 0.0 or p.hero_emergence <= 0.0):
+                self._flow_renorm = 1.0
+            else:
+                rc = float(np.mean([h.r_core for h in heroes]))
+                asp = float(np.mean([h.aspect for h in heroes]))
+                self._flow_renorm = hero_flow_renorm(rc, asp, k)
+        return self._flow_renorm
+
     def _omega_static_uniforms(self, state: _OmegaState, domain: Domain) -> None:
         """Set size / f0 uniforms that never change after build."""
         size = domain.size
@@ -361,6 +426,11 @@ class Solver:
             _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
             _set(k, "u_oval_solid_core", p.storms.oval_solid_core)
             _set(k, "u_hero_emergence", p.storms.hero_emergence)
+            _set(k, "u_hero_shape", p.storms.hero_shape)
+            _set(k, "u_hero_shape_phase", self._shape_phase)
+            _set(k, "u_hero_taper", p.storms.hero_taper)
+            _set(k, "u_hero_flow_aspect", p.storms.hero_flow_aspect)
+            _set(k, "u_hero_flow_renorm", self._hero_flow_renorm())
         _set(state.k_force0, "u_relax_tau", p.solver.vort_relax_tau)
         _set(state.k_force1, "u_hypervisc", p.solver.vort_hypervisc)
         # Eddy-only drag (equirect only): the reduction kernel's grid size and the
@@ -525,6 +595,14 @@ class Solver:
         _set(kf0, "u_hypervisc", p.solver.vort_hypervisc)
         _set(kf0, "u_vort_inject", p.solver.vort_inject)
         _set(kf0, "u_inject_freq", p.bands.detail_freq * p.solver.vort_inject_scale)
+        # Hero wake-wedge eddy injection (HERO_EMERGENCE variant only;
+        # KeyError-guarded no-op otherwise). wake_turbulence's semantics
+        # completed for vorticity mode; frequency tracks the hero radius so
+        # the churn scale is storm-relative. 0.9/rc: reference-anchored
+        # review — the GRS wake is CHUNKY curd-like folded turbulence, and
+        # the 2.0/rc grain read thready; features ~rc at the base octave.
+        _set(kf0, "u_hero_wake_turb", p.storms.wake_turbulence)
+        _set(kf0, "u_hero_wake_freq", 0.9 / max(p.storms.hero_radius, 0.01))
         # Spatial localization mask for eddy injection (0=global,1=belt,2=shear).
         self.profile_dyn.use(location=3)
         _set(kf0, "u_profile_dyn", 3)
@@ -594,6 +672,12 @@ class Solver:
         _set(prog, "u_rib_lat", rib_lat)
         _set(prog, "u_rib_k", float(p.waves.ribbon_wavenumber))
         _set(prog, "u_rib_phase", self._rib_phase)
+        # FESTOON2 uniforms exist only in the variant program; _set suppresses
+        # the KeyError on the default one.
+        _set(prog, "u_fest2_amp", p.waves.festoon_hero_strength)
+        _set(prog, "u_fest2_lat", self.hero_wave_lat or 0.0)
+        _set(prog, "u_fest2_k", float(p.waves.festoon_hero_wavenumber))
+        _set(prog, "u_fest2_phase", self._fest2_phase)
 
     def _poly_uniforms(self, prog: moderngl.ComputeShader, pole: PoleParams) -> None:
         enabled = pole.style == PoleStyle.POLYGON_JET and pole.strength > 0.0
@@ -629,6 +713,10 @@ class Solver:
         wave_rng = subseed(p.seed, "eq-waves")
         self._fest_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
         self._rib_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
+        # Third draw APPENDED after the existing two (fest/rib phases stay
+        # byte-identical) and drawn UNCONDITIONALLY (stream position must not
+        # depend on the FESTOON2 toggle).
+        self._fest2_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
 
         relax_k = 1.0 / max(p.turbulence.relax_tau, 1.0)
         for dom in self.domains:
@@ -663,6 +751,9 @@ class Solver:
                     _set(prog, "u_hero_wake_detail", p.storms.hero_wake_detail)
                     _set(prog, "u_hero_emergence", p.storms.hero_emergence)
                     _set(prog, "u_hero_noise_offset", self._detail_offset)
+                    _set(prog, "u_hero_shape", p.storms.hero_shape)
+                    _set(prog, "u_hero_shape_phase", self._shape_phase)
+                    _set(prog, "u_hero_taper", p.storms.hero_taper)
                     _set(prog, "u_warp_offset", self._warp_offset)
                     _set(prog, "u_warp_amount", p.bands.warp_amount)
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
@@ -702,6 +793,9 @@ class Solver:
             _set(k, "u_hero_rim_tint", p.storms.hero_rim_tint)
             _set(k, "u_hero_wake_detail", p.storms.hero_wake_detail)
             _set(k, "u_hero_noise_offset", self._detail_offset)
+            _set(k, "u_hero_shape", p.storms.hero_shape)
+            _set(k, "u_hero_shape_phase", self._shape_phase)
+            _set(k, "u_hero_taper", p.storms.hero_taper)
             _set(k, "u_warp_offset", self._warp_offset)
             _set(k, "u_warp_amount", p.bands.warp_amount)
             _set(k, "u_warp_freq", p.bands.warp_freq)
@@ -739,6 +833,8 @@ class Solver:
             _set(k, "u_kh_wavenumber", float(p.turbulence.kh_wavenumber))
             _set(k, "u_kh_phase", self._kh_phase)
             _set(k, "u_wake_gain", p.storms.wake_turbulence)
+            # Extended wake wedge (HERO_EMERGENCE variant; guarded no-op else).
+            _set(k, "u_hero_emergence", p.storms.hero_emergence)
 
     def set_profiles(self, profiles: LatProfiles) -> None:
         self.profiles = profiles

@@ -194,6 +194,30 @@ def select_wave_latitudes(bands: BandLayout, profiles: LatProfiles) -> tuple[flo
     return festoon, ribbon
 
 
+def select_hero_festoon_latitude(
+    bands: BandLayout, hero_lat: float, primary_festoon_lat: float
+) -> float | None:
+    """Root latitude for the hero-adjacent festoon train (FESTOON2), or None.
+
+    The interior band edge nearest the hero storm: on a hollow-straddling
+    placement its plumes weave through the hero's wake lane with tails
+    brushing the collar (the reference's streamers rooting on the SEB edge
+    next to the GRS). None when the nearest edge is farther than 0.15 rad
+    (a train rooted away from the storm is just a second equatorial comb)
+    or when it coincides with the primary festoon edge (never double-train
+    one edge). Deterministic — layout-derived, no RNG."""
+    interior = bands.edges[1:-1].astype(np.float64)
+    if interior.size == 0:
+        return None
+    d = np.abs(interior - hero_lat)
+    i = int(np.argmin(d))
+    if float(d[i]) > 0.15:
+        return None
+    if abs(float(interior[i]) - primary_festoon_lat) < 1e-6:
+        return None
+    return float(interior[i])
+
+
 def _stamp_profiles(
     lat: np.ndarray,
     bands: BandLayout,

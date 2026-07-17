@@ -128,6 +128,7 @@
       "hero_rim_tint": 0.85,
       "hero_rim_warp": 0.65,
       "hero_wake_detail": 0.8,
+      "hero_wake_dir": "auto",
       "hero_solid_core": 1.0,
       "hero_emergence": 0.8,
       "wake_turbulence": 1.593,
@@ -135,6 +136,9 @@
       "hero_brightness": 0.05,
       "hero_companions": 0,
       "companion_aspect": 1.0,
+      "companion_brightness": 0.32,
+      "hero_shape": 1.0,
+      "hero_shape_seed": 0,
       "oval_density": 3.0,
       "oval_solid_core": 0.0,
       "accent_count": 0,
@@ -164,7 +168,9 @@
       "festoon_wavenumber": 20,
       "hotspot_depth": 1.0,
       "ribbon_strength": 0.0,
-      "ribbon_wavenumber": 12
+      "ribbon_wavenumber": 12,
+      "festoon_hero_strength": 0.0,
+      "festoon_hero_wavenumber": 11
     },
     "poles": {
       "north": {
@@ -745,17 +751,25 @@
         {
           "pos": 0.72,
           "color": [
-            0.46,
-            0.3,
-            0.2
+            0.56,
+            0.31,
+            0.19
+          ]
+        },
+        {
+          "pos": 0.85,
+          "color": [
+            0.8,
+            0.4,
+            0.18
           ]
         },
         {
           "pos": 1.0,
           "color": [
-            0.79,
-            0.45,
-            0.3
+            0.86,
+            0.44,
+            0.2
           ]
         }
       ],

@@ -21,7 +21,7 @@ _PKG = "gasgiant.sim.kernels"
 # To regenerate: uv run python -c "
 #   import hashlib, importlib.resources as ir
 #   pkg = 'gasgiant.sim.kernels'
-#   for f in ['psi.comp','velocity.comp','advect.comp',
+#   for f in ['psi.comp','velocity.comp','advect.comp','init.comp',
 #             'noise3d.glsl','common.glsl','vortex_stamp.glsl',
 #             'band_mod.glsl','wave_stamp.glsl','hero_q.glsl']:
 #       t = ir.files(pkg).joinpath(f).read_text(encoding='utf-8')
@@ -32,7 +32,11 @@ _PINNED: dict[str, str] = {
     # montage user-approved 2026-07-03): hero wake wedge reads the new
     # wake_lat_off lane, defaults westward, and is windowed to |across| 2.5
     # so it can no longer leak into the psi_feather polar band.
-    "psi.comp":          "4e905a61164cea74991442622d38742482f0edeb",
+    # Updated 2026-07-15 (GRS hero-interaction pass, Phase 1): the hero wake
+    # wedge gains a HERO_EMERGENCE variant arm extending its length (rc*7 ->
+    # mix to rc*10) with the pre-feature text verbatim in #else — default
+    # program text unchanged after preprocessing; p05 9/9 verified same day.
+    "psi.comp":          "4abc2ea619b72c8181a83d2d081b34d4c15623ce",
     "velocity.comp":     "a5edeb117303788431b9d1ab686f0dddae402fd6",
     # Updated 2026-07-10 (hero_emergence, GRS-realism pack): pass 2's relaxation
     # lines compile as a HERO_EMERGENCE preprocessor VARIANT (define selected when
@@ -41,7 +45,16 @@ _PINNED: dict[str, str] = {
     # byte-identical by construction. (An earlier runtime-guarded cut moved the
     # jupiter@1024 p05 hash via FMA-contraction changes on shared expressions;
     # the variant conversion is the fix, per the CLAUDE.md gated-out rule.)
-    "advect.comp":       "239d5022eeab06c8ea747a1614e9f00c55d04040",
+    # Updated 2026-07-15 (GRS hero-interaction pass, Phase 1): the band-target
+    # lookup gains a HERO_EMERGENCE variant arm sampling the hero-deflected
+    # latitude (heroBandDeflect — belt bowing around the oval), verbatim
+    # pre-feature #else => default program text unchanged after preprocessing.
+    "advect.comp":       "c76ee3ba979c656e5751bd4a3890bdef04708b5b",
+    # New pin 2026-07-15: init.comp gained the SAME heroBandDeflect variant
+    # arm as advect.comp (both must shape the SAME relaxation target). It was
+    # never pinned before this pass; it is a kinematic kernel and #includes
+    # vortex_stamp.glsl, so it belongs here.
+    "init.comp":         "ea86b0344a599329f458096adddbe6ff7608bc0c",
     "noise3d.glsl":      "971a4a110900ff63237eb7ae030edc18ea23bc1a",
     "common.glsl":       "48c13b438e4e893b32b594234ef965bdfeac1cad",
     # Updated 2026-06-29 for the convective white-plume outbreak stamp branch
@@ -71,13 +84,153 @@ _PINNED: dict[str, str] = {
     # claimed advect.comp runtime-guards the call; the guard is variant
     # compilation). Zero code change — the compiled default program and the
     # p05 hashes are untouched.
-    "vortex_stamp.glsl": "0ab171fa175e7243e6382ea81f884f9ced50072b",
+    # Updated 2026-07-15 (GRS hero-interaction pass, Phase 1 — plan
+    # ancient-snuggling-meadow): all inside HERO_EMERGENCE arms (open-spiral
+    # interior lane + off-center knot, deterministic moat shear-asymmetry with
+    # the west-arc carve, wake-sector relaxation release in heroRelaxWeight,
+    # the new heroBandDeflect helper) or a new variant arm around the wake
+    # wedge (extended + dimmed; verbatim pre-feature #else). Default program
+    # text unchanged after preprocessing; p05 9/9 verified same day.
+    # Re-pinned same day: the moat-asymmetry east/west weights were built on a
+    # wrong frame reading (h1 = cross(j, c) points ANTI-east, so hth=0 is
+    # local west) — the carve landed on the upstream arc; caught by the new
+    # collar-arc asymmetry GPU test. Variant-arm-only fix.
+    # Re-pinned 2026-07-15 (Phase 2 retune, same pass): anatomy inversion
+    # (bright annulus 1.12/k34 hugging the plateau, diffuse dark collar
+    # 1.30/k12 outside), rim relax fade narrowed off the annulus (0.95/k10),
+    # flush rise steepened (1.55,1.9) at x8 with the outer fade kept WIDE at
+    # (2.7,3.4) — a pulled-in outer let wound arcs survive in the 2.8-3.4
+    # shell (measured as upstream fold variance at parity with the wake) —
+    # mottle mute 0.35/fscale 0.9. ALL inside HERO_EMERGENCE
+    # mix-endpoints/arms; e=0 legacy endpoints and the default program text
+    # unchanged; p05 9/9 verified same day.
+    # Re-pinned same day (Checkpoint-1 feedback): bright-collar base raised
+    # under emergence (0.22 -> mix to 0.31; m5 hero-contrast tripwire), and
+    # leading-side smoothing in heroRelaxWeight (upstream weight suppresses
+    # the rim-fade erosion x(1-0.65 upw) and boosts the flush x(1+0.6 upw) so
+    # the belt approaches the storm laminar and band-parallel, deflecting
+    # cleanly — "tighten up the leading side"). Variant-arm-only.
+    # Re-pinned 2026-07-15 (Round A, per-latitude adversarial reviews): belt
+    # bow gains a CPU boundary gate (bow_gain, SSBO slot [3i+2].w — no phantom
+    # wrap where no boundary exists) plus FLANK-only shed/raggedness (|cos az|
+    # weighting: the E/W painted-ride arcs open and vary, the load-bearing
+    # N/S apex bow is untouched — an un-weighted first cut zeroed the apex
+    # and the bow test caught it); collar closure-breaking (downstream carve
+    # 0.8 over a wider arc + seeded amplitude/width lobes on both rings);
+    # core polarity (radial deep-darkening REMOVED, uniform plateau lift
+    # +0.10e, hot off-center knot 0.14/0.10, T3 rim fade 0.60->0.30).
+    # Variant-arm-only; default text unchanged; p05 9/9 same day.
+    # Re-pinned same day (A2): dark collar gains its own amplitude lobes +
+    # downstream tear (ringmod) and eases -0.16 -> mix to -0.125; rim-tint
+    # ring DE-DOUBLED (co-located with the dark collar at 1.30/k12 — the old
+    # 1.09 inner line + 1.27 collar pair read as two drawn ellipses).
+    # NOTE the residual visible boundary ring was subsequently ROOT-CAUSED as
+    # EMERGENT wound tracer (controlled renders with rim_contrast=0 AND
+    # rim_tint=0 keep it; palette-notch warming does not remove it) — the
+    # stamps are exonerated; regularity of the wound boundary is a
+    # texture/fray question, not a stamp one. Variant-arm-only.
+    # Re-pinned 2026-07-15 (Round B de-bullseye + interior legibility, plan
+    # ancient-snuggling-meadow): heroRelaxWeight gains a hero-local
+    # meridional frame — belt-side flush pinch (inner rise to ~1.19,
+    # protected by a uniform full-strength floor q 2.05-2.35 + the wide
+    # outer fade), low-order wound-boundary raggedness (width lobes +
+    # one-sided inward radius wobble + one seeded ring-break arc + per-arc
+    # erosion depth); the dark collar's lobes deepen (floor 0.10) and gain
+    # an equatorward cut paired with the pinch; the interior gains T3-space
+    # spiral banding (lane3, pitch 13), a hotter knot (T3 0.24), and a
+    # storm-within-a-storm dark nucleus. ALL inside HERO_EMERGENCE arms;
+    # default program text unchanged after preprocessing; p05 9/9 verified
+    # same day.
+    # Re-pinned same day (round-B calibration fix pass, reference-anchored
+    # review): heroBandDeflect outer fade azimuth-BLENDED — equatorward arc
+    # recovers by q~1.6 (the flush relaxes toward the DEFLECTED target, so
+    # the bow's reach WAS the pale moat's width and the belt-side pinch
+    # measured as a no-op), flanks keep (1.45,2.0) (an all-azimuth tighten
+    # broke the bow/flush co-design there — the wake-fold test's upstream
+    # window read the target-vs-flow disagreement annulus as folds); interior
+    # amplitudes to their calibration bounds (lane3 0.30, knot T3 0.32,
+    # nucleus 0.45 — measured interior luminance std 4.5 vs reference 18.9).
+    # Variant-arm-only; default text unchanged; p05 9/9.
+    # Re-pinned same day (user: "is it too perfect of an oval?" — yes): a
+    # low-order SHAPE deformation of the hero outline itself. R(theta)
+    # divides q/qrim/qcol in the stamp anatomy AND q in heroRelaxWeight
+    # (matched seeds): equatorward flattening 0.11 e (belt presses the north
+    # rim flat) + seeded m=2/3 breathing 0.05/0.04 e, so plateau, rings,
+    # collar and the release/flush windows share ONE imperfect envelope.
+    # heroBandDeflect and the vorticity-side windows deliberately stay
+    # elliptical (bow calibration + anchor basin). Variant-arm-only.
+    # Re-pinned same day: the deformation became a user lever —
+    # storms.hero_shape (intensity, default 1.0 = the calibrated egg) +
+    # hero_shape_seed (dedicated "hero-shape:<seed>" substream), via new
+    # variant-declared uniforms u_hero_shape / u_hero_shape_phase replacing
+    # the hard-coded amplitudes' shared noise-offset phases. Variant-arm-only.
+    # Re-pinned same day: seeded lobes 0.05/0.04 -> 0.075/0.055 (at ~2 px the
+    # seed dial was sub-perceptual — a 3-seed strip rendered near-identical;
+    # the flatten is deterministic, so the lobes ARE the re-roll), and the
+    # heroRelaxWeight cull 3.6 -> 4.2 so the deformed flush fade COMPLETES on
+    # max-bulge azimuths instead of truncating with a relax-rate step arc.
+    # Far field beyond raw ~4.0 still returns exactly 1.0. Variant-arm-only.
+    # Updated 2026-07-16 (storms.hero_taper, plan ancient-snuggling-meadow):
+    # both shape blocks restructured from a single-expression Rr to guarded
+    # accumulate (`Rr = 1.0; if shape>0 ...; if taper>0 ...`) and gained the
+    # deterministic upstream WEDGE term (0.25 amp, 6.75*c^4*(1-c^2) window on
+    # the squashed upstream cosine, Rr floor 0.4 inside the taper guard).
+    # Variant-arm-only; taper=0 output verified BYTE-identical across the
+    # restructure by the cross-commit capture (4 kinematic emergence scenes,
+    # dev 0+60, shape 1.0 and 0.0 — p05 cannot see HERO_EMERGENCE, so the
+    # capture is the binding gate; p05 9/9 unchanged same day). Constants
+    # cross-pinned by tests/unit/test_hero_shape_constants.py. Re-pinned same
+    # day: uct sign — cross(j, c) points ANTI-east (the F06 chirality trap),
+    # the first cut put the wedge downstream; caught by the new
+    # test_hero_taper_is_upstream_wedge before commit. Taper-guard-only.
+    # Re-pinned 2026-07-16 (taper equilibrium mechanisms, S2 calibration):
+    # geometric deformation alone measured ~0 at dev 700 (psi low-passes the
+    # wedge harmonics; wound material re-parks on smooth streamlines; the
+    # dev-60 field shows the wedge plainly). Three taper-guarded holds so
+    # the equilibrium keeps it: erosion hold on the wedge arc (release
+    # suppressed x(1-0.7*e*twr)), wedge flush (x12 fast-relax from just
+    # outside the DEFORMED annulus — only the flush rate outruns advective
+    # re-supply), and the heroBandDeflect CONVERGENCE (the bow's outer
+    # recovery pulls in up to 35% on the wedge arc — the hollow closes at
+    # the stagnation point; the percept lives on THIS contour, measured).
+    # All under u_hero_taper > 0 guards / twr = 0 off; cross-commit capture
+    # 4/4 byte-identical, p05 9/9 unchanged.
+    # Re-pinned 2026-07-16 (PR-43 review fixes): heroBandDeflect gains the
+    # heroRelaxWeight-style q > 0.05 atan(0,0) guard (GLSL-undefined at the
+    # exact hero-center texel; bw masks the center so output is unchanged on
+    # atan(0,0)==0 GPUs); stale `westw` renamed `wakew` (it keys off wdir —
+    # the downstream arc, east on warm — not compass west); one flush-window
+    # comment qualified. Comment/rename + emergence-arm-only guard; default
+    # program text unchanged, p05 9/9 same day.
+    "vortex_stamp.glsl": "d9846442cac3316fccb1752c8bae8469ce523994",
+    # NOT kinematic — pinned for the opposite reason (PR-43 test review,
+    # 2026-07-16): vortex_omega.glsl hosts the vorticity-only hero levers
+    # (solid core, emergence ring/skirt, shape/taper/flow-aspect arms), whose
+    # levers-OFF output NO byte gate can observe (p05 renders kinematic-only
+    # configs; SOR noise forbids byte asserts on developed vorticity output;
+    # the dev-0 omega byte-captures live in session scratchpads and die with
+    # the session). The source pin is the standing off-state gate: any edit
+    # here is a CONSCIOUS re-pin whose author re-runs the dev-0 omega capture
+    # discipline (see tests/gpu/test_hero_emergence.py::_dev0_omega).
+    # Pinned 2026-07-16 (PR-43 review fixes commit): comment-only corrections
+    # same day (wake window frame note — wake_dir is flow-derived under
+    # emergence, east on warm; K>1 GRS-recipe claim replaced with the S2
+    # falsified verdict; skirt peak 0.9 -> 1.0 and ~70% -> ~76% cancellation
+    # prose; renorm figures re-qualified to the S1 calibration scene).
+    "vortex_omega.glsl": "7fea1e1e83e998cf9c0c6faa53ac2f41765db113",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
     "hero_q.glsl": "0d116e76423ac56301e74907bf2b2a81aaa659fa",
     "band_mod.glsl":     "278a7379ae63c7cc59e4ab8b61c7dc783c099fd6",
-    "wave_stamp.glsl":   "11094b91e32fd4f59cd5db8bc26b630d05306e47",
+    # Updated 2026-07-15 (waves.festoon_hero_strength, Round B of the GRS
+    # hero-interaction pass): a second festoon train rooted on the band edge
+    # nearest the hero — plumes only, T3 only, per-plume amplitude jitter.
+    # Entirely `#ifdef FESTOON2` (predicate in solver._domain_defines:
+    # strength > 0 AND a facade-selected root edge exists), so the default
+    # program text is unchanged after preprocessing — byte-identical by
+    # construction; p05 9/9 verified same day.
+    "wave_stamp.glsl":   "97e01d66d370e640867619e083f69610505cfd7e",
 }
 
 

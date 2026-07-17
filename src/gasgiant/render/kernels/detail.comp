@@ -262,7 +262,16 @@ void main() {
     // the full mask so calm/coverage still see the enlarged oval. Deepen calm
     // toward a floor so the interior drops to reference quietness.
     float heroQ = hero * (1.0 - u_hero_emergence);
-    calm = min(calm, 1.0 - 0.9 * u_hero_emergence * hero);
+    // SERENE MOAT (reference-anchored review): the GRS's strongest
+    // morphological cue is a three-way texture gradient — chaotic wake,
+    // near-FEATURELESS moat, laminar leading side — and a moat full of
+    // strands can never read calm. The smoothstep saturates the calm across
+    // the whole moat annulus (heroMask ~0.5 at the bright annulus, ~0.27 at
+    // 1.6 true-radii) instead of fading with the Gaussian, so the quiet
+    // region covers oval + moat and releases by ~2 radii. Floor ~0.24 at
+    // e=0.9 re-admits sparse ~3%-contrast wisps (quiet, not glassy).
+    calm = min(calm, 1.0 - 0.85 * u_hero_emergence
+                         * smoothstep(0.05, 0.45, hero));
 #endif
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the
@@ -550,18 +559,26 @@ void main() {
             // convention). m=2 must stay integer: at theta = +-pi the
             // 2*theta term jumps by exactly 4*pi while jig/log are
             // continuous in position, so cos is branch-cut continuous.
+#ifdef HERO_EMERGENCE
+            // Emergence opens the pitch (-20 -> -6): the surviving faint
+            // interior spiral reads as circulation BANDING, not a tightly
+            // wound whirlpool (the tell the pack removes). Verbatim
+            // pre-feature #else — the no-defines projection hash pins it.
+            float k = mix(-20.0, -6.0, u_hero_emergence) * u_hero_spin[i];
+#else
             float k = -20.0 * u_hero_spin[i];
+#endif
             float qc = max(q, 0.08);
             float jig = fbm(pc * (u_freq * 1.5) + u_offset_spiral, 3, 2.0, 0.5);
             float lane = cos(2.0 * theta + k * log(qc) + 2.4 * jig)
                        * (0.55 + 0.45 * jig);
             float win = smoothstep(0.12, 0.34, q) * (1.0 - smoothstep(0.72, 0.98, q));
 #ifdef HERO_EMERGENCE
-            // The emergence interior is a stagnant quiescent core ("small and
-            // random" cloud motion) — the tightly-wound interior log-spiral is
-            // the whirlpool tell the pack removes. Fade it with the lever; the
-            // sim-side mottle/lanes carry the interior instead.
-            win *= 1.0 - 0.85 * u_hero_emergence;
+            // The emergence interior is a quiescent core, but a FAINT open
+            // spiral (pitch remapped above) is the reference's visible
+            // circulation banding — fade eased 0.85 -> 0.55 so it survives
+            // as garnish over the sim-side T3 lanes (round B).
+            win *= 1.0 - 0.55 * u_hero_emergence;
 #endif
             sp += win * lane;
             // Collar streamlines: thin turbulent rings hugging the rim.
@@ -570,8 +587,8 @@ void main() {
             // outer edge in with the lever so the streamlines hug it instead of
             // ringing out to 1.85 (part of the oversized-footprint fix).
             float wino = smoothstep(0.98, 1.12, q)
-                       * (1.0 - smoothstep(mix(1.5, 1.32, u_hero_emergence),
-                                           mix(1.85, 1.52, u_hero_emergence), q));
+                       * (1.0 - smoothstep(mix(1.5, 1.26, u_hero_emergence),
+                                           mix(1.85, 1.40, u_hero_emergence), q));
 #else
             float wino = smoothstep(0.98, 1.12, q) * (1.0 - smoothstep(1.5, 1.85, q));
 #endif
