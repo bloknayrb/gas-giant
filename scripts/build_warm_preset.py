@@ -153,6 +153,12 @@ def main():
     p.appearance = p.appearance.model_copy(update={
         "palette_rows": rows,
         "chroma_scale": 1.0,
+        # Two-material detail tint (S2-calibrated 2026-07-16, user sign-off):
+        # 0.6 delivers the bright-cool/dark-warm material read while leaving
+        # headroom for detail levers that stack stronger excursions through
+        # the same vehicle (the wake-braid lever). Judge recommended 0.6 over
+        # 1.0 for exactly that stacking reason.
+        "detail_chroma": 0.6,
     })
 
     p.name = "gas_giant_warm"

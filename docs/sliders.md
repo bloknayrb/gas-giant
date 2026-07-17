@@ -1210,7 +1210,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 How strongly the per-latitude band_tint_stops override the planet color (0 = off, byte-identical; 1 = the tint fully replaces the graded color). Blended in after the post chain and chroma FX so the tint is not re-graded by contrast/saturation
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/appearance__band_tint_strength__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### chroma aging
@@ -1260,7 +1260,7 @@ Color contrast multiplier about mid-gray
 Two-material tint for synthesized detail: bright detail excursions shade toward a cool pale-cloud material, dark excursions (weaker) toward warm belt material -- the reference's interleaved cool/warm texture read, which a luminance-only detail multiply cannot express. L-preserving (Oklab hue push), palette-independent. Needs detail.intensity > 0 (the Detail panel); inert without it. 0 = off (byte-identical)
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/appearance__detail_chroma__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
 </tr></table>
 
 ### gamma

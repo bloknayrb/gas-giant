@@ -287,6 +287,7 @@
       "chroma_scale": 1.0,
       "chroma_variance": 0.0,
       "hue_variance": 0.0,
+      "detail_chroma": 0.0,
       "chroma_aging": 0.0,
       "polar_tint_color": [
         0.42,

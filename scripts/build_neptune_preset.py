@@ -187,6 +187,12 @@ APPEARANCE_SCALARS = {
     "chroma_variance": 0.0,
     "hue_variance": 0.0,
     "chroma_aging": 0.0,
+    # Inheritance pin: warm bakes detail_chroma 0.6 (2026-07-16) and
+    # model_copy(update=) preserves unlisted fields -- without this pin the
+    # warm bake silently propagates. Neptune's cool cirrus-on-cyan doesn't
+    # want the warm-side push; Round D judges any nonzero value on its own
+    # renders.
+    "detail_chroma": 0.0,
     "polar_tint_color": (0.42, 0.50, 0.58),
     "polar_tint_strength": 0.0,
     "polar_tint_start_lat": 55.0,
@@ -261,6 +267,7 @@ def build() -> None:
     assert reloaded.waves.ribbon_strength == 0.0
     assert reloaded.bands.count == 7
     # The detail pass is fiber-only: intensity on, every other term dead.
+    assert reloaded.appearance.detail_chroma == 0.0  # warm bakes 0.6; pin holds
     assert reloaded.detail.intensity == 0.85
     assert reloaded.detail.cirrus_fibers == 1.8
     assert reloaded.detail.cirrus_fiber_freq == 3.0
