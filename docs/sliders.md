@@ -1253,6 +1253,16 @@ Color contrast multiplier about mid-gray
 <td align="center"><img src="img/sliders/appearance__contrast__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.8</sub></td><td align="center"><img src="img/sliders/appearance__contrast__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
+### detail chroma
+
+`appearance.detail_chroma` &mdash; range **0 to 1**, default **0**, tier `post`.
+
+Two-material tint for synthesized detail: bright detail excursions shade toward a cool pale-cloud material, dark excursions (weaker) toward warm belt material -- the reference's interleaved cool/warm texture read, which a luminance-only detail multiply cannot express. L-preserving (Oklab hue push), palette-independent. Needs detail.intensity > 0 (the Detail panel); inert without it. 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1<br>(not rendered)</sub></td>
+</tr></table>
+
 ### gamma
 
 `appearance.gamma` &mdash; range **0.4 to 2.5**, default **1**, tier `post`.
