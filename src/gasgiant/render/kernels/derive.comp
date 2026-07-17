@@ -239,8 +239,13 @@ void main() {
             float ex = clamp((dsyn - 0.5) * 2.0, -1.0, 1.0);
             float g = u_detail_chroma * ((ex > 0.0) ? 1.0 : 0.3) * abs(ex);
             vec3 lab = srgb_to_oklab(col);
-            lab.y -= g * sign(ex) * 0.008;
-            lab.z -= g * sign(ex) * 0.028;
+            // S2-calibrated: at the first-cut 0.008/0.028 the full-lever
+            // separation measured ~half the reference's warmness modulation
+            // (warm_d std 0.016 vs PIA07782 wake 0.034) -- raised 1.6x so
+            // ~0.6 reproduces that look and 1.0 keeps headroom for detail
+            // levers (the wake braid) that stack stronger excursions.
+            lab.y -= g * sign(ex) * 0.013;
+            lab.z -= g * sign(ex) * 0.045;
             col = oklab_to_srgb(lab);
         }
 #endif
