@@ -44,9 +44,10 @@ def test_zero_routes_to_default_program_byte_equal(gpu):
 
 def test_forced_variant_is_noop_at_epsilon(gpu):
     """detail_chroma=1e-6 forces the DETAIL_CHROMA program while leaving the
-    push sub-fp32 — the test that actually exercises the variant text, and
-    (chroma params all neutral) the compile regression for the
-    CHROMA_FX-off/DETAIL_CHROMA-on include-trap combination."""
+    math a no-op up to the fp32 Oklab round-trip — the test that actually
+    exercises the variant text, and (chroma params all neutral) the compile
+    regression for the CHROMA_FX-off/DETAIL_CHROMA-on include-trap
+    combination."""
     base = Simulation(_quick_params(), gpu).render_maps(256)["color"]
     eps = Simulation(_quick_params(detail_chroma=1e-6), gpu).render_maps(256)["color"]
     assert np.allclose(base, eps, atol=2e-3), np.abs(base - eps).max()
@@ -70,24 +71,42 @@ def test_pushes_bright_detail_cool_and_dark_detail_weakly_warm(gpu):
     ex_proxy = (base @ lum_w) - no_det  # sign of the detail excursion
     lab_base = srgb_to_oklab(np.clip(base, 0, 1).reshape(-1, 3)).reshape(*base.shape[:2], 3)
     lab_on = srgb_to_oklab(np.clip(on, 0, 1).reshape(-1, 3)).reshape(*on.shape[:2], 3)
+    dL = lab_on[..., 0] - lab_base[..., 0]
+    da = lab_on[..., 1] - lab_base[..., 1]
     db = lab_on[..., 2] - lab_base[..., 2]
 
     bright = ex_proxy > np.quantile(ex_proxy, 0.9)
     dark = ex_proxy < np.quantile(ex_proxy, 0.1)
-    assert db[bright].mean() < -1e-3, db[bright].mean()   # cool push
+    assert db[bright].mean() < -1e-3, db[bright].mean()   # cool push (b)
+    assert da[bright].mean() < 0.0, da[bright].mean()     # cool push (a)
     assert db[dark].mean() > 2e-4, db[dark].mean()        # weaker warm push
-    assert abs(db[bright].mean()) > 2.0 * abs(db[dark].mean())  # asymmetry
-    # L-preserving: whole-image luma barely moves (gamut clamp only).
-    assert abs(float((on @ lum_w).mean() - (base @ lum_w).mean())) < 5e-3
+    # Asymmetry window: the shader ships 1.0x/0.3x; a drift of the 0.3
+    # constant (or a regression to symmetric) must fail, so bound BOTH sides
+    # on this deterministic scene.
+    ratio = abs(db[bright].mean()) / abs(db[dark].mean())
+    assert 2.0 < ratio < 6.0, ratio
+    # L-preserving PER GROUP (a whole-image mean would let signed L leakage
+    # -- bright pixels brighter, dark darker -- cancel and pass): Oklab L must
+    # barely move in each excursion group separately (gamut clamp + fp32
+    # round-trip residue only).
+    assert abs(dL[bright].mean()) < 2e-3, dL[bright].mean()
+    assert abs(dL[dark].mean()) < 2e-3, dL[dark].mean()
 
 
 def test_composes_with_chroma_fx(gpu):
-    """Both axes on = a distinct 6-tuple program; must compile and stay
-    finite (oklab.glsl shared through the single hoisted include)."""
+    """Both axes on = a distinct 6-tuple program; must compile, stay finite
+    (oklab.glsl shared through the single hoisted include), AND the detail
+    push must be LIVE inside the composition — a composed program in which
+    DETAIL_CHROMA silently no-ops (a future uniform-wiring regression on the
+    both-axes path) would stay finite and pass a compile-only check."""
+    fx_only = Simulation(
+        _quick_params(chroma_scale=1.3, chroma_variance=0.3), gpu
+    ).render_maps(256)["color"]
     both = Simulation(
         _quick_params(detail_chroma=0.8, chroma_scale=1.3, chroma_variance=0.3), gpu
     ).render_maps(256)["color"]
     assert np.all(np.isfinite(both))
+    assert not np.allclose(both, fx_only, atol=2e-3)
 
 
 def test_noop_without_detail_intensity(gpu):
@@ -103,11 +122,6 @@ def test_noop_without_detail_intensity(gpu):
     assert np.allclose(a, b, atol=2e-3), np.abs(a - b).max()
 
 
-def test_detail_chroma_is_post_tier():
-    from gasgiant.engine.invalidation import diff_tiers
-    from gasgiant.params.model import Tier
-
-    a = PlanetParams(seed=1)
-    b = a.model_copy(deep=True)
-    b.appearance.detail_chroma = 0.5
-    assert diff_tiers(a, b) == {Tier.POST}
+# The POST-tier and preset-bake pins are pure-logic tests: they live in
+# tests/unit/test_detail_chroma_params.py so the always-blocking no-GPU tier
+# runs them (this module's gpu mark would deselect them there).

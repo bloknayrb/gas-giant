@@ -259,10 +259,11 @@ plus the independent BAND_TINT (per-band RGB tint via
 `appearance.band_tint_stops`/`_strength`), PROJECTION_CUBE (cube-face
 sampling), and DETAIL_CHROMA (`appearance.detail_chroma` — L-preserving Oklab
 material tint keyed to the synthesized detail excursion; oklab.glsl is shared
-with CHROMA_FX through a single compound-guard include) variants; detail.comp per (DETAIL_FX, SPREAD, HERO_EMERGENCE); the
-sim kernels per (HERO_EMERGENCE — hero present and `storms.hero_emergence >
-0`; FESTOON2 — `waves.festoon_hero_strength > 0` and a facade-selected root
-edge near the hero). Each new variant's
+with CHROMA_FX through a single compound-guard include) variants; detail.comp
+per (DETAIL_FX, SPREAD, HERO_EMERGENCE); the sim kernels per (HERO_EMERGENCE —
+hero present and `storms.hero_emergence > 0`; FESTOON2 —
+`waves.festoon_hero_strength > 0` and a facade-selected root edge near the
+hero). Each new variant's
 default is a no-op that preprocesses OUT (MASK only when a mask is bound and a
 gain is nonzero; BAND_TINT only when `band_tint_strength > 0`; PROJECTION_CUBE
 only on a cube export — guarded by the default-projection byte-identity test),

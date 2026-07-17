@@ -54,6 +54,22 @@ def _eval_if(expr: str, defines: set[str]) -> bool:
     raise ValueError(f"unsupported #if expression: {expr!r}")
 
 
+def test_eval_if_boolean_operators():
+    """Direct coverage of the ||/&& extension: it guards golden hashes, so the
+    first kernel author to write a form only exercised transitively (today no
+    kernel uses &&) must not be trusting an untested evaluator. Split order
+    (|| before &&) implements C precedence: a && b || c == (a && b) || c."""
+    d = {"A", "B"}
+    assert _eval_if("defined(A) || defined(Z)", d)
+    assert not _eval_if("defined(Y) || defined(Z)", d)
+    assert _eval_if("defined(A) && defined(B)", d)
+    assert not _eval_if("defined(A) && defined(Z)", d)
+    assert _eval_if("defined(Y) && defined(Z) || defined(A)", d)  # (Y&&Z)||A
+    assert not _eval_if("defined(A) && defined(Z) || defined(Y)", d)
+    with pytest.raises(ValueError):
+        _eval_if("(defined(A) || defined(B)) && defined(C)", d)  # no grouping
+
+
 def _preprocess(source: str, defines: set[str]) -> str:
     """Project the flattened source through the given defines. Handles the
     directive subset the kernels use, with nesting. ``#define`` lines are passed

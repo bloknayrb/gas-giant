@@ -1492,7 +1492,7 @@ class AppearanceParams(_Params):
                     "excursions (weaker) toward warm belt material -- the "
                     "reference's interleaved cool/warm texture read, which a "
                     "luminance-only detail multiply cannot express. "
-                    "L-preserving (Oklab hue push), palette-independent. "
+                    "L-preserving (Oklab a/b push), palette-independent. "
                     "Needs detail.intensity > 0 (the Detail panel); inert "
                     "without it. 0 = off (byte-identical)",
     )
