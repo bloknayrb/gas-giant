@@ -123,7 +123,10 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   the flow/rings maps, both equirect-space); `export.flow_map` adds `flow.exr` (east/north
   velocity, equirect only); `rings.enabled` adds `rings.exr` (radial strip, Blender-only,
   invisible in the GUI preview). derive.comp's preprocessor variants are now
-  (EMISSION × CHROMA_FX × MASK) plus BAND_TINT and PROJECTION_CUBE; `mask.file` binds an
+  (EMISSION × CHROMA_FX × MASK) plus BAND_TINT, PROJECTION_CUBE, and DETAIL_CHROMA
+  (`appearance.detail_chroma` two-material detail tint; shares oklab.glsl with
+  CHROMA_FX via ONE compound-guard include — never add a second guarded include,
+  the flattener's include-once guard is filename-keyed); `mask.file` binds an
   imported paint mask whose band_fade/emission_gain/detail_gain art-direct POST output.
 
 ## Lever-author checklist (adding a new opt-in visual lever)
