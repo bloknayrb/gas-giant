@@ -432,6 +432,36 @@ Equatorial jet half-width, radians of latitude (1 rad = 57.3 deg; default 0.12 r
 <td align="center"><img src="img/sliders/jets__equatorial_width__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/jets__equatorial_width__hi.jpg" width="320"><br><sub>high &middot; 0.4</sub></td>
 </tr></table>
 
+### local jet latitude
+
+`jets.local_jet_latitude` &mdash; range **-60 to 60**, default **-20**, tier `restart`.
+
+Center latitude of the local zonal jet (degrees, north positive). Only used while local_jet_speed is nonzero
+
+<table><tr>
+<td align="center"><sub>low &middot; -60<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; -20</sub></td><td align="center"><sub>high &middot; 60<br>(not rendered)</sub></td>
+</tr></table>
+
+### local jet speed
+
+`jets.local_jet_speed` &mdash; range **-3 to 3**, default **0**, tier `restart`.
+
+Extra local zonal jet, additive on top of the banded jet profile (0 = off, byte-identical). Negative = retrograde. Authors a westward SEBs-analog jet under an anticyclonic hero storm; the amplitude is applied PRE jets.strength and pre polar_fade (same convention as equatorial_speed), so the effective peak speed is speed * jets.strength -- a later jets.strength retune rescales it too. RESTART tier: the live-edit VELOCITY path rebuilds the jet profile without regenerating storms, which would flip the ambient shear sign under stale storm rotations
+
+<table><tr>
+<td align="center"><sub>low &middot; -3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+</tr></table>
+
+### local jet width
+
+`jets.local_jet_width` &mdash; range **0.01 to 0.3**, default **0.05**, tier `restart`.
+
+Half-width of the local zonal jet, radians of latitude (1 rad = 57.3 deg; default 0.05 rad is about 2.9 deg). Only used while local_jet_speed is nonzero
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.01<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.05</sub></td><td align="center"><sub>high &middot; 0.3<br>(not rendered)</sub></td>
+</tr></table>
+
 ### polar decay
 
 `jets.polar_decay` &mdash; range **0 to 1**, default **0.5**, tier `velocity`.

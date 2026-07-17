@@ -98,6 +98,15 @@ def build_profiles(
 
     # Equatorial superrotation jet (the dominant jet on both Jupiter and Saturn).
     u += jets.equatorial_speed * np.exp(-((lat / jets.equatorial_width) ** 2))
+
+    # Optional additive local zonal jet (e.g. a westward SEBs-analog jet under
+    # an anticyclonic hero storm). Structural guard, not a magnitude check --
+    # `x + 0.0` would still flip -0.0 bits elsewhere in u, so the default
+    # 0.0 must skip the term entirely to stay a true no-op.
+    if jets.local_jet_speed != 0.0:
+        lat0 = np.deg2rad(jets.local_jet_latitude)
+        u += jets.local_jet_speed * np.exp(-(((lat - lat0) / jets.local_jet_width) ** 2))
+
     u *= jets.strength
     u *= polar_fade(lat)
 

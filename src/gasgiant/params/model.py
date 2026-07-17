@@ -356,6 +356,30 @@ class JetsParams(_Params):
         0.5, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Jets",
         description="How strongly jet amplitudes decay toward the poles",
     )
+    local_jet_speed: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-3.0, hi=3.0, adv=True, ui="Jets",
+        description="Extra local zonal jet, additive on top of the banded jet "
+                    "profile (0 = off, byte-identical). Negative = retrograde. "
+                    "Authors a westward SEBs-analog jet under an anticyclonic "
+                    "hero storm; the amplitude is applied PRE jets.strength and "
+                    "pre polar_fade (same convention as equatorial_speed), so "
+                    "the effective peak speed is speed * jets.strength -- a "
+                    "later jets.strength retune rescales it too. RESTART tier: "
+                    "the live-edit VELOCITY path rebuilds the jet profile "
+                    "without regenerating storms, which would flip the ambient "
+                    "shear sign under stale storm rotations",
+    )
+    local_jet_latitude: float = pfield(
+        -20.0, tier=Tier.RESTART, lo=-60.0, hi=60.0, adv=True, ui="Jets",
+        description="Center latitude of the local zonal jet (degrees, north "
+                    "positive). Only used while local_jet_speed is nonzero",
+    )
+    local_jet_width: float = pfield(
+        0.05, tier=Tier.RESTART, lo=0.01, hi=0.3, adv=True, ui="Jets",
+        description="Half-width of the local zonal jet, radians of latitude "
+                    "(1 rad = 57.3 deg; default 0.05 rad is about 2.9 deg). "
+                    "Only used while local_jet_speed is nonzero",
+    )
 
 
 class TurbulenceParams(_Params):
