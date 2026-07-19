@@ -125,8 +125,49 @@ _SECTION_BLURBS: dict[str, str] = {
 }
 
 
+_SEAT_COLORS = {
+    "green": (0.4, 0.8, 0.4, 1.0),
+    "amber": (0.9, 0.7, 0.2, 1.0),
+    "red": (0.9, 0.4, 0.4, 1.0),
+}
+
+
+def _draw_seat_meter(sim: Any, storms_doc: dict[str, Any]) -> None:
+    """Live natural-bearing readout under hero_latitude. Diagnostic ONLY -- it
+    never moves the storm (auto-snap was rejected in design review). Reads the
+    DRAFT hero_latitude so it updates live during a drag; the underlying
+    bracket-off profile is cached on the facade (no per-frame profile rebuild).
+    Pre-development proxy (~1.8 deg poleward when developed); hidden when no
+    hero is pinned or before GL init (sim is None)."""
+    if sim is None:
+        return
+    lat = storms_doc.get("hero_latitude")
+    band = sim.seat_band(lat_deg=lat)  # facade returns the band directly
+    if band is None:
+        return
+    color = _SEAT_COLORS.get(band, (0.7, 0.7, 0.7, 1.0))
+    imgui.text_colored(imgui.ImVec4(*color), sim.seat_status(lat_deg=lat))
+
+
+def _draw_bracket_note(doc: dict[str, Any]) -> None:
+    """Amber warning when a hero_bracket_* jet is authored but no hero is pinned
+    -- the override then no-ops SILENTLY (the default hero is seeded, so
+    storms.hero_latitude is None). Reads the live draft so it fires as soon as a
+    bracket slider moves, giving the otherwise-inert lever a visible reason."""
+    jets = doc.get("jets", {})
+    storms = doc.get("storms", {})
+    bracket_set = (jets.get("hero_bracket_north", 0.0) != 0.0
+                   or jets.get("hero_bracket_south", 0.0) != 0.0)
+    pinned = storms.get("hero_latitude") is not None and storms.get("hero_count", 0) > 0
+    if bracket_set and not pinned:
+        imgui.text_colored(
+            imgui.ImVec4(*_SEAT_COLORS["amber"]),
+            "hero_bracket is inert: pin storms.hero_latitude to enable it",
+        )
+
+
 def draw_params_panel(
-    params: PlanetParams, state: PanelState | None = None
+    params: PlanetParams, state: PanelState | None = None, sim: Any = None
 ) -> tuple[dict[str, Any], bool, bool]:
     """Draw all parameter widgets against a fresh draft of ``params``.
 
@@ -148,7 +189,7 @@ def draw_params_panel(
     _draw_search_box(state)
     draft = params.model_dump()
     changed, committed = _draw_model(
-        type(params), draft, _defaults_baseline(), state, top_level=True
+        type(params), draft, _defaults_baseline(), state, top_level=True, sim=sim
     )
     return draft, changed, committed
 
@@ -396,6 +437,7 @@ def _draw_model(
     state: PanelState,
     top_level: bool = False,
     prefix: str = "",
+    sim: Any = None,
 ) -> tuple[bool, bool]:
     changed = False
     committed = False
@@ -436,12 +478,16 @@ def _draw_model(
                 c, cm = _draw_hero_latitude_escape(doc[name])
                 changed |= c
                 committed |= cm
+                _draw_seat_meter(sim, doc[name])
+            if name == "jets":
+                _draw_bracket_note(doc)
             if name == "emission":
                 _draw_emission_aurora_note(doc[name])
             if opened:
                 imgui.push_id(name)
                 imgui.indent(8.0)
-                c, cm = _draw_model(ann, doc[name], baseline[name], state, prefix=f"{path}.")
+                c, cm = _draw_model(ann, doc[name], baseline[name], state,
+                                    prefix=f"{path}.", sim=sim)
                 changed |= c
                 committed |= cm
                 imgui.unindent(8.0)

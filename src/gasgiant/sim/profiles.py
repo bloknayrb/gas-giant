@@ -11,7 +11,9 @@ the spherically divergence-free pairing.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -75,7 +77,8 @@ def polar_fade(lat: np.ndarray) -> np.ndarray:
 
 
 def build_profiles(
-    seed: int, bands: BandLayout, bands_params: BandsParams, jets: JetsParams
+    seed: int, bands: BandLayout, bands_params: BandsParams, jets: JetsParams,
+    hero_lat_deg: float | None = None,
 ) -> LatProfiles:
     n = PROFILE_SAMPLES
     lat = np.linspace(np.pi / 2.0, -np.pi / 2.0, n)
@@ -109,6 +112,37 @@ def build_profiles(
 
     u *= jets.strength
     u *= polar_fade(lat)
+
+    # Carve-and-impose hero jet override (jets.hero_bracket_*). Structural guard
+    # (mirrors the local_jet != 0.0 skip): default north==south==0 -> the whole
+    # block is skipped, byte-identical. Requires a pinned hero (hero_lat_deg).
+    # Applied AFTER strength+polar_fade so the flat pedestal samples the same u
+    # that is blended, and BEFORE psi/shear/omega so every derived field sees the
+    # carved u. The bracket carries jets.strength (baked into the amplitudes) so
+    # a later strength retune rescales it consistently; it is intentionally NOT
+    # polar_faded (a documented LIMIT for a high-latitude hero).
+    if hero_lat_deg is not None and (
+        jets.hero_bracket_north != 0.0 or jets.hero_bracket_south != 0.0
+    ):
+        hero = np.deg2rad(hero_lat_deg)
+        # C1 window: 1 within `window` deg of the hero, smoothstep to 0 by
+        # window+feather deg. Zero derivative at both ends -> no du/dphi jump.
+        full = np.deg2rad(jets.hero_bracket_window)
+        outer = np.deg2rad(jets.hero_bracket_window + jets.hero_bracket_feather)
+        x = np.clip((np.abs(lat - hero) - full) / max(outer - full, 1e-9), 0.0, 1.0)
+        w = 1.0 - (x * x * (3.0 - 2.0 * x))            # 1 near hero, 0 outside
+        # Flat pedestal = the base u at the hero (keeps the bracket zero-crossing
+        # on the hero; a sloped ramp would reintroduce seed-dependent shear).
+        pedestal = float(np.interp(hero, lat[::-1], u[::-1]))
+        north_c = np.deg2rad(hero_lat_deg + jets.hero_bracket_north_offset)
+        south_c = np.deg2rad(hero_lat_deg + jets.hero_bracket_south_offset)
+        bracket = jets.strength * (
+            jets.hero_bracket_north
+            * np.exp(-(((lat - north_c) / jets.hero_bracket_north_width) ** 2))
+            + jets.hero_bracket_south
+            * np.exp(-(((lat - south_c) / jets.hero_bracket_south_width) ** 2))
+        )
+        u = u * (1.0 - w) + (pedestal + bracket) * w
 
     # psi(phi) with u = -dpsi/dphi  =>  psi = -integral(u dphi).
     # lat is descending so cumulative trapezoid over the array runs from the
@@ -149,6 +183,65 @@ def build_profiles(
         fade_sector=bands.fade_sector,
         omega_jet=omega_jet,
     )
+
+
+# Green/amber/red thresholds for the natural-bearing seat meter. Coarse bands
+# (the reading is a pre-development proxy; the developed velocity-zero sits
+# ~1.8 deg poleward), calibrated so warm's iconic -22 hero reads amber/red
+# (natural bearing poor -> enable the bracket) and its best natural seat ~-40
+# reads green.
+_SEAT_GREEN = 0.15
+_SEAT_AMBER = 0.0
+
+
+def seat_quality(
+    profiles: LatProfiles, lat_deg: float, r_core_deg: float, spin_sign: float = 1.0
+) -> float:
+    """Natural two-sided bearing quality at `lat_deg` for a storm of half-extent
+    `r_core_deg`, from the (bracket-off) profile. spin_sign +1 = anticyclone
+    (wants westward equatorward rim + eastward poleward rim), -1 = cyclone.
+    quality = min(-spin*u_equatorward, spin*u_poleward) - 0.5*|u_center|;
+    two_sided is magnitude-based (not sign-only), so a correct-sign-but-weak
+    bearing scores low. Reported as a coarse pre-development proxy.
+
+    (Deliberate simplification vs spec 3.1: the explicit r_core-relative
+    'moat-orientation weight' is DROPPED. two_sided is already magnitude-based,
+    which addresses the spec's core 'not sign-only' concern; r_core_deg still
+    sets WHERE the rims are sampled. The coarse green/amber/red band absorbs the
+    calibration the weight would have carried. Restore the weight only if
+    calibration shows a strong-sign/weak-moat false-green.)"""
+    lat_asc = profiles.lat[::-1]
+    u_asc = profiles.u[::-1]
+
+    def u_at(ld: float) -> float:
+        return float(np.interp(np.deg2rad(ld), lat_asc, u_asc))
+
+    equatorward_rim = u_at(lat_deg + r_core_deg)   # less-negative side for a SH hero
+    poleward_rim = u_at(lat_deg - r_core_deg)
+    center = abs(u_at(lat_deg))
+    two_sided = min(-spin_sign * equatorward_rim, spin_sign * poleward_rim)
+    return two_sided - 0.5 * center
+
+
+def seat_scan(
+    profiles: LatProfiles, lats_deg: Iterable[float], r_core_deg: float,
+    spin_sign: float = 1.0,
+) -> list[tuple[float, float]]:
+    """(lat_deg, quality) over a latitude sweep -- the GUI's 'find a good seat'
+    readout. Diagnostic only: never moves the storm."""
+    return [
+        (float(ld), seat_quality(profiles, float(ld), r_core_deg, spin_sign))
+        for ld in lats_deg
+    ]
+
+
+def seat_band(quality: float) -> Literal["green", "amber", "red"]:
+    """Coarse green/amber/red classification of a seat_quality value."""
+    if quality >= _SEAT_GREEN:
+        return "green"
+    if quality >= _SEAT_AMBER:
+        return "amber"
+    return "red"
 
 
 MAX_LANES = 16

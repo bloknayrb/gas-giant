@@ -415,6 +415,22 @@ def test_storms_subgroup_fields_are_contiguous_by_declaration_order():
             seen_once.append(ui)
 
 
+def test_jets_subgroup_fields_are_contiguous_by_declaration_order():
+    """Same separator_text contiguity contract as storms, for the JetsParams
+    'Hero Bracket' sub-group: the 8 hero_bracket_* fields must stay consecutive.
+    Interleaving a plain 'Jets' field between two 'Hero Bracket' fields would
+    silently draw two 'Hero Bracket' separators, which no other test catches."""
+    from gasgiant.params.model import JetsParams
+
+    seen_once: list[str] = []
+    for info in JetsParams.model_fields.values():
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        ui = extra.get("ui")
+        if not seen_once or seen_once[-1] != ui:
+            assert ui not in seen_once, f"ui label {ui!r} is not contiguous"
+            seen_once.append(ui)
+
+
 def test_other_sections_have_constant_ui_no_separators_expected():
     """Backward-safety: every section besides Storms must still have a
     single constant ui value across all its (non-empty-ui) leaves, so
@@ -450,6 +466,14 @@ def test_other_sections_have_constant_ui_no_separators_expected():
             # cadence" sub-label (it used to ship ui="" and draw unlabeled).
             assert labels == {"Solver", "Fixed cadence"}, (
                 f"solver sub-groups drifted: {labels}"
+            )
+            continue
+        if section == "jets":
+            # The jets.hero_bracket_* carve-and-impose override renders under its
+            # own "Hero Bracket" sub-label (the 8 fields are a distinct cluster
+            # the spec groups together), separate from the base "Jets" jets.
+            assert labels == {"Jets", "Hero Bracket"}, (
+                f"jets sub-groups drifted: {labels}"
             )
             continue
         assert len(labels) == 1, f"section {section!r} has multiple ui labels: {labels}"

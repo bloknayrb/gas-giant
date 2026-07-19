@@ -117,6 +117,14 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   and `storms.hero_flow_aspect` are no-ops in kinematic mode (both live on the omega path;
   flow_aspect additionally needs solid_core > 0 + emergence > 0). Opt-in baroclinic coupling
   (`engine/baroclinic_coupling.py`) requires vorticity mode; off = byte-identical.
+- **Hero jet environment (`jets.hero_bracket_*`)**: carve-and-impose override in
+  `build_profiles` — replaces the seeded band jets in a feathered hero-centered window with an
+  authored two-sided bracket (needs a pinned hero: `hero_latitude` set + `hero_count > 0`).
+  Default-off byte-identical via a structural `!= 0.0` guard over the WHOLE block (a CPU/numpy
+  skip, NOT a GLSL variant). Mode-AGNOSTIC (shapes `u` before ψ/ω). NOT baked into any factory
+  preset yet — the warm `local_jet`→bracket migration + re-bake is a deferred visual checkpoint.
+  A `seat_quality` diagnostic (facade `seat_status`, GUI meter beside `hero_latitude`) scores
+  the natural bearing on the bracket-off profile; diagnostic only, never moves the storm.
 - **Export levers (all default-off / byte-identical when off)**: `export.projection` =
   equirect (default; manifest schema_version 1) or cube (6-face map, per-face `width/4`,
   manifest schema_version 2 with a per-map `faces` block — cube OMITS synthesized detail and

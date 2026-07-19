@@ -432,6 +432,86 @@ Equatorial jet half-width, radians of latitude (1 rad = 57.3 deg; default 0.12 r
 <td align="center"><img src="img/sliders/jets__equatorial_width__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/jets__equatorial_width__hi.jpg" width="320"><br><sub>high &middot; 0.4</sub></td>
 </tr></table>
 
+### hero bracket feather
+
+`jets.hero_bracket_feather` &mdash; range **0.5 to 15**, default **5**, tier `restart`.
+
+Smoothstep feather (deg) beyond the full window; a C1 (zero-derivative) taper so the carved jet adds no vorticity spike at the window edge
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.5<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 5</sub></td><td align="center"><sub>high &middot; 15<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket north
+
+`jets.hero_bracket_north` &mdash; range **-3 to 3**, default **0**, tier `restart`.
+
+Carve-and-impose hero jet override: equatorward-flank jet strength (negative = westward, the anticyclone-seating sign). 0 = off, byte-identical. With hero_bracket_south, replaces the seeded band jets inside a feathered hero-centered window with an authored two-sided bracket; needs a pinned hero. 'north'/'south' name the flanks for the SOUTHERN-hemisphere GRS hero (the only one that ships): north = equatorward, south = poleward. Machinery lever -- not baked into any factory preset yet
+
+<table><tr>
+<td align="center"><sub>low &middot; -3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket north offset
+
+`jets.hero_bracket_north_offset` &mdash; range **0 to 12**, default **3**, tier `restart`.
+
+Degrees equatorward of the hero for the equatorward-flank jet center (jet center latitude = hero_latitude + this). KNOWN LIMITATION: the lo=0 bound assumes a SOUTHERN hero (equatorward = +offset); a northern hero would need a negative offset. Hemisphere-agnostic offsets are deferred (SH GRS is the only hero that ships)
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 12<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket north width
+
+`jets.hero_bracket_north_width` &mdash; range **0.01 to 0.3**, default **0.05**, tier `restart`.
+
+Equatorward-flank jet gaussian half-width, radians (1 rad = 57.3 deg)
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.01<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.05</sub></td><td align="center"><sub>high &middot; 0.3<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket south
+
+`jets.hero_bracket_south` &mdash; range **-3 to 3**, default **0**, tier `restart`.
+
+Carve-and-impose hero jet override: poleward-flank jet strength (positive = eastward, the anticyclone-seating sign). 0 = off, byte-identical
+
+<table><tr>
+<td align="center"><sub>low &middot; -3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket south offset
+
+`jets.hero_bracket_south_offset` &mdash; range **-12 to 0**, default **-3**, tier `restart`.
+
+Degrees poleward of the hero for the poleward-flank jet center (jet center latitude = hero_latitude + this)
+
+<table><tr>
+<td align="center"><sub>low &middot; -12<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; -3</sub></td><td align="center"><sub>high &middot; 0<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket south width
+
+`jets.hero_bracket_south_width` &mdash; range **0.01 to 0.3**, default **0.05**, tier `restart`.
+
+Poleward-flank jet gaussian half-width, radians (1 rad = 57.3 deg)
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.01<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.05</sub></td><td align="center"><sub>high &middot; 0.3<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero bracket window
+
+`jets.hero_bracket_window` &mdash; range **0 to 15**, default **4**, tier `restart`.
+
+Full-override half-width (deg): seeded jets are fully replaced within this many degrees of the hero
+
+<table><tr>
+<td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 4</sub></td><td align="center"><sub>high &middot; 15<br>(not rendered)</sub></td>
+</tr></table>
+
 ### local jet latitude
 
 `jets.local_jet_latitude` &mdash; range **-60 to 60**, default **-20**, tier `restart`.
