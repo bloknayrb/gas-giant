@@ -89,9 +89,19 @@ red T3 core stamp; collar ring and internal spiral EMERGE from rotation.
 
 ### Turbulent wakes
 Chaotic folded bright filaments trailing downstream of the big storms (the
-classic GRS wake). *Implementation:* VEL — a turbulence-amplification wedge
+classic GRS wake — the reference's chain of recumbent hairpin folds / rolled
+billows). *Implementation:* VEL — a turbulence-amplification wedge
 attached downstream of hero vortices (downstream = local jet direction) in
-`psi.comp` (`storms.wake_turbulence`); the folded filaments EMERGE.
+`psi.comp` (`storms.wake_turbulence`); the folded filaments EMERGE. STAMP —
+`storms.hero_wake_detail` frays the downstream wake wedge in the relaxation
+target so the churn reads as filaments rather than a smooth blob. DETAIL —
+`detail.hero_wake_braid` (POST, default-off, byte-identical when off; needs
+`detail.intensity > 0` + a hero) inks that wake at render time as the discrete
+rolled billows: it brightens the pale entrained tracer cores and darkens the
+fold-boundary rims, keyed to the sim's OWN advected tracer folds (not a
+synthetic strand pattern). The per-hero wake frame (direction + lane-latitude
+offset) is threaded from the vortex registry through the hero-centers snapshot
+(8-field tuple), so the braid auto-tracks wherever the flow puts the wake.
 
 ### White ovals
 Compact bright anticyclones (the Oval BA lineage), often in same-latitude

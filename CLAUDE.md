@@ -104,8 +104,13 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   `#include "file.glsl"` expands with error line-mapping; cross-package form:
   `#include "gasgiant.sim.kernels:noise3d.glsl"`. `defines` are injected after `#version`
   and programs are cached per (package, name, defines). Optional features compile as
-  preprocessor variants (derive.comp: EMISSION, CHROMA_FX; detail.comp: DETAIL_FX) so the
-  default program text is the pre-feature kernel — byte-identical by construction.
+  preprocessor variants (derive.comp: EMISSION, CHROMA_FX; detail.comp: DETAIL_FX, SPREAD,
+  HERO_EMERGENCE) so the default program text is the pre-feature kernel — byte-identical by
+  construction. `detail.hero_wake_braid` (POST, `fx=True`, default 0.0, unbaked) is a DETAIL_FX
+  sub-feature (rides that variant, NOT a new axis): it inks the hero storm's turbulent wake from
+  the sim's own advected tracer folds, keyed to a per-hero wake frame threaded via
+  `engine/snapshot.py::hero_centers` (now an 8-field tuple: x,y,z,r_core,spin,aspect,wake_dir,
+  wake_lat_off).
 - **GLSL gotchas**: `patch` is a reserved word; declare uniforms before the `#include` that
   uses them (includes are textual); every sampler uniform must be explicitly bound — an
   unassigned moderngl sampler silently reads unit 0.
@@ -124,9 +129,10 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   skip, NOT a GLSL variant). Mode-AGNOSTIC (shapes `u` before ψ/ω). Geometry (offset/window/
   feather/gaussian-width) is in units of the hero CORE RADIUS (`hero_radius`) — the bracket
   tracks storm size; the facade threads `hero_radius` via `_hero_r_core` into `build_profiles`.
-  Defaults calibrated to the warm radius (0.062 rad); model-default `hero_radius` is 0.10.
-  NOT baked into any factory preset yet — the warm `local_jet`→bracket migration + re-bake is a
-  deferred visual checkpoint.
+  Model-default `hero_radius` is 0.10. BAKED into gas_giant_warm (commit 25746e7): the warm
+  `local_jet` was removed (`local_jet_speed` 0.0) and the size-relative bracket is now ACTIVE
+  (hero_latitude -24.0, hero_radius 0.108, hero_aspect 2.0, hero_emergence 0.9; bracket
+  north -3.0 / south +3.0, offsets +-1.0, window 1.0, feather 1.4, north/south widths 0.8).
   A `seat_quality` diagnostic (facade `seat_status`, GUI meter beside `hero_latitude`) scores
   the natural bearing on the bracket-off profile; diagnostic only, never moves the storm.
 - **Export levers (all default-off / byte-identical when off)**: `export.projection` =

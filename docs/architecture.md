@@ -218,10 +218,12 @@ not a GLSL variant). A pure-function `seat_quality` metric (exposed via
 storm. All bracket geometry (offset/window/feather/gaussian-width) is expressed
 in **units of the hero core radius** (`hero_radius`), so the bracket tracks storm
 size automatically — the facade threads `hero_radius` into `build_profiles` at
-every call site. Defaults are calibrated to the WARM hero radius (0.062 rad); the
-bare model-default `hero_radius` is 0.10, so a default-`PlanetParams` bracket is
-larger in degrees (harmless — no preset bakes a bracket). Machinery only: no
-factory preset bakes the bracket yet.
+every call site. The pfield defaults were calibrated against the warm hero
+radius; the bare model-default `hero_radius` is 0.10. **Baked into
+`gas_giant_warm`:** its hero sits at −24.0° (`hero_radius` 0.108) with an
+authored two-sided anticyclonic bracket (`hero_bracket_north = −3.0`,
+`hero_bracket_south = 3.0`, geometry in units of the hero core radius), which
+replaced the earlier `local_jet` seat (now zeroed out of the preset).
 
 ## Export
 
@@ -310,6 +312,21 @@ detail tracer and shear/speed, blended with Worley convective cells in quiet
 zones. Poleward of 66–72° the backtrace routes through the polar patch
 velocities (feather mixes noise values, never positions), so the caps carry
 real texture instead of fading to neutral (v1.1).
+
+**Hero wake braid** (`detail.hero_wake_braid`, default-off, POST tier, a
+DETAIL_FX lever via the `fx=True` flag) inks the hero storm's turbulent wake at
+render time as the reference GRS's chain of rolled billows (recumbent hairpin
+folds) — brightening pale entrained tracer cores and darkening fold-boundary
+rims — keyed to the sim's OWN advected tracer folds, not a synthetic strand
+pattern (earlier synthetic-carrier revisions were rejected). The per-hero wake
+frame (`wake_dir`, `wake_lat_off`) is threaded from the sim vortex registry
+through the `engine/snapshot.py` hero-centers tuple — now 8 fields (`x, y, z,
+r_core, spin, aspect, wake_dir, wake_lat_off`) — so the braid auto-tracks
+wherever the flow puts the wake instead of assuming a fixed downstream
+direction. Mode-agnostic (a POST render pass), but requires
+`detail.intensity > 0`, a hero, and rides `storms.hero_wake_detail` (the
+sim-side wake churn). Byte-identical when off; unbaked (no factory preset
+enables it yet).
 
 **Uniform detail coverage** (`detail.spread`, default-off, opt-in `SPREAD`
 variant) applies the flow-folded detail-FX texture at EVEN density across
