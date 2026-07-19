@@ -1514,7 +1514,9 @@ class StudioApp:
 
         self._draw_pending_hint()
         imgui.separator()
-        draft, any_changed, any_committed = draw_params_panel(self._live, self.panel_state)
+        draft, any_changed, any_committed = draw_params_panel(
+            self._live, self.panel_state, sim=self.sim
+        )
         self._process_edit(draft, any_changed, any_committed)
         # The mask.file Browse... button only raises this flag (it must not open
         # a dialog synchronously on the GL thread). Consume it here and open the
