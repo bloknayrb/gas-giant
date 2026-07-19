@@ -183,6 +183,64 @@ def build_profiles(
     )
 
 
+# Green/amber/red thresholds for the natural-bearing seat meter. Coarse bands
+# (the reading is a pre-development proxy; the developed velocity-zero sits
+# ~1.8 deg poleward), calibrated so warm's iconic -22 hero reads amber/red
+# (natural bearing poor -> enable the bracket) and its best natural seat ~-40
+# reads green.
+_SEAT_GREEN = 0.15
+_SEAT_AMBER = 0.0
+
+
+def seat_quality(
+    profiles: LatProfiles, lat_deg: float, r_core_deg: float, spin_sign: float = 1.0
+) -> float:
+    """Natural two-sided bearing quality at `lat_deg` for a storm of half-extent
+    `r_core_deg`, from the (bracket-off) profile. spin_sign +1 = anticyclone
+    (wants westward equatorward rim + eastward poleward rim), -1 = cyclone.
+    quality = min(-spin*u_equatorward, spin*u_poleward) - 0.5*|u_center|;
+    two_sided is magnitude-based (not sign-only), so a correct-sign-but-weak
+    bearing scores low. Reported as a coarse pre-development proxy.
+
+    (Deliberate simplification vs spec 3.1: the explicit r_core-relative
+    'moat-orientation weight' is DROPPED. two_sided is already magnitude-based,
+    which addresses the spec's core 'not sign-only' concern; r_core_deg still
+    sets WHERE the rims are sampled. The coarse green/amber/red band absorbs the
+    calibration the weight would have carried. Restore the weight only if
+    calibration shows a strong-sign/weak-moat false-green.)"""
+    lat_asc = profiles.lat[::-1]
+    u_asc = profiles.u[::-1]
+
+    def u_at(ld: float) -> float:
+        return float(np.interp(np.deg2rad(ld), lat_asc, u_asc))
+
+    equatorward_rim = u_at(lat_deg + r_core_deg)   # less-negative side for a SH hero
+    poleward_rim = u_at(lat_deg - r_core_deg)
+    center = abs(u_at(lat_deg))
+    two_sided = min(-spin_sign * equatorward_rim, spin_sign * poleward_rim)
+    return two_sided - 0.5 * center
+
+
+def seat_scan(
+    profiles: LatProfiles, lats_deg, r_core_deg: float, spin_sign: float = 1.0
+) -> list[tuple[float, float]]:
+    """(lat_deg, quality) over a latitude sweep -- the GUI's 'find a good seat'
+    readout. Diagnostic only: never moves the storm."""
+    return [
+        (float(ld), seat_quality(profiles, float(ld), r_core_deg, spin_sign))
+        for ld in lats_deg
+    ]
+
+
+def seat_band(quality: float) -> str:
+    """Coarse green/amber/red classification of a seat_quality value."""
+    if quality >= _SEAT_GREEN:
+        return "green"
+    if quality >= _SEAT_AMBER:
+        return "amber"
+    return "red"
+
+
 MAX_LANES = 16
 
 
