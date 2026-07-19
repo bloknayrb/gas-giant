@@ -203,6 +203,20 @@ validated parameter trees and dispatches the cheapest sufficient recompute:
 | VELOCITY | jet strength, turbulence amplitude | rebuild profiles/ψ; run continues (+adaptation steps if finished) |
 | RESTART | seed, band layout, storms, poles | rebuild everything, development run restarts (the GUI shows it evolving) |
 
+### Hero jet environment (`jets.hero_bracket_*`)
+
+A default-off, RESTART-tier lever set in `build_profiles`: with a pinned hero it
+replaces the seeded band jets inside a feathered (C1 smoothstep) hero-centered
+window with an authored two-sided bracket (flat pedestal + equatorward/poleward
+gaussians), so the hero's local shear is artist-authored and seed-independent
+instead of fighting the seeded jets. Applied after `u *= strength`/`polar_fade`
+and before ψ/ω, so it is mode-agnostic (kinematic + vorticity). Byte-identical at
+defaults (a structural `!= 0.0` guard skips the whole block — a CPU/numpy skip,
+not a GLSL variant). A pure-function `seat_quality` metric (exposed via
+`Simulation.seat_status`, rendered as a GUI meter) scores how well the *natural*
+(bracket-off) jets already seat the hero — a diagnostic that never moves the
+storm. Machinery only: no factory preset bakes the bracket yet.
+
 ## Export
 
 `export/exporter.py` is a generator: finish development (yielding progress),
