@@ -58,6 +58,16 @@ def _hero_lat_deg(params: PlanetParams) -> float | None:
     return s.hero_latitude if s.hero_count > 0 else None
 
 
+def _hero_r_core(params: PlanetParams) -> float:
+    """The hero core radius (radians = hero_radius) threaded into build_profiles
+    for the size-relative bracket geometry (r_core = the storm's MINOR-axis
+    half-extent; aspect-independent, matching the seat meter's `r_core_deg` read
+    in seat_quality). Not None-able: build_profiles reads it only inside the
+    strength-guarded override block, so passing it at a bracket-off / no-hero
+    site is harmless."""
+    return params.storms.hero_radius
+
+
 class Simulation:
     def __init__(self, params: PlanetParams, gpu: GpuContext | None = None) -> None:
         self.params = params
@@ -98,6 +108,7 @@ class Simulation:
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(
             p.seed, self.bands, p.bands, p.jets, hero_lat_deg=_hero_lat_deg(p),
+            hero_r_core=_hero_r_core(p),
         )
         self._seat_profile = None  # invalidate the bracket-off meter cache
         dt = compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed)
@@ -261,7 +272,8 @@ class Simulation:
         if getattr(self, "_seat_profile", None) is None:
             p = self.params
             self._seat_profile = build_profiles(
-                p.seed, self.bands, p.bands, p.jets, hero_lat_deg=None
+                p.seed, self.bands, p.bands, p.jets, hero_lat_deg=None,
+                hero_r_core=_hero_r_core(p),  # unread here (bracket-off) -- passed for uniformity
             )
         return self._seat_profile
 
@@ -275,6 +287,9 @@ class Simulation:
             lat_deg = p.storms.hero_latitude
         if lat_deg is None or p.storms.hero_count <= 0:
             return None
+        # Same r_core (minor axis, aspect-independent) the size-relative bracket
+        # geometry uses via _hero_r_core; keep the two reads in lockstep if the
+        # reference axis is ever changed.
         r_core_deg = float(np.rad2deg(p.storms.hero_radius))
         # Anticyclone by default (the GRS case); a cyclonic hero would flip this
         # (deferred -- no cyclonic-hero preset ships). Normalize by jets.strength
@@ -440,6 +455,7 @@ class Simulation:
             self.profiles = build_profiles(
                 new_params.seed, self.bands, new_params.bands, new_params.jets,
                 hero_lat_deg=_hero_lat_deg(new_params),
+                hero_r_core=_hero_r_core(new_params),
             )
             self._seat_profile = None  # invalidate the bracket-off meter cache
             self.lanes = select_lanes(new_params.seed, self.bands, new_params.bands.lane_density)

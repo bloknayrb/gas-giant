@@ -121,8 +121,12 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   `build_profiles` — replaces the seeded band jets in a feathered hero-centered window with an
   authored two-sided bracket (needs a pinned hero: `hero_latitude` set + `hero_count > 0`).
   Default-off byte-identical via a structural `!= 0.0` guard over the WHOLE block (a CPU/numpy
-  skip, NOT a GLSL variant). Mode-AGNOSTIC (shapes `u` before ψ/ω). NOT baked into any factory
-  preset yet — the warm `local_jet`→bracket migration + re-bake is a deferred visual checkpoint.
+  skip, NOT a GLSL variant). Mode-AGNOSTIC (shapes `u` before ψ/ω). Geometry (offset/window/
+  feather/gaussian-width) is in units of the hero CORE RADIUS (`hero_radius`) — the bracket
+  tracks storm size; the facade threads `hero_radius` via `_hero_r_core` into `build_profiles`.
+  Defaults calibrated to the warm radius (0.062 rad); model-default `hero_radius` is 0.10.
+  NOT baked into any factory preset yet — the warm `local_jet`→bracket migration + re-bake is a
+  deferred visual checkpoint.
   A `seat_quality` diagnostic (facade `seat_status`, GUI meter beside `hero_latitude`) scores
   the natural bearing on the bracket-off profile; diagnostic only, never moves the storm.
 - **Export levers (all default-off / byte-identical when off)**: `export.projection` =

@@ -215,7 +215,13 @@ defaults (a structural `!= 0.0` guard skips the whole block — a CPU/numpy skip
 not a GLSL variant). A pure-function `seat_quality` metric (exposed via
 `Simulation.seat_status`, rendered as a GUI meter) scores how well the *natural*
 (bracket-off) jets already seat the hero — a diagnostic that never moves the
-storm. Machinery only: no factory preset bakes the bracket yet.
+storm. All bracket geometry (offset/window/feather/gaussian-width) is expressed
+in **units of the hero core radius** (`hero_radius`), so the bracket tracks storm
+size automatically — the facade threads `hero_radius` into `build_profiles` at
+every call site. Defaults are calibrated to the WARM hero radius (0.062 rad); the
+bare model-default `hero_radius` is 0.10, so a default-`PlanetParams` bracket is
+larger in degrees (harmless — no preset bakes a bracket). Machinery only: no
+factory preset bakes the bracket yet.
 
 ## Export
 

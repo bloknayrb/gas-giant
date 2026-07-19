@@ -78,7 +78,7 @@ def polar_fade(lat: np.ndarray) -> np.ndarray:
 
 def build_profiles(
     seed: int, bands: BandLayout, bands_params: BandsParams, jets: JetsParams,
-    hero_lat_deg: float | None = None,
+    hero_lat_deg: float | None = None, hero_r_core: float = 0.0,
 ) -> LatProfiles:
     n = PROFILE_SAMPLES
     lat = np.linspace(np.pi / 2.0, -np.pi / 2.0, n)
@@ -125,22 +125,31 @@ def build_profiles(
         jets.hero_bracket_north != 0.0 or jets.hero_bracket_south != 0.0
     ):
         hero = np.deg2rad(hero_lat_deg)
-        # C1 window: 1 within `window` deg of the hero, smoothstep to 0 by
-        # window+feather deg. Zero derivative at both ends -> no du/dphi jump.
-        full = np.deg2rad(jets.hero_bracket_window)
-        outer = np.deg2rad(jets.hero_bracket_window + jets.hero_bracket_feather)
+        # C1 window: 1 within `window` CORE RADII of the hero, smoothstep to 0 by
+        # window+feather core radii. Zero derivative at both ends -> no du/dphi jump.
+        # All bracket geometry (offset/window/feather/width) is a multiple of the hero
+        # core radius r = hero_r_core, so the bracket tracks storm size.
+        r = hero_r_core
+        if r <= 0.0:
+            raise ValueError(
+                "build_profiles: hero_r_core (radians, = hero_radius) must be > 0 when the "
+                "hero bracket is active (hero_lat_deg set + non-zero bracket strength); "
+                "the facade always passes it -- a 0 here is a caller bug (forgotten kwarg)"
+            )
+        full = jets.hero_bracket_window * r
+        outer = (jets.hero_bracket_window + jets.hero_bracket_feather) * r
         x = np.clip((np.abs(lat - hero) - full) / max(outer - full, 1e-9), 0.0, 1.0)
         w = 1.0 - (x * x * (3.0 - 2.0 * x))            # 1 near hero, 0 outside
         # Flat pedestal = the base u at the hero (keeps the bracket zero-crossing
         # on the hero; a sloped ramp would reintroduce seed-dependent shear).
         pedestal = float(np.interp(hero, lat[::-1], u[::-1]))
-        north_c = np.deg2rad(hero_lat_deg + jets.hero_bracket_north_offset)
-        south_c = np.deg2rad(hero_lat_deg + jets.hero_bracket_south_offset)
+        north_c = hero + jets.hero_bracket_north_offset * r
+        south_c = hero + jets.hero_bracket_south_offset * r
         bracket = jets.strength * (
             jets.hero_bracket_north
-            * np.exp(-(((lat - north_c) / jets.hero_bracket_north_width) ** 2))
+            * np.exp(-(((lat - north_c) / (jets.hero_bracket_north_width * r)) ** 2))
             + jets.hero_bracket_south
-            * np.exp(-(((lat - south_c) / jets.hero_bracket_south_width) ** 2))
+            * np.exp(-(((lat - south_c) / (jets.hero_bracket_south_width * r)) ** 2))
         )
         u = u * (1.0 - w) + (pedestal + bracket) * w
 
