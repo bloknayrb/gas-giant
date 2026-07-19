@@ -31,6 +31,12 @@ from gasgiant.sim.profiles import (
     select_lanes,
     select_wave_latitudes,
 )
+from gasgiant.sim.profiles import (
+    seat_band as _seat_band,
+)
+from gasgiant.sim.profiles import (
+    seat_quality as _seat_quality,
+)
 from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver, compute_dt
 from gasgiant.sim.vortices import generate_vortices
 
@@ -81,7 +87,11 @@ class Simulation:
     def _build(self) -> None:
         p = self.params
         self.bands = generate_bands(p.seed, p.bands)
-        self.profiles = build_profiles(p.seed, self.bands, p.bands, p.jets)
+        self.profiles = build_profiles(
+            p.seed, self.bands, p.bands, p.jets,
+            hero_lat_deg=(p.storms.hero_latitude if p.storms.hero_count > 0 else None),
+        )
+        self._seat_profile = None  # invalidate the bracket-off meter cache
         dt = compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed)
         self.vortices = generate_vortices(
             p.seed, self.bands, self.profiles, p.storms, p.poles,
@@ -233,6 +243,51 @@ class Simulation:
         """Human-readable cause when ``baroclinic_status == 'degraded'``, else None."""
         return self._baro_degraded_reason
 
+    def _bracket_off_profile(self):
+        """The natural (bracket-off) profile for the seat meter, cached. Built
+        with hero_lat_deg=None so the override is SKIPPED regardless of the
+        bracket params -- no model_copy/zeroing needed. Cache is invalidated
+        wherever self.profiles is rebuilt (_build / the VELOCITY branch), so a
+        hero_latitude drag (RESTART -- not applied mid-drag) reuses it and the
+        per-frame meter does no profile work."""
+        if getattr(self, "_seat_profile", None) is None:
+            p = self.params
+            self._seat_profile = build_profiles(
+                p.seed, self.bands, p.bands, p.jets, hero_lat_deg=None
+            )
+        return self._seat_profile
+
+    def seat_quality(self, lat_deg: float | None = None) -> float | None:
+        """Natural two-sided bearing quality at the hero latitude (or ``lat_deg``
+        -- the GUI passes the live draft latitude), on the BRACKET-OFF profile
+        so the reading is the natural bearing even when the override is engaged.
+        None when no hero is pinned."""
+        p = self.params
+        if lat_deg is None:
+            lat_deg = p.storms.hero_latitude
+        if lat_deg is None or p.storms.hero_count <= 0:
+            return None
+        r_core_deg = float(np.rad2deg(p.storms.hero_radius))
+        # Anticyclone by default (the GRS case); a cyclonic hero would flip this
+        # (deferred -- no cyclonic-hero preset ships).
+        return _seat_quality(self._bracket_off_profile(), float(lat_deg),
+                             r_core_deg, spin_sign=1.0)
+
+    def seat_status(self, lat_deg: float | None = None) -> str | None:
+        """One-line banded readout for the GUI seat meter (None if no pinned
+        hero). Pre-development proxy -- the developed bearing sits ~1.8 deg
+        poleward of this profile-level reading."""
+        q = self.seat_quality(lat_deg)
+        if q is None:
+            return None
+        band = _seat_band(q)
+        hint = {
+            "green": "natural bearing OK here",
+            "amber": "natural bearing weak -- consider hero_bracket",
+            "red": "natural bearing poor -- enable hero_bracket",
+        }[band]
+        return f"seat: {band} ({hint})"
+
     def _update_baroclinic_source(self) -> None:
         """Advance the baroclinic solver and re-upload the coherent source. On
         an EXPECTED degrade (lower-layer outcrop or an incoherent/checkerboard
@@ -365,8 +420,11 @@ class Simulation:
             self._build()
         elif Tier.VELOCITY in tiers:
             self.profiles = build_profiles(
-                new_params.seed, self.bands, new_params.bands, new_params.jets
+                new_params.seed, self.bands, new_params.bands, new_params.jets,
+                hero_lat_deg=(new_params.storms.hero_latitude
+                              if new_params.storms.hero_count > 0 else None),
             )
+            self._seat_profile = None  # invalidate the bracket-off meter cache
             self.lanes = select_lanes(new_params.seed, self.bands, new_params.bands.lane_density)
             self.profile_dyn.write(self.profiles.dyn_lut().astype(np.float32).tobytes())
             self.profile_stamp.write(self.profiles.stamp_lut().astype(np.float32).tobytes())
