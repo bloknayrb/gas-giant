@@ -380,6 +380,54 @@ class JetsParams(_Params):
                     "(1 rad = 57.3 deg; default 0.05 rad is about 2.9 deg). "
                     "Only used while local_jet_speed is nonzero",
     )
+    hero_bracket_north: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-3.0, hi=3.0, adv=True, ui="Hero Bracket",
+        description="Carve-and-impose hero jet override: equatorward-flank jet "
+                    "strength (negative = westward, the anticyclone-seating sign). "
+                    "0 = off, byte-identical. With hero_bracket_south, replaces the "
+                    "seeded band jets inside a feathered hero-centered window with an "
+                    "authored two-sided bracket; needs a pinned hero. 'north'/'south' "
+                    "name the flanks for the SOUTHERN-hemisphere GRS hero (the only "
+                    "one that ships): north = equatorward, south = poleward. Machinery "
+                    "lever -- not baked into any factory preset yet",
+    )
+    hero_bracket_south: float = pfield(
+        0.0, tier=Tier.RESTART, lo=-3.0, hi=3.0, adv=True, ui="Hero Bracket",
+        description="Carve-and-impose hero jet override: poleward-flank jet strength "
+                    "(positive = eastward, the anticyclone-seating sign). 0 = off, "
+                    "byte-identical",
+    )
+    hero_bracket_north_offset: float = pfield(
+        3.0, tier=Tier.RESTART, lo=0.0, hi=12.0, adv=True, ui="Hero Bracket",
+        description="Degrees equatorward of the hero for the equatorward-flank jet "
+                    "center (jet center latitude = hero_latitude + this)",
+    )
+    hero_bracket_south_offset: float = pfield(
+        -3.0, tier=Tier.RESTART, lo=-12.0, hi=0.0, adv=True, ui="Hero Bracket",
+        description="Degrees poleward of the hero for the poleward-flank jet center "
+                    "(jet center latitude = hero_latitude + this)",
+    )
+    hero_bracket_window: float = pfield(
+        4.0, tier=Tier.RESTART, lo=0.0, hi=15.0, adv=True, ui="Hero Bracket",
+        description="Full-override half-width (deg): seeded jets are fully replaced "
+                    "within this many degrees of the hero",
+    )
+    hero_bracket_feather: float = pfield(
+        5.0, tier=Tier.RESTART, lo=0.5, hi=15.0, adv=True, ui="Hero Bracket",
+        description="Smoothstep feather (deg) beyond the full window; a C1 (zero-"
+                    "derivative) taper so the carved jet adds no vorticity spike at "
+                    "the window edge",
+    )
+    hero_bracket_north_width: float = pfield(
+        0.05, tier=Tier.RESTART, lo=0.01, hi=0.3, adv=True, ui="Hero Bracket",
+        description="Equatorward-flank jet gaussian half-width, radians (1 rad = "
+                    "57.3 deg)",
+    )
+    hero_bracket_south_width: float = pfield(
+        0.05, tier=Tier.RESTART, lo=0.01, hi=0.3, adv=True, ui="Hero Bracket",
+        description="Poleward-flank jet gaussian half-width, radians (1 rad = "
+                    "57.3 deg)",
+    )
 
 
 class TurbulenceParams(_Params):
