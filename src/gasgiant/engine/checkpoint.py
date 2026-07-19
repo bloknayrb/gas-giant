@@ -53,7 +53,14 @@ if TYPE_CHECKING:
 # east, bow_gain gates the belt bow, the accent roots hero-relative), the
 # same class as the v6 bump. A v8 warm checkpoint resuming here would mix
 # old-generation tracers with new-generation stamps/registry silently.
-GENERATION_VERSION = 9
+# 10 = vortex chirality fix (2026-07-17): every seeded/cast storm's `strength`
+# sign flipped (co-rotate with ambient shear instead of counter-rotating;
+# polar caps flipped to genuinely cyclonic), plus the warm-preset bake (a new
+# local zonal jet term + hero_latitude retune). A v9 checkpoint's registry
+# strengths and tracer textures were generated under the OLD (wrong-class)
+# sign convention, so resuming here would silently mix old-sign storms with
+# new-sign profiles/detail winding.
+GENERATION_VERSION = 10
 
 # Registry scalar fields serialized per vortex. float64: the "restored
 # registry is identical" guarantee is exact-round-trip, and pack_ssbo computes

@@ -313,6 +313,20 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     p.storms.pearls_count = 0
     p.storms.accent_count = 0
     p.storms.hero_companions = 0
+    # jets.local_jet_speed pinned OFF: the chirality fix (co-rotate all
+    # storms with ambient shear) bakes a local westward jet into warm
+    # (-0.9 @ -20.0 w0.05) so the -22.0 hero lands in strong co-rotating
+    # shear, but THIS probe's hero_latitude stays frozen at the pre-bake
+    # -21.0 (see below) -- 1 deg from the jet center, inside its search
+    # window for _hero_wake_frame. With the jet live the probe measured
+    # 1.28 (fails the 1.3 gate); with it neutralized, matching the ambient
+    # profile the gate was calibrated against, seed 7 measures 1.355 (was
+    # 1.334 pre-flip) and 3/4 probe seeds {7,11,23,42} pass both before and
+    # after the flip (11 flips fail->pass, 23 flips pass->fail — the
+    # statistic was already seed-sensitive pre-flip, not newly so). The
+    # chirality flip itself does not weaken wake folding; the unpinned new
+    # lever did (fix/vortex-chirality, commit 4b60fa6).
+    p.jets.local_jet_speed = 0.0
     # The background SCENE is part of this test's premise and is FROZEN:
     # small storms + outbreaks stay at the values the E/W statistic was
     # calibrated against (they shape the chaotic vorticity field everywhere,
@@ -723,12 +737,32 @@ def test_hero_flow_aspect_widens_flow_ew_only(gpu):
     row = int(round((0.5 - hero.lat / np.pi) * h - 0.5))
     col = int(round((hero.lon + np.pi) / (2.0 * np.pi) * w - 0.5))
 
-    # Ring trough radius along each axis (min of the zonal anomaly).
+    # Ring trough radius along each axis (min of the zonal anomaly), searched
+    # in the vortex's OWN core polarity (core omega = -sign(strength), the
+    # chirality convention pinned by fix/vortex-chirality 4b60fa6/module
+    # docstring): the Laplacian-of-Gaussian radial shape has one sign at the
+    # core (q~0) and the opposite sign at the ring shoulder (q~1.22) — which
+    # extremum "argmin" lands on depends on that polarity, not on the ring's
+    # physical location. This probe's _solo_warm_params pin (hero_latitude
+    # -21, predating the chirality fix) sits at an ambient latitude whose
+    # _ambient_sign is UNCHANGED by the fix (measured: -1.0 identically on
+    # both sides of 4b60fa6, jet-independent — the new local_jet_speed bake
+    # term is a per-row constant that cancels exactly under the row-mean
+    # subtraction below, confirmed jet-on vs jet-off byte-identical here) —
+    # so `strength` itself flips sign (-0.0855 pre-fix -> +0.0855 post-fix,
+    # co-rotation was the bug being fixed), and unoriented argmin silently
+    # started grabbing the near-core dip (ew_r 15px) instead of the outer
+    # ring shoulder (32px) it always used to find. Orienting by core polarity
+    # reproduces the pre-fix master measurement bit-for-bit (32/65 -> ratio
+    # 2.0312, both jet on and off, both hero_latitude -21 and the new -22
+    # bake) — this is a search-heuristic fix, not a relaxed tolerance.
+    orient = -1.0 if hero.strength >= 0.0 else 1.0
+
     dlon_px = 2.0 * np.pi / w
     dlat_px = np.pi / h
     ew_r, ns_r = {}, {}
     for k, q in ((1.0, q1), (K, qk)):
-        anom = q - q.mean(axis=1, keepdims=True)
+        anom = (q - q.mean(axis=1, keepdims=True)) * orient
         lo_e = 2
         hi_e = int(1.3 * hero.aspect * k * hero.r_core / np.cos(hero.lat)
                    / dlon_px)

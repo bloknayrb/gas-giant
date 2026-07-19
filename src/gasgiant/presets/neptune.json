@@ -100,7 +100,10 @@
       "strength": 0.733,
       "equatorial_speed": 1.693,
       "equatorial_width": 0.194,
-      "polar_decay": 0.648
+      "polar_decay": 0.648,
+      "local_jet_speed": 0.0,
+      "local_jet_latitude": -20.0,
+      "local_jet_width": 0.05
     },
     "turbulence": {
       "intensity": 0.8,

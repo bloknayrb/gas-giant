@@ -4,10 +4,19 @@ placement, power-law sizes, and Poisson-disc longitude spacing.
 Each vortex contributes a Gaussian streamfunction
     psi_v = strength * exp(-(d/r_core)^2),  d = great-circle distance,
 which yields a smooth coherent rotating core (tangential speed peaks at
-d = r_core/sqrt(2)) and composes trivially in psi. Sign convention: vortex
-rotation matches (heroes/ovals/pearls) or opposes (barges) the ambient shear
-vorticity at its latitude, which is what lets matched storms persist and
-mismatched barges get sheared into cigars.
+d = r_core/sqrt(2)) and composes trivially in psi. THE PSI-AMPLITUDE TRAP:
+because u = -dpsi/dphi and zeta = +laplacian(psi), a vortex's own core
+vorticity is the OPPOSITE sign of its `strength` field: omega = -sign(strength).
+Every seeded storm class in this module CO-ROTATES with the local ambient
+shear vorticity (all of them: heroes, ovals, barges, pearls, accents,
+companions, small storms) -- that is what lets a storm persist against
+differential shear rather than getting torn apart by it; barges persist
+inside belts by the same co-rotation rule, then get stretched into cigars by
+the jets' shear gradient (not by an opposing rotation). Given the trap above,
+co-rotation means `strength = -_ambient_sign(profiles, lat) * |magnitude|`
+everywhere in this file -- the leading minus is not optional. Polar caps are
+cyclonic per hemisphere (sign f, i.e. sign(pole_sign)), which under the same
+trap means `s_central = -pole_sign * |magnitude|` too.
 """
 
 from __future__ import annotations
@@ -462,8 +471,11 @@ def add_polar_vortices(
     if style == "calm" or strength <= 0.0:
         return
     pole_lat = pole_sign * (np.pi / 2.0)
-    # Cyclonic sense, mirrored across hemispheres.
-    s_central = pole_sign * 0.032 * strength
+    # Cyclonic sense, mirrored across hemispheres (sign f = sign(pole_sign)).
+    # Under the psi-amplitude trap (omega = -sign(strength), see the module
+    # docstring) that means the `strength` argument itself must carry the
+    # OPPOSITE sign of pole_sign.
+    s_central = -pole_sign * 0.032 * strength
 
     if style == "plain_vortex":
         reg.vortices.append(
@@ -531,11 +543,12 @@ def generate_vortices(
         if storms.hero_latitude is not None:
             lat = float(np.deg2rad(storms.hero_latitude))
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
-        s = _ambient_sign(profiles, lat) * storms.hero_strength * 0.045
+        s = -_ambient_sign(profiles, lat) * storms.hero_strength * 0.045
         # Legacy wake frame (review F06): authored WNW — westward, biased half
-        # a core radius toward the equator. NOT jet-derived (the ambient jet
-        # is eastward across warm's entire hero band; the real GRS's WNW wake
-        # rides Jupiter's westward SEBs jet, which this planet does not have).
+        # a core radius toward the equator. This static frame is the
+        # emergence-OFF fallback; warm now bakes a westward SEBs-analog jet
+        # across the hero band (jets.local_jet -0.9 @ -20°), so the real GRS's
+        # WNW wake IS reproducible here — see build_warm_preset.py.
         # Under emergence the wake is DYNAMIC (wedge eddy injection +
         # relaxation release), so the frame must follow the actual flow —
         # _hero_wake_frame puts the lane in the strongest nearby jet and
@@ -584,13 +597,15 @@ def generate_vortices(
             lat = float(
                 np.clip(center + rng.normal(0.0, 0.15 * width), -MAX_VORTEX_LAT, MAX_VORTEX_LAT)
             )
-            s = _ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
+            s = -_ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
             reg.vortices.append(
                 Vortex(lat, lon, r, s, KIND_OVAL, tint=0.1, brightness=0.22)
             )
 
-    # Brown barges: weak cyclones inside belts (sign opposes ambient shear),
-    # sheared into dark cigars by the jets.
+    # Brown barges: weak cyclones inside belts, co-rotating with the local
+    # (cyclonic) belt shear the same as every other seeded class -- what
+    # shears them into dark cigars is the jets' shear GRADIENT across the
+    # barge's footprint, not an opposed rotation sense.
     for center, width in belts:
         count = int(rng.poisson(storms.barge_density * 1.2))
         if count == 0:
@@ -616,7 +631,7 @@ def generate_vortices(
         for i in range(n):
             lon = base + (2 * np.pi * i) / n + float(rng.normal(0.0, 0.04))
             lon = (lon + np.pi) % (2 * np.pi) - np.pi
-            s = _ambient_sign(profiles, lat) * 0.008
+            s = -_ambient_sign(profiles, lat) * 0.008
             reg.vortices.append(
                 Vortex(lat, lon, 0.02, s, KIND_PEARL, tint=0.05, brightness=0.25)
             )
@@ -733,7 +748,7 @@ def _add_accent_ovals(
         center, _w = cands[int(rng.integers(0, len(cands)))]
         lat = float(np.clip(center, -cap, cap))
     r = storms.accent_radius
-    s = _ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
+    s = -_ambient_sign(profiles, lat) * 0.012 * (r / 0.03)
     # Consume the seeded Poisson-disc draw unconditionally (RNG-stream position
     # must not depend on the pin). When pinned, override every accent longitude
     # to the drift-compensated target, offset a fixed min_sep step per accent so
@@ -798,7 +813,7 @@ def _add_hero_companions(
                     + float(rng.normal(0.0, 0.2 * hero.r_core)))
             lon = float((hero.lon + dlon + np.pi) % (2.0 * np.pi) - np.pi)
             r = float(np.clip(0.30 * hero.r_core, 0.015, 0.035))
-            s = _ambient_sign(profiles, lat) * 0.008
+            s = -_ambient_sign(profiles, lat) * 0.008
             reg.vortices.append(
                 Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=brightness,
                        aspect=aspect)
@@ -823,11 +838,13 @@ def _add_cast(
     for entry in storms.cast:
         lat = float(np.deg2rad(entry.lat_deg))
         lon = drift_compensated_lon(profiles, lat, entry.lon_deg, dt, dev_steps)
-        sign = _ambient_sign(profiles, lat)
+        sign = -_ambient_sign(profiles, lat)
         kind = entry.kind
         # (KIND_* const, base strength law, default tint, default brightness).
-        # barge's base is negative so it OPPOSES the ambient shear sign, matching
-        # the seeded brown-barge convention (s = -ambient_sign * 0.006).
+        # Every base here is a positive magnitude; `sign` alone carries the
+        # co-rotation flip, matching the seeded populations above (e.g. the
+        # brown-barge convention s = -ambient_sign * 0.006 -- base=+0.006 here
+        # since `sign` already supplies the leading minus).
         if kind == CastKind.HERO:
             k, base, d_tint, d_bright = (
                 KIND_HERO, 0.045 * storms.hero_strength,
@@ -836,7 +853,7 @@ def _add_cast(
         elif kind == CastKind.OVAL:
             k, base, d_tint, d_bright = KIND_OVAL, 0.012 * (entry.radius / 0.03), 0.1, 0.22
         elif kind == CastKind.BARGE:
-            k, base, d_tint, d_bright = KIND_BARGE, -0.006, 0.35, -0.28
+            k, base, d_tint, d_bright = KIND_BARGE, 0.006, 0.35, -0.28
         else:  # CastKind.PEARL
             k, base, d_tint, d_bright = KIND_PEARL, 0.008, 0.05, 0.25
         s = sign * base * entry.strength_scale
@@ -994,9 +1011,7 @@ def _add_small_storms(
             # bright ones (subtle either way — these are texture, not features).
             base = (0.08 + 5.0 * r) * _veil(lat)
             brightness = -0.8 * base if is_belt else base
-            s = _ambient_sign(profiles, lat) * (0.5 if is_belt else 1.0) * 0.004 * (r / 0.012)
-            if is_belt:
-                s = -s
+            s = -_ambient_sign(profiles, lat) * (0.5 if is_belt else 1.0) * 0.004 * (r / 0.012)
             reg.vortices.append(
                 Vortex(lat, lon, r, s, KIND_OVAL, tint=0.0, brightness=brightness)
             )

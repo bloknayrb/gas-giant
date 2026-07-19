@@ -228,6 +228,16 @@ DETAIL = {
 
 def build() -> None:
     p = load_factory_preset("gas_giant_warm")
+    # Vortex chirality fix (2026-07-17, plan chirality_plan.md F3): neptune
+    # loads warm as its base, so it would otherwise silently inherit warm's
+    # local zonal jet (baked to carve an anticyclonic window at warm's OWN
+    # hero_latitude=-22.0) -- and neptune's hero sits at -22.5, well within
+    # that jet's reach, which would be an UNREVIEWED compensation, not the
+    # "un-compensated in the interim" state F3 explicitly calls for. Neptune
+    # + jupiter_vorticity heroes both sit in cyclonic ambient shear post-flip
+    # (wrong storm class) -- an S4 per-preset judgment call, not this commit's
+    # to make. Reset to the no-op default until that judgment lands.
+    p.jets = p.jets.model_copy(update={"local_jet_speed": 0.0})
     p.sim = p.sim.model_copy(update=SIM)
     p.solver = p.solver.model_copy(update=SOLVER)
     p.bands = p.bands.model_copy(update=BANDS)

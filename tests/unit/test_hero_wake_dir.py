@@ -7,11 +7,20 @@ Key invariants:
 - default (auto, emergence off) is the legacy authored frame: wake_dir -1,
   lane 0.5 r equatorward — byte-identical registries for legacy presets;
 - auto + emergence: wake_dir follows the sign of the strongest jet within
-  [0.4 r, 2.5 r] equatorward of the hero (east on gas_giant_warm — the whole
-  hero band flows east), and the lane sits AT that jet;
+  [0.4 r, 2.5 r] equatorward of the hero;
 - east/west force wake_dir regardless of the flow, with the lane unchanged
   (it keeps tracking the jet: that is where the material is);
 - the override does not perturb the RNG stream (placement identical).
+
+Vortex chirality fix (2026-07-17, plan chirality_plan.md C2): warm's
+hero_latitude moved -21.0 -> -22.0 and gained a local westward zonal jet
+(jets.local_jet_speed=-0.9 @ -20.0, width 0.05) to carve an anticyclonic
+window post-flip (storms now co-rotate with ambient shear instead of
+counter-rotating, so the OLD -21.0 latitude — cyclonic ambient there — would
+have developed the hero as the wrong storm class). The new latitude sits in
+the local jet's westward flank, so the auto+emergence wake is now WEST
+(was east pre-fix) — a registry-measured, r-jitter-robust flip (C0 grid
+search), not an incidental test breakage.
 """
 from __future__ import annotations
 
@@ -35,11 +44,12 @@ def _hero(preset: str = "gas_giant_warm", **storms_update):
 
 
 def test_default_auto_with_emergence_follows_the_jet():
-    """warm ships auto + emergence 0.9; its hero band flows EAST everywhere,
-    so the dynamic wake must trail east and the lane must sit in real flow
-    (|u| >= 0.05), not at the legacy stagnation offset."""
+    """warm ships auto + emergence 0.9 at hero_latitude=-22.0, inside the baked
+    local jet's westward flank (chirality-fix bake, C0 grid search), so the
+    dynamic wake trails WEST and the lane must sit in real flow (|u| >= 0.05),
+    not at the legacy stagnation offset."""
     hero, prof = _hero()
-    assert hero.wake_dir == 1.0
+    assert hero.wake_dir == -1.0
     lane = hero.lat + hero.wake_lat_off
     u_lane = float(np.interp(-lane, -prof.lat, prof.u))
     assert abs(u_lane) >= 0.05, "auto lane sits in dead flow"

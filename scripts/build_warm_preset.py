@@ -60,6 +60,25 @@ def main():
     #   PROTRUDES into the belt (the Red Spot Hollow straddle) and the wake
     #   lane (equatorward-biased) folds dark belt material instead of
     #   invisible zone-on-zone cream.
+    # Vortex chirality fix (2026-07-17, plan chirality_plan.md): storms now
+    # co-rotate with the local ambient shear instead of counter-rotating, so
+    # the hero at a cyclonic latitude would develop as a CYCLONE (wrong
+    # class). No latitude on warm's authored ambient field gives a wide
+    # anticyclonic window on its own, so a local zonal jet
+    # (jets.local_jet_speed/-latitude/-width) is baked in alongside a
+    # hero_latitude retune to CARVE one. C0 grid search (scratch,
+    # (triplet x latitude) x seeded-registry measurement, seed 4201) tested
+    # {primary -0.9/-20.0/0.05, fallback -0.7/-19.5/0.045} x
+    # {-21.0, -21.5, -22.0}: primary @ -22.0 wins every axis simultaneously
+    # -- strongest co-rotating ambient shear of the grid (zeta +7.03, vs.
+    # +3.8..+5.2 elsewhere), a registry-measured WEST wake that is robust
+    # across the full +/-20% r-core jitter band (flips only at the
+    # mathematical +20% extreme), and the slowest hero drift of the primary
+    # family (-10.89 deg over the dev-700 run, vs -14.95 deg @ -21.0).
+    # hero_latitude -21.0 -> -22.0 for this reason (still inside the belt
+    # window, now anticyclonic post-flip). The local jet's amplitude here is
+    # PRE-strength/pre-polar_fade (equatorial_speed precedent): effective
+    # peak = local_jet_speed * jets.strength.
     # - hero_radius 0.062 (~3.6 deg lat semi-axis; the real GRS is ~4-4.5):
     #   absolute presence; the fill RATIO is fixed kernel-side (q-normalized).
     # - rim_contrast 2.0 -> 1.3: the doubled ring/collar amplitude was a main
@@ -93,9 +112,14 @@ def main():
     #   the hero; longitude auto-roots 0.3-0.55 rad downstream (hero-relative
     #   placement rule). oval_solid_core 1.0 keeps it (and the larger white
     #   ovals) coherent through the dev run (the F07 pairing).
+    p.jets = p.jets.model_copy(update={
+        "local_jet_speed": -0.9,
+        "local_jet_latitude": -20.0,
+        "local_jet_width": 0.05,
+    })
     p.storms = p.storms.model_copy(update={
         "hero_radius": 0.062,
-        "hero_latitude": -21.0,
+        "hero_latitude": -22.0,
         "hero_aspect": 2.9,
         "hero_emergence": 0.9,
         "rim_contrast": 1.3,

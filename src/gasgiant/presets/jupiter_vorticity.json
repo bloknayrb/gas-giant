@@ -100,7 +100,10 @@
       "strength": 0.733,
       "equatorial_speed": 1.693,
       "equatorial_width": 0.194,
-      "polar_decay": 0.648
+      "polar_decay": 0.648,
+      "local_jet_speed": 0.0,
+      "local_jet_latitude": -20.0,
+      "local_jet_width": 0.05
     },
     "turbulence": {
       "intensity": 1.2,
@@ -139,6 +142,8 @@
       "companion_brightness": 0.32,
       "hero_shape": 1.0,
       "hero_shape_seed": 0,
+      "hero_taper": 0.0,
+      "hero_flow_aspect": 1.0,
       "oval_density": 3.0,
       "oval_solid_core": 0.0,
       "accent_count": 0,
@@ -804,6 +809,7 @@
       "chroma_scale": 1.0,
       "chroma_variance": 0.45,
       "hue_variance": 0.3,
+      "detail_chroma": 0.0,
       "chroma_aging": 0.35,
       "polar_tint_color": [
         0.36,

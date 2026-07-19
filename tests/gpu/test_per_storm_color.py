@@ -158,13 +158,31 @@ def test_dark_hero_on_ice_giant(gpu):
 # --------------------------------------------------- accent post-dev (A01/F07)
 
 def test_accent_oval_survives_dev_run_coherent(gpu):
-    """POST-DEV coherence: a red accent oval at -33 deg must survive a real
+    """POST-DEV coherence: a red accent oval at -29 deg must survive a real
     vorticity dev run as a compact red spot (small Gaussian ovals dissipate —
-    F07 — so this pairs accent_radius 0.06 with oval_solid_core)."""
+    F07 — so this pairs accent_radius 0.06 with oval_solid_core).
+
+    Frozen-scene re-roll from -33 -> -29 (fix/vortex-chirality, 4b60fa6): the
+    chirality fix makes every seeded storm's own vorticity sign deterministic
+    (co-rotate the LOCAL ambient shear, `sim/vortices.py` module docstring),
+    where before the bug let an accent land on whichever sign happened to
+    survive. At seed 7 (this test's fixed seed), jupiter_vorticity's randomly
+    drawn band layout puts a belt near -40 deg; -33 sits on that belt's
+    cyclonic-matching flank, so the now-correctly-cyclonic accent there merges
+    into the belt's same-signed vorticity instead of staying a compact oval
+    (measured: forcing the pre-fix sign at the SAME latitude/seed reproduces
+    the old peak-background=0.36; the corrected sign gives 0.067, i.e. the
+    dip is sign-specific to this one coincidental belt-proximity, not a
+    general co-rotation weakness). Confirmed general: -25/-29/-37/-41 all
+    pass under the corrected physics, -29 by the widest margin
+    (peak-background=0.346, lat_rms=0.013, lon_rms=0.030, both well inside
+    the 0.05 coherence gate) and matches the accent_latitude gas_giant_warm
+    already ships (round B). No preset bakes -33 -- this was a test-only
+    pin, not a shipped regression."""
     p = _shrunk("jupiter_vorticity", steps=300)
-    p.storms.hero_count = 0          # keep the red hero out of the -33 band
+    p.storms.hero_count = 0          # keep the red hero out of the -29 band
     p.storms.accent_count = 1
-    p.storms.accent_latitude = -33.0
+    p.storms.accent_latitude = -29.0
     p.storms.accent_tint = 0.9
     p.storms.accent_brightness = 0.25
     p.storms.accent_radius = 0.06

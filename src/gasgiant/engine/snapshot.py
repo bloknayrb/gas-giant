@@ -26,10 +26,11 @@ def hero_centers(
     registry: VortexRegistry,
 ) -> list[tuple[float, float, float, float, float, float]]:
     """(x, y, z, r_core, spin, aspect) of each hero storm at its current drifted
-    position. spin = sign(strength): the hero's actual rotation sense
-    (seed-dependent via the ambient shear — NOT a function of hemisphere),
-    which the detail pass needs to wind the analytic spiral lanes the same
-    way the backtraced filaments wind."""
+    position. spin = sign(strength), which is the NEGATION of the hero's
+    actual rotation sense (the psi-amplitude trap: omega = -sign(strength),
+    see sim/vortices.py's module docstring) — seed-dependent via the ambient
+    shear, not a function of hemisphere — which the detail pass needs to wind
+    the analytic spiral lanes the same way the backtraced filaments wind."""
     out = []
     for v in registry.heroes():
         cl = math.cos(v.lat)
