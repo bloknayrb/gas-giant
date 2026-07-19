@@ -327,6 +327,13 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     # chirality flip itself does not weaken wake folding; the unpinned new
     # lever did (fix/vortex-chirality, commit 4b60fa6).
     p.jets.local_jet_speed = 0.0
+    # Hero jet BRACKET pinned OFF (2026-07-19 GRS bake): warm now bakes an active
+    # carve-and-impose bracket (hero_bracket_north/south) that supersedes the old
+    # local_jet. It reorganizes the jets around the hero, so a live bracket
+    # re-rolls this frozen fold pattern exactly as local_jet did -- pin it off to
+    # keep the pre-bake ambient the E/W statistic was calibrated against.
+    p.jets.hero_bracket_north = 0.0
+    p.jets.hero_bracket_south = 0.0
     # The background SCENE is part of this test's premise and is FROZEN:
     # small storms + outbreaks stay at the values the E/W statistic was
     # calibrated against (they shape the chaotic vorticity field everywhere,
@@ -660,6 +667,19 @@ def _solo_warm_params(**storms_over) -> PlanetParams:
     p.storms.outbreak_count = 0
     p.storms.hero_shape = 0.0
     p.storms.hero_taper = 0.0
+    # Frozen probe GEOMETRY (2026-07-19 GRS bake): these omega geometry probes are
+    # calibrated at hero_latitude -21 / hero_aspect 2.2 / r_core 0.062 (the
+    # pre-bake values the ratio/centroid masters were measured at -- see the
+    # widens-test comments). The bake moved warm's hero to -24 / aspect 2.0 /
+    # r 0.108, so pin the calibration geometry here (the measurement boxes scale
+    # with aspect*r_core; letting them track the bake re-rolls the masters).
+    p.storms.hero_aspect = 2.2
+    p.storms.hero_radius = 0.062
+    # Bracket pinned OFF (same bake): warm now bakes an active bracket that
+    # reorganizes the jets around the hero; these probes want the pure seeded jet
+    # background, so neutralize it (local_jet already 0 in the baked warm).
+    p.jets.hero_bracket_north = 0.0
+    p.jets.hero_bracket_south = 0.0
     for key, val in storms_over.items():
         setattr(p.storms, key, val)
     assert p.solver.type == SolverType.VORTICITY

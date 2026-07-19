@@ -228,16 +228,19 @@ DETAIL = {
 
 def build() -> None:
     p = load_factory_preset("gas_giant_warm")
-    # Vortex chirality fix (2026-07-17, plan chirality_plan.md F3): neptune
-    # loads warm as its base, so it would otherwise silently inherit warm's
-    # local zonal jet (baked to carve an anticyclonic window at warm's OWN
-    # hero_latitude=-22.0) -- and neptune's hero sits at -22.5, well within
-    # that jet's reach, which would be an UNREVIEWED compensation, not the
-    # "un-compensated in the interim" state F3 explicitly calls for. Neptune
-    # + jupiter_vorticity heroes both sit in cyclonic ambient shear post-flip
-    # (wrong storm class) -- an S4 per-preset judgment call, not this commit's
-    # to make. Reset to the no-op default until that judgment lands.
-    p.jets = p.jets.model_copy(update={"local_jet_speed": 0.0})
+    # Neptune loads warm as its base, so it would otherwise silently inherit
+    # warm's hero jet ENVIRONMENT -- which warm now bakes as the size-relative
+    # carve-and-impose BRACKET (hero_bracket_north/south, 2026-07-19), seated at
+    # warm's OWN hero_latitude -24 for the GRS. Neptune's GDS sits at -22.5 with
+    # its own seeded field, and whether it wants an authored bracket is a
+    # per-preset judgment (the same "un-compensated in the interim" call F3 made
+    # for the earlier local_jet). Reset the bracket strengths + local_jet to the
+    # no-op defaults until that judgment lands (geometry is inert at strength 0).
+    p.jets = p.jets.model_copy(update={
+        "local_jet_speed": 0.0,
+        "hero_bracket_north": 0.0,
+        "hero_bracket_south": 0.0,
+    })
     p.sim = p.sim.model_copy(update=SIM)
     p.solver = p.solver.model_copy(update=SOLVER)
     p.bands = p.bands.model_copy(update=BANDS)
@@ -259,6 +262,11 @@ def build() -> None:
     # Prove it is in-bounds (save_preset does not re-validate; load_preset does).
     reloaded = load_preset(out)
     assert reloaded.solver.vort_inject == 0.0
+    # Bracket pinned off (warm bakes the GRS bracket; the pin blocks a silent
+    # inherit -- neptune's GDS gets no authored bracket until a per-preset call).
+    assert reloaded.jets.hero_bracket_north == 0.0
+    assert reloaded.jets.hero_bracket_south == 0.0
+    assert reloaded.jets.local_jet_speed == 0.0
     assert reloaded.storms.hero_tint == -0.9
     assert reloaded.storms.hero_companions == 3
     assert reloaded.storms.companion_aspect == 3.5

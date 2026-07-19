@@ -103,7 +103,15 @@
       "polar_decay": 0.648,
       "local_jet_speed": 0.0,
       "local_jet_latitude": -20.0,
-      "local_jet_width": 0.05
+      "local_jet_width": 0.05,
+      "hero_bracket_north": 0.0,
+      "hero_bracket_south": 0.0,
+      "hero_bracket_north_offset": 1.0,
+      "hero_bracket_south_offset": -1.0,
+      "hero_bracket_window": 1.0,
+      "hero_bracket_feather": 1.4,
+      "hero_bracket_north_width": 0.8,
+      "hero_bracket_south_width": 0.8
     },
     "turbulence": {
       "intensity": 0.8,

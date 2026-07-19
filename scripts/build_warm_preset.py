@@ -53,34 +53,27 @@ def main():
     # coherent (solid_core=1.0 preserved) and everything beyond the storm is
     # byte-identical. 0.8 = strong effect, still a distinct storm (calibrated by
     # emergence x solid_core sweep, 2026-07-09).
-    # GRS interaction pass (2026-07-15, plan ancient-snuggling-meadow): the
-    # hero must READ as embedded in the flow, not sitting on it.
-    # - hero_latitude -21.0 FORKS from jupiter_vorticity's -22.5 (deliberate):
-    #   warm's belt spans -7.31..-19.41 deg, so at -21.0 the oval's north rim
-    #   PROTRUDES into the belt (the Red Spot Hollow straddle) and the wake
-    #   lane (equatorward-biased) folds dark belt material instead of
-    #   invisible zone-on-zone cream.
-    # Vortex chirality fix (2026-07-17, plan chirality_plan.md): storms now
-    # co-rotate with the local ambient shear instead of counter-rotating, so
-    # the hero at a cyclonic latitude would develop as a CYCLONE (wrong
-    # class). No latitude on warm's authored ambient field gives a wide
-    # anticyclonic window on its own, so a local zonal jet
-    # (jets.local_jet_speed/-latitude/-width) is baked in alongside a
-    # hero_latitude retune to CARVE one. C0 grid search (scratch,
-    # (triplet x latitude) x seeded-registry measurement, seed 4201) tested
-    # {primary -0.9/-20.0/0.05, fallback -0.7/-19.5/0.045} x
-    # {-21.0, -21.5, -22.0}: primary @ -22.0 wins every axis simultaneously
-    # -- strongest co-rotating ambient shear of the grid (zeta +7.03, vs.
-    # +3.8..+5.2 elsewhere), a registry-measured WEST wake that is robust
-    # across the full +/-20% r-core jitter band (flips only at the
-    # mathematical +20% extreme), and the slowest hero drift of the primary
-    # family (-10.89 deg over the dev-700 run, vs -14.95 deg @ -21.0).
-    # hero_latitude -21.0 -> -22.0 for this reason (still inside the belt
-    # window, now anticyclonic post-flip). The local jet's amplitude here is
-    # PRE-strength/pre-polar_fade (equatorial_speed precedent): effective
-    # peak = local_jet_speed * jets.strength.
-    # - hero_radius 0.062 (~3.6 deg lat semi-axis; the real GRS is ~4-4.5):
-    #   absolute presence; the fill RATIO is fixed kernel-side (q-normalized).
+    # GRS BAKE (2026-07-19, plans hero-bracket-size-relative + hero-jet-
+    # environment): the hero is seated by the size-relative carve-and-impose jet
+    # BRACKET (jets.hero_bracket_*, set below), which SUPERSEDES the earlier
+    # additive local_jet one-sided bearing. The bracket erases the seeded band
+    # jets in a feathered hero-core-radius window and imposes an authored
+    # two-sided anticyclonic shear (equatorward westward + poleward eastward), so
+    # the storm co-rotates with an artist-authored, seed-independent environment
+    # instead of a local jet hand-tuned to warm's seeded field. local_jet is
+    # REMOVED (the bracket carves the same window; the developed look is unchanged
+    # with it off, verified 2026-07-19). All below is a USER visual checkpoint,
+    # reference-anchored vs PIA07782 (detail-off calibration + detail-on look):
+    # - hero_latitude -22.0 -> -24.0: the storm sits ON the reddish band boundary
+    #   in a pale lane (the Red Spot Hollow straddle), the bracket bowing the
+    #   surrounding bands around it. -24 was walked in from -22 to sit on the
+    #   boundary; the bracket (not the seeded field) now supplies the bearing, so
+    #   the old chirality latitude/local_jet grid search no longer constrains it.
+    # - hero_radius 0.062 -> 0.108 (~6.2 deg lat semi-axis; the real GRS dominates
+    #   its band): the bigger storm reads in the right proportion to its band vs
+    #   the reference. The size-relative bracket geometry tracks this radius
+    #   automatically (offset/window/feather/widths are in core-radius units), so
+    #   growing the storm keeps the bracket straddling it with no manual re-tune.
     # - rim_contrast 2.0 -> 1.3: the doubled ring/collar amplitude was a main
     #   driver of the etched-rings look; the real Hollow is only slightly
     #   brighter than the bands.
@@ -90,17 +83,13 @@ def main():
     #   stamp; granular (still muted) interior.
     # - hero_emergence 0.8 -> 0.9: the retuned pack endpoints land at 90%.
     # Round B (de-bullseye + populate the neighborhood, same plan):
-    # Aspect pass (2026-07-16, same plan): the reference GRS's RED CORE is
-    # MORE elongated (~2.9) than its pale envelope (~1.8); ours rendered the
-    # core at ~2.0. The deficit is anatomy-side (psi rounds any authored
-    # geometry, but every erasure window is aspect-normalized, so raising the
-    # AUTHORED aspect moves the flow and the anatomy windows together — no
-    # metric mismatch, no dye dilution). storms.hero_flow_aspect stays at its
-    # 1.0 default: K>1 widens the ENVELOPE (the wrong component — it inverts
-    # the reference's core>envelope hierarchy) and pays the dilution.
-    # - hero_aspect 2.2 -> 2.9: measured dye-core aspect 3.04 vs reference
-    #   2.9, core saturation unchanged from the 2.2 bake; 2.6 was a dead zone
-    #   (no core gain — the response is nonlinear, 2.9 punches through).
+    # Aspect (2026-07-19 GRS bake, was 2.9): user picked hero_aspect 2.0 -- a
+    # plump GRS oval (develops ~1.8, close to the reference's pale envelope) over
+    # the more-elongated lozenge that authored 2.9 develops to (~2.4). The earlier
+    # 2.9 bake targeted the reference RED CORE's ~2.9 elongation; at the
+    # -24/r0.108 checkpoint the plumper whole-storm read was preferred on a
+    # 2.0-vs-2.9 side-by-side. storms.hero_flow_aspect stays at its 1.0 default.
+    # - hero_aspect 2.9 -> 2.0 (user checkpoint, 2026-07-19).
     # - hero_tint_var 0.55 -> 0.35: the interior now carries a deterministic
     #   T3 spiral lane; the isotropic tint fbm was the same magnitude as the
     #   lane signal (S/N ~ 1) and must come down for the banding to read.
@@ -112,15 +101,28 @@ def main():
     #   the hero; longitude auto-roots 0.3-0.55 rad downstream (hero-relative
     #   placement rule). oval_solid_core 1.0 keeps it (and the larger white
     #   ovals) coherent through the dev run (the F07 pairing).
+    # Hero jet environment: the size-relative bracket seats the -24 hero. Geometry
+    # is authored in hero-core-radius units at the model defaults (offset +/-1.0,
+    # window 1.0, feather 1.4, widths 0.8) so it tracks hero_radius; only the
+    # strengths are authored (N equatorward westward -3.0, S poleward eastward
+    # +3.0 = anticyclonic seating; effective peak carries jets.strength). Set
+    # explicitly (not relying on model defaults) so a future default drift cannot
+    # silently move the bake. local_jet removed -- superseded by the bracket.
     p.jets = p.jets.model_copy(update={
-        "local_jet_speed": -0.9,
-        "local_jet_latitude": -20.0,
-        "local_jet_width": 0.05,
+        "local_jet_speed": 0.0,
+        "hero_bracket_north": -3.0,
+        "hero_bracket_south": 3.0,
+        "hero_bracket_north_offset": 1.0,
+        "hero_bracket_south_offset": -1.0,
+        "hero_bracket_window": 1.0,
+        "hero_bracket_feather": 1.4,
+        "hero_bracket_north_width": 0.8,
+        "hero_bracket_south_width": 0.8,
     })
     p.storms = p.storms.model_copy(update={
-        "hero_radius": 0.062,
-        "hero_latitude": -22.0,
-        "hero_aspect": 2.9,
+        "hero_radius": 0.108,
+        "hero_latitude": -24.0,
+        "hero_aspect": 2.0,
         "hero_emergence": 0.9,
         "rim_contrast": 1.3,
         "wake_turbulence": 3.2,

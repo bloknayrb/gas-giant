@@ -12,15 +12,15 @@ Key invariants:
   (it keeps tracking the jet: that is where the material is);
 - the override does not perturb the RNG stream (placement identical).
 
-Vortex chirality fix (2026-07-17, plan chirality_plan.md C2): warm's
-hero_latitude moved -21.0 -> -22.0 and gained a local westward zonal jet
-(jets.local_jet_speed=-0.9 @ -20.0, width 0.05) to carve an anticyclonic
-window post-flip (storms now co-rotate with ambient shear instead of
-counter-rotating, so the OLD -21.0 latitude — cyclonic ambient there — would
-have developed the hero as the wrong storm class). The new latitude sits in
-the local jet's westward flank, so the auto+emergence wake is now WEST
-(was east pre-fix) — a registry-measured, r-jitter-robust flip (C0 grid
-search), not an incidental test breakage.
+GRS bake (2026-07-19): warm's hero moved to -24 and the anticyclonic bearing
+that carves its wake frame is now supplied by the size-relative carve-and-impose
+BRACKET (jets.hero_bracket_*), which SUPERSEDED the earlier local_jet. The
+bracket lives in build_profiles and needs a pinned hero (hero_lat_deg), so -- to
+match the facade, where generate_vortices runs on the BRACKETED profile -- these
+tests build the profile with the pin (see _hero). The bracket's equatorward jet
+is westward (north strength -3.0), so the auto+emergence wake is still WEST
+(wake_dir -1.0), the same class the chirality fix established, now authored via
+the bracket instead of local_jet.
 """
 from __future__ import annotations
 
@@ -38,16 +38,22 @@ def _hero(preset: str = "gas_giant_warm", **storms_update):
     if storms_update:
         p.storms = p.storms.model_copy(update=storms_update)
     bands = generate_bands(p.seed, p.bands)
-    prof = build_profiles(p.seed, bands, p.bands, p.jets)
+    # Match the facade: generate_vortices runs on the BRACKETED profile (the hero
+    # jet environment is what seats the wake frame). Pin predicate mirrors
+    # facade._hero_lat_deg / _hero_r_core.
+    hero_lat = p.storms.hero_latitude if p.storms.hero_count > 0 else None
+    prof = build_profiles(p.seed, bands, p.bands, p.jets,
+                          hero_lat_deg=hero_lat, hero_r_core=p.storms.hero_radius)
     reg = generate_vortices(p.seed, bands, prof, p.storms, p.poles)
     return reg.heroes()[0], prof
 
 
 def test_default_auto_with_emergence_follows_the_jet():
-    """warm ships auto + emergence 0.9 at hero_latitude=-22.0, inside the baked
-    local jet's westward flank (chirality-fix bake, C0 grid search), so the
-    dynamic wake trails WEST and the lane must sit in real flow (|u| >= 0.05),
-    not at the legacy stagnation offset."""
+    """warm ships auto + emergence 0.9 at hero_latitude=-24.0; the bracket's
+    equatorward westward jet (hero_bracket_north -3.0) seats the bearing, so the
+    dynamic wake trails WEST and the lane must sit in real flow (|u| >= 0.05), not
+    at the legacy stagnation offset. (Measured on the bracketed profile, matching
+    the facade -- the un-bracketed profile no longer carries the bearing.)"""
     hero, prof = _hero()
     assert hero.wake_dir == -1.0
     lane = hero.lat + hero.wake_lat_off
