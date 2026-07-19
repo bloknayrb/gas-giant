@@ -31,6 +31,20 @@ def test_seat_quality_none_without_pinned_hero():
     sim = _seat_sim(p)
     assert sim.seat_quality() is None
     assert sim.seat_status() is None
+    assert sim.seat_band() is None
+
+
+def test_seat_quality_none_when_no_hero_even_if_latitude_set():
+    """The hero_count <= 0 gate is a distinct behavioral contract from the
+    hero_latitude is None gate: a latitude with zero heroes must still return
+    None (deleting the `or hero_count <= 0` clause would otherwise slip through,
+    since hero_count defaults to 1 everywhere else)."""
+    p = PlanetParams(seed=4201)
+    p.storms.hero_latitude = -22.0
+    p.storms.hero_count = 0
+    sim = _seat_sim(p)
+    assert sim.seat_quality() is None
+    assert sim.seat_status() is None
 
 
 def test_seat_quality_uses_bracket_off_profile():

@@ -141,12 +141,29 @@ def _draw_seat_meter(sim: Any, storms_doc: dict[str, Any]) -> None:
     hero is pinned or before GL init (sim is None)."""
     if sim is None:
         return
-    status = sim.seat_status(lat_deg=storms_doc.get("hero_latitude"))
-    if status is None:
+    lat = storms_doc.get("hero_latitude")
+    band = sim.seat_band(lat_deg=lat)  # facade returns the band directly
+    if band is None:
         return
-    band = status.split()[1]  # "seat: <band> (...)"
     color = _SEAT_COLORS.get(band, (0.7, 0.7, 0.7, 1.0))
-    imgui.text_colored(imgui.ImVec4(*color), status)
+    imgui.text_colored(imgui.ImVec4(*color), sim.seat_status(lat_deg=lat))
+
+
+def _draw_bracket_note(doc: dict[str, Any]) -> None:
+    """Amber warning when a hero_bracket_* jet is authored but no hero is pinned
+    -- the override then no-ops SILENTLY (the default hero is seeded, so
+    storms.hero_latitude is None). Reads the live draft so it fires as soon as a
+    bracket slider moves, giving the otherwise-inert lever a visible reason."""
+    jets = doc.get("jets", {})
+    storms = doc.get("storms", {})
+    bracket_set = (jets.get("hero_bracket_north", 0.0) != 0.0
+                   or jets.get("hero_bracket_south", 0.0) != 0.0)
+    pinned = storms.get("hero_latitude") is not None and storms.get("hero_count", 0) > 0
+    if bracket_set and not pinned:
+        imgui.text_colored(
+            imgui.ImVec4(*_SEAT_COLORS["amber"]),
+            "hero_bracket is inert: pin storms.hero_latitude to enable it",
+        )
 
 
 def draw_params_panel(
@@ -462,6 +479,8 @@ def _draw_model(
                 changed |= c
                 committed |= cm
                 _draw_seat_meter(sim, doc[name])
+            if name == "jets":
+                _draw_bracket_note(doc)
             if name == "emission":
                 _draw_emission_aurora_note(doc[name])
             if opened:

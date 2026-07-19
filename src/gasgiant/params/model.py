@@ -400,7 +400,11 @@ class JetsParams(_Params):
     hero_bracket_north_offset: float = pfield(
         3.0, tier=Tier.RESTART, lo=0.0, hi=12.0, adv=True, ui="Hero Bracket",
         description="Degrees equatorward of the hero for the equatorward-flank jet "
-                    "center (jet center latitude = hero_latitude + this)",
+                    "center (jet center latitude = hero_latitude + this). KNOWN "
+                    "LIMITATION: the lo=0 bound assumes a SOUTHERN hero (equatorward "
+                    "= +offset); a northern hero would need a negative offset. "
+                    "Hemisphere-agnostic offsets are deferred (SH GRS is the only "
+                    "hero that ships)",
     )
     hero_bracket_south_offset: float = pfield(
         -3.0, tier=Tier.RESTART, lo=-12.0, hi=0.0, adv=True, ui="Hero Bracket",

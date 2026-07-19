@@ -456,7 +456,7 @@ Carve-and-impose hero jet override: equatorward-flank jet strength (negative = w
 
 `jets.hero_bracket_north_offset` &mdash; range **0 to 12**, default **3**, tier `restart`.
 
-Degrees equatorward of the hero for the equatorward-flank jet center (jet center latitude = hero_latitude + this)
+Degrees equatorward of the hero for the equatorward-flank jet center (jet center latitude = hero_latitude + this). KNOWN LIMITATION: the lo=0 bound assumes a SOUTHERN hero (equatorward = +offset); a northern hero would need a negative offset. Hemisphere-agnostic offsets are deferred (SH GRS is the only hero that ships)
 
 <table><tr>
 <td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 12<br>(not rendered)</sub></td>

@@ -49,6 +49,15 @@ log = logging.getLogger(__name__)
 _ADAPT_STEPS = 120
 
 
+def _hero_lat_deg(params: PlanetParams) -> float | None:
+    """The pinned-hero latitude threaded into build_profiles for the
+    hero_bracket override, or None when no hero is pinned (unpinned/seeded hero
+    or hero_count 0 -> the override no-ops). One source of truth for the
+    'pinned hero' predicate, used at both build_profiles call sites."""
+    s = params.storms
+    return s.hero_latitude if s.hero_count > 0 else None
+
+
 class Simulation:
     def __init__(self, params: PlanetParams, gpu: GpuContext | None = None) -> None:
         self.params = params
@@ -88,8 +97,7 @@ class Simulation:
         p = self.params
         self.bands = generate_bands(p.seed, p.bands)
         self.profiles = build_profiles(
-            p.seed, self.bands, p.bands, p.jets,
-            hero_lat_deg=(p.storms.hero_latitude if p.storms.hero_count > 0 else None),
+            p.seed, self.bands, p.bands, p.jets, hero_lat_deg=_hero_lat_deg(p),
         )
         self._seat_profile = None  # invalidate the bracket-off meter cache
         dt = compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed)
@@ -269,18 +277,28 @@ class Simulation:
             return None
         r_core_deg = float(np.rad2deg(p.storms.hero_radius))
         # Anticyclone by default (the GRS case); a cyclonic hero would flip this
-        # (deferred -- no cyclonic-hero preset ships).
-        return _seat_quality(self._bracket_off_profile(), float(lat_deg),
-                             r_core_deg, spin_sign=1.0)
+        # (deferred -- no cyclonic-hero preset ships). Normalize by jets.strength
+        # so the seat bands mean the same thing across presets: u (hence the raw
+        # quality) scales linearly with strength, but _SEAT_GREEN/_SEAT_AMBER are
+        # absolute. No-op at strength 1.
+        raw = _seat_quality(self._bracket_off_profile(), float(lat_deg),
+                            r_core_deg, spin_sign=1.0)
+        return raw / max(p.jets.strength, 1e-6)
+
+    def seat_band(self, lat_deg: float | None = None) -> str | None:
+        """The green/amber/red band at the hero latitude (or ``lat_deg``), or
+        None when no hero is pinned. Exposed so the GUI colors the meter from the
+        band directly instead of re-parsing ``seat_status``'s string."""
+        q = self.seat_quality(lat_deg)
+        return None if q is None else _seat_band(q)
 
     def seat_status(self, lat_deg: float | None = None) -> str | None:
         """One-line banded readout for the GUI seat meter (None if no pinned
         hero). Pre-development proxy -- the developed bearing sits ~1.8 deg
         poleward of this profile-level reading."""
-        q = self.seat_quality(lat_deg)
-        if q is None:
+        band = self.seat_band(lat_deg)
+        if band is None:
             return None
-        band = _seat_band(q)
         hint = {
             "green": "natural bearing OK here",
             "amber": "natural bearing weak -- consider hero_bracket",
@@ -421,8 +439,7 @@ class Simulation:
         elif Tier.VELOCITY in tiers:
             self.profiles = build_profiles(
                 new_params.seed, self.bands, new_params.bands, new_params.jets,
-                hero_lat_deg=(new_params.storms.hero_latitude
-                              if new_params.storms.hero_count > 0 else None),
+                hero_lat_deg=_hero_lat_deg(new_params),
             )
             self._seat_profile = None  # invalidate the bracket-off meter cache
             self.lanes = select_lanes(new_params.seed, self.bands, new_params.bands.lane_density)

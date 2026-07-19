@@ -11,7 +11,9 @@ the spherically divergence-free pairing.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -222,7 +224,8 @@ def seat_quality(
 
 
 def seat_scan(
-    profiles: LatProfiles, lats_deg, r_core_deg: float, spin_sign: float = 1.0
+    profiles: LatProfiles, lats_deg: Iterable[float], r_core_deg: float,
+    spin_sign: float = 1.0,
 ) -> list[tuple[float, float]]:
     """(lat_deg, quality) over a latitude sweep -- the GUI's 'find a good seat'
     readout. Diagnostic only: never moves the storm."""
@@ -232,7 +235,7 @@ def seat_scan(
     ]
 
 
-def seat_band(quality: float) -> str:
+def seat_band(quality: float) -> Literal["green", "amber", "red"]:
     """Coarse green/amber/red classification of a seat_quality value."""
     if quality >= _SEAT_GREEN:
         return "green"
