@@ -24,19 +24,25 @@ if TYPE_CHECKING:
 
 def hero_centers(
     registry: VortexRegistry,
-) -> list[tuple[float, float, float, float, float, float]]:
-    """(x, y, z, r_core, spin, aspect) of each hero storm at its current drifted
-    position. spin = sign(strength), which is the NEGATION of the hero's
-    actual rotation sense (the psi-amplitude trap: omega = -sign(strength),
-    see sim/vortices.py's module docstring) — seed-dependent via the ambient
-    shear, not a function of hemisphere — which the detail pass needs to wind
-    the analytic spiral lanes the same way the backtraced filaments wind."""
+) -> list[tuple[float, float, float, float, float, float, float, float]]:
+    """(x, y, z, r_core, spin, aspect, wake_dir, wake_lat_off) of each hero
+    storm at its current drifted position. spin = sign(strength), which is the
+    NEGATION of the hero's actual rotation sense (the psi-amplitude trap:
+    omega = -sign(strength), see sim/vortices.py's module docstring) —
+    seed-dependent via the ambient shear, not a function of hemisphere — which
+    the detail pass needs to wind the analytic spiral lanes the same way the
+    backtraced filaments wind. wake_dir (+1 east / -1 west / 0 no wake) and
+    wake_lat_off (the wake lane's latitude offset from the hero center, rad)
+    carry the sim's flow-derived wake frame to the render pass for the
+    wake-braid synthesis. Consumers slice positionally and len-guard, so
+    shorter tuples stay legal."""
     out = []
     for v in registry.heroes():
         cl = math.cos(v.lat)
         out.append((
             cl * math.cos(v.lon), math.sin(v.lat), cl * math.sin(v.lon),
             v.r_core, 1.0 if v.strength >= 0.0 else -1.0, v.aspect,
+            v.wake_dir, v.wake_lat_off,
         ))
     return out
 
@@ -87,9 +93,10 @@ class ExportSnapshot:
     mask: moderngl.Texture | None
     patch_rho_max: float
     blend_band: tuple[float, float]
-    # Hero-storm centers at their drifted positions, (x, y, z, r_core, spin, aspect)
-    # each: the detail pass amplifies/winds filaments inside them.
-    heroes: list[tuple[float, float, float, float, float, float]] = None  # type: ignore[assignment]
+    # Hero-storm centers at their drifted positions, (x, y, z, r_core, spin,
+    # aspect, wake_dir, wake_lat_off) each: the detail pass amplifies/winds
+    # filaments inside them and braids their wakes.
+    heroes: list[tuple[float, ...]] = None  # type: ignore[assignment]
     # Elongated bright-cloud centers (x, y, z, r_core, aspect) at their drifted
     # positions: the detail pass synthesizes cirrus fibers over them.
     clouds: list[tuple[float, float, float, float, float]] = None  # type: ignore[assignment]

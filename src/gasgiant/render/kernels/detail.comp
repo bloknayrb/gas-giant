@@ -127,6 +127,17 @@ uniform sampler2D u_profile_stamp;
 // smooth laminar planets enabling detail.intensity only for cirrus_fibers
 // would gain planet-wide flow-grain. 0 => *1.0, byte-identical.
 uniform float u_streak_mute;
+// Braided rope texture in the hero wake (the GRS wake's recumbent hairpin
+// folds): two crossing strand fields about the folded local flow line,
+// dominance-blended, confined downstream of the drawn body on the belt side
+// of the wake lane. The wake frame arrives per hero from the sim registry
+// (engine.snapshot.hero_centers) — NOT re-derived here, so render and sim
+// agree on where the wake is.
+uniform float u_hero_wake_braid;
+uniform vec3 u_offset_braid;        // subseed("detail-wake-braid")
+uniform float u_hero_wake_dir[3];   // +1 east / -1 west / 0 = no wake
+uniform float u_hero_wake_lat[3];   // wake lane latitude offset from center (rad)
+uniform float u_hero_wake_belt[3];  // beltward sign: the braid side of the lane
 #endif
 
 #ifdef SPREAD
@@ -768,6 +779,99 @@ void main() {
                 d += 0.9 * u_cirrus_fibers * (1.0 - routeW) * excess * win_max
                    * clamp(num / den, -1.0, 1.0);
             }
+        }
+    }
+
+    // Wake-fold INKING (detail.hero_wake_braid): the hi-res reference (2015
+    // Hubble + Cassini PIA02863) shows the GRS wake as the sim's own curl
+    // street — discrete rolled billows whose pale entrained cores and dark
+    // rolled rims span nearly the full belt-to-zone value range. Three
+    // rounds of independent synthetic strand carriers (REV 1-3) could not
+    // read as that structure, so this KEYS THE SIGNAL TO THE TRACER FIELD
+    // instead: brighten the pale entrained material (T0 excess over the
+    // band-stamp baseline — the cirrus mask trick) and darken the fold
+    // boundaries (tracer-gradient rims, ragged-inked). detail_chroma then
+    // drives the two-material tint off the same excursions. The reviewed
+    // window machinery (registry wake frame, aspect-scaled onset, belt-side
+    // asymmetry, quiet ground) is unchanged. No backtrace: the folds are
+    // already advected INTO the tracer — the signal reads them in place.
+    // Guarded => byte-identical when off; upstream half adds exactly 0.0.
+    if (u_hero_wake_braid > 0.0 && u_hero_count > 0 && routeW < 1.0) {
+        vec2 tsz = vec2(textureSize(u_tracers, 0));
+        vec2 uvB = eqUV(ll);
+        // Fold rims: sharpest resolvable T0 gradient (1.5 sim texels).
+        float tEb = texture(u_tracers, uvB + vec2(1.5 / tsz.x, 0.0)).r;
+        float tWb = texture(u_tracers, uvB - vec2(1.5 / tsz.x, 0.0)).r;
+        float tNb = texture(u_tracers, uvB - vec2(0.0, 1.5 / tsz.y)).r;
+        float tSb = texture(u_tracers, uvB + vec2(0.0, 1.5 / tsz.y)).r;
+        float gmag = length(vec2(tEb - tWb, tNb - tSb));
+        // Fold cores: BILLOW-SCALE HIGH-PASS — T0 relative to its ~0.5 rc
+        // neighborhood mean, so each billow's pale core lifts individually.
+        // (A band-baseline excess saturated over the whole pale wake region
+        // as one giant blob — false-color diagnostic, 2026-07-17.) The
+        // radius uses the FIRST wake-bearing hero's rc; heroes are a
+        // 1-per-planet class, so per-hero radii are not worth extra taps.
+        float rcm = 0.0;
+        for (int i = 0; i < u_hero_count; ++i) {
+            if (u_hero_wake_dir[i] != 0.0) { rcm = max(u_heroes[i].w, 1e-4); break; }
+        }
+        float duM = 0.5 * rcm / (2.0 * PI);
+        float dvM = 0.5 * rcm / PI;
+        float mE = texture(u_tracers, uvB + vec2(duM, 0.0)).r;
+        float mW = texture(u_tracers, uvB - vec2(duM, 0.0)).r;
+        float mN = texture(u_tracers, uvB - vec2(0.0, dvM)).r;
+        float mS = texture(u_tracers, uvB + vec2(0.0, dvM)).r;
+        float core = smoothstep(0.01, 0.10,
+                                tr.r - 0.25 * (mE + mW + mN + mS));
+        // Ragged rim inking: rims fade in and out like the reference's
+        // rolled edges instead of clinically tracing every contour.
+        float rim = smoothstep(0.04, 0.16, gmag)
+                  * (0.55 + 0.45 * fbm(pc * 30.0 + u_offset_braid, 2, 2.0, 0.5));
+        float sig = clamp(1.1 * core - 1.5 * rim, -1.0, 1.0);
+        float win_max = 0.0;
+        for (int i = 0; i < u_hero_count; ++i) {
+            vec3 c = u_heroes[i].xyz;
+            float wd = u_hero_wake_dir[i];
+            if (wd == 0.0) continue;              // no wake, no braid
+            if (dot(pc, c) <= 0.0) continue;      // near-hemisphere gate
+            float rc = max(u_heroes[i].w, 1e-4);
+            float asp = max(u_hero_aspect[i], 1.0);
+            // Production wake frame VERBATIM (vortex_stamp's raw dlon/dlat;
+            // a tangent-plane chord diverges badly by an ~ 8).
+            float vlat = asin(clamp(c.y, -1.0, 1.0));
+            float vlon = atan(c.z, c.x);
+            float dlon = mod(ll.x - vlon + 3.0 * PI, 2.0 * PI) - PI;
+            float an = dlon * wd / rc;            // along-wake, +downstream
+            if (an <= 0.0) continue;              // upstream: exact zero
+            // Onset scales with aspect (the drawn body extends east to
+            // an ~ aspect; a fixed onset would start inside warm's 2.9
+            // east lobe) and clears the serene moat. Outer fade 14-19 rc:
+            // the 2015 Hubble reference shows the billow chain running
+            // 3-4 storm EW-diameters downstream before merging into the
+            // belt's general churn (the original 6.5-8.5 was authored
+            // against the low-res crop's limited reach).
+            float wwin = smoothstep(1.0 * asp, 1.5 * asp, an)
+                       * (1.0 - smoothstep(14.0, 19.0, an));
+            if (wwin <= 0.0) continue;
+            // Asymmetric lat window about the WAKE LANE (center + offset):
+            // full amplitude ~1.5 rc beltward, faster zone rolloff — but
+            // FEATHERED (0.25-0.80 rc): the first cut's 0.25-rc zone edge
+            // was a ~10 px cliff at 2048, harder than the belt edge on
+            // exactly the side that must stay smooth (S2 artifact hunt).
+            float alat = (ll.y - (vlat + u_hero_wake_lat[i])) / rc;
+            float b = alat * u_hero_wake_belt[i];
+            float lwin = (b >= 0.0) ? 1.0 - smoothstep(1.8, 2.4, b)
+                                    : 1.0 - smoothstep(0.25, 0.80, -b);
+            win_max = max(win_max, wwin * lwin);
+        }
+        if (win_max > 1e-4) {
+            // QUIET GROUND first: the reference's billows sit on a calm
+            // field, so mute the pre-existing detail weave inside the wedge
+            // (the serene-moat treatment), then ink the folds. Amplitude is
+            // high by design — the reference's cores/rims span nearly the
+            // full local value range, not a subtle texture modulation.
+            d = mix(d, 0.5, clamp(0.55 * u_hero_wake_braid, 0.0, 0.65) * win_max);
+            d += 0.85 * u_hero_wake_braid * (1.0 - routeW) * win_max * sig;
         }
     }
 #endif

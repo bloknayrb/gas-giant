@@ -1556,6 +1556,16 @@ Tightly wound internal spiral lanes inside hero storms (the Juno-close-up GRS lo
 <td align="center"><img src="img/sliders/detail__hero_spiral__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/detail__hero_spiral__hi.jpg" width="320"><br><sub>high &middot; 1.5</sub></td>
 </tr></table>
 
+### hero wake braid
+
+`detail.hero_wake_braid` &mdash; range **0 to 2**, default **0**, tier `post`.
+
+Inks the hero storm's turbulent wake as the reference GRS's chain of rolled billows (recumbent hairpin folds): brightens the pale entrained tracer cores and darkens the fold-boundary rims, keyed to the sim's OWN advected tracer folds (not a synthetic strand pattern), confined to the belt-side flank of the wake lane downstream of the drawn storm body. Rides the sim-side wake churn (storms.hero_wake_detail); with appearance.detail_chroma the folds pick up the two-material tint. Requires detail.intensity > 0 and a hero. No rand (draw-order safe). 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
+
 ### intensity
 
 `detail.intensity` &mdash; range **0 to 2**, default **0.55**, tier `post`.

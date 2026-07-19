@@ -1257,6 +1257,20 @@ class DetailParams(_Params):
                     "planet-wide flow-grain without this. No rand (draw-order "
                     "safe). 0 = full streak (byte-identical)",
     )
+    hero_wake_braid: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail", fx=True,
+        description="Inks the hero storm's turbulent wake as the reference "
+                    "GRS's chain of rolled billows (recumbent hairpin folds): "
+                    "brightens the pale entrained tracer cores and darkens the "
+                    "fold-boundary rims, keyed to the sim's OWN advected tracer "
+                    "folds (not a synthetic strand pattern), confined to the "
+                    "belt-side flank of the wake lane downstream of the drawn "
+                    "storm body. Rides the sim-side wake churn "
+                    "(storms.hero_wake_detail); with appearance.detail_chroma "
+                    "the folds pick up the two-material tint. Requires "
+                    "detail.intensity > 0 and a hero. No rand (draw-order "
+                    "safe). 0 = off (byte-identical)",
+    )
 
 
 class SolverType(StrEnum):

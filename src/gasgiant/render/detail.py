@@ -167,18 +167,20 @@ class DetailSynth:
         params: DetailParams,
         origin: tuple[int, int] = (0, 0),
         full_size: tuple[int, int] | None = None,
-        heroes: list[tuple[float, float, float, float, float, float]] | None = None,
+        heroes: list[tuple[float, ...]] | None = None,
         polar: PolarRoute | None = None,
         clouds: list[tuple[float, float, float, float, float]] | None = None,
         profile_stamp: moderngl.Texture | None = None,
         hero_emergence: float = 0.0,
     ) -> None:
-        """heroes: up to 3 (x, y, z, r_core, spin, aspect) hero-storm centers; the
-        detail amplitude and winding time grow inside them, and the
-        DETAIL_FX spiral lanes wind in the spin (= sign(strength)) sense — the
-        render winding convention, which is the negation of the hero's true
-        vorticity (psi-amplitude trap; see sim/vortices.py).
-        6-tuples carry aspect; shorter tuples default aspect 1.0.
+        """heroes: up to 3 (x, y, z, r_core, spin, aspect, wake_dir,
+        wake_lat_off) hero-storm centers; the detail amplitude and winding
+        time grow inside them, the DETAIL_FX spiral lanes wind in the spin
+        (= sign(strength)) sense — the render winding convention, which is the
+        negation of the hero's true vorticity (psi-amplitude trap; see
+        sim/vortices.py) — and the wake-braid ropes fill the wake frame.
+        Shorter tuples stay legal: aspect defaults 1.0, wake fields
+        default 0.0 (wake_dir 0 disables the braid for that hero).
         polar: patch velocity/tracer textures — when given, polar backtraces
         route through the patch charts instead of fading to neutral.
         clouds: up to 12 (x, y, z, r_core, aspect) elongated bright-cloud
@@ -215,6 +217,31 @@ class DetailSynth:
             with contextlib.suppress(KeyError):
                 prog["u_hero_spin"].write(spins.tobytes())
             _set(prog, "u_streak_mute", params.streak_mute)
+            _set(prog, "u_hero_wake_braid", params.hero_wake_braid)
+            rng_braid = subseed(seed, "detail-wake-braid")
+            _set(prog, "u_offset_braid", tuple(rng_braid.uniform(-100.0, 100.0, 3)))
+            # Wake frame per hero (braid geometry): trail direction, lane
+            # latitude offset, and the beltward sign — the braid fills the
+            # belt side of the lane and rolls off fast on the zone side. The
+            # lane is displaced from the hero TOWARD the belt jet, so
+            # sign(wake_lat_off) IS beltward; a zero offset falls back to
+            # equatorward (-sign(sin(lat)), lat sign from the packed center y).
+            wdirs = np.zeros(3, dtype=np.float32)
+            wlats = np.zeros(3, dtype=np.float32)
+            wbelt = np.zeros(3, dtype=np.float32)
+            for i, h in enumerate((heroes or [])[:3]):
+                wdirs[i] = h[6] if len(h) > 6 else 0.0
+                wlats[i] = h[7] if len(h) > 7 else 0.0
+                if wlats[i] != 0.0:
+                    wbelt[i] = 1.0 if wlats[i] > 0.0 else -1.0
+                else:
+                    wbelt[i] = -1.0 if h[1] > 0.0 else 1.0
+            with contextlib.suppress(KeyError):
+                prog["u_hero_wake_dir"].write(wdirs.tobytes())
+            with contextlib.suppress(KeyError):
+                prog["u_hero_wake_lat"].write(wlats.tobytes())
+            with contextlib.suppress(KeyError):
+                prog["u_hero_wake_belt"].write(wbelt.tobytes())
             _set(prog, "u_cirrus_fibers", params.cirrus_fibers)
             rng_cirrus = subseed(seed, "detail-cirrus")
             _set(prog, "u_offset_cirrus", tuple(rng_cirrus.uniform(-100.0, 100.0, 3)))

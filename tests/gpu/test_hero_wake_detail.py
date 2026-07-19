@@ -1,5 +1,9 @@
 """GPU tests for storms.hero_wake_detail (filament structure in the hero wake).
 
+NOT detail.hero_wake_braid — that is the RENDER-side rope-texture lever measured
+on the detail-synth field (tests/gpu/test_hero_wake_braid.py); this one is the
+SIM lever that breaks the wake's relaxation target on the tracers.
+
 The hero's downstream wake is stamped as a smooth exp(-across^2) wedge into the
 relaxation TARGET (vortex_stamp.glsl), so even though the wake VELOCITY is turbulent
 (psi.comp's u_wake_gain), relaxation keeps pulling the brightness back to a smooth blob.

@@ -39,6 +39,7 @@ EXPECTED_FX_LEVERS = {
     "polar_filaments",
     "cirrus_fibers",
     "streak_mute",
+    "hero_wake_braid",
 }
 
 
