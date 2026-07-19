@@ -313,25 +313,20 @@ def test_emergence_wake_sector_folds_downstream_only(gpu):
     p.storms.pearls_count = 0
     p.storms.accent_count = 0
     p.storms.hero_companions = 0
-    # jets.local_jet_speed pinned OFF: the chirality fix (co-rotate all
-    # storms with ambient shear) bakes a local westward jet into warm
-    # (-0.9 @ -20.0 w0.05) so the -22.0 hero lands in strong co-rotating
-    # shear, but THIS probe's hero_latitude stays frozen at the pre-bake
-    # -21.0 (see below) -- 1 deg from the jet center, inside its search
-    # window for _hero_wake_frame. With the jet live the probe measured
-    # 1.28 (fails the 1.3 gate); with it neutralized, matching the ambient
-    # profile the gate was calibrated against, seed 7 measures 1.355 (was
-    # 1.334 pre-flip) and 3/4 probe seeds {7,11,23,42} pass both before and
-    # after the flip (11 flips fail->pass, 23 flips pass->fail — the
-    # statistic was already seed-sensitive pre-flip, not newly so). The
-    # chirality flip itself does not weaken wake folding; the unpinned new
-    # lever did (fix/vortex-chirality, commit 4b60fa6).
+    # jets.local_jet_speed + hero BRACKET pinned OFF: warm's shipped hero
+    # environment has evolved -- the chirality fix baked a local westward jet, and
+    # the 2026-07-19 GRS bake replaced it with the carve-and-impose bracket at
+    # hero_latitude -24. Both reorganize the ambient jets around the hero and
+    # would re-roll this frozen fold pattern. THIS probe's hero_latitude stays
+    # frozen at -21.0 (see below) and neutralizes warm's authored forcing so the
+    # E/W statistic sees the seeded ambient the gate was calibrated against.
+    # Historical calibration (local-jet era): with the jet live the probe measured
+    # 1.28 (fails the 1.3 gate); neutralized, seed 7 measured 1.355 (was 1.334
+    # pre-chirality-flip) and 3/4 probe seeds {7,11,23,42} pass both sides of the
+    # flip (11 flips fail->pass, 23 pass->fail) -- the statistic was already
+    # seed-sensitive, not newly so. Wake folding itself is not weakened by the
+    # ambient change; an UNPINNED ambient lever re-rolls the fold pattern.
     p.jets.local_jet_speed = 0.0
-    # Hero jet BRACKET pinned OFF (2026-07-19 GRS bake): warm now bakes an active
-    # carve-and-impose bracket (hero_bracket_north/south) that supersedes the old
-    # local_jet. It reorganizes the jets around the hero, so a live bracket
-    # re-rolls this frozen fold pattern exactly as local_jet did -- pin it off to
-    # keep the pre-bake ambient the E/W statistic was calibrated against.
     p.jets.hero_bracket_north = 0.0
     p.jets.hero_bracket_south = 0.0
     # The background SCENE is part of this test's premise and is FROZEN:
@@ -668,11 +663,13 @@ def _solo_warm_params(**storms_over) -> PlanetParams:
     p.storms.hero_shape = 0.0
     p.storms.hero_taper = 0.0
     # Frozen probe GEOMETRY (2026-07-19 GRS bake): these omega geometry probes are
-    # calibrated at hero_latitude -21 / hero_aspect 2.2 / r_core 0.062 (the
-    # pre-bake values the ratio/centroid masters were measured at -- see the
-    # widens-test comments). The bake moved warm's hero to -24 / aspect 2.0 /
-    # r 0.108, so pin the calibration geometry here (the measurement boxes scale
-    # with aspect*r_core; letting them track the bake re-rolls the masters).
+    # calibrated at hero_latitude -21 / hero_aspect 2.2 / r_core 0.062 -- the
+    # MASTER-CALIBRATION reference the ratio/centroid masters were measured at (see
+    # the widens-test comments; NB aspect 2.2 is that original master, not warm's
+    # immediately-prior 2.9 -- see git blame). The GRS bake moved warm's hero to
+    # -24 / aspect 2.0 / r 0.108, so pin the calibration geometry here (the
+    # measurement boxes scale with aspect*r_core; tracking the bake re-rolls the
+    # masters).
     p.storms.hero_aspect = 2.2
     p.storms.hero_radius = 0.062
     # Bracket pinned OFF (same bake): warm now bakes an active bracket that
@@ -766,16 +763,16 @@ def test_hero_flow_aspect_widens_flow_ew_only(gpu):
     # physical location. This probe's _solo_warm_params pin (hero_latitude
     # -21, predating the chirality fix) sits at an ambient latitude whose
     # _ambient_sign is UNCHANGED by the fix (measured: -1.0 identically on
-    # both sides of 4b60fa6, jet-independent — the new local_jet_speed bake
-    # term is a per-row constant that cancels exactly under the row-mean
-    # subtraction below, confirmed jet-on vs jet-off byte-identical here) —
-    # so `strength` itself flips sign (-0.0855 pre-fix -> +0.0855 post-fix,
-    # co-rotation was the bug being fixed), and unoriented argmin silently
-    # started grabbing the near-core dip (ew_r 15px) instead of the outer
-    # ring shoulder (32px) it always used to find. Orienting by core polarity
-    # reproduces the pre-fix master measurement bit-for-bit (32/65 -> ratio
-    # 2.0312, both jet on and off, both hero_latitude -21 and the new -22
-    # bake) — this is a search-heuristic fix, not a relaxed tolerance.
+    # both sides of 4b60fa6, jet-independent — an ambient forcing term is a
+    # per-row constant that cancels exactly under the row-mean subtraction
+    # below, confirmed byte-identical with and without it; this probe pins the
+    # bracket off + local_jet 0 anyway) — so `strength` itself flips sign
+    # (-0.0855 pre-fix -> +0.0855 post-fix, co-rotation was the bug being
+    # fixed), and unoriented argmin silently started grabbing the near-core dip
+    # (ew_r 15px) instead of the outer ring shoulder (32px) it always used to
+    # find. Orienting by core polarity reproduces the pre-fix master measurement
+    # bit-for-bit (32/65 -> ratio 2.0312, hero_latitude -21) — this is a
+    # search-heuristic fix, not a relaxed tolerance.
     orient = -1.0 if hero.strength >= 0.0 else 1.0
 
     dlon_px = 2.0 * np.pi / w

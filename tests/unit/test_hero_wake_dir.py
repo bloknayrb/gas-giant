@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from gasgiant.engine.facade import _hero_lat_deg, _hero_r_core
 from gasgiant.params.model import WakeDir
 from gasgiant.params.presets import load_factory_preset
 from gasgiant.sim.bands import generate_bands
@@ -39,11 +40,10 @@ def _hero(preset: str = "gas_giant_warm", **storms_update):
         p.storms = p.storms.model_copy(update=storms_update)
     bands = generate_bands(p.seed, p.bands)
     # Match the facade: generate_vortices runs on the BRACKETED profile (the hero
-    # jet environment is what seats the wake frame). Pin predicate mirrors
-    # facade._hero_lat_deg / _hero_r_core.
-    hero_lat = p.storms.hero_latitude if p.storms.hero_count > 0 else None
+    # jet environment seats the wake frame). Reuse the facade's OWN pinned-hero
+    # predicate so this test can't drift from it.
     prof = build_profiles(p.seed, bands, p.bands, p.jets,
-                          hero_lat_deg=hero_lat, hero_r_core=p.storms.hero_radius)
+                          hero_lat_deg=_hero_lat_deg(p), hero_r_core=_hero_r_core(p))
     reg = generate_vortices(p.seed, bands, prof, p.storms, p.poles)
     return reg.heroes()[0], prof
 
@@ -64,8 +64,8 @@ def test_default_auto_with_emergence_follows_the_jet():
 
 def test_legacy_frame_without_emergence():
     """Emergence off => the authored F06 frame verbatim (wake_dir -1, lane
-    0.5 r equatorward), regardless of the local jet — legacy presets must
-    keep byte-identical registries."""
+    0.5 r equatorward), regardless of the ambient flow (jet or bracket) — legacy
+    presets must keep byte-identical registries."""
     hero, _ = _hero(hero_emergence=0.0)
     assert hero.wake_dir == -1.0
     assert np.isclose(hero.wake_lat_off, 0.5 * hero.r_core)
