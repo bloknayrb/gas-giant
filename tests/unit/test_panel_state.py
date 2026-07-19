@@ -452,6 +452,14 @@ def test_other_sections_have_constant_ui_no_separators_expected():
                 f"solver sub-groups drifted: {labels}"
             )
             continue
+        if section == "jets":
+            # The jets.hero_bracket_* carve-and-impose override renders under its
+            # own "Hero Bracket" sub-label (the 8 fields are a distinct cluster
+            # the spec groups together), separate from the base "Jets" jets.
+            assert labels == {"Jets", "Hero Bracket"}, (
+                f"jets sub-groups drifted: {labels}"
+            )
+            continue
         assert len(labels) == 1, f"section {section!r} has multiple ui labels: {labels}"
 
 
