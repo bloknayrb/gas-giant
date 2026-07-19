@@ -545,9 +545,10 @@ def generate_vortices(
         r = storms.hero_radius * (1.0 + 0.2 * rng.uniform(-1.0, 1.0))
         s = -_ambient_sign(profiles, lat) * storms.hero_strength * 0.045
         # Legacy wake frame (review F06): authored WNW — westward, biased half
-        # a core radius toward the equator. NOT jet-derived (the ambient jet
-        # is eastward across warm's entire hero band; the real GRS's WNW wake
-        # rides Jupiter's westward SEBs jet, which this planet does not have).
+        # a core radius toward the equator. This static frame is the
+        # emergence-OFF fallback; warm now bakes a westward SEBs-analog jet
+        # across the hero band (jets.local_jet -0.9 @ -20°), so the real GRS's
+        # WNW wake IS reproducible here — see build_warm_preset.py.
         # Under emergence the wake is DYNAMIC (wedge eddy injection +
         # relaxation release), so the frame must follow the actual flow —
         # _hero_wake_frame puts the lane in the strongest nearby jet and

@@ -90,7 +90,9 @@ uniform vec3 u_offset_gate;       // subseed("detail-intermittency")
 uniform float u_hero_spiral;
 uniform float u_hero_collar_wrap; // wound-lane filaments wrapping the collar; 0 disables
 uniform vec3 u_offset_spiral;     // subseed("detail-hero-spiral")
-// Rotation sense per hero, sign(strength) — deliberately NOT packed into
+// Spiral-wind sense per hero, sign(strength) — the render winding convention,
+// which is the NEGATION of the hero's true vorticity (the psi-amplitude trap:
+// omega = -sign(strength); see sim/vortices.py). Deliberately NOT packed into
 // u_heroes.w so heroMask and the default program text stay untouched.
 uniform float u_hero_spin[3];
 // Storm-scale folded structure inside belts + temperate lace mottle (the

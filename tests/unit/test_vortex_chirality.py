@@ -69,6 +69,18 @@ def test_seeded_storms_corotate_with_ambient_shear():
     # that silently produced zero of a kind would make the loop above vacuous).
     for k, n in checked.items():
         assert n > 0, f"kind {k} was never seeded — test config is not exercising it"
+    # KIND_OVAL conflates four seeding sites (white ovals, accents, zone + belt
+    # small storms), so `checked[KIND_OVAL] > 0` does NOT prove the belt path
+    # ran. That path is the fragile one: its sign is BYTE-IDENTICAL to pre-fix
+    # (the old `if is_belt: s = -s` folded into the leading minus of
+    # `-_ambient_sign * (0.5 if is_belt else 1.0)`), so a regression that
+    # re-introduces the explicit belt flip is caught ONLY if a belt small storm
+    # is actually present. Belt small storms are the sole KIND_OVAL site with
+    # negative brightness (dark spots, -0.8*base) at sub-oval radius; pin >=1
+    # fired so the co-rotation loop above provably exercised it.
+    belt_smalls = [v for v in reg.vortices
+                   if v.kind == KIND_OVAL and v.brightness < 0.0 and v.r_core < 0.04]
+    assert belt_smalls, "no belt small-storm seeded — the belt-path sign is untested"
 
 
 def test_polar_caps_are_cyclonic_per_hemisphere():
@@ -145,6 +157,17 @@ def test_convergent_companion_inherits_host_sign():
     profiles = build_profiles(9, bands, p.bands, p.jets)
     reg = generate_vortices(9, bands, profiles, p.storms, poles=None,
                              dt=1e-3, dev_steps=200)
+    # Non-vacuity: the loop below re-checks every KIND_OVAL, so it would pass on
+    # the regular ovals even if zero companions spawned. Pin that convergent
+    # pairs actually fired by comparing against the same scene with merge_rate=0
+    # (no spawns): at seed 9 the spawns net +2 vortices (measured), so the count
+    # must strictly rise.
+    p_ref = p.model_copy(deep=True)
+    p_ref.storms.merge_rate = 0.0
+    reg_ref = generate_vortices(9, bands, profiles, p_ref.storms, poles=None,
+                                dt=1e-3, dev_steps=200)
+    assert len(reg.vortices) > len(reg_ref.vortices), (
+        "no convergent companions spawned — the relative-sign rule is untested")
     ovals = [v for v in reg.vortices if v.kind == KIND_OVAL]
     # Group by (lat, sign) is fragile; instead just confirm every KIND_OVAL
     # vortex still lands on the ambient co-rotating sign at its own latitude

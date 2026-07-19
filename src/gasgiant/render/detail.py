@@ -175,7 +175,9 @@ class DetailSynth:
     ) -> None:
         """heroes: up to 3 (x, y, z, r_core, spin, aspect) hero-storm centers; the
         detail amplitude and winding time grow inside them, and the
-        DETAIL_FX spiral lanes wind in the spin (= sign(strength)) sense.
+        DETAIL_FX spiral lanes wind in the spin (= sign(strength)) sense — the
+        render winding convention, which is the negation of the hero's true
+        vorticity (psi-amplitude trap; see sim/vortices.py).
         6-tuples carry aspect; shorter tuples default aspect 1.0.
         polar: patch velocity/tracer textures — when given, polar backtraces
         route through the patch charts instead of fading to neutral.
