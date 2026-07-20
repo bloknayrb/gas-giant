@@ -945,7 +945,8 @@
       "spread": 0.36,
       "cirrus_fibers": 0.0,
       "cirrus_fiber_freq": 6.0,
-      "streak_mute": 0.0
+      "streak_mute": 0.0,
+      "hero_wake_braid": 0.0
     },
     "mask": {
       "file": null,

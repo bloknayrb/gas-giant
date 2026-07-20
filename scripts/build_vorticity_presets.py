@@ -206,6 +206,23 @@ JETS_WARM = {
     "equatorial_speed": 1.693,
     "equatorial_width": 0.194,
     "polar_decay": 0.648,
+    # Round D (2026-07-19) FULL warm-style hero treatment, BRACKET-ONLY stage
+    # (user checkpoint "bracket now, braid later"). The carve-and-impose
+    # anticyclonic bracket that warm bakes (jets.hero_bracket_*) seats the hero
+    # at its pinned -22.5 and builds a turbulent GRS-like WEST wake; geometry is
+    # in units of the hero core radius so it auto-scales to this preset's larger
+    # r 0.16. Detail-off renders showed the bracket seats + wakes the hero with
+    # no blowout. The matching detail.hero_wake_braid inking is DEFERRED: at
+    # warm's amplitudes it clips this preset's brighter wake zones to white, a
+    # per-preset brightness retune left as a focused follow-up (braid stays 0.0).
+    "hero_bracket_north": -3.0,
+    "hero_bracket_south": 3.0,
+    "hero_bracket_north_offset": 1.0,
+    "hero_bracket_south_offset": -1.0,
+    "hero_bracket_window": 1.0,
+    "hero_bracket_feather": 1.4,
+    "hero_bracket_north_width": 0.8,
+    "hero_bracket_south_width": 0.8,
 }
 
 # Raise fresh-detail replenishment + global turbulence so the zone bands stay textured.
