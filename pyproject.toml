@@ -75,6 +75,15 @@ ignore = ["E702", "E701"]
 # shipped `src/` but relaxed here (low-value churn, not shipped code).
 "tests/**" = ["E501"]
 "scripts/**" = ["E501"]
+# Archived research harness for the wake-billow crux spike (measurement-only,
+# committed as the verdict record per the detail-character-spike precedent).
+# Preserved byte-for-byte as it produced the recorded result rather than churned
+# for lint; relax the scratch-style codes it trips (import order, yoda compares,
+# loop closures, inline diagnostics).
+"scripts/spike_wake_billow/**" = [
+    "E501", "I001", "E401", "F841", "SIM108", "SIM115", "SIM300",
+    "B007", "B023", "B905",
+]
 
 [tool.importlinter]
 root_package = "gasgiant"
