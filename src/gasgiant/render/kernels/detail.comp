@@ -127,17 +127,25 @@ uniform sampler2D u_profile_stamp;
 // smooth laminar planets enabling detail.intensity only for cirrus_fibers
 // would gain planet-wide flow-grain. 0 => *1.0, byte-identical.
 uniform float u_streak_mute;
-// Braided rope texture in the hero wake (the GRS wake's recumbent hairpin
-// folds): two crossing strand fields about the folded local flow line,
-// dominance-blended, confined downstream of the drawn body on the belt side
-// of the wake lane. The wake frame arrives per hero from the sim registry
-// (engine.snapshot.hero_centers) — NOT re-derived here, so render and sim
-// agree on where the wake is.
+// Two hero-wake detail levers sharing the registry wake frame (per hero from
+// engine.snapshot.hero_centers — NOT re-derived here, so render and sim agree
+// on where the wake is) and the same wedge window (heroWakeWindow):
+//  - u_hero_wake_braid INKS the sim's OWN advected tracer folds (pale entrained
+//    cores brightened, fold-boundary rims darkened), confined downstream of the
+//    drawn body on the belt side of the wake lane. Capped at the sim's few
+//    large rolls (it reads what the tracer carries).
+//  - u_hero_wake_billows SYNTHESIZES a dense co-scaled chain of rolled ropes
+//    procedurally (anisotropic folded-flow fbm, material-anchored to the real
+//    wake), decoupled from sim resolution — the fine scale the braid cannot
+//    manufacture. The two compose (braid inks rims, billows is the carrier).
 uniform float u_hero_wake_braid;
 uniform vec3 u_offset_braid;        // subseed("detail-wake-braid")
 uniform float u_hero_wake_dir[3];   // +1 east / -1 west / 0 = no wake
 uniform float u_hero_wake_lat[3];   // wake lane latitude offset from center (rad)
 uniform float u_hero_wake_belt[3];  // beltward sign: the braid side of the lane
+uniform float u_hero_wake_billows;      // procedural billow-chain synthesis
+uniform float u_hero_wake_billow_freq;  // transverse cycles per hero core radius
+uniform vec3 u_offset_billows;          // subseed("detail-wake-billows")
 #endif
 
 #ifdef SPREAD
@@ -303,6 +311,17 @@ float heroWakeWindow(vec3 pc, vec2 ll,
     }
     return win_max;
 }
+
+// hero_wake_billows synthesis tunables (S2-calibrated). INSIDE #ifdef DETAIL_FX
+// so the default program never sees them (a const outside the guard would leak
+// into the no-DETAIL_FX program exactly like a stray uniform).
+const float BILLOW_K_ANISO   = 2.5;   // along:transverse rope anisotropy (ropes)
+const float BILLOW_S_ORIENT  = 0.6;   // folded-flow weight (0 = pure wake axis)
+const float BILLOW_M_ANCHOR  = 0.85;  // material-anchor strength (0 = synthetic)
+const float BILLOW_A_MUTE    = 0.55;  // quiet-ground mute strength (lever-scaled)
+const float BILLOW_A         = 0.9;   // additive chain amplitude (S2-tuned ~1.5x)
+const float BILLOW_WARP_AMP  = 0.5;   // domain-warp amplitude (across, rc units)
+const float BILLOW_WARP_FREQ = 0.2;   // warp freq as a FRACTION of trans_freq
 #endif
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -843,6 +862,114 @@ void main() {
         }
     }
 
+    // Shared hero-wake MATERIAL (billows + braid): the pale entrained core is a
+    // billow-scale HIGH-PASS of T0 (relative to its ~0.5 rc neighborhood mean,
+    // so each billow's core lifts individually — a band-baseline excess
+    // saturated the whole pale wake as one blob, false-color diagnostic
+    // 2026-07-17). Hoisted out of the braid guard so the independently-guarded
+    // billows block can anchor to the SAME material (a value scoped inside the
+    // braid guard is an undefined identifier there). Radius uses the FIRST
+    // wake-bearing hero's rc (heroes are 1-per-planet). Guarded by (billows ||
+    // braid) so the taps only run when a wake lever is active; the arithmetic
+    // is verbatim the braid's former inline core -> byte-identical when only
+    // the braid is on.
+    float wake_rcm = 0.0;
+    float wake_core = 0.0;
+    if (u_hero_wake_billows > 0.0 || u_hero_wake_braid > 0.0) {
+        for (int i = 0; i < u_hero_count; ++i) {
+            if (u_hero_wake_dir[i] != 0.0) { wake_rcm = max(u_heroes[i].w, 1e-4); break; }
+        }
+        vec2 uvM = eqUV(ll);
+        float duM = 0.5 * wake_rcm / (2.0 * PI);
+        float dvM = 0.5 * wake_rcm / PI;
+        float mE = texture(u_tracers, uvM + vec2(duM, 0.0)).r;
+        float mW = texture(u_tracers, uvM - vec2(duM, 0.0)).r;
+        float mN = texture(u_tracers, uvM - vec2(0.0, dvM)).r;
+        float mS = texture(u_tracers, uvM + vec2(0.0, dvM)).r;
+        wake_core = smoothstep(0.01, 0.10, tr.r - 0.25 * (mE + mW + mN + mS));
+    }
+
+    // Hero-wake billow-chain SYNTHESIS (detail.hero_wake_billows): a dense
+    // co-scaled chain of rolled ropes manufactured procedurally at reference
+    // scale (transverse lambda ~1.2 rc, along-wake ~3.0 rc, ~2.5:1 ropes),
+    // decoupled from the sim's few large rolls. Anisotropic fbm in the
+    // folded-flow wake frame, MATERIAL-ANCHORED to the real wake (the hoisted
+    // wake_core presence — the primary differentiator from the falsified
+    // pure-synthetic REV 1-3 strand carriers), muted onto a quiet ground and
+    // added at ~1.5x ambient. Composes with the braid (braid inks rolled rims on
+    // real folds, billows supplies the fine carrier). detail_chroma drives the
+    // two-material tint off the same excursions. Guarded => byte-identical when
+    // off; upstream/outside the wedge adds exactly 0.0; the quiet-ground mute is
+    // lever-scaled so the WHOLE block vanishes at epsilon (the forced-variant
+    // no-op).
+    if (u_hero_wake_billows > 0.0 && u_hero_count > 0 && routeW < 1.0) {
+        float bv_vlat, bv_an, bv_b, bv_rc, bv_asp;
+        float win_max = heroWakeWindow(pc, ll,
+                                       bv_vlat, bv_an, bv_b, bv_rc, bv_asp);
+        if (win_max > 1e-4) {
+            // cos(lat) correction: `an` is dlon-based, so a unit along-step is
+            // cos(vlat)*rc physical E-W arc, while `b` is already physical-rc
+            // N-S. Work in physical-rc (an_phys, b) so the two axes match and
+            // the (east,north) flow angle maps directly (no per-latitude skew);
+            // along-wake lambda then lands ~3.0 rc without a per-latitude skew.
+            float an_phys = bv_an * cos(bv_vlat);
+            // Winning hero's wake direction (heroWakeWindow returns the frame
+            // but not wd; heroes are 1-per-planet so the first wake-bearing
+            // hero IS the winner, matching wake_rcm above).
+            float wd = 1.0;
+            for (int i = 0; i < u_hero_count; ++i) {
+                if (u_hero_wake_dir[i] != 0.0) { wd = u_hero_wake_dir[i]; break; }
+            }
+            // Folded-flow orientation: fold the DOWNSTREAM flow angle to a LINE
+            // (mod pi) via a PURE unfold (0.5*atan(sin,cos) — cirrus's 0.25
+            // already bakes a x0.5, so unfold here and soften ONCE, below), with
+            // the wd sign putting east/west wakes in the same downstream frame.
+            float th = 0.0;
+            if (dot(vel, vel) > 1e-6) {
+                float a2 = 2.0 * atan(vel.y, wd * vel.x);
+                th = 0.5 * atan(sin(a2), cos(a2));
+            }
+            th *= BILLOW_S_ORIENT;   // soften toward the wake (along) axis once
+            float ca = cos(th);
+            float sa = sin(th);
+            // Rotate the physical-rc (an_phys, b) axes by the softened flow
+            // angle -> (along, across): ropes elongated along `along`.
+            float along  =  ca * an_phys + sa * bv_b;
+            float across = -sa * an_phys + ca * bv_b;
+            // Anisotropic 2.5:1 noise at reference scale: transverse freq from
+            // the dial, along freq / K_ANISO. A LOW-freq domain warp (~0.2x the
+            // strand freq — cirrus's literal 0.7 would SHRED at 0.85) waves the
+            // comb so no single frequency survives, amplitude-capped to keep the
+            // ropes from breaking into dots.
+            float trans_freq = u_hero_wake_billow_freq;
+            float along_freq = trans_freq / BILLOW_K_ANISO;
+            float warp = BILLOW_WARP_AMP
+                       * fbm(vec3(along, across, 7.0) * (BILLOW_WARP_FREQ * trans_freq)
+                             + u_offset_billows.yzx, 2, 2.0, 0.5);
+            float f = fbm(vec3(along * along_freq,
+                               (across + warp) * trans_freq,
+                               3.0) + u_offset_billows, 3, 2.0, 0.5);
+            // Neutral polarity: an ODD function of the mean-zero fbm -> mean and
+            // skew ~0 by construction (interleaved light AND dark ropes, both
+            // lobes full weight, |skew| <= 0.2).
+            float strand = smoothstep(-0.5, 0.5, f) - 0.5;
+            // Pixel-resolvability: fade as the transverse wavelength nears the
+            // output pixel (spacing ~ rc/trans_freq radians), like cirrus.
+            float wl_px = bv_rc / max(trans_freq, 1e-3)
+                        * float(u_full_size.x) / (2.0 * PI);
+            float atten = smoothstep(1.5, 3.0, wl_px);
+            // Material anchor (the PRIMARY REV 1-3 differentiator): ground the
+            // synthetic chain in the real wake material. M high ~ cirrus's hard
+            // gate; M=0 = the falsified pure-synthetic regime.
+            strand *= (1.0 - BILLOW_M_ANCHOR) + BILLOW_M_ANCHOR * wake_core;
+            strand *= atten;
+            // Quiet ground (lever-scaled: REQUIRED for the epsilon no-op) then
+            // the additive chain at ~1.5x ambient.
+            d = mix(d, 0.5, clamp(BILLOW_A_MUTE * u_hero_wake_billows, 0.0, 0.65) * win_max);
+            d += BILLOW_A * u_hero_wake_billows * (1.0 - routeW) * win_max * strand;
+        }
+    }
+
     // Wake-fold INKING (detail.hero_wake_braid): the hi-res reference (2015
     // Hubble + Cassini PIA02863) shows the GRS wake as the sim's own curl
     // street — discrete rolled billows whose pale entrained cores and dark
@@ -866,29 +993,14 @@ void main() {
         float tNb = texture(u_tracers, uvB - vec2(0.0, 1.5 / tsz.y)).r;
         float tSb = texture(u_tracers, uvB + vec2(0.0, 1.5 / tsz.y)).r;
         float gmag = length(vec2(tEb - tWb, tNb - tSb));
-        // Fold cores: BILLOW-SCALE HIGH-PASS — T0 relative to its ~0.5 rc
-        // neighborhood mean, so each billow's pale core lifts individually.
-        // (A band-baseline excess saturated over the whole pale wake region
-        // as one giant blob — false-color diagnostic, 2026-07-17.) The
-        // radius uses the FIRST wake-bearing hero's rc; heroes are a
-        // 1-per-planet class, so per-hero radii are not worth extra taps.
-        float rcm = 0.0;
-        for (int i = 0; i < u_hero_count; ++i) {
-            if (u_hero_wake_dir[i] != 0.0) { rcm = max(u_heroes[i].w, 1e-4); break; }
-        }
-        float duM = 0.5 * rcm / (2.0 * PI);
-        float dvM = 0.5 * rcm / PI;
-        float mE = texture(u_tracers, uvB + vec2(duM, 0.0)).r;
-        float mW = texture(u_tracers, uvB - vec2(duM, 0.0)).r;
-        float mN = texture(u_tracers, uvB - vec2(0.0, dvM)).r;
-        float mS = texture(u_tracers, uvB + vec2(0.0, dvM)).r;
-        float core = smoothstep(0.01, 0.10,
-                                tr.r - 0.25 * (mE + mW + mN + mS));
+        // Fold cores: the billow-scale T0 high-pass hoisted above (wake_core),
+        // shared with the billows synthesis so both anchor to the same pale
+        // entrained material. Arithmetic is verbatim the former inline core.
         // Ragged rim inking: rims fade in and out like the reference's
         // rolled edges instead of clinically tracing every contour.
         float rim = smoothstep(0.04, 0.16, gmag)
                   * (0.55 + 0.45 * fbm(pc * 30.0 + u_offset_braid, 2, 2.0, 0.5));
-        float sig = clamp(1.1 * core - 1.5 * rim, -1.0, 1.0);
+        float sig = clamp(1.1 * wake_core - 1.5 * rim, -1.0, 1.0);
         // Wake window via the shared helper (byte-identical to the former inline
         // loop). The braid only consumes win_max; the winner-frame out params
         // are for the future synthesis caller.

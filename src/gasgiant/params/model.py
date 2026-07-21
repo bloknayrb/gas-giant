@@ -1271,6 +1271,27 @@ class DetailParams(_Params):
                     "detail.intensity > 0 and a hero. No rand (draw-order "
                     "safe). 0 = off (byte-identical)",
     )
+    hero_wake_billows: float = pfield(
+        0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail", fx=True,
+        description="Render-time procedural synthesis of the hero storm's wake "
+                    "as the reference GRS's dense chain of rolled billows "
+                    "(co-scaled ropes, ~1.2 rc transverse / 3.0 rc along), "
+                    "material-anchored to the real wake and oriented by the "
+                    "local folded flow. Unlike hero_wake_braid (which inks the "
+                    "sim's own tracer folds, capped at the sim's few large "
+                    "rolls), this manufactures the fine chain procedurally, "
+                    "decoupled from sim resolution; the two compose (braid inks "
+                    "rolled rims, billows supplies the fine carrier). With "
+                    "appearance.detail_chroma the ropes pick up the two-material "
+                    "tint. Requires detail.intensity > 0 and a hero. No rand "
+                    "(draw-order safe). 0 = off (byte-identical)",
+    )
+    hero_wake_billow_freq: float = pfield(
+        0.85, tier=Tier.POST, lo=0.3, hi=2.0, log=True, ui="Detail",
+        description="Transverse billow frequency (cycles per hero core radius); "
+                    "along-wake lambda follows at ~2.5x (ropes). Attenuated "
+                    "near pixel size. Inert unless hero_wake_billows > 0",
+    )
 
 
 class SolverType(StrEnum):

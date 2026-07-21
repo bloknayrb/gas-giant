@@ -242,6 +242,13 @@ class DetailSynth:
                 prog["u_hero_wake_lat"].write(wlats.tobytes())
             with contextlib.suppress(KeyError):
                 prog["u_hero_wake_belt"].write(wbelt.tobytes())
+            # Billow-chain synthesis rides the SAME per-hero wake frame arrays
+            # (wdirs/wlats/wbelt) just written for the braid — only its own
+            # amplitude + seed offset are new here (freq is non-fx, uploaded
+            # outside this block by u_cirrus_fiber_freq).
+            _set(prog, "u_hero_wake_billows", params.hero_wake_billows)
+            rng_billows = subseed(seed, "detail-wake-billows")
+            _set(prog, "u_offset_billows", tuple(rng_billows.uniform(-100.0, 100.0, 3)))
             _set(prog, "u_cirrus_fibers", params.cirrus_fibers)
             rng_cirrus = subseed(seed, "detail-cirrus")
             _set(prog, "u_offset_cirrus", tuple(rng_cirrus.uniform(-100.0, 100.0, 3)))
@@ -319,6 +326,10 @@ class DetailSynth:
         # Non-fx (its non-zero default must never select the FX variant), so
         # it is uploaded OUTSIDE the fx_on block, like u_hero_calm.
         _set(prog, "u_cirrus_fiber_freq", params.cirrus_fiber_freq)
+        # Same rule for the billow transverse frequency: non-fx, its non-zero
+        # default must never select the FX variant, so it is uploaded OUTSIDE
+        # the fx_on block (like u_cirrus_fiber_freq / u_hero_calm).
+        _set(prog, "u_hero_wake_billow_freq", params.hero_wake_billow_freq)
         prog["u_offset"].value = tuple(rng.uniform(-100.0, 100.0, 3))
         out_tex.bind_to_image(0, read=False, write=True)
         gx = (size[0] + _GROUP - 1) // _GROUP

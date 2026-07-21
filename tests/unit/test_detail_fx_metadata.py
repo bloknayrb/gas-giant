@@ -40,6 +40,7 @@ EXPECTED_FX_LEVERS = {
     "cirrus_fibers",
     "streak_mute",
     "hero_wake_braid",
+    "hero_wake_billows",
 }
 
 
