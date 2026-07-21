@@ -102,6 +102,15 @@ fold-boundary rims, keyed to the sim's OWN advected tracer folds (not a
 synthetic strand pattern). The per-hero wake frame (direction + lane-latitude
 offset) is threaded from the vortex registry through the hero-centers snapshot
 (8-field tuple), so the braid auto-tracks wherever the flow puts the wake.
+Braid is capped at the sim's own resolution — a few large tracer folds — so it
+cannot reach the reference's dense small-billow scale. `detail.hero_wake_billows`
+(POST, default-off, byte-identical when off, also a DETAIL_FX lever) instead
+SYNTHESIZES that scale procedurally: a co-scaled chain of rolled ropes
+(transverse ~1.2 rc, along-wake ~3.0 rc) material-anchored to the real wake and
+oriented by the local folded flow, decoupled from the sim's own tracer
+resolution. The two compose — braid inks rolled rims on the real folds,
+billows supplies the fine carrier underneath — and together are the primary
+read for the reference's dense hairpin chain.
 
 ### White ovals
 Compact bright anticyclones (the Oval BA lineage), often in same-latitude

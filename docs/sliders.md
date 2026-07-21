@@ -1556,6 +1556,26 @@ Tightly wound internal spiral lanes inside hero storms (the Juno-close-up GRS lo
 <td align="center"><img src="img/sliders/detail__hero_spiral__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/detail__hero_spiral__hi.jpg" width="320"><br><sub>high &middot; 1.5</sub></td>
 </tr></table>
 
+### hero wake billow freq
+
+`detail.hero_wake_billow_freq` &mdash; range **0.3 to 2**, default **0.85**, tier `post`, log scale.
+
+Transverse billow frequency (cycles per hero core radius); along-wake lambda follows at ~2.5x (ropes). Attenuated near pixel size. Inert unless hero_wake_billows > 0
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.3<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.85</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
+
+### hero wake billows
+
+`detail.hero_wake_billows` &mdash; range **0 to 2**, default **0**, tier `post`.
+
+Render-time procedural synthesis of the hero storm's wake as the reference GRS's dense chain of rolled billows (co-scaled ropes, ~1.2 rc transverse / 3.0 rc along), material-anchored to the real wake and oriented by the local folded flow. Unlike hero_wake_braid (which inks the sim's own tracer folds, capped at the sim's few large rolls), this manufactures the fine chain procedurally, decoupled from sim resolution; the two compose (braid inks rolled rims, billows supplies the fine carrier). With appearance.detail_chroma the ropes pick up the two-material tint. Requires detail.intensity > 0 and a hero. No rand (draw-order safe). 0 = off (byte-identical)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
+</tr></table>
+
 ### hero wake braid
 
 `detail.hero_wake_braid` &mdash; range **0 to 2**, default **0**, tier `post`.

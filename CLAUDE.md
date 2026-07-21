@@ -110,7 +110,10 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
   sub-feature (rides that variant, NOT a new axis): it inks the hero storm's turbulent wake from
   the sim's own advected tracer folds, keyed to a per-hero wake frame threaded via
   `engine/snapshot.py::hero_centers` (now an 8-field tuple: x,y,z,r_core,spin,aspect,wake_dir,
-  wake_lat_off).
+  wake_lat_off). `detail.hero_wake_billows` (POST, `fx=True`, default 0.0, unbaked) is a
+  sibling DETAIL_FX sub-feature: it procedurally synthesizes a co-scaled dense wake billow
+  chain (decoupled from sim resolution, material-anchored + folded-flow-oriented) that
+  composes with the braid rather than replacing it. Default-off byte-identical.
 - **GLSL gotchas**: `patch` is a reserved word; declare uniforms before the `#include` that
   uses them (includes are textual); every sampler uniform must be explicitly bound — an
   unassigned moderngl sampler silently reads unit 0.

@@ -328,6 +328,21 @@ direction. Mode-agnostic (a POST render pass), but requires
 sim-side wake churn). Byte-identical when off; unbaked (no factory preset
 enables it yet).
 
+**Hero wake billows** (`detail.hero_wake_billows`, default-off, POST tier, a
+DETAIL_FX sub-feature — rides the same variant as the braid, not a new
+preprocessor axis) procedurally SYNTHESIZES the fine co-scaled carrier the
+braid cannot reach: the braid only inks the sim's own advected tracer folds
+(a few large rolls, capped at sim resolution), so it never manufactures the
+reference's dense chain of small billows. Billows generates a co-scaled rope
+chain (transverse wavelength ~1.2 hero core radii, along-wake ~3.0, ~2.5:1
+aspect) decoupled from sim resolution, material-anchored to the real wake and
+oriented by the local folded flow. It composes with `detail.hero_wake_braid`
+rather than replacing it — braid inks rolled rims on the real folds, billows
+supplies the fine carrier underneath. A companion non-fx pfield,
+`detail.hero_wake_billow_freq` (log, default 0.85), sets the transverse billow
+frequency. Byte-identical when off; unbaked (no factory preset enables it
+yet).
+
 **Uniform detail coverage** (`detail.spread`, default-off, opt-in `SPREAD`
 variant) applies the flow-folded detail-FX texture at EVEN density across
 latitude instead of the band-gated LUT (belts textured, zones detail-starved).
