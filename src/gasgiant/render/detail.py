@@ -244,8 +244,9 @@ class DetailSynth:
                 prog["u_hero_wake_belt"].write(wbelt.tobytes())
             # Billow-chain synthesis rides the SAME per-hero wake frame arrays
             # (wdirs/wlats/wbelt) just written for the braid — only its own
-            # amplitude + seed offset are new here (freq is non-fx, uploaded
-            # outside this block by u_cirrus_fiber_freq).
+            # amplitude + seed offset are new here (its freq companion
+            # u_hero_wake_billow_freq is non-fx, uploaded outside this block
+            # alongside u_cirrus_fiber_freq, like u_hero_calm).
             _set(prog, "u_hero_wake_billows", params.hero_wake_billows)
             rng_billows = subseed(seed, "detail-wake-billows")
             _set(prog, "u_offset_billows", tuple(rng_billows.uniform(-100.0, 100.0, 3)))
