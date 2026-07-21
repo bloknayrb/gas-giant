@@ -225,13 +225,19 @@ def test_synthesizes_coscaled_anisotropic_structure(gpu):
     anisotropic co-scaled rope chain at the dialed transverse frequency. Three
     reference properties (tolerances budget the residual cos-lat skew + the
     flow-angle variation across the wedge):
-      - NEUTRAL polarity: the field is not bright- or dark-dominant (unlike the
-        cirrus fibers, which are designed bright-dominant). Measured as a
-        near-zero standardized mean AND |Bowley quantile skew| <= 0.2. The raw
-        3rd moment is NOT used: the high material anchor concentrates the signal
-        into sparse full-amplitude rope crests, which inflate the tail-sensitive
-        3rd moment (raw ~1.0) while mean and median-symmetry stay neutral -- the
-        pure strand is neutral by construction (odd function of mean-zero fbm).
+      - CONSTRUCTION-neutral polarity (NOT the same as reference-grade polarity):
+        the SYNTHESIZED STRAND is neutral by construction (odd function of
+        mean-zero fbm), so the machinery introduces no bright/dark bias of its
+        own. Measured as a near-zero standardized mean AND |Bowley quantile skew|
+        <= 0.2 with both sign-lobes present. The raw 3rd moment is NOT used: the
+        high material anchor makes the field heavy-tailed (sparse full-amplitude
+        rope crests in material cores), inflating the tail-sensitive 3rd moment
+        (raw ~1.0) while mean and median-symmetry stay ~0 -- a measurement
+        artifact of the anchor's heteroscedasticity, not a polarity bias.
+        CAVEAT: this proves the STRAND is unbiased, NOT that the rendered wake
+        reads as the reference's EQUAL interleaved light/dark ropes (PIA07782
+        skew -0.12..+0.01) under the high default M -- reference-grade polarity
+        stays a LIVE S2 visual gate (M is an S2 knob; see the plan S2 section).
       - ANISOTROPY > 1.5:1: built 2.5:1 via along_freq = trans_freq / K_ANISO.
       - the dominant transverse wavelength TRACKS the dial (doubling the freq
         roughly halves it).
