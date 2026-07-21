@@ -167,6 +167,27 @@ Falsified or dropped directions that are under-recorded elsewhere. Check this li
 (and the FALSIFIED sections above, plus `docs/superpowers/specs/*verdict*.md`)
 before proposing work in these areas.
 
+- **Ordered "arrested" wake billow chain via ANY solver change — NO-GO (2026-07-21).**
+  The reference GRS wake (PIA07782) shows a persistent downstream row of many co-scaled
+  Kelvin–Helmholtz billows that do not merge. Five approaches are now exhausted:
+  tracer-stamp, frozen-field flow-injection, solver-dissipation rewrite (FALSIFIED, crux
+  spike 2026-07-20), render-time synthesis (user-rejected as decoration, PR #48 closed),
+  and a 2D **stratified** (Boussinesq) feasibility spike (2026-07-21). The stratified spike
+  is the mechanistic close: in a strictly-2D **barotropic** solver — the production engine —
+  a like-signed vortex row is unconditionally unstable to subharmonic pairing, so merger
+  (a few large rolls / 2D turbulence) is the *correct* 2D behaviour. Adding explicit
+  stratification DOES recover the pairing-arrest mechanism (buoyancy is the missing
+  ingredient the barotropic solver lacks — verified, adversarially defended: it is
+  stratification, not hyperviscosity or the metric), **but only as a 2D artifact**: at the
+  relevant Richardson number the billows are 3D-secondary-unstable and break to turbulence
+  (Klaassen & Peltier 1985; Smyth & Peltier), which a strictly-2D run only hides by
+  forbidding the 3D route — the confound-closing even-box run showed the 2D stratified layer
+  roughening toward small scales rather than holding a clean chain. The ordered chain is
+  therefore intrinsically a **3D finite-stratification** phenomenon, beyond a tractable
+  texture solver (2D barotropic, 2D stratified, or 2.5D). Do not re-attempt via any 2D solver
+  change, dissipation tuning, or render synthesis. The only genuine route is a full 3D
+  stratified engine — a major independent project the literature says is not guaranteed to
+  succeed. Full record: `docs/superpowers/specs/2026-07-21-stratified-wake-billow-spike-verdict.md`.
 - **Fibrous cirrus by STAMPING fine strands into the tracer — FALSIFIED (2026-07-08).**
   Neptune's bright methane clouds are multi-stranded "combed fiber" cirrus, not smooth
   lobes. Attempt: modulate the elongated bright cloud stamps (accent/companion, via
