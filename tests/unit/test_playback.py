@@ -243,6 +243,73 @@ def test_dev_overlay_text_hidden_when_done_or_paused() -> None:
     assert main._dev_overlay_text(done=10, target=1256, playing=False, eta_seconds=None) is None
 
 
+# -- Phase 1 responsiveness: dev-step cadence decision ------------------------
+#
+# _should_step_this_frame is clock-driven and imgui-free so draw_equirect stays
+# headless-drivable. Idle users step every frame (full-speed dev, unchanged
+# scheduling); interacting users get spaced/paused stepping so the UI stays
+# responsive while a high-res step blocks the frame. tick() is chunk-invariant,
+# so the developed result is byte-identical regardless of scheduling.
+
+
+def test_should_step_single_step_always_fires_even_when_paused_and_dragging() -> None:
+    assert main._should_step_this_frame(
+        playing=False, single_step=True, now=100.0,
+        last_step_time=100.0, last_input_time=100.0, mouse_down=True,
+    ) is True
+
+
+def test_should_step_paused_never_fires() -> None:
+    assert main._should_step_this_frame(
+        playing=False, single_step=False, now=100.0,
+        last_step_time=0.0, last_input_time=0.0, mouse_down=False,
+    ) is False
+
+
+def test_should_step_idle_steps_every_frame() -> None:
+    """No recent input -> not interacting -> full-speed stepping (the headless
+    playback tests above rely on this default path via getattr fallbacks)."""
+    now = 100.0
+    assert main._should_step_this_frame(
+        playing=True, single_step=False, now=now,
+        last_step_time=now, last_input_time=now - main.INPUT_ACTIVE_WINDOW - 1.0,
+        mouse_down=False,
+    ) is True
+
+
+def test_should_step_active_drag_pauses_stepping() -> None:
+    """Mouse held while interacting -> pause the blocking step so the drag is
+    smooth (resumes on release)."""
+    assert main._should_step_this_frame(
+        playing=True, single_step=False, now=100.0,
+        last_step_time=0.0, last_input_time=100.0, mouse_down=True,
+    ) is False
+
+
+def test_should_step_interacting_respects_responsive_window() -> None:
+    now = 100.0
+    within = main._should_step_this_frame(
+        playing=True, single_step=False, now=now,
+        last_step_time=now - main.STEP_RESPONSIVE_WINDOW / 2,
+        last_input_time=now, mouse_down=False,
+    )
+    elapsed = main._should_step_this_frame(
+        playing=True, single_step=False, now=now,
+        last_step_time=now - main.STEP_RESPONSIVE_WINDOW * 2,
+        last_input_time=now, mouse_down=False,
+    )
+    assert within is False, "within the responsive window: skip stepping (cheap frame)"
+    assert elapsed is True, "window elapsed: take one step"
+
+
+def test_draw_equirect_records_last_step_time_on_tick() -> None:
+    """A playing frame stamps _last_step_time so the cadence gate can space the
+    next step; a no-op (developed) frame leaves it unset."""
+    app = _make_app(playing=True, steps_per_frame=2, single_step=False)
+    app.draw_equirect()
+    assert app._last_step_time > 0.0
+
+
 def test_default_speed_is_measured_choice_and_valid_option() -> None:
     """W10a measurement (2026-07-02, RTX 3070, gas_giant_warm): GUI dev-run
     throughput is FLAT across steps-per-frame (~3.0 steps/s at spf=2 AND
