@@ -302,12 +302,37 @@ def test_should_step_interacting_respects_responsive_window() -> None:
     assert elapsed is True, "window elapsed: take one step"
 
 
+@pytest.mark.parametrize(
+    ("mouse_down", "moved", "wheel", "expected"),
+    [
+        (False, False, False, False),
+        (True, False, False, True),   # held button (no delta) MUST count -- see docstring
+        (False, True, False, True),
+        (False, False, True, True),
+        (True, True, True, True),
+    ],
+)
+def test_input_is_active(mouse_down: bool, moved: bool, wheel: bool, expected: bool) -> None:
+    assert main._input_is_active(mouse_down=mouse_down, moved=moved, wheel=wheel) is expected
+
+
 def test_draw_equirect_records_last_step_time_on_tick() -> None:
-    """A playing frame stamps _last_step_time so the cadence gate can space the
-    next step; a no-op (developed) frame leaves it unset."""
+    """A playing frame that actually steps stamps _last_step_time so the cadence
+    gate can space the next step."""
     app = _make_app(playing=True, steps_per_frame=2, single_step=False)
     app.draw_equirect()
     assert app._last_step_time > 0.0
+
+
+def test_draw_equirect_leaves_last_step_time_unset_on_noop() -> None:
+    """A developed (no-op tick) frame must NOT stamp the step clock: the
+    responsive-window gate spaces steps off the last REAL step, so a cheap
+    in-between frame stamping this would continuously reset the window and
+    starve interactive stepping."""
+    app = _make_app(playing=True, steps_per_frame=4, single_step=False, target=0)
+    app.draw_equirect()
+    assert app.sim.tick_calls == [4], "tick was attempted"
+    assert app._last_step_time == 0.0, "no-op tick must not stamp the step clock"
 
 
 def test_default_speed_is_measured_choice_and_valid_option() -> None:

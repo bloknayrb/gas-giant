@@ -18,9 +18,13 @@ copy, feather, velocity, MacCormack, exchange) is the poisson_iters-independent
 remainder. SOR runs on all three domains (equirect + 2 poles), so the measured
 per-iter cost already sums the domains.
 
-The SOR *share* is ~resolution-independent (both SOR and the remainder scale with
-cell count), so a tractable --res gives a valid share even if absolute per-step
-ms is quoted lower than the 4096 flagship. Run:
+The SOR *share* is ~resolution-independent ONLY because the remainder is itself
+GPU-compute-bound (near-zero CPU/submission overhead) -- confirmed by
+perf_step_breakdown.py, which measures the step ~100% GPU-bound and the share
+near-constant (28% @2048 vs 26% @4096). So a tractable --res gives a valid share
+even though absolute per-step ms is lower than the 4096 flagship. (If a future
+change made the step submission-bound, a lower --res would understate the share.)
+Run:
 
     uv run python scripts/perf_sor_timing.py                 # preset resolution
     uv run python scripts/perf_sor_timing.py --res 2048      # faster, same share
@@ -95,20 +99,31 @@ def main() -> None:
         per_step[n_iters] = 1000.0 * dt / args.steps
         print(f"{n_iters:>14} {per_step[n_iters]:>10.2f}")
 
-    # Linear fit of the two bracketing points around the shipped 48.
-    lo, hi = 8, 96
+    # Linear fit across the bracketing iter points; the share denominator is the
+    # SHIPPED step cost (not a hardcoded 48), so this holds if a preset ships a
+    # different poisson_iters.
+    if shipped_iters not in per_step:
+        raise SystemExit(f"shipped poisson_iters={shipped_iters} not among measured ITER_POINTS={ITER_POINTS}")
+    lo, hi = ITER_POINTS[0], ITER_POINTS[-1]
     per_iter_ms = (per_step[hi] - per_step[lo]) / (hi - lo)
-    sor_ms = per_iter_ms * shipped_iters
-    remainder_ms = per_step[48] - sor_ms
-    share = sor_ms / per_step[48] if per_step[48] else 0.0
+    step_ms = per_step[shipped_iters]
 
     print()
-    print(f"per-SOR-iter cost (all 3 domains) = {per_iter_ms:.3f} ms/iter")
-    print(f"at shipped {shipped_iters} iters: SOR = {sor_ms:.2f} ms/step "
-          f"({share * 100:.0f}% of step); remainder = {remainder_ms:.2f} ms/step")
-    print()
-    print("Phase 3 reads this as: SOR share sets the ceiling on any (omega, iters) "
-          "cut; the remainder is what stays even at poisson_iters -> 0.")
+    # A negative fit means SOR is below run-to-run noise at this res/steps (the
+    # vorticity SOR carries documented LSB/thread divergence) -- report it as
+    # unresolved rather than printing a negative share as if it were a fact.
+    if per_iter_ms <= 0.0:
+        print(f"SOR below measurement noise at res={res}/steps={args.steps} "
+              f"(per-iter fit {per_iter_ms:.4f} ms <= 0); increase --res or --steps. Share not reported.")
+    else:
+        sor_ms = per_iter_ms * shipped_iters
+        share = sor_ms / step_ms if step_ms else 0.0
+        print(f"per-SOR-iter cost (all 3 domains) = {per_iter_ms:.3f} ms/iter")
+        print(f"at shipped {shipped_iters} iters: SOR = {sor_ms:.2f} ms/step "
+              f"({share * 100:.0f}% of step); remainder = {step_ms - sor_ms:.2f} ms/step")
+        print()
+        print("Phase 3 reads this as: SOR share sets the ceiling on any (omega, iters) "
+              "cut; the remainder is what stays even at poisson_iters -> 0.")
 
     sim._release_sim()
 

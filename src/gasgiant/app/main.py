@@ -190,6 +190,14 @@ STEP_RESPONSIVE_WINDOW = 1.0 / 15.0  # min gap of responsive frames between step
 INPUT_ACTIVE_WINDOW = 0.5            # treat input as "active" for this long after the last activity
 
 
+def _input_is_active(*, mouse_down: bool, moved: bool, wheel: bool) -> bool:
+    """Whether the pointer signals interaction this frame -- a held button, a
+    move, or a wheel. Pure so the OR-reduction is testable without imgui; the
+    held-button term is load-bearing (a drag with no delta must still count as
+    active, or _should_step_this_frame goes idle and resumes blocking mid-drag)."""
+    return mouse_down or moved or wheel
+
+
 def _should_step_this_frame(
     *,
     playing: bool,
@@ -536,6 +544,16 @@ class StudioApp:
     """All state behind the hello_imgui callbacks. GL members are created in
     init_gl (post_init), never at construction."""
 
+    # Phase 1 responsiveness cadence (see _should_step_this_frame): monotonic
+    # clocks for the last dev step and the last user input, plus whether a drag
+    # is in progress. Class-level defaults so instances built via __new__ in the
+    # headless playback tests (which bypass __init__ and never register
+    # _post_new_frame) resolve them as "idle" and step every frame; the live
+    # runner overwrites them in draw_equirect / _sample_input_activity.
+    _last_step_time: float = 0.0
+    _last_input_time: float = 0.0
+    _mouse_is_down: bool = False
+
     def __init__(self) -> None:
         self.gpu: GpuContext | None = None
         self.sim: Simulation | None = None
@@ -590,14 +608,7 @@ class StudioApp:
         self._steps_per_frame = DEFAULT_STEPS_PER_FRAME  # measured choice, see constant
         self._dev_rate = DevRateSampler()  # feeds the ETA in label + overlay
         self._single_step_requested = False  # consumed once, the frame after Step
-        # Phase 1 responsiveness cadence (see _should_step_this_frame): monotonic
-        # clocks for the last dev step and the last user input, plus whether a
-        # drag is in progress. Sampled each live frame by _sample_input_activity;
-        # getattr-defaulted in draw_equirect so the headless playback tests (which
-        # never register that callback) keep stepping every frame.
-        self._last_step_time = 0.0
-        self._last_input_time = 0.0
-        self._mouse_is_down = False
+        # (cadence-clock state is class-level; see the top of StudioApp.)
         # Bounded undo/redo history (Phase 2). Each entry is an UndoRecord — a
         # deep copy of a committed params snapshot plus Phase 6 preset-identity
         # placeholders. maxlen=64 evicts the oldest entry automatically.
@@ -1274,7 +1285,7 @@ class StudioApp:
         self._mouse_is_down = imgui.is_any_mouse_down()
         moved = io.mouse_delta.x != 0.0 or io.mouse_delta.y != 0.0
         wheel = io.mouse_wheel != 0.0 or io.mouse_wheel_h != 0.0
-        if self._mouse_is_down or moved or wheel:
+        if _input_is_active(mouse_down=self._mouse_is_down, moved=moved, wheel=wheel):
             self._last_input_time = time.monotonic()
 
     def _handle_shortcuts(self) -> None:
@@ -1902,9 +1913,9 @@ class StudioApp:
             playing=self._playing,
             single_step=self._single_step_requested,
             now=time.monotonic(),
-            last_step_time=getattr(self, "_last_step_time", 0.0),
-            last_input_time=getattr(self, "_last_input_time", 0.0),
-            mouse_down=getattr(self, "_mouse_is_down", False),
+            last_step_time=self._last_step_time,
+            last_input_time=self._last_input_time,
+            mouse_down=self._mouse_is_down,
         )
         self._single_step_requested = False
         if step_now and self.sim.tick(self._steps_per_frame):
@@ -2521,11 +2532,12 @@ class StudioApp:
         frame_ms = self.frame_perf.mean_ms
         render_ms = self.render_perf.mean_ms
         # W13 present/render split. render_perf brackets draw_equirect (tick +
-        # derive + blit); frame_perf is the whole frame, so frame-render is imgui
-        # plus hello_imgui's present/swap. Decision rule during a live dev run: if
-        # render itself is ~step-cost, the per-step overhead is in compute (vsync-
-        # off won't help); if render is small but this gap is large, the cost is
-        # in present/swap (worth trying vsync-off).
+        # derive + blit); frame_perf is the whole frame, so frame-render is the
+        # OTHER imgui panels (controls/perf/playback/menus) PLUS hello_imgui's
+        # present/swap. Decision rule during a live dev run: if render itself is
+        # ~step-cost, the per-step overhead is in compute (vsync-off won't help).
+        # A large gap is worth probing, but only its present/swap component --
+        # not the imgui-panel part -- is what vsync-off could address.
         imgui.text(f"frame   {frame_ms:6.2f} ms")
         imgui.text(f"render  {render_ms:6.2f} ms  (last {self.render_perf.last_ms:6.2f})")
         imgui.text(f"present {max(0.0, frame_ms - render_ms):6.2f} ms  (frame-render)")
@@ -2750,9 +2762,11 @@ def main() -> int:
     params.renderer_backend_options.open_gl_options = gl_options
     params.callbacks.post_init = app.init_gl
     params.callbacks.pre_new_frame = app.pre_frame
-    # Runs right after ImGui::NewFrame() -- io.want_text_input/is_key_pressed
-    # are current for this frame, and it fires before any window is drawn, so
-    # a shortcut-set flag (search-focus) is consumed later this same frame.
+    # Runs right after ImGui::NewFrame(): _post_new_frame samples input activity
+    # for the dev-step cadence (Phase 1) and dispatches shortcuts. io (mouse
+    # delta/buttons, want_text_input, is_key_pressed) is current for this frame,
+    # and it fires before any window is drawn, so a shortcut-set flag
+    # (search-focus) is consumed later this same frame.
     params.callbacks.post_new_frame = app._post_new_frame
     params.callbacks.show_gui = app.gui_overlays
     params.callbacks.before_exit = app.shutdown
