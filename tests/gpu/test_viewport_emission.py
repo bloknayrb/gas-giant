@@ -116,3 +116,47 @@ def test_view_transform_aurora_composite_formula(gpu):
     dst.release()
     src.release()
     gpu.make_current()
+
+
+def test_view_transform_is_north_up(gpu):
+    """Orientation gate: the equirect blit must be NORTH-UP. Source texel row 0
+    is latitude +90 (core/domain.py: lat = pi/2 - (j+0.5)/H*pi), and imgui.image
+    draws texel row 0 at the TOP of the on-screen image. So after the blit the
+    display's row 0 must still carry the source's north row -- not the south row.
+
+    This pins the fix for the flipped-viewport bug (the hero at lat -24 rendered
+    at the top of the map): view_transform.frag must NOT vertically flip. Renders
+    the real shader into an offscreen f4 FBO; no imgui / default framebuffer.
+    """
+    import struct
+
+    H = 4
+    src = gpu.texture2d((1, H), 4, "f4")  # 1 wide, H tall
+    north = (1.0, 0.0, 0.0, 1.0)  # row 0
+    south = (0.0, 0.0, 1.0, 1.0)  # row H-1
+    rows = [north] + [(0.0, 0.0, 0.0, 1.0)] * (H - 2) + [south]
+    src.write(b"".join(struct.pack("4f", *row) for row in rows))
+
+    dst = gpu.texture2d((1, H), 4, "f4")
+    fbo = gpu.framebuffer(dst)
+    pass_ = gpu.fullscreen_pass("gasgiant.app.shaders", "view_transform.frag")
+    src.use(location=0)
+    pass_.prog["u_image"].value = 0
+    pass_.prog["u_mode"].value = 0  # Standard = pass-through
+    pass_.prog["u_channel"].value = 0
+    pass_.prog["u_aurora"].value = (0.0, 0.0, 0.0)
+    pass_.render(fbo)
+
+    out = fbo.read(components=4, dtype="f4")
+    display = [struct.unpack("4f", out[i * 16 : (i + 1) * 16]) for i in range(H)]
+    top = display[0]  # texel row 0 == imgui screen-TOP
+    assert top[0] > top[2] + 0.5, (
+        f"screen-top is not the source NORTH row (rgb={top[:3]}); the equirect "
+        "view is upside down -- view_transform.frag is flipping V."
+    )
+
+    pass_.release()
+    fbo.release()
+    dst.release()
+    src.release()
+    gpu.make_current()

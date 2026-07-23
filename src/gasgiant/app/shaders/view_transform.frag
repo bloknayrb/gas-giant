@@ -17,7 +17,11 @@ uniform vec3 u_aurora;  // Emission channel only (u_channel 5): composites the
                         // other channel, so channels 0-4 are untouched.
 
 void main() {
-    vec2 uv = vec2(v_uv.x, 1.0 - v_uv.y);
+    // NORTH-UP: source texel row 0 is lat +90 (core/domain.py) and imgui.image
+    // draws row 0 at the top of the image, so v_uv maps straight through -- NO
+    // vertical flip. A `1.0 - v_uv.y` here rendered the whole equirect upside
+    // down (pinned by test_view_transform_is_north_up).
+    vec2 uv = v_uv;
     vec4 texel = texture(u_image, uv);
     vec3 color;
     if      (u_channel == 1) color = texel.rrr;
