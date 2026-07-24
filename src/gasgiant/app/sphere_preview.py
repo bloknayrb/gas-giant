@@ -72,7 +72,9 @@ class SpherePreview:
             io = imgui.get_io()
             if imgui.is_mouse_dragging(0):
                 self.yaw += io.mouse_delta.x * 0.01
-                self.pitch = max(-1.5, min(1.5, self.pitch + io.mouse_delta.y * 0.01))
+                # Inverted Y: dragging DOWN tilts the view up (grab-the-globe
+                # feel), matching how the horizontal drag pulls the surface.
+                self.pitch = max(-1.5, min(1.5, self.pitch - io.mouse_delta.y * 0.01))
             if io.mouse_wheel:
                 self.zoom = max(0.2, min(8.0, self.zoom * (1.0 + 0.12 * io.mouse_wheel)))
             if imgui.is_mouse_double_clicked(0):

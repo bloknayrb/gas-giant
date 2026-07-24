@@ -45,7 +45,16 @@ void main() {
 
     float lon = atan(p.z, p.x);
     float lat = asin(clamp(p.y, -1.0, 1.0));
-    vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
+    // Both axes are negated relative to the naive equirect lookup so the globe
+    // matches the north-up, east-right 2D preview:
+    //  - Longitude: at the default view the camera sits on +X and screen-right
+    //    maps to the -Z world axis, so world longitude increases LEFTward on the
+    //    facing hemisphere while the equirect/overlay run it RIGHTward -- a plain
+    //    lookup renders the globe east-west MIRRORED. `0.5 - lon/2pi` fixes it.
+    //  - Latitude: `0.5 + lat/PI` puts +90 (north) at the top of the facing
+    //    hemisphere, matching the north-up equirect (verified on-screen: a plain
+    //    `0.5 - lat/PI` rendered the globe south-up vs the 2D preview).
+    vec2 uv = vec2(0.5 - lon / (2.0 * PI), 0.5 + lat / PI);
     // textureLod: derivative-based mip selection would show a seam line at
     // the atan2 wrap; the preview texture has no mips anyway.
     vec3 albedo = textureLod(u_color, uv, 0.0).rgb;
