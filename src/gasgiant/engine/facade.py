@@ -37,7 +37,11 @@ from gasgiant.sim.profiles import (
 from gasgiant.sim.profiles import (
     seat_quality as _seat_quality,
 )
-from gasgiant.sim.resolution_scaling import effective_dev_steps, scale_factor
+from gasgiant.sim.resolution_scaling import (
+    effective_dev_steps,
+    scale_duration,
+    scale_factor,
+)
 from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver, compute_dt
 from gasgiant.sim.vortices import generate_vortices
 
@@ -226,8 +230,19 @@ class Simulation:
         # dt does not track sim resolution, so scaling them would change the
         # baroclinic physical time. s == 1 (flag off / at reference) => bp.update_every.
         s = scale_factor(self.params)
-        self._baro_update_every = max(1, round(bp.update_every * s)) if s != 1.0 \
-            else bp.update_every
+        # Reuse scale_duration (round(n*s), structural no-op at s==1), flooring the
+        # scaled branch only so the s==1 / flag-off path passes bp.update_every
+        # through byte-identically (mirrors how effective_dev_steps floors it).
+        eff_cadence = scale_duration(bp.update_every, s)
+        self._baro_update_every = eff_cadence if s == 1.0 else max(1, eff_cadence)
+        # Gain is deliberately NOT scaled. The source is injected into the Poisson
+        # RHS only (omega_recover.comp: orel = q - f + gain*f0*src) -- an INSTANTANEOUS
+        # per-step overlay, never accumulated into the persistent q. Its only effect on
+        # the carried state is via the psi -> velocity -> advection channel, which is
+        # dt-weighted, so its total contribution ~ gain*dt*eff = gain*dt_ref*dev_steps
+        # is already resolution-invariant. Scaling gain by 1/s would inject a spurious
+        # 1/s and BREAK that invariance. (Contrast vort_psi_drag, which writes the
+        # persistent q directly with no dt and so DOES scale -- see scale_rate.)
         self._baro_gain = bp.gain
         self._baro_steps_per_update = bp.baro_steps_per_update
         self._baro_degraded_reason = None

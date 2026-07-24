@@ -431,11 +431,21 @@ at `s == 1`:
   land at the same physical longitude/time at any resolution (intent guards stay
   on raw `dev_steps`).
 - **Deterministic per-step decays decay-exact** `1 − (1−f)^(1/s)`
-  (drags, relaxation τ, tracer relax/replenish): the linear `f/s` would exceed 1
-  and invert a `mix()` at `s < 1`.
+  (`vort_drag`, `vort_eddy_drag`, relaxation τ, tracer relax/replenish — all
+  genuine `[0,1)` retained fractions): the linear `f/s` would exceed 1 and invert
+  a `mix()` at `s < 1`.
+- **Additive per-step rate coefficients that write the persistent state ÷ s**
+  (`vort_psi_drag`, `q += r·ψ′`, `hi=20`): a rate, *not* a fraction — its induced
+  per-mode decay `r/(k²+1/L_d²)` is linear in `r`, so linear `r/s` is the correct
+  first-order remap and stays continuous across the whole range (decay-exact would
+  mistreat `r` as a fraction and silently no-op at `r ≥ 1`).
 - **White-in-time stochastic forcings ÷√s** (`vort_inject`, `hero_wake_turb`):
   variance-injection-rate preserving.
 - **`turb_time` reframed onto physical time** (`evolution_rate / s`).
+- **Not scaled — already invariant:** the baroclinic overlay `gain` is injected
+  into the instantaneous Poisson RHS (never accumulated into `q`), so its only
+  effect is dt-weighted advection (`gain·dt·steps` is fixed); only its refresh
+  *cadence* scales ×s. Grid-Nyquist hyperviscosity is likewise unscaled (below).
 
 **Honest scope — this is calibration, not a physics guarantee.** It fully
 holds for **nudge-dominated** presets (the large scale is set by the painted

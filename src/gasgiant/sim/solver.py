@@ -36,6 +36,7 @@ from gasgiant.sim.profiles import LatProfiles
 from gasgiant.sim.resolution_scaling import (
     scale_decay_fraction,
     scale_factor,
+    scale_rate,
     scale_relax_tau,
     scale_stochastic_amp,
 )
@@ -667,12 +668,17 @@ class Solver:
         _set(kf0, "u_inject_mask", INJECT_MASK_CODE[p.solver.vort_inject_mask])
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
-        # Rayleigh / eddy / psi drags are deterministic per-step decay fractions:
-        # decay-exact remap so the retained fraction over the scaled run matches
-        # the reference (a linear 1/s would exceed 1 and blow up at s < 1).
+        # Rayleigh + eddy drags are genuine per-step retained fractions in [0, 0.3]
+        # (q = f + (q-f)*(1-drag); q -= eddy*(q-<q>)): decay-exact remap so the
+        # retained fraction over the scaled run matches the reference (a linear 1/s
+        # would exceed 1 and blow up the mix at s < 1).
         _set(kf0, "u_vort_drag", scale_decay_fraction(p.solver.vort_drag, s))
         _set(kf0, "u_vort_eddy_drag", scale_decay_fraction(p.solver.vort_eddy_drag, s))
-        _set(kf0, "u_vort_psi_drag", scale_decay_fraction(p.solver.vort_psi_drag, s))
+        # psi-drag is NOT a decay fraction: it is an additive rate coefficient
+        # (q += r*psi_eddy, hi=20) whose induced per-mode decay r/(k^2+1/L_d^2) is
+        # linear in r, so it scales linearly (c/s) and stays continuous across its
+        # whole range -- decay-exact would mistreat r as a fraction and no-op at r>=1.
+        _set(kf0, "u_vort_psi_drag", scale_rate(p.solver.vort_psi_drag, s))
         if eddy_drag_on:
             state.mean_buf.bind_to_storage_buffer(3)  # keep ⟨q⟩_x bound for SUBPASS 0
         if psi_drag_on:

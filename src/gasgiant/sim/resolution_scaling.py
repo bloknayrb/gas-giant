@@ -55,8 +55,16 @@ def effective_dev_steps(params: PlanetParams) -> int:
     elapses at any resolution. The single source of truth threaded into the seeded
     timeline (drift compensation, merger + outbreak scheduling) so it never
     desyncs from ``steps_target``. Returns raw ``dev_steps`` when the feature is
-    off (``s == 1``)."""
-    return scale_duration(params.sim.dev_steps, scale_factor(params))
+    off (``s == 1``).
+
+    Floored to ``>= 1`` for a nonzero request: a strong downscale (``s`` as small
+    as ``512/8192 = 0.0625``) can ``round`` a small ``dev_steps`` (1..8) down to
+    ``0``, which would silently render the undeveloped step-0 field as if
+    developed. One step is the honest minimum for a run the user asked to
+    develop; a genuine ``dev_steps == 0`` still returns ``0``."""
+    n = params.sim.dev_steps
+    eff = scale_duration(n, scale_factor(params))
+    return max(1, eff) if n > 0 else eff
 
 
 def scale_duration(n_steps: int, s: float) -> int:
@@ -85,6 +93,29 @@ def scale_decay_fraction(f: float, s: float) -> float:
     return 1.0 - retained ** (1.0 / s)
 
 
+def scale_rate(c: float, s: float) -> float:
+    """A per-step ADDITIVE rate coefficient that modifies the PERSISTENT state
+    directly (no ``dt`` weighting) -- e.g. ``vort_psi_drag`` (``q += c * psi_eddy``
+    in omega_force.comp). Its cumulative effect over the run is ``~ c * steps``, so
+    to hold it fixed as the run length scales by ``s`` the coefficient scales
+    ``c / s`` (linear).
+
+    Distinct from :func:`scale_decay_fraction`: that is for a MULTIPLICATIVE decay
+    written as an explicit ``[0, 1)`` retained fraction (``x <- x * (1 - f)``).
+    ``vort_psi_drag`` reads like a fraction but is a rate coefficient with
+    ``hi = 20`` -- the per-mode decay it INDUCES is ``c / (k^2 + 1/L_d^2)`` (small
+    for realistic ``c``), so linear ``c / s`` is the correct first-order remap and,
+    unlike ``scale_decay_fraction``, it is continuous across the whole ``[0, 20]``
+    range (the fraction helper silently no-ops at ``c >= 1``). Also distinct from a
+    per-step term consumed with ``dt`` weighting (an instantaneous velocity/source
+    that advects the state), whose effect is ALREADY invariant (``dt * steps`` is
+    fixed) and must NOT be scaled -- see the baroclinic gain in ``engine/facade.py``.
+    Structural no-op at ``s == 1``."""
+    if s == 1.0:
+        return c
+    return c / s
+
+
 def scale_relax_tau(tau: float, s: float) -> float:
     """A relaxation timescale expressed in STEPS (``tau``; per-step fraction
     ``1 / tau``). Apply the decay-exact correction to the implied fraction and invert:
@@ -99,7 +130,7 @@ def scale_relax_tau(tau: float, s: float) -> float:
 
 def scale_stochastic_amp(amp: float, s: float) -> float:
     """A white-in-time stochastic forcing amplitude (``vort_inject``,
-    ``hero_wake_turb``, the replenish fresh-field): ``amp / sqrt(s)`` so the
+    ``hero_wake_turb``): ``amp / sqrt(s)`` so the
     variance-injection RATE per unit physical time is preserved (independent draws add
     in variance). A deterministic ``amp / s`` would over/under-inject. The ``sqrt``
     exponent is the first-principles white-noise value; Phase-0 calibration may refine
