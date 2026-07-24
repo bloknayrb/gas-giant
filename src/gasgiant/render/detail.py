@@ -293,14 +293,29 @@ class DetailSynth:
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)
         aspects = np.ones(3, dtype=np.float32)   # default 1.0 -> exact short-circuit
+        # Per-hero emergence (M2-C) for the read sites that already run INSIDE
+        # the per-hero loop. hero_centers appends it as a 9th field; a legacy
+        # 8-tuple (every caller that is not the facade/snapshot) falls back to
+        # the scalar those sites read before this existed, so a uniform scene is
+        # byte-identical either way. The two CROSS-hero sites (detail.comp:277
+        # and :286) still take the scalar: they scale a SUMMED mask, so a
+        # per-storm form there is a new formulation, not a substitution.
+        emergences = np.full(3, hero_emergence, dtype=np.float32)
         n_heroes = 0
         for h in (heroes or [])[:3]:
             packed[n_heroes] = h[:4]
             aspects[n_heroes] = h[5] if len(h) > 5 else 1.0
+            if len(h) > 8:
+                emergences[n_heroes] = h[8]
             n_heroes += 1
         prog["u_hero_count"].value = n_heroes
         prog["u_heroes"].write(packed.tobytes())
         prog["u_hero_aspect"].write(aspects.tobytes())
+        # Its four read sites all live in the DETAIL_FX-only spiral/collar block
+        # (like u_hero_spin), so the compiler strips the array whenever either
+        # variant is off.
+        if he_on and fx_on:
+            prog["u_hero_emergence_arr"].write(emergences.tobytes())
         vel_tex.use(location=0)
         prog["u_vel"].value = 0
         tracers_tex.use(location=1)

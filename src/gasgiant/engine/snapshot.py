@@ -13,7 +13,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from gasgiant.params.model import PlanetParams
+from gasgiant.params.model import PlanetParams, StormsParams, effective_cast_lever
 
 if TYPE_CHECKING:
     import moderngl
@@ -24,8 +24,9 @@ if TYPE_CHECKING:
 
 def hero_centers(
     registry: VortexRegistry,
-) -> list[tuple[float, float, float, float, float, float, float, float]]:
-    """(x, y, z, r_core, spin, aspect, wake_dir, wake_lat_off) of each hero
+    storms: StormsParams | None = None,
+) -> list[tuple[float, ...]]:
+    """(x, y, z, r_core, spin, aspect, wake_dir, wake_lat_off[, emergence]) of each hero
     storm at its current drifted position. spin = sign(strength), which is the
     NEGATION of the hero's actual rotation sense (the psi-amplitude trap:
     omega = -sign(strength), see sim/vortices.py's module docstring) —
@@ -35,15 +36,24 @@ def hero_centers(
     wake_lat_off (the wake lane's latitude offset from the hero center, rad)
     carry the sim's flow-derived wake frame to the render pass for the
     wake-braid synthesis. Consumers slice positionally and len-guard, so
-    shorter tuples stay legal."""
+    shorter tuples stay legal.
+
+    ``storms`` appends a 9th field: this hero's EFFECTIVE emergence (M2-C), so
+    the detail pass can treat two placed heroes differently instead of applying
+    one scene-wide value. Omitting it yields the legacy 8-tuple and the pass
+    falls back to the scalar — which is what every non-production caller
+    (tests exercising other levers) wants."""
     out = []
     for v in registry.heroes():
         cl = math.cos(v.lat)
-        out.append((
+        row = (
             cl * math.cos(v.lon), math.sin(v.lat), cl * math.sin(v.lon),
             v.r_core, 1.0 if v.strength >= 0.0 else -1.0, v.aspect,
             v.wake_dir, v.wake_lat_off,
-        ))
+        )
+        if storms is not None:
+            row += (effective_cast_lever(storms, v.cast_ref, "emergence"),)
+        out.append(row)
     return out
 
 
@@ -131,7 +141,7 @@ class ExportSnapshot:
             mask=(gpu.clone_texture(sim._mask_tex) if sim._mask_tex is not None else None),
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
-            heroes=hero_centers(sim.vortices),
+            heroes=hero_centers(sim.vortices, sim.params.storms),
             hero_emergence=sim.vortices.scene_emergence(sim.params.storms),
             clouds=bright_cloud_centers(sim.vortices),
             lanes=list(sim.lanes),

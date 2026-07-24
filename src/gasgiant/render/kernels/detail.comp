@@ -79,6 +79,15 @@ uniform float u_hero_calm;
 // HERO_EMERGENCE is selected independently of DETAIL_FX, and the quiet-storm
 // heroQ/calm remap it drives lives in the pre-FX path (as u_hero_calm does).
 uniform float u_hero_emergence;
+// Per-hero EFFECTIVE emergence (M2-C), threaded as hero_centers' 9th field.
+// Read at the sites that already run inside the per-hero loop; a uniform scene
+// packs the scalar into every slot, so those reads are an operand substitution
+// with an equal value -- byte-identical, verified by the render_* configs in
+// scripts/m2b_emergence_hash.py. The two CROSS-hero sites keep the scalar:
+// heroMask SUMS over heroes and is scaled once afterwards, so distributing a
+// per-storm factor into that sum is a new formulation (and would move the
+// flagship preset's shipped output), not a substitution.
+uniform float u_hero_emergence_arr[3];
 #endif
 #ifdef DETAIL_FX
 // Longitudinal intermittency gate + hero internal spiral lanes. The
@@ -577,7 +586,7 @@ void main() {
             // interior spiral reads as circulation BANDING, not a tightly
             // wound whirlpool (the tell the pack removes). Verbatim
             // pre-feature #else — the no-defines projection hash pins it.
-            float k = mix(-20.0, -6.0, u_hero_emergence) * u_hero_spin[i];
+            float k = mix(-20.0, -6.0, u_hero_emergence_arr[i]) * u_hero_spin[i];
 #else
             float k = -20.0 * u_hero_spin[i];
 #endif
@@ -591,7 +600,7 @@ void main() {
             // spiral (pitch remapped above) is the reference's visible
             // circulation banding — fade eased 0.85 -> 0.55 so it survives
             // as garnish over the sim-side T3 lanes (round B).
-            win *= 1.0 - 0.55 * u_hero_emergence;
+            win *= 1.0 - 0.55 * u_hero_emergence_arr[i];
 #endif
             sp += win * lane;
             // Collar streamlines: thin turbulent rings hugging the rim.
@@ -600,8 +609,8 @@ void main() {
             // outer edge in with the lever so the streamlines hug it instead of
             // ringing out to 1.85 (part of the oversized-footprint fix).
             float wino = smoothstep(0.98, 1.12, q)
-                       * (1.0 - smoothstep(mix(1.5, 1.26, u_hero_emergence),
-                                           mix(1.85, 1.40, u_hero_emergence), q));
+                       * (1.0 - smoothstep(mix(1.5, 1.26, u_hero_emergence_arr[i]),
+                                           mix(1.85, 1.40, u_hero_emergence_arr[i]), q));
 #else
             float wino = smoothstep(0.98, 1.12, q) * (1.0 - smoothstep(1.5, 1.85, q));
 #endif

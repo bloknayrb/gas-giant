@@ -24,6 +24,10 @@ heroRelaxWeight's cross-hero max() actually CONTENDS (measured ~5.9k px with two
 heroes inside q<=4.2 and ~2.2k inside both wake windows). With a single hero the
 max never contends and a restructure of it is trivially safe.
 
+`render_*` configs hash render_maps() with detail ON, covering detail.comp's own
+HERO_EMERGENCE arm — the quiet-storm remap and the collar/spiral/wake windows,
+which the tracer configs never touch and which are LIVE in the flagship preset.
+
 The omega side is deliberately NOT here: vorticity output cannot carry a stored
 byte-exact hash, so its equivalence is asserted same-process in
 tests/gpu/test_cast_levers.py against the dev-0 omega texture (CLAUDE.md's one
@@ -76,11 +80,50 @@ CONFIGS = {
 }
 
 
+# The RENDER-side companions. The configs above hash developed TRACERS, which the
+# detail pass never touches -- so they cannot see detail.comp's own HERO_EMERGENCE
+# arm (the quiet-storm remap, the collar/spiral windows, the wake braid), which is
+# LIVE in the flagship preset at emergence 0.9 and which p05 again cannot reach.
+# These hash render_maps() with detail ON instead.
+RENDER_CONFIGS = {
+    "render_bare": lambda: _p(),
+    "render_shape_taper": lambda: _p(hero_shape=1.0, hero_taper=0.8),
+    "render_two_heroes": lambda: _p(hero_count=2, hero_shape=1.0, hero_taper=0.8),
+}
+_RENDER_DETAIL = 0.6   # > 0 so detail.comp actually runs
+_RENDER_WIDTH = 512
+# detail.comp's hero-emergence read sites are split across its variants: the two
+# cross-hero ones are in the BASE HERO_EMERGENCE path, but the spiral-pitch,
+# spiral-window and collar-window ones are inside the DETAIL_FX-only block. With
+# every fx pfield at its 0 default, DETAIL_FX does not compile and those three
+# sites are not in the program at all -- a hash that leaves them off is green by
+# construction, the same blindness p05 has toward HERO_EMERGENCE. So drive the
+# fx levers that own them.
+_RENDER_FX = {"hero_spiral": 0.8, "hero_collar_wrap": 0.7, "hero_wake_braid": 0.6,
+              "intermittency": 0.5}
+
+
 def _hash(p: PlanetParams, gpu) -> str:
     sim = Simulation(p, gpu)
     sim.run_to_completion(chunk=64)
     arr = sim.gpu.read_texture(sim.solver.equirect.tracers.cur)
     return hashlib.sha1(np.ascontiguousarray(arr, np.float32).tobytes()).hexdigest()
+
+
+def _render_hash(p: PlanetParams, gpu) -> str:
+    p.detail.intensity = _RENDER_DETAIL
+    for name, value in _RENDER_FX.items():
+        setattr(p.detail, name, value)
+    from gasgiant.render.detail import detail_fx_enabled
+    assert detail_fx_enabled(p.detail), "DETAIL_FX must compile or the fx-only sites are unhashed"
+    sim = Simulation(p, gpu)
+    sim.run_to_completion(chunk=64)
+    maps = sim.render_maps(_RENDER_WIDTH)
+    h = hashlib.sha1()
+    for key in sorted(maps):
+        h.update(key.encode())
+        h.update(np.ascontiguousarray(maps[key], np.float32).tobytes())
+    return h.hexdigest()
 
 
 def main() -> None:
@@ -90,6 +133,7 @@ def main() -> None:
 
     gpu = GpuContext.headless()
     out = {name: _hash(mk(), gpu) for name, mk in CONFIGS.items()}
+    out.update({name: _render_hash(mk(), gpu) for name, mk in RENDER_CONFIGS.items()})
     for k, v in out.items():
         print(f"{k}: {v}")
 
