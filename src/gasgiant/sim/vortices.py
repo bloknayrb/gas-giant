@@ -36,6 +36,7 @@ from gasgiant.params.model import (
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
+from gasgiant.sim.resolution_scaling import scale_duration
 
 # No discrete vortices poleward of this (polar patches own the caps; the
 # nesting blend band must stay storm-free).
@@ -128,6 +129,13 @@ class Vortex:
 @dataclass
 class VortexRegistry:
     vortices: list[Vortex] = field(default_factory=list)
+    # Resolution-invariant step scale s = resolution / reference_resolution
+    # (1.0 = feature off or authored-at-reference). Runtime merger/debris
+    # lifetimes below are step counts; they are multiplied by this so a
+    # transient occupies the same PHYSICAL fraction of the run at any
+    # resolution. Set once by generate_vortices; recomputed on checkpoint
+    # resume (which re-runs generation), so it is never serialized.
+    step_scale: float = 1.0
 
     def heroes(self) -> list[Vortex]:
         return [v for v in self.vortices if v.kind == KIND_HERO]
@@ -243,7 +251,9 @@ def zonal_rate(profiles: LatProfiles, lats: np.ndarray) -> np.ndarray:
     return u / np.maximum(np.cos(lats), 0.2)
 
 
-def _merge_pair(a: Vortex, b: Vortex, profiles: LatProfiles) -> Vortex:
+def _merge_pair(
+    a: Vortex, b: Vortex, profiles: LatProfiles, cooldown: int = MERGE_COOLDOWN
+) -> Vortex:
     """Coalesce two same-sign peers. Conserves PEAK TANGENTIAL VELOCITY
     (S*r), not the psi-impulse (S*r^2): impulse conservation makes the
     product spin ~29% slower than its parents and erode fastest — the
@@ -271,7 +281,7 @@ def _merge_pair(a: Vortex, b: Vortex, profiles: LatProfiles) -> Vortex:
         # products ever gain wakes, use the hero convention (wake_dir=-1,
         # equatorward wake_lat_off), not this jet sample (see F06).
         wake_dir=1.0 if u_here >= 0.0 else -1.0,
-        cooldown=MERGE_COOLDOWN,
+        cooldown=cooldown,
     )
 
 
@@ -299,6 +309,11 @@ def resolve_mergers(
     if rate <= 0.0:
         return []
     _age_transients(reg, storms)
+    # Resolution-invariant lifetimes: scale the per-step merger cooldown and the
+    # debris collar's step budget so a transient spans the same physical fraction
+    # of the run (s == 1 => the module constants unchanged).
+    cooldown = scale_duration(MERGE_COOLDOWN, reg.step_scale)
+    debris_life = scale_duration(MERGE_DEBRIS_LIFETIME, reg.step_scale)
     vs = reg.vortices
     for v in vs:  # hysteresis ages even on steps with no merges
         if v.cooldown > 0:
@@ -365,13 +380,15 @@ def resolve_mergers(
             hero, victim = (a, b) if a.kind == KIND_HERO else (b, a)
             removed.add(i if victim is vs[i] else j)
             resolved.append((hero, victim, None))
-            debris = _spawn_debris(victim.lat, victim.lon, victim.r_core, storms)
+            debris = _spawn_debris(victim.lat, victim.lon, victim.r_core, storms,
+                                   lifetime=debris_life)
         else:
             removed.update((i, j))
-            product = _merge_pair(a, b, profiles)
+            product = _merge_pair(a, b, profiles, cooldown=cooldown)
             products.append(product)
             resolved.append((a, b, product))
-            debris = _spawn_debris(product.lat, product.lon, product.r_core, storms)
+            debris = _spawn_debris(product.lat, product.lon, product.r_core, storms,
+                                   lifetime=debris_life)
         if debris is not None:
             products.append(debris)
     # One identity-based rebuild — never list.remove (dataclass == is field
@@ -381,7 +398,10 @@ def resolve_mergers(
     return resolved
 
 
-def _spawn_debris(lat: float, lon: float, r_core: float, storms: StormsParams) -> Vortex | None:
+def _spawn_debris(
+    lat: float, lon: float, r_core: float, storms: StormsParams,
+    lifetime: int = MERGE_DEBRIS_LIFETIME,
+) -> Vortex | None:
     """The transient turbulent collar a fresh merger leaves behind: a
     zero-strength registry entry (no psi) whose bright ring stamp the ambient
     flow folds into filaments while it decays. The Outbreak mechanism, reused.
@@ -393,13 +413,17 @@ def _spawn_debris(lat: float, lon: float, r_core: float, storms: StormsParams) -
         return None
     return Vortex(lat, lon, r_core, 0.0, KIND_DEBRIS,
                   tint=0.0, brightness=0.0,  # ramps in via _age_transients
-                  ttl=MERGE_DEBRIS_LIFETIME)
+                  ttl=lifetime)
 
 
 def _age_transients(reg: VortexRegistry, storms: StormsParams) -> None:
     """Decrement debris ttl; brightness = base * fade-in * fade-out, removed
-    at expiry. Deterministic — pure function of ttl + params."""
+    at expiry. Deterministic — pure function of ttl + params. Debris spawned
+    with an s-scaled ttl, so age/fade use the same s-scaled lifetime/ramp
+    (s == 1 => the module constants unchanged)."""
     base = MERGE_DEBRIS_BRIGHT * storms.merge_debris * storms.stamp_contrast
+    lifetime = scale_duration(MERGE_DEBRIS_LIFETIME, reg.step_scale)
+    ramp = scale_duration(MERGE_DEBRIS_RAMP, reg.step_scale)
     expired = False
     for v in reg.vortices:
         if v.ttl < 0:
@@ -408,9 +432,9 @@ def _age_transients(reg: VortexRegistry, storms: StormsParams) -> None:
         if v.ttl <= 0:
             expired = True
             continue
-        age = MERGE_DEBRIS_LIFETIME - v.ttl
-        ramp_in = min(age / MERGE_DEBRIS_RAMP, 1.0)
-        v.brightness = base * ramp_in * (v.ttl / MERGE_DEBRIS_LIFETIME)
+        age = lifetime - v.ttl
+        ramp_in = min(age / ramp, 1.0)
+        v.brightness = base * ramp_in * (v.ttl / lifetime)
     if expired:
         reg.vortices = [v for v in reg.vortices if v.ttl != 0]
 
@@ -569,9 +593,16 @@ def generate_vortices(
     poles: PolesParams | None = None,
     dt: float | None = None,
     dev_steps: int = 0,
+    step_scale: float = 1.0,
 ) -> VortexRegistry:
     rng = subseed(seed, "storms")
-    reg = VortexRegistry()
+    reg = VortexRegistry(step_scale=step_scale)
+    # Effective run length the solver will actually step (dev_steps * s). dt
+    # already tracks 1/resolution, so drift compensation and merger scheduling
+    # keyed to `eff` land storms at the same physical longitude/time at any
+    # resolution. Intent guards below stay on raw dev_steps (the run length the
+    # author asked for); s == 1 makes eff == dev_steps (byte-identical).
+    eff = scale_duration(dev_steps, step_scale)
 
     zones = _band_centers(bands, want_belt=False)
     belts = _band_centers(bands, want_belt=True)
@@ -602,7 +633,7 @@ def generate_vortices(
         lon = float(rng.uniform(-np.pi, np.pi))
         if storms.hero_longitude is not None:
             lon = drift_compensated_lon(
-                profiles, lat, storms.hero_longitude, dt, dev_steps
+                profiles, lat, storms.hero_longitude, dt, eff
             )
         woff = 0.5 * r * (1.0 if lat < 0.0 else -1.0)
         wdir = -1.0
@@ -720,7 +751,7 @@ def generate_vortices(
     if storms.merge_rate > 0.0 and dt is not None and dev_steps > 0:
         _seed_convergent_pairs(
             reg, subseed(seed, "mergers"), zones, profiles,
-            storms.merge_rate, dt, dev_steps,
+            storms.merge_rate, dt, eff, step_scale,
         )
 
     # Accent ovals (A01) and hero companions (B5-5): explicitly colored stamps
@@ -729,7 +760,7 @@ def generate_vortices(
     # off — and untouched even when they are on.
     if storms.accent_count > 0:
         _add_accent_ovals(reg, subseed(seed, "accent-ovals"), zones, profiles, storms,
-                          dt, dev_steps)
+                          dt, eff)
     if storms.hero_companions > 0:
         _add_hero_companions(reg, subseed(seed, "hero-companions"), profiles,
                              storms.hero_companions, storms.companion_aspect,
@@ -738,7 +769,7 @@ def generate_vortices(
     # seeded population, so they are byte-identical no-ops when the list is
     # empty and never perturb a seeded draw when present.
     if storms.cast:
-        _add_cast(reg, profiles, storms, dt, dev_steps)
+        _add_cast(reg, profiles, storms, dt, eff)
     # Kind-aware atomic trim: cast-list storms (origin=="cast") are art
     # direction and are NEVER trimmed; drop the NEWEST non-cast entry first
     # (accents/companions). With zero cast entries every entry is non-cast, so
@@ -989,6 +1020,7 @@ def _seed_convergent_pairs(
     merge_rate: float,
     dt: float,
     dev_steps: int,
+    step_scale: float = 1.0,
 ) -> None:
     """Spawn companion ovals placed KINEMATICALLY: measure the actual closure
     rate at the site via zonal_rate, draw a target merge step, and set the
@@ -1040,10 +1072,17 @@ def _seed_convergent_pairs(
         # debris collar is still bright in the final still) with early ones
         # (matured product drifts on). LATE FIRST: many runs seed only one
         # pair, and the live collar is the showcase.
+        # Schedule offsets are step-count DURATIONS (a late merge fires ~220..80
+        # steps before the end; an early one within the first ~280) -- scale them
+        # by s so the capture lands at the same physical time. dev_steps here is
+        # already the effective (scaled) run length. s == 1 => unchanged.
+        off_hi = scale_duration(220, step_scale)
+        off_lo = scale_duration(80, step_scale)
+        early_hi = scale_duration(280, step_scale)
         if pair_index % 2 == 0:
-            lo, hi = max(dev_steps - 220, 80), max(dev_steps - 80, 81)
+            lo, hi = max(dev_steps - off_hi, off_lo), max(dev_steps - off_lo, off_lo + 1)
         else:
-            lo, hi = 80, max(min(280, dev_steps), 81)
+            lo, hi = off_lo, max(min(early_hi, dev_steps), off_lo + 1)
         target_step = int(rng.integers(lo, hi + 1))
         if closure * dev_steps < 0.02:
             # Flat shear: place just outside capture so any drift nudges it in.

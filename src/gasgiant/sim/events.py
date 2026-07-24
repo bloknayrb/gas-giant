@@ -20,6 +20,11 @@ from gasgiant.params.model import PlanetParams
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.bands import BandLayout
 from gasgiant.sim.profiles import LatProfiles
+from gasgiant.sim.resolution_scaling import (
+    effective_dev_steps,
+    scale_duration,
+    scale_factor,
+)
 from gasgiant.sim.vortices import (
     MAX_VORTEX_LAT,
     Vortex,
@@ -75,6 +80,9 @@ class Outbreak:
 class EventSchedule:
     outbreaks: list[Outbreak] = field(default_factory=list)
     strength: float = 1.0
+    # Resolution-invariant step scale (see VortexRegistry.step_scale). apply()
+    # scales the outbreak LIFETIME/RAMP by it; s == 1 leaves them unchanged.
+    step_scale: float = 1.0
 
     @classmethod
     def generate(
@@ -85,10 +93,16 @@ class EventSchedule:
         dt: float | None = None,
     ) -> EventSchedule:
         rng = subseed(params.seed, "events")
-        sched = cls(strength=params.storms.outbreak_strength)
+        s = scale_factor(params)
+        sched = cls(strength=params.storms.outbreak_strength, step_scale=s)
         count = params.storms.outbreak_count
+        # Intent guard on RAW dev_steps: dev_steps * dt is the physical run length,
+        # invariant across resolution, so "is there a real run" is a raw-steps test.
         if count == 0 or params.sim.dev_steps < 50:
             return sched
+        # Schedule anchors use the EFFECTIVE (s-scaled) run length so eruptions
+        # fire at the same physical time / phase at any resolution.
+        eff = effective_dev_steps(params)
         values = bands.values
         # DARK belts only (review: a plume on a light zone/boundary is white-on-
         # white and vanishes). Take the darkest half of the belts so the bright-
@@ -121,7 +135,7 @@ class EventSchedule:
             # other outbreak properties.
             draw_phase = float(rng.uniform(0.55, 0.85))
             phase = params.storms.outbreak_phase
-            step0 = int((draw_phase if phase is None else phase) * params.sim.dev_steps)
+            step0 = int((draw_phase if phase is None else phase) * eff)
             # The 0.0 fallback is only reachable when pinned (belts empty).
             center = (
                 float(dark_belts[rng.integers(0, len(dark_belts))][0])
@@ -142,7 +156,7 @@ class EventSchedule:
                 # the head is precise -- the belt shear folds the tail into a
                 # streak (a recorded caveat). With no profiles/dt (default
                 # call), seed the target directly, no compensation.
-                remaining = params.sim.dev_steps - step0
+                remaining = eff - step0
                 base_lon = drift_compensated_lon(
                     profiles, center, params.storms.outbreak_longitude,
                     dt if profiles is not None else None, remaining,
@@ -164,8 +178,8 @@ class EventSchedule:
                 if k == 0:
                     radius *= LEAD_RADIUS
                 # Stagger so the train unfurls in sequence, not all at once.
-                step = step0 + k * int(0.015 * params.sim.dev_steps) \
-                    + int(rng.uniform(0.0, 0.04) * params.sim.dev_steps)
+                step = step0 + k * int(0.015 * eff) \
+                    + int(rng.uniform(0.0, 0.04) * eff)
                 sched.outbreaks.append(
                     Outbreak(step=step, lat=lat, lon=lon, radius=radius,
                              bright_mul=bright_mul)
@@ -176,11 +190,15 @@ class EventSchedule:
         """Spawn/age/retire outbreaks; returns active outflow impulses as
         (lon, lat, radius, strength) for the velocity kernel."""
         impulses: list[tuple[float, float, float, float]] = []
+        # Resolution-invariant lifetimes: an outbreak lives the same physical
+        # time (same fraction of the run) at any resolution. s == 1 => LIFETIME/RAMP.
+        lifetime = scale_duration(LIFETIME, self.step_scale)
+        ramp_steps = scale_duration(RAMP, self.step_scale)
         for ob in self.outbreaks:
             age = step - ob.step
             if age < 0:
                 continue
-            if age > LIFETIME:
+            if age > lifetime:
                 if ob.vortex is not None:
                     # Identity-based removal: dataclass == is field equality, so
                     # list.remove could drop a different but field-equal vortex.
@@ -195,10 +213,10 @@ class EventSchedule:
                     tint=0.0, brightness=BRIGHTNESS * self.strength * ob.bright_mul,
                 )
                 registry.vortices.append(ob.vortex)
-            decay = 1.0 - age / LIFETIME
+            decay = 1.0 - age / lifetime
             ob.vortex.brightness = BRIGHTNESS * self.strength * ob.bright_mul * decay
             if len(impulses) < 2:
-                ramp = min(age / RAMP, 1.0) * decay
+                ramp = min(age / ramp_steps, 1.0) * decay
                 impulses.append(
                     (ob.vortex.lon, ob.vortex.lat, ob.radius * 1.5,
                      OUTFLOW * self.strength * ramp)
