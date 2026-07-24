@@ -195,12 +195,80 @@ def test_cast_companions_placed_deterministically():
     assert _fields(r1) == _fields(r2)  # no RNG on the cast path
 
 
+def test_cast_companion_appearance_inherits_global():
+    """companion_aspect/brightness=None -> the pearls take the global
+    storms.companion_aspect/companion_brightness."""
+    from gasgiant.sim.vortices import KIND_PEARL
+
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
+                                   radius=0.1, companions=1)]
+    pearl = next(v for v in _gen(p).vortices
+                 if v.origin == "cast" and v.kind == KIND_PEARL)
+    assert pearl.aspect == pytest.approx(p.storms.companion_aspect)
+    assert pearl.brightness == pytest.approx(p.storms.companion_brightness)
+
+
+def test_cast_companion_appearance_per_storm_override():
+    """Explicit companion_aspect/brightness win over the global for that storm."""
+    from gasgiant.sim.vortices import KIND_PEARL
+
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
+                                   radius=0.1, companions=1,
+                                   companion_aspect=3.0, companion_brightness=0.42)]
+    pearl = next(v for v in _gen(p).vortices
+                 if v.origin == "cast" and v.kind == KIND_PEARL)
+    assert pearl.aspect == pytest.approx(3.0)
+    assert pearl.brightness == pytest.approx(0.42)
+
+
+def test_cast_companions_independent_across_storms():
+    """Toggling one cast hero's companions leaves ANOTHER cast hero (and its own
+    companions) byte-identical -- the cast path shares no RNG stream, so a storm's
+    output can't depend on a sibling's companion count."""
+    def scene(a_companions):
+        p = PlanetParams()
+        p.storms.cast = [
+            StormOverride(kind=CastKind.HERO, lat_deg=-25.0, lon_deg=-60.0,
+                          radius=0.1, companions=a_companions),
+            StormOverride(kind=CastKind.HERO, lat_deg=30.0, lon_deg=60.0,
+                          radius=0.1, companions=2),
+        ]
+        return _gen(p)
+
+    def b_block(reg):
+        # Storm B and its companions sit in the northern hemisphere; storm A and
+        # its (variable) companions are southern -- filter to B's block.
+        return [t for t, v in zip(_fields(reg), reg.vortices, strict=True)
+                if v.origin == "cast" and v.lat > 0.0]
+
+    assert b_block(scene(0)) == b_block(scene(3))
+
+
 def test_hero_only_lever_on_oval_warns():
     """A hero-only lever set on a non-hero cast kind is flagged as inert."""
     p = PlanetParams()
     p.storms.cast = [StormOverride(kind=CastKind.OVAL, lat_deg=10.0, companions=2)]
     warnings = p.validation_warnings()
     assert any("hero-only lever" in w for w in warnings)
+
+
+def test_companion_appearance_on_oval_warns():
+    """companion_aspect on a non-hero is inert and flagged (it rides companions)."""
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.OVAL, lat_deg=10.0,
+                                   companion_aspect=3.0)]
+    assert any("hero-only lever" in w for w in p.validation_warnings())
+
+
+def test_companion_appearance_without_companions_warns():
+    """A hero that sets companion appearance but companions=0 gets no pearls, so
+    the appearance override is inert -- flagged."""
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1,
+                                   companions=0, companion_brightness=0.5)]
+    assert any("companions=0" in w for w in p.validation_warnings())
 
 
 # ---------------------------------------------------------------- validators
@@ -411,3 +479,84 @@ def test_draw_cast_list_hides_hero_levers_on_oval(imgui_ctx):
     # the gating predicate the editor uses
     assert "wake_dir" in panels._HERO_ONLY_CAST_FIELDS
     assert "aspect" not in panels._HERO_ONLY_CAST_FIELDS
+
+
+def test_draw_cast_list_rekind_clears_hero_only_fields(imgui_ctx, monkeypatch):
+    """Re-kinding a hero row to a non-hero kind resets the (now-hidden) hero-only
+    levers to their defaults, so no dead value is stranded where the user can
+    neither see nor clear it (silent-failure review)."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+    from gasgiant.params.model import WakeDir
+
+    hero = StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1,
+                         companions=2, companion_aspect=3.0,
+                         wake_dir=WakeDir.EAST).model_dump()
+
+    def fake_combo(label, current, items):
+        # drive ONLY the kind combo to pick "oval"; leave other combos untouched
+        if label == "kind":
+            return True, items.index("oval")
+        return False, current
+    monkeypatch.setattr(panels.imgui, "combo", fake_combo)
+
+    imgui.new_frame()
+    imgui.begin("cast_test", None, 0)
+    panels._draw_cast_list("cast", [hero], panels.PanelState(show_advanced=True))
+    imgui.end()
+    imgui.end_frame()
+
+    assert hero["kind"] == "oval"
+    defaults = StormOverride().model_dump()
+    for f in ("wake_dir", "companions", "companion_aspect", "companion_brightness"):
+        assert hero[f] == defaults[f]
+
+
+def test_draw_cast_list_remove_reconciles_selection(imgui_ctx, monkeypatch):
+    """Removing an earlier row via the panel "remove storm" button shifts a later
+    selection down -- the panel path reuses viewport.selection_after_delete."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+
+    rows = [StormOverride(kind=CastKind.OVAL, lat_deg=0.0,
+                          lon_deg=float(i)).model_dump() for i in range(3)]
+    state = panels.PanelState(selected_cast=2)
+    calls = {"n": 0}
+
+    def fake_small_button(label):
+        # fire "remove storm" once, on the first row (index 0); never "add storm"
+        if label == "remove storm":
+            calls["n"] += 1
+            return calls["n"] == 1
+        return False
+    monkeypatch.setattr(panels.imgui, "small_button", fake_small_button)
+
+    imgui.new_frame()
+    imgui.begin("cast_test", None, 0)
+    panels._draw_cast_list("cast", rows, state)
+    imgui.end()
+    imgui.end_frame()
+
+    assert len(rows) == 2  # row 0 removed
+    assert state.selected_cast == 1  # selection 2 shifted down past the removed row
+
+
+def test_draw_optional_enum_toggle_none_to_value(imgui_ctx, monkeypatch):
+    """The override checkbox flips None -> the first enum option and commits (the
+    None<->value transition that has no other renderer coverage)."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+    from gasgiant.params.model import WakeDir
+
+    doc = {"wake_dir": None}
+    monkeypatch.setattr(panels.imgui, "checkbox", lambda label, v: (True, True))
+
+    imgui.new_frame()
+    imgui.begin("t", None, 0)
+    changed, committed = panels._draw_optional_enum("wake_dir", "wake dir", doc,
+                                                    WakeDir)
+    imgui.end()
+    imgui.end_frame()
+
+    assert doc["wake_dir"] == [e.value for e in WakeDir][0]
+    assert (changed, committed) == (True, True)

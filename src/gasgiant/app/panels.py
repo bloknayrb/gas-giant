@@ -1091,6 +1091,7 @@ def _draw_cast_list(
     as ``_draw_palette_rows`` (per-sub-widget release OR a synthetic commit on a
     structural mutation -- plain buttons never raise the imgui end-of-edit
     signal)."""
+    from gasgiant.app.viewport import selection_after_delete
     from gasgiant.params.model import CastKind, StormOverride
 
     changed = False
@@ -1114,6 +1115,15 @@ def _draw_cast_list(
         if c:
             row["kind"] = kinds[idx]
             changed = True
+            # Re-kinding away from HERO strands the hero-only levers: _add_cast
+            # ignores them (kind != HERO) and _draw_flat_model_fields hides them,
+            # so the user could neither see nor clear the dead values. Reset them
+            # to their inherit/off defaults on the transition (silent-failure
+            # review); committed follows from the combo's end-of-edit below.
+            if row["kind"] != "hero":
+                defaults = StormOverride().model_dump()
+                for f in _HERO_ONLY_CAST_FIELDS:
+                    row[f] = defaults[f]
         committed |= imgui.is_item_deactivated_after_edit()
         fc, fcm = _draw_flat_model_fields(
             StormOverride, row, state, skip=frozenset({"kind"}), kind=row["kind"]
@@ -1127,14 +1137,9 @@ def _draw_cast_list(
         rows.pop(remove_index)
         changed = True
         committed = True
-        # Reconcile the panel selection when a row is removed here (mirrors the
-        # viewport's selection_after_delete; inlined to keep panels self-contained).
-        sel = state.selected_cast
-        if sel is not None:
-            if sel == remove_index:
-                state.selected_cast = None
-            elif sel > remove_index:
-                state.selected_cast = sel - 1
+        # Reconcile the panel selection when a row is removed here, reusing the
+        # viewport's pure index math (both are app-layer -- no layering break).
+        state.selected_cast = selection_after_delete(state.selected_cast, remove_index)
     if imgui.small_button(f"add storm##{label}"):
         rows.append(StormOverride().model_dump())
         changed = True

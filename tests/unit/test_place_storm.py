@@ -266,17 +266,6 @@ def test_delete_selected_removes_and_reconciles():
     assert app._selected_cast is None  # deleting the selected clears selection
 
 
-def test_delete_shifts_selection_when_earlier_entry_removed():
-    app = _make_app_headless()
-    app.params.storms.cast = _cast_of(4)
-    app._selected_cast = 3
-    # simulate deleting index 1 by pointing the selection elsewhere first
-    app._selected_cast = 1
-    app._delete_selected_cast()
-    assert len(app.params.storms.cast) == 3
-    assert app._selected_cast is None  # deleted-the-selected -> cleared
-
-
 def test_delete_is_noop_mid_export():
     app = _make_app_headless()
     app.params.storms.cast = _cast_of(2)
@@ -314,6 +303,41 @@ def test_reset_working_copy_keeps_valid_selection():
     app._selected_cast = 2  # in range
     app._reset_working_copy()
     assert app._selected_cast == 2
+
+
+# ---------------------------------------------------------------- panel bridge
+
+
+def test_bridge_panel_selection_round_trips(monkeypatch):
+    """The panel<->app selection bridge publishes the app's selection into
+    panel_state (scroll-requesting it only when the change came from the app/
+    viewport), then reads a panel-side click back onto the app. Guards the
+    read-back line whose loss would silently break panel->marker selection."""
+    from gasgiant.app import main as main_mod
+
+    app = _make_app_headless()
+    app._process_edit = lambda draft, changed, committed: None
+
+    # Case 1: an app-side (viewport) selection change scrolls the row into view.
+    app._selected_cast = 2
+    app.panel_state.selected_cast = None
+    app.panel_state.cast_scroll_requested = False
+    monkeypatch.setattr(main_mod, "draw_params_panel",
+                        lambda live, ps, sim=None: ({}, False, False))
+    app._bridge_panel_selection()
+    assert app.panel_state.cast_scroll_requested is True  # external change -> scroll
+    assert app._selected_cast == 2
+
+    # Case 2: a panel-side row click writes back to the app, WITHOUT a re-scroll.
+    app.panel_state.cast_scroll_requested = False
+
+    def panel_clicks_row(live, ps, sim=None):
+        ps.selected_cast = 0  # user clicked row 0 in the panel this frame
+        return {}, False, False
+    monkeypatch.setattr(main_mod, "draw_params_panel", panel_clicks_row)
+    app._bridge_panel_selection()
+    assert app._selected_cast == 0  # read back from the panel
+    assert app.panel_state.cast_scroll_requested is False  # panel-origin -> no scroll
 
 
 # ---------------------------------------------------------------- headless imgui

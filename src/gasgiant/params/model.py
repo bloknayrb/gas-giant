@@ -1938,15 +1938,30 @@ class PlanetParams(_Params):
                         f"solver.type=vorticity or reset it to 0"
                     )
         # Hero-only cast levers set on a non-hero kind are silently inert (the
-        # oval/barge/pearl stamp paths carry no wake or companions).
+        # oval/barge/pearl stamp paths carry no wake or companions). The companion
+        # appearance overrides are equally inert on a hero with no companions.
         for i, entry in enumerate(self.storms.cast):
-            if entry.kind == CastKind.HERO:
+            hero_only_set = (
+                entry.wake_dir is not None
+                or entry.companions > 0
+                or entry.companion_aspect is not None
+                or entry.companion_brightness is not None
+            )
+            if entry.kind != CastKind.HERO:
+                if hero_only_set:
+                    warnings.append(
+                        f"storms.cast[{i}] is a {entry.kind.value} but sets a "
+                        f"hero-only lever (wake_dir/companions); it has no effect "
+                        f"on non-hero kinds"
+                    )
                 continue
-            if entry.wake_dir is not None or entry.companions > 0:
+            if entry.companions == 0 and (
+                entry.companion_aspect is not None
+                or entry.companion_brightness is not None
+            ):
                 warnings.append(
-                    f"storms.cast[{i}] is a {entry.kind.value} but sets a "
-                    f"hero-only lever (wake_dir/companions); it has no effect "
-                    f"on non-hero kinds"
+                    f"storms.cast[{i}] sets companion_aspect/companion_brightness "
+                    f"but companions=0, so they have no effect"
                 )
         return warnings
 

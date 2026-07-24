@@ -909,7 +909,8 @@ def _add_cast(
             # silently ignored a forced direction a seeded hero honors).
             # Per-storm entry.wake_dir wins; None inherits the global
             # storms.hero_wake_dir (byte-identical to the pre-per-storm path).
-            eff_wake = entry.wake_dir or storms.hero_wake_dir
+            eff_wake = (entry.wake_dir if entry.wake_dir is not None
+                        else storms.hero_wake_dir)
             if eff_wake == WakeDir.EAST:
                 wake_dir = 1.0
             elif eff_wake == WakeDir.WEST:

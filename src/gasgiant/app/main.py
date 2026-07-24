@@ -36,7 +36,6 @@ from gasgiant.app.viewport import (
     drag_is_noop,
     marker_hit_test,
     screen_to_lonlat,
-    selection_after_delete,
 )
 from gasgiant.core import brush
 from gasgiant.diagnostics import PerfCounter, configure_logging
@@ -1442,6 +1441,24 @@ class StudioApp:
 
     # -- UI ----------------------------------------------------------------------------
 
+    def _bridge_panel_selection(self) -> None:
+        """T4 selection bridge across one panel draw: publish the app's selected
+        cast index into ``panel_state`` (requesting a scroll-into-view ONLY when
+        the change came from OUTSIDE the panel -- a viewport marker click/place/
+        delete -- not from a panel-side row click, which is already visible),
+        draw the parameter panel, then read the panel's clicked row back so the
+        next equirect frame highlights that marker. Extracted from
+        ``draw_controls`` so the in/out round-trip is unit-testable."""
+        ps = self.panel_state
+        if self._selected_cast != ps.selected_cast:
+            ps.cast_scroll_requested = True
+        ps.selected_cast = self._selected_cast
+        draft, any_changed, any_committed = draw_params_panel(
+            self._live, self.panel_state, sim=self.sim
+        )
+        self._process_edit(draft, any_changed, any_committed)
+        self._selected_cast = ps.selected_cast
+
     def draw_controls(self) -> None:
         if self.sim is None:  # init_gl failed; the runner is already exiting
             imgui.text_wrapped(self.init_error or "initializing...")
@@ -1618,21 +1635,7 @@ class StudioApp:
 
         self._draw_pending_hint()
         imgui.separator()
-        # T4 selection bridge: share the selected cast index with the panel. A
-        # selection that changed OUTSIDE the panel (a viewport marker click/place/
-        # delete) requests a scroll so the matching row comes into view; a
-        # panel-side row click does not force-scroll (it's already visible). The
-        # panel writes a clicked row back into panel_state.selected_cast, read
-        # back after the walk so the next equirect frame highlights that marker.
-        ps = self.panel_state
-        if self._selected_cast != ps.selected_cast:
-            ps.cast_scroll_requested = True
-        ps.selected_cast = self._selected_cast
-        draft, any_changed, any_committed = draw_params_panel(
-            self._live, self.panel_state, sim=self.sim
-        )
-        self._process_edit(draft, any_changed, any_committed)
-        self._selected_cast = ps.selected_cast
+        self._bridge_panel_selection()
         # The mask.file Browse... button only raises this flag (it must not open
         # a dialog synchronously on the GL thread). Consume it here and open the
         # picker through the same non-blocking _dialog/_poll_dialog slot every
@@ -2178,7 +2181,10 @@ class StudioApp:
         new = self.params.model_copy(deep=True)
         del new.storms.cast[idx]
         self._commit(new)
-        self._selected_cast = selection_after_delete(idx, idx)
+        # The deleted storm was the selected one, so nothing shifts into view --
+        # clear the selection outright (selection_after_delete(idx, idx) is
+        # unconditionally None; the literal reads truer to intent).
+        self._selected_cast = None
         self._reset_working_copy()  # discrete action wins over pending edit
         self.toasts.info(f"deleted {kind} storm {idx + 1} (Ctrl+Z to undo)")
 
