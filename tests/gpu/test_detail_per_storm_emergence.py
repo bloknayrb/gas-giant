@@ -51,24 +51,37 @@ def _params() -> PlanetParams:
     return p
 
 
-def _synth(gpu, emergences: tuple[float, float] | None) -> np.ndarray:
-    """Detail field for the same sim state, overriding each hero's 9th field."""
+def _synth(gpu, emergences: tuple[float, float] | None, *, fx: bool = True) -> np.ndarray:
+    """Detail field for the same sim state. ``emergences`` overrides each hero's
+    9th field; None TRUNCATES to the legacy 8-tuple — no per-hero field at all,
+    which is the scalar-fallback path every non-facade caller takes and the one
+    the no-op test has to actually exercise.
+
+    ``fx=False`` zeroes the two levers that own the per-hero read sites. Every
+    other fx pfield defaults to 0.0, so DETAIL_FX then does not compile at all
+    and ONLY the cross-hero, scene-wide sites remain live."""
     p = _params()
+    if not fx:
+        p.detail.hero_spiral = 0.0
+        p.detail.hero_collar_wrap = 0.0
     sim = Simulation(p, gpu)
     s = sim.solver
     heroes = hero_centers(sim.vortices, p.storms)
     assert len(heroes) == 2 and len(heroes[0]) == 9, "hero_centers must carry emergence"
-    if emergences is not None:
+    if emergences is None:
+        heroes = [h[:8] for h in heroes]
+    else:
         heroes = [h[:8] + (e,) for h, e in zip(heroes, emergences, strict=True)]
     out = gpu.texture2d((512, 256), 1, "f4", linear=True)
-    sim.detail_synth.synthesize(
-        p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
-        sim.profile_dyn, out, p.detail, heroes=heroes,
-        hero_emergence=sim.vortices.scene_emergence(p.storms),
-    )
-    field = gpu.read_texture(out)[..., 0]
-    out.release()
-    return field.astype(np.float64)
+    try:
+        sim.detail_synth.synthesize(
+            p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
+            sim.profile_dyn, out, p.detail, heroes=heroes,
+            hero_emergence=sim.vortices.scene_emergence(p.storms),
+        )
+        return gpu.read_texture(out)[..., 0].astype(np.float64)
+    finally:
+        out.release()
 
 
 def test_detail_emergence_is_per_storm(gpu):
@@ -82,7 +95,8 @@ def test_detail_emergence_is_per_storm(gpu):
 def test_uniform_emergence_matches_the_scalar_path(gpu):
     """The no-op direction: per-hero values all equal to the scene scalar must
     render byte-identically to the legacy 8-tuple path, which supplies no
-    per-hero field at all and falls back to that same scalar."""
+    per-hero field at all and falls back to that same scalar. This is the
+    guarantee every existing hero_centers(registry) caller rides on."""
     legacy = _synth(gpu, None)
     explicit = _synth(gpu, (0.9, 0.9))
     np.testing.assert_array_equal(legacy, explicit)
@@ -96,22 +110,6 @@ def test_cross_hero_sites_are_still_scene_wide(gpu):
     sites remain, and a per-hero swap must therefore leave the field EXACTLY
     unchanged. When the cross-hero formulation goes per storm (a visual-review
     change), this test is the one that should start failing."""
-    def synth_no_fx(emergences):
-        p = _params()
-        p.detail.hero_spiral = 0.0
-        p.detail.hero_collar_wrap = 0.0
-        sim = Simulation(p, gpu)
-        s = sim.solver
-        heroes = [h[:8] + (e,) for h, e in
-                  zip(hero_centers(sim.vortices, p.storms), emergences, strict=True)]
-        out = gpu.texture2d((512, 256), 1, "f4", linear=True)
-        sim.detail_synth.synthesize(
-            p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
-            sim.profile_dyn, out, p.detail, heroes=heroes,
-            hero_emergence=sim.vortices.scene_emergence(p.storms),
-        )
-        field = gpu.read_texture(out)[..., 0]
-        out.release()
-        return field.astype(np.float64)
-
-    np.testing.assert_array_equal(synth_no_fx((0.9, 0.1)), synth_no_fx((0.1, 0.9)))
+    np.testing.assert_array_equal(
+        _synth(gpu, (0.9, 0.1), fx=False), _synth(gpu, (0.1, 0.9), fx=False)
+    )

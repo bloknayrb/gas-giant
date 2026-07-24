@@ -46,6 +46,7 @@ import numpy as np
 from gasgiant.engine import Simulation
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import PlanetParams, SolverType, WakeDir
+from gasgiant.render.detail import detail_fx_enabled
 
 BASELINE = Path("out/audit/m2b_emergence_hash.json")
 
@@ -80,16 +81,6 @@ CONFIGS = {
 }
 
 
-# The RENDER-side companions. The configs above hash developed TRACERS, which the
-# detail pass never touches -- so they cannot see detail.comp's own HERO_EMERGENCE
-# arm (the quiet-storm remap, the collar/spiral windows, the wake braid), which is
-# LIVE in the flagship preset at emergence 0.9 and which p05 again cannot reach.
-# These hash render_maps() with detail ON instead.
-RENDER_CONFIGS = {
-    "render_bare": lambda: _p(),
-    "render_shape_taper": lambda: _p(hero_shape=1.0, hero_taper=0.8),
-    "render_two_heroes": lambda: _p(hero_count=2, hero_shape=1.0, hero_taper=0.8),
-}
 _RENDER_DETAIL = 0.6   # > 0 so detail.comp actually runs
 _RENDER_WIDTH = 512
 # detail.comp's hero-emergence read sites are split across its variants: the two
@@ -101,6 +92,14 @@ _RENDER_WIDTH = 512
 # fx levers that own them.
 _RENDER_FX = {"hero_spiral": 0.8, "hero_collar_wrap": 0.7, "hero_wake_braid": 0.6,
               "intermittency": 0.5}
+
+# The RENDER-side companions (rationale in the module docstring): deliberately the
+# SAME scene builders as the tracer configs, not copies -- only the hashed artifact
+# differs, and a copy would let a scene retune leave the two families describing
+# different planets. Add a render-only scene as an explicit extra entry rather than
+# forking one of these three.
+RENDER_SCENES = ("bare", "shape_taper", "two_heroes")
+RENDER_CONFIGS = {f"render_{name}": CONFIGS[name] for name in RENDER_SCENES}
 
 
 def _hash(p: PlanetParams, gpu) -> str:
@@ -114,8 +113,8 @@ def _render_hash(p: PlanetParams, gpu) -> str:
     p.detail.intensity = _RENDER_DETAIL
     for name, value in _RENDER_FX.items():
         setattr(p.detail, name, value)
-    from gasgiant.render.detail import detail_fx_enabled
-    assert detail_fx_enabled(p.detail), "DETAIL_FX must compile or the fx-only sites are unhashed"
+    assert detail_fx_enabled(p.detail), \
+        "DETAIL_FX must compile or the fx-only sites are unhashed"
     sim = Simulation(p, gpu)
     sim.run_to_completion(chunk=64)
     maps = sim.render_maps(_RENDER_WIDTH)
@@ -139,9 +138,16 @@ def main() -> None:
 
     if args.check:
         old = json.loads(BASELINE.read_text(encoding="utf-8"))
-        bad = [k for k in out if old.get(k) != out[k]]
+        missing = [k for k in out if k not in old]
+        if missing:
+            raise SystemExit(
+                f"NO BASELINE for {missing}: these configs are newer than the stored "
+                f"baseline. Re-capture (drop --check) once the shared configs are "
+                f"green -- this is NOT a numeric regression."
+            )
+        bad = [k for k in out if old[k] != out[k]]
         if bad:
-            raise SystemExit(f"MISMATCH in {bad}\n  was {[old.get(k) for k in bad]}")
+            raise SystemExit(f"MISMATCH in {bad}\n  was {[old[k] for k in bad]}")
         print(f"OK: all {len(out)} emergence hashes match baseline.")
     else:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)

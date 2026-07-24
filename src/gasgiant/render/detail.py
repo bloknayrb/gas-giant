@@ -154,6 +154,15 @@ class DetailSynth:
                     "detail.comp HERO_EMERGENCE variant is missing u_hero_emergence: "
                     "the hero-anatomy remap would silently no-op."
                 )
+            # ...and `fx`: the array is DECLARED under HERO_EMERGENCE but READ
+            # only inside the DETAIL_FX spiral/collar block, so a HERO_EMERGENCE-
+            # only program legitimately prunes it.
+            if hero_emergence and fx and _absent(prog, "u_hero_emergence_arr"):
+                raise RuntimeError(
+                    "detail.comp HERO_EMERGENCE+DETAIL_FX variant is missing "
+                    "u_hero_emergence_arr: per-storm emergence would silently "
+                    "collapse to the scene scalar."
+                )
             self._progs[key] = prog
         return self._progs[key]
 
@@ -297,9 +306,10 @@ class DetailSynth:
         # the per-hero loop. hero_centers appends it as a 9th field; a legacy
         # 8-tuple (every caller that is not the facade/snapshot) falls back to
         # the scalar those sites read before this existed, so a uniform scene is
-        # byte-identical either way. The two CROSS-hero sites (detail.comp:277
-        # and :286) still take the scalar: they scale a SUMMED mask, so a
-        # per-storm form there is a new formulation, not a substitution.
+        # byte-identical either way. The two CROSS-hero sites (detail.comp's
+        # `heroQ` and the serene-moat `calm` floor) still take the scalar: they
+        # scale a SUMMED mask, so a per-storm form there is a new formulation,
+        # not a substitution.
         emergences = np.full(3, hero_emergence, dtype=np.float32)
         n_heroes = 0
         for h in (heroes or [])[:3]:
@@ -311,9 +321,12 @@ class DetailSynth:
         prog["u_hero_count"].value = n_heroes
         prog["u_heroes"].write(packed.tobytes())
         prog["u_hero_aspect"].write(aspects.tobytes())
-        # Its four read sites all live in the DETAIL_FX-only spiral/collar block
+        # u_hero_emergence_arr's three read sites (spiral pitch, spiral window,
+        # collar window) all live in the DETAIL_FX-only spiral/collar block
         # (like u_hero_spin), so the compiler strips the array whenever either
-        # variant is off.
+        # variant is off. Raw .write, not contextlib.suppress: _program's
+        # tripwire below already proves the uniform is there, and suppressing
+        # would turn a wiring regression into a silent scene-wide fallback.
         if he_on and fx_on:
             prog["u_hero_emergence_arr"].write(emergences.tobytes())
         vel_tex.use(location=0)
