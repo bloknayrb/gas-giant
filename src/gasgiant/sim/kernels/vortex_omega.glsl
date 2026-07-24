@@ -237,7 +237,15 @@ float vortexOmegaAccum(vec3 p) {
         // rotation -> the hero reads as a coherent GRS-like oval (spiral arms
         // only OUTSIDE it). Blended so u_hero_solid_core=0 is byte-identical to
         // the Gaussian; =1 is the full patch.
-        if (b.y == VKIND_HERO && u_hero_solid_core > 0.0) {
+        // Per-storm solid-core lever: the global uniform by default; the
+        // CAST_LEVERS variant reads THIS hero's own row (the caller -- omega_init
+        // / omega_force -- declares the CastLevers buffer at binding 5, exactly as
+        // it declares Vortices). Default path == u_hero_solid_core (byte-identical).
+        float solidcore_v = u_hero_solid_core;
+#ifdef CAST_LEVERS
+        solidcore_v = cast_lever_data[2 * i + 1].z;
+#endif
+        if (b.y == VKIND_HERO && solidcore_v > 0.0) {
             // ('patch' is a reserved GLSL keyword — use 'disk'.)
             float disk = -2.5 * scale * (1.0 - smoothstep(0.80, 1.15, q));
             // Hero emergence: morph the solid disk toward an ANNULAR RING of
@@ -391,7 +399,7 @@ float vortexOmegaAccum(vec3 p) {
                 disk = mix(disk, ring, u_hero_emergence);
             }
 #endif
-            contrib = mix(contrib, disk, u_hero_solid_core);
+            contrib = mix(contrib, disk, solidcore_v);
         } else if (b.y == VKIND_OVAL && u_oval_solid_core > 0.0
                    && r_core >= OVAL_SOLID_MIN_R) {
             // Same patch for large ovals: kills the per-oval mini-bullseye that

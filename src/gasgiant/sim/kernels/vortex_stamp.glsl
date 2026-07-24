@@ -9,6 +9,16 @@ layout(std430, binding = 2) readonly buffer Vortices {
     //          [wake_dir, aspect, wake_lat_off, -]
     vec4 vortex_data[];
 };
+#ifdef CAST_LEVERS
+// Per-storm HERO appearance/dynamics overrides (M2). Same row order as
+// vortex_data: two vec4 per vortex at 2*i / 2*i+1. Read ONLY under the
+// CAST_LEVERS variant (selected when some cast entry overrides a lever); the
+// default program never declares or reads it, so it stays byte-identical.
+layout(std430, binding = 5) readonly buffer CastLevers {
+    // [rim_contrast, rim_tint, rim_warp, mottle], [tint_var, wake_detail, solid_core, -]
+    vec4 cast_lever_data[];
+};
+#endif
 uniform int u_vortex_count;
 // heroEllipQ for the variant-only heroRelaxWeight below; the include's whole
 // body is #ifdef HERO_EMERGENCE so the default program is unchanged.
@@ -126,6 +136,22 @@ vec3 vortexStamp(vec3 p) {
             dT1 += dome * 0.15 * core;
             dT3 += b.z * core;
             if (b.y == VKIND_HERO) {
+                // Per-storm lever values: the global uniforms by default; the
+                // CAST_LEVERS variant overrides them from THIS hero's own row so
+                // two placed heroes can carry different rim/interior looks. The
+                // default program reads the uniforms directly (byte-identical).
+                float rim_c = u_rim_contrast;
+                float rimtint_v = u_hero_rim_tint;
+                float rimwarp_v = u_hero_rim_warp;
+                float mottle_v = u_hero_mottle;
+                float tintvar_v = u_hero_tint_var;
+#ifdef CAST_LEVERS
+                {
+                    vec4 cl0 = cast_lever_data[2 * i];
+                    rim_c = cl0.x; rimtint_v = cl0.y; rimwarp_v = cl0.z;
+                    mottle_v = cl0.w; tintvar_v = cast_lever_data[2 * i + 1].x;
+                }
+#endif
                 // GRS anatomy: dark thin perimeter ring at the spot edge,
                 // bright collar (the Red Spot Hollow) outside it.
                 // Lumpy-oval boundary: warp the q feeding the ring/collar with a
@@ -145,10 +171,10 @@ vec3 vortexStamp(vec3 p) {
                 float hth = 0.0;
                 bool hth_ok = false;
 #ifdef HERO_EMERGENCE
-                if (u_hero_rim_warp > 0.0 || u_hero_rim_tint > 0.0
+                if (rimwarp_v > 0.0 || rimtint_v > 0.0
                     || u_hero_emergence > 0.0) {
 #else
-                if (u_hero_rim_warp > 0.0 || u_hero_rim_tint > 0.0) {
+                if (rimwarp_v > 0.0 || rimtint_v > 0.0) {
 #endif
                     vec3 hc = a.xyz;
                     vec3 hew = cross(vec3(0.0, 1.0, 0.0), hc);
@@ -239,7 +265,7 @@ vec3 vortexStamp(vec3 p) {
                     qcol /= Rr;
                 }
 #endif
-                if (u_hero_rim_warp > 0.0 && hth_ok) {
+                if (rimwarp_v > 0.0 && hth_ok) {
                     // Seeded phases from the hero noise offset (deterministic).
                     vec3 ph = u_hero_noise_offset * 6.2831853;
                     // Incommensurate wavenumbers {2,3,5} => quasi-irregular, few lobes
@@ -251,8 +277,8 @@ vec3 vortexStamp(vec3 p) {
                     float wc = ( 0.55 * sin(2.0 * hth + ph.y + 1.7)
                                + 0.30 * sin(3.0 * hth + ph.z + 0.6)
                                + 0.20 * sin(5.0 * hth + ph.x + 2.9));
-                    qrim += u_hero_rim_warp * 0.20 * wr;
-                    qcol += u_hero_rim_warp * 0.20 * wc;
+                    qrim += rimwarp_v * 0.20 * wr;
+                    qcol += rimwarp_v * 0.20 * wc;
                 }
                 // Hero fill profile (emergence): the real GRS is a FILLED oval —
                 // its red is a near-flat plateau across the whole spot (PIA21775),
@@ -469,21 +495,21 @@ vec3 vortexStamp(vec3 p) {
                 // more pop (Checkpoint 1). Raising THIS base, not
                 // rim_contrast, keeps the dark collar unamplified.
                 dT0 += b.w * fill
-                     - mix(0.16, 0.125, u_hero_emergence) * quiet * ringmod * u_rim_contrast
+                     - mix(0.16, 0.125, u_hero_emergence) * quiet * ringmod * rim_c
                        * exp(-(qrim - ring_q) * (qrim - ring_q) * ring_k)
-                     + mix(0.22, 0.31, u_hero_emergence) * quiet * carve * u_rim_contrast
+                     + mix(0.22, 0.31, u_hero_emergence) * quiet * carve * rim_c
                        * exp(-(qcol - col_q) * (qcol - col_q) * col_k);
 #else
                 dT0 += b.w * core
-                     - 0.16 * u_rim_contrast * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
-                     + 0.22 * u_rim_contrast * exp(-(qcol - 1.55) * (qcol - 1.55) * 5.0);
+                     - 0.16 * rim_c * exp(-(qrim - 1.0) * (qrim - 1.0) * 16.0)
+                     + 0.22 * rim_c * exp(-(qcol - 1.55) * (qcol - 1.55) * 5.0);
 #endif
                 // Dark reddish collar (the Red Spot Hollow rim): redden (T3 up,
                 // toward the salmon storm-tint LUT) and darken (T0 down) the
                 // perimeter annulus so the spot has a discrete dark-red rim.
                 // Rides on the warped qrim so the tint follows the lumpy edge.
                 // Guarded => byte-identical when off.
-                if (u_hero_rim_tint > 0.0) {
+                if (rimtint_v > 0.0) {
 #ifdef HERO_EMERGENCE
                     // DE-DOUBLED under emergence: co-located with the dark
                     // collar (ring_q endpoint 1.30) so the reddening and the
@@ -521,11 +547,11 @@ vec3 vortexStamp(vec3 p) {
                     // (declared with the collar above) tears the downstream arc
                     // open the same way it tears the bright collar.
                     float moat = (1.0 - 0.6 * u_hero_emergence) * carve;
-                    dT3 += u_hero_rim_tint * 0.55 * rring * moat;     // redden
-                    dT0 -= u_hero_rim_tint * 0.16 * rring * azw * moat;  // darken + broken
+                    dT3 += rimtint_v * 0.55 * rring * moat;     // redden
+                    dT0 -= rimtint_v * 0.16 * rring * azw * moat;  // darken + broken
 #else
-                    dT3 += u_hero_rim_tint * 0.55 * rring;            // redden -- unchanged
-                    dT0 -= u_hero_rim_tint * 0.16 * rring * azw;      // deeper (was 0.12) + broken
+                    dT3 += rimtint_v * 0.55 * rring;            // redden -- unchanged
+                    dT0 -= rimtint_v * 0.16 * rring * azw;      // deeper (was 0.12) + broken
 #endif
                 }
                 // Interior turbulent churn: a flow-scale fbm breaks up the
@@ -534,7 +560,7 @@ vec3 vortexStamp(vec3 p) {
                 // fights the perimeter ring/collar. Stamped into the relaxation
                 // target => advect.comp folds it into filaments (motion-safe).
                 // Guarded => byte-identical when off (fbm never evaluated).
-                if (u_hero_mottle > 0.0) {
+                if (mottle_v > 0.0) {
                     float win = core * (1.0 - smoothstep(0.6, 1.0, q));
 #ifdef HERO_EMERGENCE
                     // Under emergence the interior is the whole plateau, not just
@@ -556,13 +582,13 @@ vec3 vortexStamp(vec3 p) {
                     // scaled by the dim hero core brightness (b.w~0.05) which
                     // would render the churn invisible. The interior window keeps
                     // it off the perimeter ring.
-                    dT0 += 0.15 * u_hero_mottle * win
+                    dT0 += 0.15 * mottle_v * win
                          * fbm(p * fscale + u_hero_noise_offset.yzx, 4, 2.0, 0.5);
                 }
                 // Interior color festoon: modulate the warm-red tint with a
                 // decorrelated fbm so the spot carries salmon/white mottle
                 // instead of flat red. Signed => spot mean tint ~preserved.
-                if (u_hero_tint_var > 0.0) {
+                if (tintvar_v > 0.0) {
                     float winT = core * (1.0 - smoothstep(0.55, 1.0, q));
 #ifdef HERO_EMERGENCE
                     winT = max(winT, fill * (1.0 - smoothstep(0.75, 1.0, qrim)))
@@ -572,7 +598,7 @@ vec3 vortexStamp(vec3 p) {
 #else
                     float fscaleT = a.w > 0.0 ? 7.0 / a.w : 7.0;
 #endif
-                    dT3 += b.z * u_hero_tint_var * winT
+                    dT3 += b.z * tintvar_v * winT
                          * fbm(p * fscaleT + u_hero_noise_offset.zxy + 13.0, 3, 2.0, 0.5);
                 }
             } else if (b.y == VKIND_POLAR) {
@@ -620,6 +646,12 @@ vec3 vortexStamp(vec3 p) {
         // BRIGHT gray-white in true color — a tracer signature, matching the
         // velocity wedge in psi.comp.
         if (b.y == VKIND_HERO) {
+            // Per-storm wake-detail lever (global by default; CAST_LEVERS variant
+            // overrides from this hero's own row). Byte-identical default path.
+            float wakedet_v = u_hero_wake_detail;
+#ifdef CAST_LEVERS
+            wakedet_v = cast_lever_data[2 * i + 1].y;
+#endif
             float down = vortex_data[3 * i + 2].x;
             float woff = vortex_data[3 * i + 2].z;  // equatorward wake bias (F06)
             float rc = a.w;
@@ -637,10 +669,10 @@ vec3 vortexStamp(vec3 p) {
             // rc-normalized => scale-invariant. Guarded => byte-identical when off.
             float wseed = u_hero_noise_offset.x * 6.3;
             float an = along / max(rc, 1e-4);              // 0..6 downstream, rc-invariant
-            if (u_hero_wake_detail > 0.0) {
+            if (wakedet_v > 0.0) {
                 // (1) Ragged envelope: low-freq wobble of the wedge centreline/width,
                 // applied BEFORE w so the silhouette both widens and narrows.
-                across += u_hero_wake_detail * 0.30
+                across += wakedet_v * 0.30
                         * fbm(vec3(an * 0.5, 0.0, wseed + 11.0), 2, 2.0, 0.5);
             }
             // Same latitude window as psi.comp's wedge: keep the stamp
@@ -659,7 +691,7 @@ vec3 vortexStamp(vec3 p) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
                 float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
                 float w = exp(-across * across) * win * (1.0 - along / (rc * wlen)) * ramp;
-                if (u_hero_wake_detail > 0.0) {
+                if (wakedet_v > 0.0) {
                     // (2) Intermittent flow-aligned filaments: anisotropic fbm (low
                     // along-freq, higher across-freq => downstream streaks), sheared so
                     // they fan along the curving flow, thresholded so there are clear
@@ -668,7 +700,7 @@ vec3 vortexStamp(vec3 p) {
                     float sh  = across + 0.25 * an;
                     float fil = fbm(vec3(an * 0.30, sh * 1.7, wseed), 4, 2.0, 0.5);
                     float streak = clamp(smoothstep(-0.2, 0.6, fil), 0.0, 1.0);
-                    w *= mix(1.0, streak, u_hero_wake_detail);
+                    w *= mix(1.0, streak, wakedet_v);
                 }
                 dT0 += 0.16 * w * wdim;   // bright churned clouds (dimmed)
                 dT3 -= 0.20 * w * wdim;   // cool gray-white, not belt-colored
@@ -678,7 +710,7 @@ vec3 vortexStamp(vec3 p) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
                 float win = 1.0 - smoothstep(2.0, 2.5, abs(across));
                 float w = exp(-across * across) * win * (1.0 - along / (rc * 6.0)) * ramp;
-                if (u_hero_wake_detail > 0.0) {
+                if (wakedet_v > 0.0) {
                     // (2) Intermittent flow-aligned filaments: anisotropic fbm (low
                     // along-freq, higher across-freq => downstream streaks), sheared so
                     // they fan along the curving flow, thresholded so there are clear
@@ -687,7 +719,7 @@ vec3 vortexStamp(vec3 p) {
                     float sh  = across + 0.25 * an;
                     float fil = fbm(vec3(an * 0.30, sh * 1.7, wseed), 4, 2.0, 0.5);
                     float streak = clamp(smoothstep(-0.2, 0.6, fil), 0.0, 1.0);
-                    w *= mix(1.0, streak, u_hero_wake_detail);
+                    w *= mix(1.0, streak, wakedet_v);
                 }
                 dT0 += 0.16 * w;   // bright churned clouds
                 dT3 -= 0.20 * w;   // cool gray-white, not belt-colored

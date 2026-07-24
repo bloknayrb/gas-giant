@@ -87,6 +87,10 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
     }
     reg["reg_cooldown"] = np.array([v.cooldown for v in vortices], dtype=np.int32)
     reg["reg_ttl"] = np.array([v.ttl for v in vortices], dtype=np.int32)
+    # Cast-list back-reference (M2 CastLevers): a restored cast hero must keep the
+    # storms.cast index it resolves its per-storm overrides against. Tolerant on
+    # load (default -1) so pre-M2 checkpoints resume unchanged.
+    reg["reg_cast_ref"] = np.array([v.cast_ref for v in vortices], dtype=np.int32)
     # Provenance marker (int-coded): 1 = cast-list storm, 0 = seeded. Restored
     # so the merger/trim cast exemptions survive a checkpoint round-trip.
     reg["reg_origin"] = np.array(
@@ -173,12 +177,14 @@ def load_checkpoint(path: Path, gpu=None) -> Simulation:
     cooldown = data["reg_cooldown"] if "reg_cooldown" in data else np.zeros(n, np.int32)
     ttl = data["reg_ttl"] if "reg_ttl" in data else np.full(n, -1, np.int32)
     origin_arr = data["reg_origin"] if "reg_origin" in data else np.zeros(n, np.int32)
+    cast_ref = data["reg_cast_ref"] if "reg_cast_ref" in data else np.full(n, -1, np.int32)
     s.vortices.vortices = [
         Vortex(
             **{name: float(cols[name][i]) for name in _REG_FIELDS},
             cooldown=int(cooldown[i]),
             ttl=int(ttl[i]),
             origin=("cast" if int(origin_arr[i]) == 1 else "seeded"),
+            cast_ref=int(cast_ref[i]),
         )
         for i in range(n)
     ]

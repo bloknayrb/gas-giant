@@ -603,6 +603,63 @@ class StormOverride(_Params):
         description="T0 brightness of this hero's companion pearls. None "
                     "inherits the global storms.companion_brightness",
     )
+    # Per-storm appearance/dynamics overrides for a cast HERO (M2). Each None
+    # inherits the matching GLOBAL storms.* lever; a value overrides it for THIS
+    # storm only, read on the GPU via the opt-in CAST_LEVERS second SSBO. Inert
+    # on non-hero kinds (hero-gated stamp/omega paths). Bounds mirror the globals.
+    rim_contrast: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True, ui="Appearance",
+        description="Per-storm dark-rim + bright-collar amplitude (the Red Spot "
+                    "Hollow). None inherits the global storms.rim_contrast",
+    )
+    rim_tint: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="Per-storm dark-red collar amount. None inherits the global "
+                    "storms.hero_rim_tint",
+    )
+    rim_warp: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="Per-storm lumpy-boundary (few-lobe) rim warp. None inherits "
+                    "the global storms.hero_rim_warp",
+    )
+    mottle: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="Per-storm turbulent interior churn. None inherits the global "
+                    "storms.hero_mottle",
+    )
+    tint_var: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="Per-storm interior color variation. None inherits the global "
+                    "storms.hero_tint_var",
+    )
+    wake_detail: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Appearance",
+        description="Per-storm wake filament structure. None inherits the global "
+                    "storms.hero_wake_detail",
+    )
+    solid_core: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Dynamics",
+        description="Per-storm solid-body core rotation (vorticity mode). None "
+                    "inherits the global storms.hero_solid_core",
+    )
+
+
+# The M2 per-storm HERO appearance/dynamics levers: (StormOverride attr, the
+# GLOBAL StormsParams attr it inherits when None). SINGLE SOURCE OF TRUTH -- the
+# GPU CastLevers SSBO packs in THIS ORDER, the editor gates these to hero rows,
+# validation flags them on non-hero kinds, and the CAST_LEVERS variant predicate
+# keys on them. Never reorder without matching the SSBO layout in vortex_stamp/
+# vortex_omega.
+CAST_LEVER_SPECS: tuple[tuple[str, str], ...] = (
+    ("rim_contrast", "rim_contrast"),
+    ("rim_tint", "hero_rim_tint"),
+    ("rim_warp", "hero_rim_warp"),
+    ("mottle", "hero_mottle"),
+    ("tint_var", "hero_tint_var"),
+    ("wake_detail", "hero_wake_detail"),
+    ("solid_core", "hero_solid_core"),
+)
+CAST_LEVER_FIELDS: frozenset[str] = frozenset(a for a, _ in CAST_LEVER_SPECS)
 
 
 class StormsParams(_Params):
@@ -1946,15 +2003,25 @@ class PlanetParams(_Params):
                 or entry.companions > 0
                 or entry.companion_aspect is not None
                 or entry.companion_brightness is not None
+                or any(getattr(entry, f) is not None for f in CAST_LEVER_FIELDS)
             )
             if entry.kind != CastKind.HERO:
                 if hero_only_set:
                     warnings.append(
                         f"storms.cast[{i}] is a {entry.kind.value} but sets a "
-                        f"hero-only lever (wake_dir/companions); it has no effect "
-                        f"on non-hero kinds"
+                        f"hero-only lever (wake_dir, companions, or a per-storm "
+                        f"appearance/dynamics lever); it has no effect on non-hero "
+                        f"kinds"
                     )
                 continue
+            # A per-storm solid_core is vorticity-only, exactly like the global.
+            if (self.solver.type == SolverType.KINEMATIC
+                    and entry.solid_core is not None and entry.solid_core != 0.0):
+                warnings.append(
+                    f"storms.cast[{i}].solid_core={entry.solid_core:g} has no "
+                    f"effect with the kinematic solver (vorticity-only lever); set "
+                    f"solver.type=vorticity or reset it"
+                )
             if entry.companions == 0 and (
                 entry.companion_aspect is not None
                 or entry.companion_brightness is not None

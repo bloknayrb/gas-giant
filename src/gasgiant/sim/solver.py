@@ -20,12 +20,14 @@ import numpy as np
 
 from gasgiant.gl import GpuContext
 from gasgiant.params.model import (
+    CAST_LEVER_FIELDS,
     INJECT_MASK_CODE,
     CastKind,
     PlanetParams,
     PoleParams,
     PoleStyle,
     SolverType,
+    StormsParams,
 )
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
@@ -210,6 +212,14 @@ class Solver:
         self.step_index = 0
         self.dt = self._compute_dt()
         self._ssbo = gpu.ssbo(vortices.pack_ssbo(), binding=2)
+        # M2 CastLevers second SSBO (binding 5): per-storm HERO lever overrides,
+        # read only under the CAST_LEVERS variant. Built + bound ONLY when some
+        # cast hero overrides a lever; otherwise None and never allocated, so the
+        # default program (which declares no binding-5 buffer) is byte-identical.
+        self._cast_ssbo = (
+            gpu.ssbo(vortices.pack_cast_levers_ssbo(self.params.storms), binding=5)
+            if self._cast_levers_active(self.params.storms) else None
+        )
 
         # M3 SPIKE (opt-in, reversible): optional external vorticity source bound
         # into omega_force SUBPASS 0 on the equirect domain. Default OFF — when
@@ -259,7 +269,28 @@ class Solver:
             and self.hero_wave_lat is not None
         ):
             defines["FESTOON2"] = "1"
+        # Per-storm HERO CastLevers (M2): same variant discipline. Selected only
+        # when some cast HERO overrides a lever, so a cast with no overrides
+        # compiles the default program AND never allocates the binding-5 SSBO
+        # (byte-identical). RESTART tier => re-evaluated on any cast edit.
+        if self._cast_levers_active(self.params.storms):
+            defines["CAST_LEVERS"] = "1"
         return defines
+
+    @staticmethod
+    def _cast_levers_active(storms: StormsParams) -> bool:
+        """True when some cast HERO overrides a per-storm CastLevers lever. Keyed
+        on the override VALUES (not mere cast presence), and on HERO kind (the
+        stamp/omega paths read the buffer only for heroes), mirroring the mask
+        gain-keyed predicate -- no cast, or only inert non-hero overrides, keeps
+        the default program and leaves binding 5 unallocated. Static so a test can
+        check the predicate without building a Solver (no GL context)."""
+        return any(
+            getattr(c, f) is not None
+            for c in storms.cast
+            if c.kind == CastKind.HERO
+            for f in CAST_LEVER_FIELDS
+        )
 
     def _make_domain(self, kind: int, size: tuple[int, int]) -> Domain:
         gpu = self.gpu
@@ -485,6 +516,8 @@ class Solver:
             self.profile_omega.use(location=0)
             _set(k, "u_profile_omega", 0)
         self._ssbo.bind_to_storage_buffer(2)
+        if self._cast_ssbo is not None:
+            self._cast_ssbo.bind_to_storage_buffer(5)
         state.cur.bind_to_image(0, read=False, write=True)
         gx, gy = domain.groups()
         k.run(gx, gy, 1)
@@ -499,6 +532,8 @@ class Solver:
 
         # Bind SSBO for vortex contributions.
         self._ssbo.bind_to_storage_buffer(2)
+        if self._cast_ssbo is not None:
+            self._cast_ssbo.bind_to_storage_buffer(5)
 
         # MacCormack pass 0 (forward).
         k0 = state.k_adv[0]
@@ -854,6 +889,12 @@ class Solver:
             self.profile_stamp.use(location=0)
             _set(k, "u_profile_stamp", 0)
             dom.tracers.cur.bind_to_image(0, read=False, write=True)
+            if self._cast_ssbo is not None:
+                # init.comp reads binding 5 under CAST_LEVERS; rebind defensively
+                # (mirror step()/the omega passes) instead of relying on the
+                # construction-time bind, in case a future dispatch rebinds 5
+                # before init_tracers -- load-bearing for dev_steps==0 renders.
+                self._cast_ssbo.bind_to_storage_buffer(5)
             gx, gy = dom.groups()
             k.run(gx, gy, 1)
             self.gpu.ctx.memory_barrier()
@@ -874,6 +915,15 @@ class Solver:
                 self._ssbo.orphan(ssbo_data.nbytes)
             self._ssbo.write(ssbo_data.tobytes())
             self._ssbo.bind_to_storage_buffer(2)
+            # CastLevers rewritten in lockstep with the base SSBO: the vortex
+            # list order can shift step-to-step (mergers/trim), so row i must be
+            # re-resolved against the same list to stay aligned with binding 2.
+            if self._cast_ssbo is not None:
+                cast_data = self.vortices.pack_cast_levers_ssbo(self.params.storms)
+                if cast_data.nbytes > self._cast_ssbo.size:
+                    self._cast_ssbo.orphan(cast_data.nbytes)
+                self._cast_ssbo.write(cast_data.tobytes())
+                self._cast_ssbo.bind_to_storage_buffer(5)
 
             turb_time = self.step_index * self.params.turbulence.evolution_rate
 
@@ -1168,6 +1218,8 @@ class Solver:
         for dom in self.domains:
             dom.release()
         self._ssbo.release()
+        if self._cast_ssbo is not None:
+            self._cast_ssbo.release()
         if self._omega_states is not None:
             for state in self._omega_states.values():
                 state.release()
