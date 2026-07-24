@@ -2135,7 +2135,11 @@ class StudioApp:
         if len(self.params.storms.cast) >= 16:
             self.toasts.info("cast list is full (16 storms)")
             return
-        radius = self._storm_tool_radius
+        # Clamp to StormOverride.radius bounds (lo=0.01, hi=0.15): the slider
+        # hands back a float32, so its max reads back as 0.15000000596046448 --
+        # a hair over the pydantic le=0.15 bound that would otherwise crash on
+        # construction. Mirrors the lat/lon clamps below.
+        radius = max(0.01, min(0.15, self._storm_tool_radius))
         cap = hero_latitude_cap(radius)
         lat = max(-cap, min(cap, lat_deg))
         lon = max(-180.0, min(180.0, lon_deg))

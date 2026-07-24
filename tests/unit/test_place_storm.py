@@ -210,6 +210,26 @@ def test_place_storm_appends_clamped_entry():
     assert abs(entry.lat_deg) <= cap
 
 
+def test_place_storm_max_radius_float32_does_not_crash():
+    """The placement radius slider stores a float32; at the top of its range that
+    is 0.15000000596046448 (> the StormOverride le=0.15 bound). Placing then must
+    clamp, not raise a pydantic ValidationError that takes down the whole app.
+    Regression for the crash-on-place at max radius."""
+    from gasgiant.params.model import CastKind
+
+    app = _make_app_headless()
+    app.params.storms.cast = []
+    app._storm_tool_mode = "place"
+    app._storm_tool_kind = CastKind.OVAL.value
+    # float32(0.15) rounds UP to this in float64 -- exactly what imgui hands back.
+    app._storm_tool_radius = 0.15000000596046448
+
+    app._place_storm_at(0.0, 0.0)  # must not raise
+
+    entry = app.params.storms.cast[-1]
+    assert entry.radius <= 0.15
+
+
 def test_place_storm_respects_cap_of_16():
     from gasgiant.params.model import CastKind, StormOverride
 
