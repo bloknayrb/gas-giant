@@ -264,7 +264,24 @@ _PINNED: dict[str, str] = {
     # mirroring the existing global coupling. Default path == the uniforms; the
     # off-state gate is the dev-0 omega byte-capture (test_cast_levers.py /
     # test_hero_emergence.py::_dev0_omega), re-run this pass.
-    "vortex_omega.glsl": "b749ef928a2f0c56bd62548e28306a1ff659da52",
+    # 2026-07-24 (M2-C): heroAnchorWindow/heroWakeWindow are UNCHANGED; two
+    # CAST_LEVERS-only companions (heroAnchorBoost/heroWakeInject) were added
+    # beside them, folding each hero's own emergence into its candidate before
+    # the cross-hero max so a placed hero anchors and injects at ITS value
+    # rather than the scene max. omega_force keeps the legacy lines verbatim in
+    # its #else arms.
+    #
+    # The companions are a separate variant arm rather than a rewrite because
+    # bit-identity for a uniform scene was MEASURED AND FAILED: scaling each
+    # candidate before the max is exact in isolation (rounding is monotone), but
+    # the legacy site `1.0 + 60.0*E*wa` can be FMA-contracted and interposing
+    # max() forces the product to round first. 9.5e-07 on 0.007% of pixels after
+    # ONE step, amplified by the chaotic field to O(OMEGA_CEILING) in q by step
+    # 40. Preserving expression SHAPE was not enough — see
+    # scripts/m2c_omega_equiv.py, which is the gate for this path (p05 is
+    # kinematic and cannot reach omega_force; the dev-0 omega carve-out cannot
+    # see a step>0 pass). That script now measures maxdiff 0 across 40 steps.
+    "vortex_omega.glsl": "37e4bd9de5a74ed94f7cdd14f5b2805b8ba3eb0e",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

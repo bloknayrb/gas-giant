@@ -137,6 +137,44 @@ float heroAnchorWindow(vec3 p) {
     return w;
 }
 
+#ifdef CAST_LEVERS
+// Per-storm companion (M2-C): the emergence-weighted BOOST, max over heroes of
+// (k*E_i)*w_i, so each hero anchors at ITS OWN emergence instead of the scene
+// max. `k` is the call site's leading constant, folded in per hero.
+//
+// This is a SEPARATE function rather than a rewrite of heroAnchorWindow, and
+// the call site keeps the legacy line verbatim in its #else arm, because the
+// two are NOT bit-identical even for a uniform scene -- and that was MEASURED,
+// not assumed. Scaling each candidate before the max is exact in isolation
+// (rounding is monotone, so max_i fl(t*w_i) == fl(t*max_i w_i)), but the legacy
+// site is `1.0 + 60.0*E*wa`, which the compiler may contract into an FMA;
+// interposing max() consumes the product and forces it to round first. The
+// resulting 1-ULP delta was measured at 9.5e-07 on 0.007% of pixels after ONE
+// step and, this being a chaotic advected field, amplified to O(OMEGA_CEILING)
+// in q and ~0.039 in the tracers by step 40 -- past GPU_NOISE_ATOL. Expression
+// SHAPE was preserved and still could not save it; only not executing the new
+// code preserves the old output.
+//
+// So the per-storm form rides CAST_LEVERS: every factory preset ships cast=[],
+// takes the #else arm, and is byte-identical by construction. A scene with a
+// cast list has opted in. scripts/m2c_omega_equiv.py is the gate for both
+// halves of that claim.
+float heroAnchorBoost(vec3 p, float k) {
+    float w = 0.0;
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 b = vortex_data[3 * i + 1];
+        if (b.y != VKIND_HERO) continue;
+        // A hero at emergence 0 contributes exactly 0 and so can never win the
+        // max -- no zero-tie steal (the M2-B heroRelaxWeight defect), because
+        // this max carries a VALUE only, never an owner.
+        float emergence_v = cast_lever_data[3 * i + 2].x;
+        w = max(w, (k * emergence_v)
+                   * (1.0 - smoothstep(1.6, 2.8, heroEllipQ(p, i, 2.8))));
+    }
+    return w;
+}
+#endif
+
 // Hero wake-wedge window in [0,1]: the turbulent-wake sector DOWNSTREAM of
 // each hero (same frame the tracer wedge in vortex_stamp.glsl uses). This
 // function compiles only under HERO_EMERGENCE, where wake_dir is flow-
@@ -180,6 +218,40 @@ float heroWakeWindow(vec3 p) {
     }
     return w;
 }
+
+#ifdef CAST_LEVERS
+// Per-storm companion (M2-C), exactly parallel to heroAnchorBoost: the
+// emergence-weighted injection amplitude, max over heroes of (k*E_i)*w_i. Same
+// reason for being a separate function behind the same variant — see that
+// function's measured-FMA note.
+float heroWakeInject(vec3 p, float k) {
+    float w = 0.0;
+    for (int i = 0; i < u_vortex_count; ++i) {
+        vec4 b = vortex_data[3 * i + 1];
+        if (b.y != VKIND_HERO) continue;
+        float emergence_v = cast_lever_data[3 * i + 2].x;
+        vec4 a = vortex_data[3 * i];
+        float rc = a.w;
+        float down = vortex_data[3 * i + 2].x;
+        float woff = vortex_data[3 * i + 2].z;
+        float vlat = asin(clamp(a.y, -1.0, 1.0));
+        float vlon = atan(a.z, a.x);
+        float plat = asin(clamp(p.y, -1.0, 1.0));
+        float plon = atan(p.z, p.x);
+        float dlon = mod(plon - vlon + 3.0 * PI, 2.0 * PI) - PI;
+        float an = dlon * down / max(rc, 1e-4);
+        float across = (plat - (vlat + woff)) / max(rc * 1.8, 1e-4);
+        if (an > 0.8 && an < 9.0 && abs(across) < 2.0) {
+            float rise = smoothstep(0.8, 1.8, an);
+            float fall = 1.0 - smoothstep(6.0, 9.0, an);
+            float aw = (1.0 - smoothstep(1.4, 2.0, abs(across)))
+                     * exp(-across * across);
+            w = max(w, (k * emergence_v) * (rise * fall * aw));
+        }
+    }
+    return w;
+}
+#endif  // CAST_LEVERS
 #endif  // HERO_EMERGENCE
 
 float vortexOmegaAccum(vec3 p) {
