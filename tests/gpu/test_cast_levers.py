@@ -106,6 +106,30 @@ def test_cast_levers_are_per_storm(gpu):
     assert np.abs(a - b).max() > 1e-3
 
 
+def test_cast_wake_detail_override_reaches_gpu(gpu):
+    """wake_detail rides a SEPARATE index in the wake block (cast_lever_data[2*i+1].y,
+    hand-written apart from the interior cl0/cl1 reads). Drive it non-zero — no other
+    test exercises that column, so a typo there would otherwise pass silently."""
+    p_off = _kin_params()
+    p_off.storms.cast = [_hero(-20.0, 0.0)]
+    p_on = _kin_params()
+    p_on.storms.cast = [_hero(-20.0, 0.0, wake_detail=0.9)]
+    assert np.abs(_tracers(p_on, gpu).astype(np.float64)
+                  - _tracers(p_off, gpu).astype(np.float64)).max() > 1e-3
+
+
+def test_cast_zero_default_columns_reach_gpu(gpu):
+    """rim_tint (cl0.y), rim_warp (cl0.z), tint_var (cl1.x) all default to 0, so the
+    forced-variant no-op cannot discriminate their columns. Drive them together and
+    confirm the reads land (output differs from the all-global hero)."""
+    p_off = _kin_params()
+    p_off.storms.cast = [_hero(-20.0, 0.0)]
+    p_on = _kin_params()
+    p_on.storms.cast = [_hero(-20.0, 0.0, rim_tint=0.8, rim_warp=0.8, tint_var=0.8)]
+    assert np.abs(_tracers(p_on, gpu).astype(np.float64)
+                  - _tracers(p_off, gpu).astype(np.float64)).max() > 1e-3
+
+
 # ----------------------------------------------------- dev-0 omega (solid_core)
 
 def _vort_params(solid_core, second_solid_core) -> PlanetParams:

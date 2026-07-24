@@ -181,20 +181,25 @@ class VortexRegistry:
         (mergers/trim); the row<->vortex mapping survives only by iterating the
         same list in the same order as ``pack_ssbo``. Column ``j`` carries lever
         ``CAST_LEVER_SPECS[j]``; the flat 8-float row is the two vec4 the shader
-        reads at ``2*i`` and ``2*i+1``."""
+        reads at ``2*i`` and ``2*i+1``.
+
+        A cast_ref out of range resolves to the global -- safe only because
+        storms.cast is RESTART tier: any add/remove/reorder rebuilds the whole
+        Solver (and this registry), so a live cast_ref can never point past a
+        shortened/reordered list within one run."""
         n = len(self.vortices)
         out = np.zeros((max(n, 1), 8), dtype=np.float32)
-        global_vals = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
+        # Every row defaults to the resolved GLOBAL values (cols 0..6; col 7 stays
+        # 0); only cast-hero rows with an actual override differ, so patch just
+        # those cells rather than re-assigning every cell every step.
+        out[:n, :7] = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
         for i, v in enumerate(self.vortices):
-            entry = (storms.cast[v.cast_ref]
-                     if 0 <= v.cast_ref < len(storms.cast) else None)
-            for j, (cast_attr, _) in enumerate(CAST_LEVER_SPECS):
-                val = global_vals[j]
-                if entry is not None:
+            if 0 <= v.cast_ref < len(storms.cast):
+                entry = storms.cast[v.cast_ref]
+                for j, (cast_attr, _) in enumerate(CAST_LEVER_SPECS):
                     override = getattr(entry, cast_attr)
                     if override is not None:
-                        val = float(override)
-                out[i, j] = val  # cols 0..6 = the 7 levers; col 7 stays 0
+                        out[i, j] = float(override)
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:

@@ -27,6 +27,7 @@ from gasgiant.params.model import (
     PoleParams,
     PoleStyle,
     SolverType,
+    StormsParams,
 )
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
@@ -215,10 +216,9 @@ class Solver:
         # read only under the CAST_LEVERS variant. Built + bound ONLY when some
         # cast hero overrides a lever; otherwise None and never allocated, so the
         # default program (which declares no binding-5 buffer) is byte-identical.
-        self._cast_levers_on = self._cast_levers_active()
         self._cast_ssbo = (
             gpu.ssbo(vortices.pack_cast_levers_ssbo(self.params.storms), binding=5)
-            if self._cast_levers_on else None
+            if self._cast_levers_active(self.params.storms) else None
         )
 
         # M3 SPIKE (opt-in, reversible): optional external vorticity source bound
@@ -273,19 +273,21 @@ class Solver:
         # when some cast HERO overrides a lever, so a cast with no overrides
         # compiles the default program AND never allocates the binding-5 SSBO
         # (byte-identical). RESTART tier => re-evaluated on any cast edit.
-        if self._cast_levers_active():
+        if self._cast_levers_active(self.params.storms):
             defines["CAST_LEVERS"] = "1"
         return defines
 
-    def _cast_levers_active(self) -> bool:
+    @staticmethod
+    def _cast_levers_active(storms: StormsParams) -> bool:
         """True when some cast HERO overrides a per-storm CastLevers lever. Keyed
         on the override VALUES (not mere cast presence), and on HERO kind (the
         stamp/omega paths read the buffer only for heroes), mirroring the mask
         gain-keyed predicate -- no cast, or only inert non-hero overrides, keeps
-        the default program and leaves binding 5 unallocated."""
+        the default program and leaves binding 5 unallocated. Static so a test can
+        check the predicate without building a Solver (no GL context)."""
         return any(
             getattr(c, f) is not None
-            for c in self.params.storms.cast
+            for c in storms.cast
             if c.kind == CastKind.HERO
             for f in CAST_LEVER_FIELDS
         )
@@ -887,6 +889,12 @@ class Solver:
             self.profile_stamp.use(location=0)
             _set(k, "u_profile_stamp", 0)
             dom.tracers.cur.bind_to_image(0, read=False, write=True)
+            if self._cast_ssbo is not None:
+                # init.comp reads binding 5 under CAST_LEVERS; rebind defensively
+                # (mirror step()/the omega passes) instead of relying on the
+                # construction-time bind, in case a future dispatch rebinds 5
+                # before init_tracers -- load-bearing for dev_steps==0 renders.
+                self._cast_ssbo.bind_to_storage_buffer(5)
             gx, gy = dom.groups()
             k.run(gx, gy, 1)
             self.gpu.ctx.memory_barrier()

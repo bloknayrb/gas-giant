@@ -2009,10 +2009,19 @@ class PlanetParams(_Params):
                 if hero_only_set:
                     warnings.append(
                         f"storms.cast[{i}] is a {entry.kind.value} but sets a "
-                        f"hero-only lever (wake_dir/companions); it has no effect "
-                        f"on non-hero kinds"
+                        f"hero-only lever (wake_dir, companions, or a per-storm "
+                        f"appearance/dynamics lever); it has no effect on non-hero "
+                        f"kinds"
                     )
                 continue
+            # A per-storm solid_core is vorticity-only, exactly like the global.
+            if (self.solver.type == SolverType.KINEMATIC
+                    and entry.solid_core is not None and entry.solid_core != 0.0):
+                warnings.append(
+                    f"storms.cast[{i}].solid_core={entry.solid_core:g} has no "
+                    f"effect with the kinematic solver (vorticity-only lever); set "
+                    f"solver.type=vorticity or reset it"
+                )
             if entry.companions == 0 and (
                 entry.companion_aspect is not None
                 or entry.companion_brightness is not None

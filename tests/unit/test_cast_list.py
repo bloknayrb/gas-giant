@@ -344,6 +344,47 @@ def test_appearance_levers_gated_to_hero_rows():
     assert CAST_LEVER_FIELDS <= panels._HERO_ONLY_CAST_FIELDS
 
 
+def test_cast_levers_variant_predicate_is_hero_only():
+    """The CAST_LEVERS variant compiles only for a HERO override -- a non-hero's
+    (inert) override, or no override, must leave it off. Static predicate, no GL."""
+    from gasgiant.sim.solver import Solver
+
+    hero = StormsParams(cast=[StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                            radius=0.1, mottle=0.5)])
+    oval = StormsParams(cast=[StormOverride(kind=CastKind.OVAL, lat_deg=10.0,
+                                            mottle=0.5)])
+    bare = StormsParams(cast=[StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                            radius=0.1)])
+    assert Solver._cast_levers_active(hero) is True
+    assert Solver._cast_levers_active(oval) is False   # non-hero override → off
+    assert Solver._cast_levers_active(bare) is False   # no override → off
+
+
+def test_pack_cast_levers_survives_vortex_reorder():
+    """Row correspondence is keyed by cast_ref, not list position: after the vortex
+    list is reordered (mergers/trim do this between steps), the override still lands
+    on the row whose cast_ref points to the overriding storm."""
+    p = PlanetParams(seed=11)
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
+                                   radius=0.1, mottle=0.7)]
+    reg = _gen(p)
+    reg.vortices.reverse()  # simulate a merger/trim reorder of the list
+    levers = reg.pack_cast_levers_ssbo(p.storms)
+    hero_rows = [levers[i] for i, v in enumerate(reg.vortices) if v.cast_ref == 0]
+    assert hero_rows and hero_rows[0][3] == pytest.approx(0.7)  # mottle, right row
+
+
+def test_kinematic_cast_solid_core_warns():
+    """A per-storm solid_core is vorticity-only; on a cast hero in a kinematic
+    preset it is inert and flagged, exactly like the global hero_solid_core."""
+    p = PlanetParams()  # kinematic by default
+    assert p.solver.type.value == "kinematic"
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1,
+                                   solid_core=0.5)]
+    assert any("solid_core" in w and "kinematic" in w
+               for w in p.validation_warnings())
+
+
 # ---------------------------------------------------------------- validators
 
 
@@ -482,8 +523,13 @@ def test_cast_origin_survives_checkpoint(gpu, tmp_path):
     assert after.count("cast") == 2
     assert ([v.cast_ref for v in sim.solver.vortices.vortices]
             == [v.cast_ref for v in restored.solver.vortices.vortices])
-    # the restored registry resolves the per-storm override identically
-    levers = restored.solver.vortices.pack_cast_levers_ssbo(p.storms)
+    # Re-pack against the RESTORED params (rebuilt from the checkpoint's embedded
+    # preset doc), not the original in-memory params -- this proves the new
+    # StormOverride lever fields survive preset (de)serialization, not just that
+    # cast_ref round-trips.
+    restored_storms = restored.solver.params.storms
+    assert restored_storms.cast[1].mottle == pytest.approx(0.6)
+    levers = restored.solver.vortices.pack_cast_levers_ssbo(restored_storms)
     hero_rows = [levers[i] for i, v in enumerate(restored.solver.vortices.vortices)
                  if v.cast_ref == 1]
     assert hero_rows and hero_rows[0][3] == pytest.approx(0.6)  # mottle = column 3
