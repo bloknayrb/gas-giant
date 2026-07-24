@@ -33,9 +33,13 @@ _MIRROR = Path(__file__).parents[1] / "gpu" / "test_hero_emergence.py"
 _FLATTEN = re.compile(r"([\d.]+)\s*\*\s*neqs?\s*\*\s*neqs?")
 _LOBE_M2 = re.compile(r"([\d.]+)\s*\*\s*(?:np\.)?sin\(\s*2\.0\s*\*\s*\w+\s*\+\s*sphs?(?:\.x|\[0\])\s*\)")
 _LOBE_M3 = re.compile(r"([\d.]+)\s*\*\s*(?:np\.)?sin\(\s*3\.0\s*\*\s*\w+\s*\+\s*sphs?(?:\.y|\[1\])\s*\)")
-# hero_taper: amplitude (leading factor of the u_hero_taper chain), wedge
+# hero_taper: amplitude (leading factor of the taper chain), wedge
 # normalization (leading factor of the c^4(1-c^2) window), and the Rr floor.
-_TAPER_AMP = re.compile(r"([\d.]+)\s*\*\s*u_hero_taper\s*\*\s*u_hero_emergence\s*\*\s*tw")
+# The chain reads the per-storm LOCALS (taper_v/emergence_v, M2-B) at every site;
+# the uniform spellings stay in the alternation so the guard survives either form.
+_TAPER = r"(?:u_hero_taper|taper_v)"
+_EMERG = r"(?:u_hero_emergence|emergence_v)"
+_TAPER_AMP = re.compile(rf"([\d.]+)\s*\*\s*{_TAPER}\s*\*\s*{_EMERG}\s*\*\s*tw")
 _TAPER_NORM = re.compile(r"tw\s*=\s*([\d.]+)\s*\*\s*tc2\s*\*\s*tc2\s*\*\s*\(1\.0\s*-\s*tc2\)")
 _TAPER_FLOOR = re.compile(r"=\s*max\(Rrs?,\s*([\d.]+)\)")
 
@@ -122,10 +126,10 @@ def test_flow_renorm_mirrors_ring_skirt_windows():
 # ------------------------------------------- taper circulation compensation
 
 # The omega wedge's net-circulation compensation, as written in
-# vortex_omega.glsl: `tcomp *= 1.0 / (1.0 - <c> * u_hero_taper * ...)`.
+# vortex_omega.glsl: `tcomp *= 1.0 / (1.0 - <c> * taper_v * emergence_v)`.
 # Anchored on the full division chain so prose cannot match.
 _TAPER_COMP = re.compile(
-    r"1\.0\s*/\s*\(1\.0\s*-\s*([\d.]+)\s*\*\s*u_hero_taper\s*\*\s*u_hero_emergence\)"
+    rf"1\.0\s*/\s*\(1\.0\s*-\s*([\d.]+)\s*\*\s*{_TAPER}\s*\*\s*{_EMERG}\)"
 )
 
 

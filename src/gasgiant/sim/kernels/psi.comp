@@ -16,6 +16,15 @@ layout(r32f, binding = 0) writeonly uniform image2D out_psi;
 uniform sampler2D u_profile_dyn;  // (u, psi_jets, shear_norm, belt_mask) by latitude
 uniform ivec2 u_size;
 
+#ifdef CAST_LEVERS
+// Per-storm HERO lever overrides (M2). Same binding (5) and 3-vec4-per-vortex
+// layout as the stamp/omega paths; psi.comp reads only the emergence column, to
+// keep the VELOCITY wake length in step with the per-storm TRACER wake length.
+// Compiled only under the CAST_LEVERS variant -> byte-identical default.
+layout(std430, binding = 5) readonly buffer CastLevers {
+    vec4 cast_lever_data[];
+};
+#endif
 layout(std430, binding = 2) readonly buffer Vortices {
     // Triples: [x,y,z,r_core], [strength,kind,tint,brightness], [wake_dir,-,-,-]
     vec4 vortex_data[];
@@ -130,7 +139,15 @@ void main() {
 #ifdef HERO_EMERGENCE
             // Emergence: extend the velocity wedge to match the extended
             // tracer wedge (vortex_stamp.glsl). Verbatim pre-feature #else.
-            float hwlen = mix(7.0, 10.0, u_hero_emergence);
+            // Per-storm emergence (M2-B): without it a placed hero with its own
+            // emergence gets the GLOBAL velocity-wake length under a longer (or
+            // shorter) tracer wake -- a visible mismatch between the painted
+            // wedge and the flow that folds it.
+            float emergence_v = u_hero_emergence;
+#ifdef CAST_LEVERS
+            emergence_v = cast_lever_data[3 * i + 2].x;
+#endif
+            float hwlen = mix(7.0, 10.0, emergence_v);
             if (along > 0.0 && along < rc * hwlen && abs(across) < 2.5) {
                 float ramp = smoothstep(rc * 0.5 * asp, rc * asp, along);
                 float win = 1.0 - smoothstep(2.0, 2.5, abs(across));

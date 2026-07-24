@@ -97,6 +97,14 @@ class ExportSnapshot:
     # aspect, wake_dir, wake_lat_off) each: the detail pass amplifies/winds
     # filaments inside them and braids their wakes.
     heroes: list[tuple[float, ...]] = None  # type: ignore[assignment]
+    # Strongest EFFECTIVE hero emergence in the scene (VortexRegistry.
+    # scene_emergence): the detail pass's HERO_EMERGENCE selector. Captured
+    # rather than re-read from params.storms.hero_emergence at tile time,
+    # because a cast hero can be emergent on its own override while the global
+    # is 0 (M2-B) -- keying the render on the global there paints the LEGACY
+    # hero anatomy over an emergent sim. Mixed-emergence scenes share this one
+    # value in the detail pass; true per-hero detail is M2-C.
+    hero_emergence: float = 0.0
     # Elongated bright-cloud centers (x, y, z, r_core, aspect) at their drifted
     # positions: the detail pass synthesizes cirrus fibers over them.
     clouds: list[tuple[float, float, float, float, float]] = None  # type: ignore[assignment]
@@ -124,6 +132,7 @@ class ExportSnapshot:
             patch_rho_max=RHO_MAX,
             blend_band=BLEND_BAND,
             heroes=hero_centers(sim.vortices),
+            hero_emergence=sim.vortices.scene_emergence(sim.params.storms),
             clouds=bright_cloud_centers(sim.vortices),
             lanes=list(sim.lanes),
             warp=(s.warp_offset, sim.params.bands.warp_amount, sim.params.bands.warp_freq),

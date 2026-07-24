@@ -83,7 +83,7 @@ layout(std430, binding = 2) readonly buffer Vortices {
 
 #ifdef CAST_LEVERS
 // Per-storm HERO lever overrides (M2), declared before vortex_omega.glsl reads
-// cast_lever_data[]. Same binding (5) and 2-vec4-per-vortex layout as the stamp
+// cast_lever_data[]. Same binding (5) and 3-vec4-per-vortex layout as the stamp
 // path. Compiled only under the CAST_LEVERS variant -> byte-identical default.
 layout(std430, binding = 5) readonly buffer CastLevers {
     vec4 cast_lever_data[];

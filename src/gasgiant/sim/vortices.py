@@ -26,11 +26,14 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from gasgiant.params.model import (
+    CAST_LEVER_COLS,
     CAST_LEVER_SPECS,
+    CAST_LEVER_WIDTH,
     CastKind,
     PolesParams,
     StormsParams,
     WakeDir,
+    effective_cast_lever,
     hero_latitude_cap,
 )
 from gasgiant.params.seeds import subseed
@@ -140,12 +143,41 @@ class VortexRegistry:
     def heroes(self) -> list[Vortex]:
         return [v for v in self.vortices if v.kind == KIND_HERO]
 
+    def scene_emergence(self, storms: StormsParams) -> float:
+        """The strongest EFFECTIVE hero emergence in the scene (M2-B).
+
+        Feeds the `u_hero_emergence` uniform. Every per-hero read resolves its
+        own value from the CastLevers row instead, so this uniform only still
+        matters where a pass has no per-hero value to resolve against: the
+        omega_force position-window terms (the 60x core anchor at :147 and the
+        wake eddy-injection at :199) and the render detail variant. Keying
+        those on the raw global broke once `_hero_emergence_active` learned to
+        select the variant for a cast-only emergent hero -- the anchor and the
+        wake injection then read 0.0 and silently vanished, so the SAME storm
+        spelled `hero_emergence=0.9` + an inheriting cast hero and spelled
+        `hero_emergence=0` + `cast[].emergence=0.9` rendered differently
+        (measured 0.86 apart in vorticity mode, 86x GPU_NOISE_ATOL).
+
+        The empty-hero fallback returns the global unchanged so a scene with no
+        heroes at all keeps today's uniform value bit-for-bit (nothing reads it
+        there -- every consumer sits behind a hero loop or window that is
+        identically 0 -- but the fallback keeps that a fact rather than an
+        argument about -0.0). Mixed-emergence scenes share this one value in
+        those two passes; true per-storm anchoring/detail is M2-C."""
+        heroes = self.heroes()
+        if not heroes:
+            return float(storms.hero_emergence)
+        return max(
+            effective_cast_lever(storms, h.cast_ref, "emergence") for h in heroes
+        )
+
     def pack_ssbo(self) -> np.ndarray:
         """(N, 12) float32, three vec4 per vortex:
         [x, y, z, r_core], [strength, kind, tint, brightness],
         [wake_dir, aspect, wake_lat_off, bow_gain].
-        (bow_gain is 0 for every vortex unless hero_emergence is on — the
-        default programs never read the .w slot, so the previously-constant
+        (bow_gain is 0 for every vortex unless that hero's EFFECTIVE emergence
+        is on — the global, or its own storms.cast[].emergence override (M2-B);
+        the default programs never read the .w slot, so the previously-constant
         zero stays byte-equivalent for them.) Vectorized: runs every sim step."""
         n = len(self.vortices)
         if n == 0:
@@ -174,11 +206,12 @@ class VortexRegistry:
         return out
 
     def pack_cast_levers_ssbo(self, storms: StormsParams) -> np.ndarray:
-        """(N, 8) float32, two vec4 per vortex, packed in the SAME row order as
+        """(N, 12) float32, THREE vec4 per vortex, packed in the SAME row order as
         ``pack_ssbo`` so row ``i`` indexes the same vortex in both buffers (the
         CAST_LEVERS variant reads it at binding 5):
         [rim_contrast, rim_tint, rim_warp, mottle],
-        [tint_var, wake_detail, solid_core, 0(reserved)].
+        [tint_var, wake_detail, solid_core, 0(reserved)],
+        [emergence, shape, taper, 0(reserved)].
 
         Every row is a fully-RESOLVED value -- no inherit flag reaches the GPU. A
         cast HERO with a per-storm override packs the override; every other vortex
@@ -187,27 +220,27 @@ class VortexRegistry:
         lever), un-overridden heroes still render exactly as the global-uniform
         path would. Re-resolved every step because the vortex list order can shift
         (mergers/trim); the row<->vortex mapping survives only by iterating the
-        same list in the same order as ``pack_ssbo``. Column ``j`` carries lever
-        ``CAST_LEVER_SPECS[j]``; the flat 8-float row is the two vec4 the shader
-        reads at ``2*i`` and ``2*i+1``.
+        same list in the same order as ``pack_ssbo``. Spec ``j`` lands in flat
+        column ``CAST_LEVER_COLS[j]``; the 12-float row is the three vec4 the
+        shader reads at ``3*i``, ``3*i+1`` and ``3*i+2``.
 
         A cast_ref out of range resolves to the global -- safe only because
         storms.cast is RESTART tier: any add/remove/reorder rebuilds the whole
         Solver (and this registry), so a live cast_ref can never point past a
         shortened/reordered list within one run."""
         n = len(self.vortices)
-        out = np.zeros((max(n, 1), 8), dtype=np.float32)
-        # Every row defaults to the resolved GLOBAL values (cols 0..6; col 7 stays
-        # 0); only cast-hero rows with an actual override differ, so patch just
-        # those cells rather than re-assigning every cell every step.
-        out[:n, :7] = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
+        out = np.zeros((max(n, 1), CAST_LEVER_WIDTH), dtype=np.float32)
+        # Every row defaults to the resolved GLOBAL values (the reserved columns
+        # stay 0); only cast-hero rows with an actual override differ, so patch
+        # just those cells rather than re-assigning every cell every step.
+        out[:n, CAST_LEVER_COLS] = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
         for i, v in enumerate(self.vortices):
             if 0 <= v.cast_ref < len(storms.cast):
                 entry = storms.cast[v.cast_ref]
                 for j, (cast_attr, _) in enumerate(CAST_LEVER_SPECS):
                     override = getattr(entry, cast_attr)
                     if override is not None:
-                        out[i, j] = float(override)
+                        out[i, CAST_LEVER_COLS[j]] = float(override)
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -973,7 +1006,14 @@ def _add_cast(
             if kind == CastKind.HERO else 0.0
         )
         bow = 0.0
-        if kind == CastKind.HERO and storms.hero_emergence > 0.0:
+        # Per-storm emergence (M2-B) gates the CPU-side wake frame + bow gain for
+        # THIS entry: a placed hero with emergence 0 keeps the legacy WNW wake
+        # convention even while the global (or another placed hero) is emergent.
+        # None inherits the global -> byte-identical to the pre-per-storm path.
+        # Resolved exactly as pack_cast_levers_ssbo resolves the GPU row, so the
+        # CPU wake frame and the shader's emergence can never disagree.
+        if (kind == CastKind.HERO
+                and effective_cast_lever(storms, cast_idx, "emergence") > 0.0):
             wake_lat_off, wake_dir = _hero_wake_frame(profiles, lat, entry.radius)
             bow = _hero_bow_gain(profiles, lat, entry.radius)
         if kind == CastKind.HERO:

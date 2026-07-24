@@ -283,9 +283,22 @@ sampling), and DETAIL_CHROMA (`appearance.detail_chroma` — L-preserving Oklab
 material tint keyed to the synthesized detail excursion; oklab.glsl is shared
 with CHROMA_FX through a single compound-guard include) variants; detail.comp
 per (DETAIL_FX, SPREAD, HERO_EMERGENCE); the sim kernels per (HERO_EMERGENCE —
-hero present and `storms.hero_emergence > 0`; FESTOON2 —
-`waves.festoon_hero_strength > 0` and a facade-selected root edge near the
-hero). Each new variant's
+some hero's EFFECTIVE emergence is > 0, i.e. a seeded hero with
+`storms.hero_emergence > 0`, or a `storms.cast` hero whose resolved value is > 0;
+FESTOON2 — `waves.festoon_hero_strength > 0` and a facade-selected root edge near
+the hero; CAST_LEVERS — some cast hero overrides a per-storm lever, which binds a
+second SSBO at binding 5 holding three vec4 per VORTEX (one row per `pack_ssbo`
+row, only hero rows ever read), each a fully-resolved lever value, so a placed
+hero can differ from the global in rim / interior / wake / solid core /
+emergence-shape-taper). HERO_EMERGENCE and CAST_LEVERS are dual-gated on the
+emergence family: its read sites are HERO_EMERGENCE arms that take their value
+from the CAST_LEVERS buffer, and an `emergence` override **> 0** satisfies both
+predicates by construction (an override of exactly 0 selects CAST_LEVERS only,
+correctly leaving that hero legacy). Two passes have no per-hero value to resolve
+against and instead take the scene's strongest effective emergence
+(`VortexRegistry.scene_emergence`): omega_force's position-window terms (the 60×
+core anchor and the wake eddy-injection) and the render detail pass. Per-hero
+values there are M2-C. Each new variant's
 default is a no-op that preprocesses OUT (MASK only when a mask is bound and a
 gain is nonzero; BAND_TINT only when `band_tint_strength > 0`; PROJECTION_CUBE
 only on a cube export — guarded by the default-projection byte-identity test),

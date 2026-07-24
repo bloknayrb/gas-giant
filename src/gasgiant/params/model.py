@@ -655,14 +655,45 @@ class StormOverride(_Params):
         description="Per-storm solid-body core rotation (vorticity mode). None "
                     "inherits the global storms.hero_solid_core",
     )
+    # The emergence FAMILY (M2-B). emergence gates shape/taper exactly as the
+    # globals do, so a per-storm shape with an inherited emergence of 0 stays
+    # inert -- same coupling as the global levers, per storm.
+    emergence: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Dynamics",
+        description="Per-storm GRS-realism pack strength (annular ring, plateau "
+                    "fill, ragged rim release, band flush). None inherits the "
+                    "global storms.hero_emergence. The shape/taper levers below "
+                    "are scaled by it, and it also gates this storm's wake "
+                    "frame and bow gain, so 0 reverts this storm to the legacy "
+                    "stamped anatomy while another placed hero stays fully "
+                    "emergent. NEAR-legacy, not byte-legacy: the variant is "
+                    "still compiled for the other hero, and a few ring/collar "
+                    "raggedness terms inside it are not emergence-scaled (they "
+                    "need rim_tint or rim_warp on to fire). The render-side "
+                    "detail quieting is NOT per storm — it keys on the "
+                    "strongest emergence in the scene (M2-C)",
+    )
+    shape: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.5, adv=True, ui="Dynamics",
+        description="Per-storm low-order outline deformation (the egg). None "
+                    "inherits the global storms.hero_shape. The seeded lobe "
+                    "PHASES stay global (one hero_shape_seed substream), so two "
+                    "storms deform on the same phases at their own amplitude",
+    )
+    taper: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.5, adv=True, ui="Dynamics",
+        description="Per-storm upstream-end wedge taper. None inherits the "
+                    "global storms.hero_taper. Follows THIS storm's wake_dir",
+    )
 
 
 # The M2 per-storm HERO appearance/dynamics levers: (StormOverride attr, the
 # GLOBAL StormsParams attr it inherits when None). SINGLE SOURCE OF TRUTH -- the
-# GPU CastLevers SSBO packs in THIS ORDER, the editor gates these to hero rows,
-# validation flags them on non-hero kinds, and the CAST_LEVERS variant predicate
-# keys on them. Never reorder without matching the SSBO layout in vortex_stamp/
-# vortex_omega.
+# GPU CastLevers SSBO packs spec j at column CAST_LEVER_COLS[j] (NOT at index j --
+# the packing stopped being positional when vec4_2 opened), the editor gates
+# these to hero rows, validation flags them on non-hero kinds, and the
+# CAST_LEVERS variant predicate keys on them. Never reorder or re-column without
+# matching EVERY reader: vortex_stamp.glsl, vortex_omega.glsl, psi.comp.
 CAST_LEVER_SPECS: tuple[tuple[str, str], ...] = (
     ("rim_contrast", "rim_contrast"),
     ("rim_tint", "hero_rim_tint"),
@@ -671,8 +702,38 @@ CAST_LEVER_SPECS: tuple[tuple[str, str], ...] = (
     ("tint_var", "hero_tint_var"),
     ("wake_detail", "hero_wake_detail"),
     ("solid_core", "hero_solid_core"),
+    ("emergence", "hero_emergence"),
+    ("shape", "hero_shape"),
+    ("taper", "hero_taper"),
 )
 CAST_LEVER_FIELDS: frozenset[str] = frozenset(a for a, _ in CAST_LEVER_SPECS)
+# Flat-float COLUMN of each spec in the packed row. The GPU reads whole vec4 and
+# swizzles by component, so a lever must never change COLUMN at all -- not
+# merely never cross a vec4 boundary (moving 0 -> 1 stays inside vec4_0 but
+# silently re-points the .x/.y swizzle). Cols 0..6 are the M2-A layout
+# (vec4_0 = 0..3, vec4_1 = 4..7) and stay put; the M2-B emergence family opens
+# vec4_2 at 8..10. Cols 7 and 11 are reserved padding (packed 0).
+CAST_LEVER_COLS: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10)
+# Floats per vortex in the CastLevers SSBO row (3 vec4) -- mirrors the hardcoded
+# `3 * i` stride in vortex_stamp.glsl / vortex_omega.glsl / psi.comp; changing
+# one requires changing all of them.
+CAST_LEVER_WIDTH: int = 12
+_CAST_LEVER_GLOBALS: dict[str, str] = dict(CAST_LEVER_SPECS)
+
+
+def effective_cast_lever(storms: StormsParams, cast_ref: int, attr: str) -> float:
+    """The value a vortex actually runs for CastLevers lever ``attr``: its own
+    cast entry's override, else the global. ``cast_ref`` is the vortex's index
+    into ``storms.cast`` (-1 = seeded/non-hero -> always the global), matching
+    the resolution ``pack_cast_levers_ssbo`` does per row. This is the ONLY
+    resolution path -- every CPU consumer (the flow-renorm quadrature, the
+    variant predicates, the cast wake frame, validation) routes through it, so
+    none of them can drift into keying on a value that hero never sees."""
+    if 0 <= cast_ref < len(storms.cast):
+        override = getattr(storms.cast[cast_ref], attr)
+        if override is not None:
+            return float(override)
+    return float(getattr(storms, _CAST_LEVER_GLOBALS[attr]))
 
 
 class StormsParams(_Params):
@@ -894,7 +955,9 @@ class StormsParams(_Params):
                     "calibrated GRS egg (the ships-at-1.0 exception to the "
                     "default=off lever convention: the deformation is part of "
                     "the emergence pack's calibration; the OFF state is 0). "
-                    "Rides the emergence variant — inert at hero_emergence 0. "
+                    "Rides the emergence variant — inert wherever a hero's "
+                    "EFFECTIVE emergence is 0 (the global, or that storm's own "
+                    "storms.cast[].emergence override). "
                     "Past ~1.4 the ragged-release band drifts onto the bright "
                     "annulus",
     )
@@ -914,7 +977,8 @@ class StormsParams(_Params):
                     "in the aspect-squashed frame (physically closer to the "
                     "tip on an elongated hero — ~14 deg at aspect 2.9); "
                     "the tip, the flanks and the whole downstream half are "
-                    "untouched. Inert at hero_emergence 0",
+                    "untouched. Inert wherever a hero's EFFECTIVE emergence is "
+                    "0 (the global, or that storm's own override)",
     )
     hero_flow_aspect: float = pfield(
         1.0, tier=Tier.RESTART, lo=1.0, hi=2.5, adv=True, ui="Hero",
@@ -927,8 +991,9 @@ class StormsParams(_Params):
                     "erasure machinery (still sized to the anatomy) dilutes "
                     "the red core — for a more elongated STORM raise "
                     "hero_aspect itself. Vorticity mode only; inert in "
-                    "kinematic mode and at hero_emergence 0 / hero_solid_core "
-                    "0",
+                    "kinematic mode, and wherever a hero's EFFECTIVE emergence "
+                    "or solid_core is 0 (either global, or that storm's own "
+                    "override)",
     )
 
     # -- Ovals ------------------------------------------------------------
@@ -1993,10 +2058,12 @@ class PlanetParams(_Params):
         carry them; a kinematic preset derived from a vorticity one keeps its
         storm levers). The GUI surfaces these as toasts on preset load (B5-6).
 
-        Current checks: the vorticity-only solid-core storm levers are exact
-        no-ops under ``solver.type == "kinematic"`` (the stamp branch that
+        The canonical example: the vorticity-only solid-core storm levers are
+        exact no-ops under ``solver.type == "kinematic"`` (the stamp branch that
         consumes them never runs), e.g. a Neptune dark oval preset silently
-        stays exposed to the whirlpool-winding artifact."""
+        stays exposed to the whirlpool-winding artifact. The checks below are
+        deliberately NOT enumerated here -- read them; the list went stale twice
+        as cast levers grew."""
         warnings: list[str] = []
         if self.solver.type == SolverType.KINEMATIC:
             for field_name in ("hero_solid_core", "oval_solid_core"):
@@ -2035,6 +2102,18 @@ class PlanetParams(_Params):
                     f"effect with the kinematic solver (vorticity-only lever); set "
                     f"solver.type=vorticity or reset it"
                 )
+            # shape/taper ride the emergence pack exactly as the globals do, so
+            # they are inert whenever THIS storm's effective emergence is 0 --
+            # resolved exactly as the GPU row is (own override, else global).
+            if effective_cast_lever(self.storms, i, "emergence") <= 0.0:
+                for field_name in ("shape", "taper"):
+                    value = getattr(entry, field_name)
+                    if value is not None and value != 0.0:
+                        warnings.append(
+                            f"storms.cast[{i}].{field_name}={value:g} has no effect "
+                            f"at emergence 0 (it rides the emergence pack); set "
+                            f"storms.cast[{i}].emergence or storms.hero_emergence"
+                        )
             if entry.companions == 0 and (
                 entry.companion_aspect is not None
                 or entry.companion_brightness is not None
