@@ -294,11 +294,31 @@ emergence-shape-taper). HERO_EMERGENCE and CAST_LEVERS are dual-gated on the
 emergence family: its read sites are HERO_EMERGENCE arms that take their value
 from the CAST_LEVERS buffer, and an `emergence` override **> 0** satisfies both
 predicates by construction (an override of exactly 0 selects CAST_LEVERS only,
-correctly leaving that hero legacy). Two passes have no per-hero value to resolve
-against and instead take the scene's strongest effective emergence
-(`VortexRegistry.scene_emergence`): omega_force's position-window terms (the 60×
-core anchor and the wake eddy-injection) and the render detail pass. Per-hero
-values there are M2-C. Each new variant's
+correctly leaving that hero legacy). Both passes that once shared one scene-level
+value now resolve per hero (M2-C): omega_force's position-window terms (the 60×
+core anchor and the wake eddy-injection) via the CAST_LEVERS-only
+`heroAnchorBoost`/`heroWakeInject`, and the render detail pass via
+`u_hero_emergence_arr[3]`, threaded as `hero_centers`' 9th field. The scene's
+strongest effective emergence (`VortexRegistry.scene_emergence`) survives only as
+a *selector* — it decides whether HERO_EMERGENCE compiles and gates the wake
+block — and as the fallback that fills every array slot for legacy 8-tuple
+callers. Two asymmetries are deliberate and load-bearing:
+
+- **detail.comp** substitutes in place; its three per-hero-loop sites are exact
+  operand substitutions, and its two cross-hero sites (`heroQ`, the serene-moat
+  calm floor) became a genuinely new formulation — a summed mask scaled once is
+  now a per-term sum — which is bit-exact only because a single-hero sum has one
+  term. All six factory presets ship `hero_count=1`, `cast=[]`, so none re-bake.
+- **omega_force** does NOT substitute in place: the per-storm form is a separate
+  CAST_LEVERS arm and the legacy lines stay verbatim in the `#else`. Preserving
+  expression shape was *not* sufficient there — `1.0 + 60.0*E*wa` is
+  FMA-contractible and interposing `max()` forces the product to round first,
+  measured at 1 ULP after one step and O(OMEGA_CEILING) by step 40 in a chaotic
+  field. `scripts/m2c_omega_equiv.py` is that path's only gate (p05 is kinematic;
+  a stored vorticity hash would be SOR flake; the dev-0 omega carve-out is read
+  before any force pass).
+
+Each new variant's
 default is a no-op that preprocesses OUT (MASK only when a mask is bound and a
 gain is nonzero; BAND_TINT only when `band_tint_strength > 0`; PROJECTION_CUBE
 only on a cube export — guarded by the default-projection byte-identity test),
