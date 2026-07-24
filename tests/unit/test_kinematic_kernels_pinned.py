@@ -202,7 +202,15 @@ _PINNED: dict[str, str] = {
     # the downstream arc, east on warm — not compass west); one flush-window
     # comment qualified. Comment/rename + emergence-arm-only guard; default
     # program text unchanged, p05 9/9 same day.
-    "vortex_stamp.glsl": "d9846442cac3316fccb1752c8bae8469ce523994",
+    # Updated 2026-07-23 (M2 per-storm CastLevers, part 2 — GPU wiring): the six
+    # hero stamp levers (rim_contrast/rim_tint/rim_warp/mottle/tint_var + the
+    # wake-block wake_detail) are hoisted into per-hero LOCALS that default to the
+    # global uniforms; a `#ifdef CAST_LEVERS` block (new binding-5 CastLevers SSBO)
+    # overrides them from THIS hero's own row. Default program: locals == the
+    # uniforms, so numerically identical — p05 9/9 verified same day (byte-identical
+    # by construction; the CAST_LEVERS variant compiles only when a cast hero
+    # overrides a lever).
+    "vortex_stamp.glsl": "80aca740a7239e25d08ef9b58e013c7e658c7861",
     # NOT kinematic — pinned for the opposite reason (PR-43 test review,
     # 2026-07-16): vortex_omega.glsl hosts the vorticity-only hero levers
     # (solid core, emergence ring/skirt, shape/taper/flow-aspect arms), whose
@@ -217,7 +225,14 @@ _PINNED: dict[str, str] = {
     # emergence, east on warm; K>1 GRS-recipe claim replaced with the S2
     # falsified verdict; skirt peak 0.9 -> 1.0 and ~70% -> ~76% cancellation
     # prose; renorm figures re-qualified to the S1 calibration scene).
-    "vortex_omega.glsl": "7fea1e1e83e998cf9c0c6faa53ac2f41765db113",
+    # Updated 2026-07-23 (M2 per-storm CastLevers, part 2 — GPU wiring): the hero
+    # solid-core lever is hoisted into a per-hero local `solidcore_v` defaulting to
+    # u_hero_solid_core; a `#ifdef CAST_LEVERS` line overrides it from this hero's
+    # binding-5 CastLevers row (the callers omega_init.comp/omega_force.comp declare
+    # the buffer). Default path == u_hero_solid_core (byte-identical); the levers-off
+    # gate is the dev-0 omega byte-capture (test_hero_emergence.py::_dev0_omega),
+    # re-run this pass. Variant-arm-only otherwise.
+    "vortex_omega.glsl": "3b098ac55a8c8e807c4593e07a86f19ee436bdd4",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.
