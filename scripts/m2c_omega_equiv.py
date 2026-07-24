@@ -12,18 +12,20 @@ That leaves the hero anchor (the 60x nudge boost) and the wake eddy injection
 with no automated protection whatsoever. This script supplies it differently:
 instead of storing a hash, it captures the developed state to .npy so the SAME
 config can be run on two trees and diffed. Cross-process reproducibility is not
-assumed — verify it with two runs of one tree before trusting a comparison
-(measured exactly 0 on the dev box; if your control is nonzero, this probe
-cannot adjudicate anything and the run is void).
+assumed — capture a SAME-TREE control and judge against its floor. On a fresh
+session this box reproduces exactly (floor 0); after enough GL work in one
+session, CLAUDE.md's documented LSB noise appears (observed: q exactly 0, tr
+2.1e-06 on 8% of pixels) and an absolute-zero verdict would call that DIVERGED.
 
     uv run python scripts/m2c_omega_equiv.py out/audit/omega_new
+    uv run python scripts/m2c_omega_equiv.py out/audit/omega_ctl   # control
     git checkout <pre-change-rev> -- src/gasgiant/sim/kernels/vortex_omega.glsl \
                                      src/gasgiant/sim/kernels/omega_force.comp
     uv run python scripts/m2c_omega_equiv.py out/audit/omega_old
     git checkout HEAD -- src/gasgiant/sim/kernels/vortex_omega.glsl \
                          src/gasgiant/sim/kernels/omega_force.comp
     uv run python scripts/m2c_omega_equiv.py out/audit/omega_old \
-                                             --diff out/audit/omega_new
+                     --diff out/audit/omega_new --control out/audit/omega_ctl
 
 (Commit or copy first: `git checkout --` discards UNCOMMITTED edits to those
 files, which has already cost one round of work here.)
@@ -78,7 +80,26 @@ def capture(out: Path, steps: int) -> None:
     print(f"{out}: q absmax={np.abs(q).max():.6f} mean={q.mean():.6f}")
 
 
-def diff(old: Path, new: Path) -> None:
+def _maxdiff(a: Path, b: Path) -> dict[str, float]:
+    out = {}
+    for tag in ("q", "tr"):
+        x = np.load(f"{a}_{tag}.npy").astype(np.float64)
+        y = np.load(f"{b}_{tag}.npy").astype(np.float64)
+        out[tag] = float(np.abs(x - y).max())
+    return out
+
+
+def diff(old: Path, new: Path, control: Path | None = None) -> None:
+    """Compare two captures, and judge against a same-tree CONTROL if given.
+
+    The verdict is control-RELATIVE, not absolute, because the honest floor is
+    not always 0. This box reproduces exactly cross-process on a fresh session
+    (measured), but after enough GL work in one session CLAUDE.md's documented
+    LSB noise appears -- observed here as q maxdiff 0 with tr maxdiff 2.1e-06 on
+    8% of pixels, in BOTH the control and the cross-tree diff. Comparing to a
+    hard 0 in that state reports DIVERGED for a change that contributes nothing,
+    which is how a real regression later gets waved through as "just noise".
+    So: capture the control, and require the cross-tree diff to be no worse."""
     worst = 0.0
     for tag in ("q", "tr"):
         a = np.load(f"{old}_{tag}.npy").astype(np.float64)
@@ -87,9 +108,23 @@ def diff(old: Path, new: Path) -> None:
         worst = max(worst, float(d.max()))
         print(f"{tag}: maxdiff={d.max():.6g} mean={d.mean():.6g} "
               f"nonzero={(d > 0).mean():.4%}")
-    # Deliberately NOT a tolerance: this path's whole claim is that the
-    # no-cast arm is untouched, and a chaotic field turns 1 ULP into O(60).
-    print("EQUIVALENT (bit-exact)" if worst == 0.0 else f"DIVERGED: {worst:.6g}")
+
+    if control is None:
+        if worst == 0.0:
+            print("EQUIVALENT (bit-exact)")
+        else:
+            print(f"DIVERGED: {worst:.6g} -- but with NO --control this cannot "
+                  f"distinguish the change from session LSB noise. Re-run with "
+                  f"a same-tree control capture before believing it.")
+        return
+
+    floor = max(_maxdiff(new, control).values())
+    print(f"same-tree control floor: {floor:.6g}")
+    if worst <= floor:
+        print("EQUIVALENT" + (" (bit-exact)" if worst == 0.0 else
+                              " (at or below the control floor)"))
+    else:
+        print(f"DIVERGED: {worst:.6g} exceeds the control floor {floor:.6g}")
 
 
 def main() -> None:
@@ -97,11 +132,14 @@ def main() -> None:
     ap.add_argument("prefix", type=Path, help="path prefix for the .npy pair")
     ap.add_argument("--diff", type=Path, metavar="OTHER_PREFIX",
                     help="compare PREFIX against OTHER_PREFIX instead of capturing")
+    ap.add_argument("--control", type=Path, metavar="CONTROL_PREFIX",
+                    help="a SAME-TREE second capture of OTHER_PREFIX; the verdict "
+                         "is judged against its floor instead of against 0")
     ap.add_argument("--steps", type=int, default=STEPS)
     args = ap.parse_args()
 
     if args.diff is not None:
-        diff(args.prefix, args.diff)
+        diff(args.prefix, args.diff, args.control)
     else:
         capture(args.prefix, args.steps)
 
