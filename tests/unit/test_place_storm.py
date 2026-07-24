@@ -8,9 +8,12 @@ from dataclasses import dataclass
 import pytest
 
 from gasgiant.app.viewport import (
+    drag_is_noop,
     lonlat_to_screen,
+    marker_hit_test,
     nearest_cast_index,
     screen_to_lonlat,
+    selection_after_delete,
 )
 
 # A displayed image rect: 800x400 px, offset so tests exercise a non-zero origin.
@@ -109,6 +112,66 @@ def test_nearest_max_deg_filters():
     assert nearest_cast_index(30.0, 40.0, cast, max_deg=10.0) is None  # dist 50 > 10
 
 
+# ---------------------------------------------------------------- marker_hit_test
+
+def test_marker_hit_test_hits_within_threshold():
+    cast = [FakeCast(0.0, 0.0)]
+    sx, sy = lonlat_to_screen(0.0, 0.0, RMIN, RMAX)  # marker at (lon,lat)=(0,0)
+    assert marker_hit_test(sx + 3.0, sy - 3.0, cast, RMIN, RMAX) == 0
+
+
+def test_marker_hit_test_misses_when_far():
+    cast = [FakeCast(0.0, 0.0)]
+    sx, sy = lonlat_to_screen(0.0, 0.0, RMIN, RMAX)
+    assert marker_hit_test(sx + 60.0, sy, cast, RMIN, RMAX) is None
+
+
+def test_marker_hit_test_empty_is_none():
+    assert marker_hit_test(500.0, 250.0, [], RMIN, RMAX) is None
+
+
+def test_marker_hit_test_grabs_wrapped_marker_from_far_edge():
+    # a marker at lon +179 has a wrapped screen twin near the LEFT edge; a click
+    # just off the left edge must still grab it.
+    cast = [FakeCast(0.0, 179.0)]
+    sx, sy = lonlat_to_screen(179.0 - 360.0, 0.0, RMIN, RMAX)  # wrapped twin
+    assert marker_hit_test(sx + 2.0, sy, cast, RMIN, RMAX) == 0
+
+
+# ---------------------------------------------------------------- drag_is_noop
+
+def test_drag_is_noop_zero_move():
+    assert drag_is_noop((12.0, -3.0), (12.0, -3.0)) is True
+
+
+def test_drag_is_noop_real_move():
+    assert drag_is_noop((12.0, -3.0), (12.0, -1.0)) is False  # 2 deg latitude
+    assert drag_is_noop((12.0, -3.0), (20.0, -3.0)) is False  # 8 deg longitude
+
+
+def test_drag_is_noop_wrap_aware():
+    # +179.9995 to -179.9995 is a ~0.001 deg step across the dateline, not ~360
+    assert drag_is_noop((179.9995, 0.0), (-179.9995, 0.0), eps=0.01) is True
+
+
+# ---------------------------------------------------------------- selection_after_delete
+
+def test_selection_after_delete_none_selected():
+    assert selection_after_delete(None, 2) is None
+
+
+def test_selection_after_delete_deleting_selected_clears():
+    assert selection_after_delete(3, 3) is None
+
+
+def test_selection_after_delete_before_selection_shifts_down():
+    assert selection_after_delete(4, 1) == 3
+
+
+def test_selection_after_delete_after_selection_unchanged():
+    assert selection_after_delete(1, 4) == 1
+
+
 # ------------------------------------------------- headless: click -> append entry
 
 def _make_app_headless():
@@ -179,6 +242,78 @@ def test_commit_cast_move_writes_clamped_position():
     entry = app.params.storms.cast[0]
     assert entry.lon_deg == pytest.approx(180.0)  # clamped to +180
     assert entry.lat_deg == pytest.approx(hero_latitude_cap(0.03))
+
+
+# ---------------------------------------------------------------- delete + selection
+
+def _cast_of(n):
+    from gasgiant.params.model import CastKind, StormOverride
+
+    return [
+        StormOverride(kind=CastKind.OVAL, lat_deg=0.0, lon_deg=float(i), radius=0.03)
+        for i in range(n)
+    ]
+
+
+def test_delete_selected_removes_and_reconciles():
+    app = _make_app_headless()
+    app.params.storms.cast = _cast_of(3)
+    app._selected_cast = 1
+    app._delete_selected_cast()
+    cast = app.params.storms.cast
+    assert len(cast) == 2
+    assert [e.lon_deg for e in cast] == [0.0, 2.0]  # entry 1 gone
+    assert app._selected_cast is None  # deleting the selected clears selection
+
+
+def test_delete_shifts_selection_when_earlier_entry_removed():
+    app = _make_app_headless()
+    app.params.storms.cast = _cast_of(4)
+    app._selected_cast = 3
+    # simulate deleting index 1 by pointing the selection elsewhere first
+    app._selected_cast = 1
+    app._delete_selected_cast()
+    assert len(app.params.storms.cast) == 3
+    assert app._selected_cast is None  # deleted-the-selected -> cleared
+
+
+def test_delete_is_noop_mid_export():
+    app = _make_app_headless()
+    app.params.storms.cast = _cast_of(2)
+    app._selected_cast = 0
+    app._export = object()
+    app._delete_selected_cast()
+    assert len(app.params.storms.cast) == 2  # never mutates mid-export
+
+
+def test_delete_is_noop_when_nothing_selected():
+    app = _make_app_headless()
+    app.params.storms.cast = _cast_of(2)
+    app._selected_cast = None
+    app._delete_selected_cast()
+    assert len(app.params.storms.cast) == 2
+
+
+def test_reset_working_copy_clamps_stale_selection():
+    # the real reconcile point: after a discrete action shrinks the cast, an
+    # out-of-range selection is dropped (undo/redo/preset-load path).
+    from gasgiant.app import main as main_mod
+
+    app = main_mod.StudioApp()
+    app.params.storms.cast = _cast_of(2)
+    app._selected_cast = 5  # stale (e.g. undo swapped in a shorter list)
+    app._reset_working_copy()
+    assert app._selected_cast is None
+
+
+def test_reset_working_copy_keeps_valid_selection():
+    from gasgiant.app import main as main_mod
+
+    app = main_mod.StudioApp()
+    app.params.storms.cast = _cast_of(3)
+    app._selected_cast = 2  # in range
+    app._reset_working_copy()
+    assert app._selected_cast == 2
 
 
 # ---------------------------------------------------------------- headless imgui

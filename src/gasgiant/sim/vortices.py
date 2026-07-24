@@ -820,6 +820,38 @@ def _add_hero_companions(
             )
 
 
+def _add_cast_companions(
+    reg: VortexRegistry,
+    profiles: LatProfiles,
+    hero_lat: float,
+    hero_lon: float,
+    r_core: float,
+    wake_dir: float,
+    count: int,
+    aspect: float,
+    brightness: float,
+) -> None:
+    """Companion pearls beside one CAST hero (its per-storm ``companions``).
+    Same geometry as the seeded ``_add_hero_companions`` but DETERMINISTIC -- no
+    RNG draws -- because the cast path must never perturb a seeded stream (the
+    jitter terms of the seeded version are dropped to fixed offsets). origin
+    stays 'cast' so the pearls survive the population trim with their hero."""
+    side = -wake_dir if wake_dir != 0.0 else 1.0
+    eq = 1.0 if hero_lat < 0.0 else -1.0  # unit step toward the equator
+    for i in range(count):
+        dist = (1.7 + 0.8 * i) * r_core
+        dlat = eq * 0.85 * r_core * (1.0 if i % 2 == 0 else -0.8)  # jitter -> fixed
+        lat = float(np.clip(hero_lat + dlat, -MAX_VORTEX_LAT, MAX_VORTEX_LAT))
+        dlon = side * dist / max(np.cos(lat), 0.2)
+        lon = float((hero_lon + dlon + np.pi) % (2.0 * np.pi) - np.pi)
+        r = float(np.clip(0.30 * r_core, 0.015, 0.035))
+        s = -_ambient_sign(profiles, lat) * 0.008
+        reg.vortices.append(
+            Vortex(lat, lon, r, s, KIND_PEARL, tint=0.0, brightness=brightness,
+                   aspect=aspect, origin="cast")
+        )
+
+
 def _add_cast(
     reg: VortexRegistry,
     profiles: LatProfiles,
@@ -875,9 +907,12 @@ def _add_cast(
             # hero path above (PR-43 simplify-pass finding: the override was
             # emergence-gated only here, so a cast hero at emergence 0
             # silently ignored a forced direction a seeded hero honors).
-            if storms.hero_wake_dir == WakeDir.EAST:
+            # Per-storm entry.wake_dir wins; None inherits the global
+            # storms.hero_wake_dir (byte-identical to the pre-per-storm path).
+            eff_wake = entry.wake_dir or storms.hero_wake_dir
+            if eff_wake == WakeDir.EAST:
                 wake_dir = 1.0
-            elif storms.hero_wake_dir == WakeDir.WEST:
+            elif eff_wake == WakeDir.WEST:
                 wake_dir = -1.0
         reg.vortices.append(
             Vortex(lat, lon, entry.radius, s, k,
@@ -886,6 +921,17 @@ def _add_cast(
                    bow_gain=bow,
                    aspect=entry.aspect, origin="cast")
         )
+        # Per-cast companion pearls (opt-in, default companions=0 -> no-op, so
+        # existing presets are byte-identical). Deterministic placement (no RNG:
+        # the cast path must never perturb a seeded draw), mirroring the seeded
+        # _add_hero_companions geometry with the jitter terms dropped.
+        if kind == CastKind.HERO and entry.companions > 0:
+            c_aspect = (entry.companion_aspect if entry.companion_aspect is not None
+                        else storms.companion_aspect)
+            c_bright = (entry.companion_brightness if entry.companion_brightness
+                        is not None else storms.companion_brightness)
+            _add_cast_companions(reg, profiles, lat, lon, entry.radius, wake_dir,
+                                 entry.companions, c_aspect, c_bright)
 
 
 def _seed_convergent_pairs(

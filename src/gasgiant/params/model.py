@@ -505,6 +505,14 @@ class CastKind(StrEnum):
     PEARL = "pearl"   # small bright string-of-pearls oval
 
 
+class WakeDir(StrEnum):
+    """Hero wake trailing direction."""
+    AUTO = "auto"   # follow the strongest nearby jet under hero_emergence;
+                    # legacy authored westward otherwise (review F06)
+    EAST = "east"   # force east-trailing
+    WEST = "west"   # force west-trailing
+
+
 class StormOverride(_Params):
     """One art-directed storm placed by hand (the 'cast list'): kind, rendered
     position, size, and an optional appearance override. Strict (unknown keys
@@ -571,14 +579,30 @@ class StormOverride(_Params):
         description="lon:lat elongation of the stamp (1.0 = round). Stretches "
                     "the iso-contours along longitude, like hero_aspect",
     )
-
-
-class WakeDir(StrEnum):
-    """Hero wake trailing direction."""
-    AUTO = "auto"   # follow the strongest nearby jet under hero_emergence;
-                    # legacy authored westward otherwise (review F06)
-    EAST = "east"   # force east-trailing
-    WEST = "west"   # force west-trailing
+    # -- hero-only per-storm levers (inert on oval/barge/pearl kinds) ------
+    wake_dir: WakeDir | None = pfield(
+        None, tier=Tier.RESTART, adv=True, ui="Wake",
+        description="Wake trailing direction for a cast HERO: auto/east/west. "
+                    "None inherits the global storms.hero_wake_dir. Inert on "
+                    "non-hero kinds (they carry no wake)",
+    )
+    companions: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=3, adv=True, ui="Companions",
+        description="Bright companion pearls placed beside a cast HERO on its "
+                    "wake-free flank (0 = none, the default). Placed "
+                    "deterministically; exempt from the population cap like the "
+                    "hero. Inert on non-hero kinds",
+    )
+    companion_aspect: float | None = pfield(
+        None, tier=Tier.RESTART, lo=1.0, hi=5.0, adv=True, ui="Companions",
+        description="lon:lat elongation of this hero's companion pearls. None "
+                    "inherits the global storms.companion_aspect",
+    )
+    companion_brightness: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=0.8, adv=True, ui="Companions",
+        description="T0 brightness of this hero's companion pearls. None "
+                    "inherits the global storms.companion_brightness",
+    )
 
 
 class StormsParams(_Params):
@@ -1913,6 +1937,17 @@ class PlanetParams(_Params):
                         f"kinematic solver (vorticity-only lever); set "
                         f"solver.type=vorticity or reset it to 0"
                     )
+        # Hero-only cast levers set on a non-hero kind are silently inert (the
+        # oval/barge/pearl stamp paths carry no wake or companions).
+        for i, entry in enumerate(self.storms.cast):
+            if entry.kind == CastKind.HERO:
+                continue
+            if entry.wake_dir is not None or entry.companions > 0:
+                warnings.append(
+                    f"storms.cast[{i}] is a {entry.kind.value} but sets a "
+                    f"hero-only lever (wake_dir/companions); it has no effect "
+                    f"on non-hero kinds"
+                )
         return warnings
 
 

@@ -33,9 +33,10 @@ from gasgiant.app.sphere_preview import SpherePreview
 from gasgiant.app.thumbnails import ThumbnailManager
 from gasgiant.app.viewport import (
     EquirectViewport,
-    lonlat_to_screen,
-    nearest_cast_index,
+    drag_is_noop,
+    marker_hit_test,
     screen_to_lonlat,
+    selection_after_delete,
 )
 from gasgiant.core import brush
 from gasgiant.diagnostics import PerfCounter, configure_logging
@@ -667,6 +668,8 @@ class StudioApp:
         self._storm_tool_radius = 0.03  # placement radius (StormOverride default)
         self._drag_index: int | None = None  # cast index being dragged
         self._drag_lonlat: tuple[float, float] | None = None  # live cursor lon/lat
+        self._drag_press_lonlat: tuple[float, float] | None = None  # cursor at press
+        self._selected_cast: int | None = None  # selected cast index (view state)
         # T12: in-GUI mask brush. The "paint" tool mode shares T4's single
         # _storm_tool_mode state machine (so paint and Place-storm can't both be
         # armed). _paint_buffer is the CPU-side single-channel equirect mask,
@@ -919,9 +922,19 @@ class StudioApp:
         load / randomize / reroll / undo / redo). Without this a heavy edit left
         pending before the action could resurrect itself the next frame, because
         diff_tiers(self.params, self._live) would still report the abandoned
-        change. Phase 2's redo path must call this too."""
+        change. Phase 2's redo path must call this too.
+
+        Also reconciles the selected-cast index: any discrete action can shrink
+        the cast list (undo/redo/preset-load/delete), so a now-out-of-range
+        selection is dropped here -- at commit time, before any consumer (the
+        panel, the delete shortcut) that runs earlier in the next frame than the
+        equirect draw could index with a stale value. A still-valid index (e.g.
+        the just-placed storm) is preserved."""
         self._live = self.params
         self._gesture_base = None
+        sel = getattr(self, "_selected_cast", None)
+        if sel is not None and not (0 <= sel < len(self.params.storms.cast)):
+            self._selected_cast = None
 
     def _commit_export_field(self, name: str, value: object) -> None:
         """B4-4: the export modal's editors (resolution combo, PNG-compression
@@ -1327,6 +1340,17 @@ class StudioApp:
             # B1-8: Ctrl+S overwrites the active USER preset (after a confirm
             # modal); with no user preset active it opens Save As, as before.
             self._request_overwrite_active()
+        # Delete removes the selected cast storm (repeat=False so a held key
+        # can't delete a burst; Backspace is deliberately NOT bound -- imgui
+        # routes it to text widgets). Not ctrl-gated. The key check comes first
+        # so the common no-Delete frame short-circuits before touching state.
+        if (
+            not ctrl
+            and not exporting
+            and imgui.is_key_pressed(imgui.Key.delete, False)
+            and self._selected_cast is not None
+        ):
+            self._delete_selected_cast()
 
     # -- dialogs --------------------------------------------------------------------
 
@@ -1594,10 +1618,21 @@ class StudioApp:
 
         self._draw_pending_hint()
         imgui.separator()
+        # T4 selection bridge: share the selected cast index with the panel. A
+        # selection that changed OUTSIDE the panel (a viewport marker click/place/
+        # delete) requests a scroll so the matching row comes into view; a
+        # panel-side row click does not force-scroll (it's already visible). The
+        # panel writes a clicked row back into panel_state.selected_cast, read
+        # back after the walk so the next equirect frame highlights that marker.
+        ps = self.panel_state
+        if self._selected_cast != ps.selected_cast:
+            ps.cast_scroll_requested = True
+        ps.selected_cast = self._selected_cast
         draft, any_changed, any_committed = draw_params_panel(
             self._live, self.panel_state, sim=self.sim
         )
         self._process_edit(draft, any_changed, any_committed)
+        self._selected_cast = ps.selected_cast
         # The mask.file Browse... button only raises this flag (it must not open
         # a dialog synchronously on the GL thread). Consume it here and open the
         # picker through the same non-blocking _dialog/_poll_dialog slot every
@@ -1941,6 +1976,7 @@ class StudioApp:
                     self.params.storms.cast,
                     drag_index=self._drag_index,
                     drag_lonlat=self._drag_lonlat,
+                    selected_index=self._selected_cast,
                 )
                 self._draw_storm_tool_ui()
                 self._draw_paint_tool_ui()
@@ -1991,10 +2027,15 @@ class StudioApp:
                 imgui.ImVec4(1.0, 0.8, 0.3, 1.0),
                 "marker moves live; the planet re-develops on release (restart-tier)",
             )
+        elif self._selected_cast is not None:
+            imgui.text_disabled(
+                f"storm {self._selected_cast + 1} selected — Delete removes it; "
+                f"drag to move ({n}/16). Edits re-develop the run on release."
+            )
         else:
             imgui.text_disabled(
-                f"click the map to place a storm ({n}/16); drag a marker to move it "
-                "(re-develops on placement/release)"
+                f"click to place a storm ({n}/16); click a marker to select it, "
+                "drag to move (re-develops the run on placement/release)"
             )
 
     def _handle_storm_tool(self) -> None:
@@ -2024,6 +2065,7 @@ class StudioApp:
             # Never commit mid-export; abandon any in-flight drag.
             self._drag_index = None
             self._drag_lonlat = None
+            self._drag_press_lonlat = None
             if self._storm_tool_mode == "drag":
                 self._storm_tool_mode = "place"
             return
@@ -2032,10 +2074,16 @@ class StudioApp:
             self._drag_lonlat = (lon, lat)  # marker follows the cursor, no commit
             if not imgui.is_mouse_down(imgui.MouseButton_.left):
                 idx = self._drag_index
+                press = self._drag_press_lonlat
                 self._storm_tool_mode = "place"
                 self._drag_index = None
                 self._drag_lonlat = None
-                if idx is not None:
+                self._drag_press_lonlat = None
+                # A pure click (cursor never moved) selects only -- skip the
+                # RESTART-tier rebuild a zero-delta move would otherwise trigger.
+                if idx is not None and not (
+                    press is not None and drag_is_noop(press, (lon, lat))
+                ):
                     self._commit_cast_move(idx, lon, lat)
             return
 
@@ -2047,7 +2095,13 @@ class StudioApp:
             if idx is not None:
                 self._storm_tool_mode = "drag"
                 self._drag_index = idx
-                self._drag_lonlat = (lon, lat)
+                self._selected_cast = idx  # grabbing a marker selects it
+                self._drag_press_lonlat = (lon, lat)  # cursor at press
+                # Seed the marker at its stored position (not the cursor, which
+                # can be up to the hit radius away) so a select-click doesn't
+                # flicker the marker to the cursor and back.
+                entry = self.params.storms.cast[idx]
+                self._drag_lonlat = (entry.lon_deg, entry.lat_deg)
             else:
                 self._place_storm_at(lon, lat)
 
@@ -2055,22 +2109,10 @@ class StudioApp:
         self, mx: float, my: float, rmin, rmax, threshold: float = 14.0
     ) -> int | None:
         """Cast index whose marker is within ``threshold`` pixels of the cursor,
-        or None. Uses the wrap-aware nearest_cast_index to pick a candidate, then
-        confirms in pixel space (checking the +-360 wrapped screen positions so a
-        dateline marker is grabbable from either edge)."""
-        cast = self.params.storms.cast
-        if not cast:
-            return None
-        lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
-        idx = nearest_cast_index(lon, lat, cast)
-        if idx is None:
-            return None
-        entry = cast[idx]
-        for lon_v in (entry.lon_deg, entry.lon_deg - 360.0, entry.lon_deg + 360.0):
-            sx, sy = lonlat_to_screen(lon_v, entry.lat_deg, rmin, rmax)
-            if (sx - mx) ** 2 + (sy - my) ** 2 <= threshold * threshold:
-                return idx
-        return None
+        or None (thin wrapper over the pure ``marker_hit_test`` helper)."""
+        return marker_hit_test(
+            mx, my, self.params.storms.cast, rmin, rmax, threshold
+        )
 
     def _place_storm_at(self, lon_deg: float, lat_deg: float) -> None:
         """Append a cast storm at (clamped) lon/lat via the discrete-action
@@ -2097,6 +2139,7 @@ class StudioApp:
         )
         self._commit(new)
         self._reset_working_copy()  # discrete action wins over pending edit
+        self._selected_cast = len(new.storms.cast) - 1  # newly placed = selected
         self.toasts.info(f"placed {self._storm_tool_kind} at lon {lon:.1f}, lat {lat:.1f}")
 
     def _commit_cast_move(self, index: int, lon_deg: float, lat_deg: float) -> None:
@@ -2118,6 +2161,26 @@ class StudioApp:
         new.storms.cast[index].lon_deg = lon
         self._commit(new)
         self._reset_working_copy()  # discrete action wins over pending edit
+
+    def _delete_selected_cast(self) -> None:
+        """Remove the selected cast storm via one discrete-action commit. Toast +
+        undo is the safety net (no blocking confirm modal, to keep the fast path
+        frictionless). No-op mid-export or when the selection is stale."""
+        idx = self._selected_cast
+        if self._export is not None or idx is None:
+            return
+        cast = self.params.storms.cast
+        if not (0 <= idx < len(cast)):
+            self._selected_cast = None
+            return
+        kind = str(cast[idx].kind)
+        self._push_history(self.params)
+        new = self.params.model_copy(deep=True)
+        del new.storms.cast[idx]
+        self._commit(new)
+        self._selected_cast = selection_after_delete(idx, idx)
+        self._reset_working_copy()  # discrete action wins over pending edit
+        self.toasts.info(f"deleted {kind} storm {idx + 1} (Ctrl+Z to undo)")
 
     # -- T13: palette-from-image ------------------------------------------------
 

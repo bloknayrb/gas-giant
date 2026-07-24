@@ -102,6 +102,48 @@ def nearest_cast_index(lon_deg, lat_deg, cast, max_deg=None):
     return best_i
 
 
+def marker_hit_test(mx, my, cast, rmin, rmax, threshold=14.0):
+    """Cast index whose on-screen marker is within ``threshold`` pixels of the
+    cursor ``(mx, my)``, or None. Picks a wrap-aware nearest candidate, then
+    confirms in pixel space against its +-360 wrapped screen positions so a
+    dateline marker is grabbable from either edge. Pure (takes ``cast`` and the
+    image rect explicitly) so the tool wiring is unit-testable without GL."""
+    if not cast:
+        return None
+    lon, lat = screen_to_lonlat(mx, my, rmin, rmax)
+    idx = nearest_cast_index(lon, lat, cast)
+    if idx is None:
+        return None
+    entry = cast[idx]
+    for lon_v in (entry.lon_deg, entry.lon_deg - 360.0, entry.lon_deg + 360.0):
+        sx, sy = lonlat_to_screen(lon_v, entry.lat_deg, rmin, rmax)
+        if (sx - mx) ** 2 + (sy - my) ** 2 <= threshold * threshold:
+            return idx
+    return None
+
+
+def drag_is_noop(old_lonlat, new_lonlat, eps=1e-3):
+    """True if a drag from ``old_lonlat`` to ``new_lonlat`` moved less than
+    ``eps`` degrees (wrap-aware in longitude) -- i.e. a click that only selected
+    a marker, not a real move. Lets the caller skip the RESTART-tier rebuild a
+    zero-delta commit would otherwise trigger."""
+    dlon = abs(((new_lonlat[0] - old_lonlat[0] + 180.0) % 360.0) - 180.0)
+    dlat = abs(new_lonlat[1] - old_lonlat[1])
+    return dlon < eps and dlat < eps
+
+
+def selection_after_delete(selected, deleted_index):
+    """New value for a selected cast index after ``deleted_index`` is removed:
+    None if the selected entry was the one deleted (or nothing was selected),
+    shifted down by one if it sat after the deletion, else unchanged. Pure index
+    math so undo/redo/delete reconciliation is unit-testable."""
+    if selected is None or selected == deleted_index:
+        return None
+    if selected > deleted_index:
+        return selected - 1
+    return selected
+
+
 # Per-kind marker (fill color rgb, glyph). Kinds are CastKind values.
 _KIND_MARKER: dict[str, tuple[tuple[float, float, float], str]] = {
     "hero": ((0.95, 0.42, 0.24), "H"),
@@ -354,14 +396,16 @@ class EquirectViewport:
         )
         draw_list.add_text(imgui.ImVec2(x, y), fg, text)
 
-    def draw_markers(self, cast, *, drag_index=None, drag_lonlat=None) -> None:
+    def draw_markers(
+        self, cast, *, drag_index=None, drag_lonlat=None, selected_index=None
+    ) -> None:
         """Overlay a marker (color-coded circle + kind glyph) at each cast
         entry's rendered position using the window draw list. Must be called in
         the same imgui window as ``draw`` (right after it). Near the +-180 edges
         the wrapped duplicates (lon +-360) are drawn too and clipped to the image
         rect, so a dateline-straddling storm shows on both sides. The entry being
         dragged is drawn at ``drag_lonlat`` (its live cursor position) and
-        highlighted."""
+        highlighted; ``selected_index`` gets a distinct outer selection ring."""
         if self.image_rect_min is None or self.image_rect_max is None:
             return
         rmin = self.image_rect_min
@@ -381,14 +425,19 @@ class EquirectViewport:
                 lon, lat = entry.lon_deg, entry.lat_deg
             color, glyph = _KIND_MARKER.get(str(entry.kind), ((1.0, 1.0, 1.0), "?"))
             highlighted = drag_index == i
+            selected = selected_index == i
             for lon_variant in (lon, lon - 360.0, lon + 360.0):
                 sx, sy = lonlat_to_screen(lon_variant, lat, rmin, rmax)
                 if left <= sx <= right:
-                    self._draw_marker(draw_list, sx, sy, color, glyph, highlighted)
+                    self._draw_marker(
+                        draw_list, sx, sy, color, glyph, highlighted, selected
+                    )
         draw_list.pop_clip_rect()
 
     @staticmethod
-    def _draw_marker(draw_list, sx, sy, color, glyph, highlighted) -> None:
+    def _draw_marker(
+        draw_list, sx, sy, color, glyph, highlighted, selected=False
+    ) -> None:
         center = imgui.ImVec2(sx, sy)
         fill = imgui.get_color_u32(imgui.ImVec4(color[0], color[1], color[2], 0.9))
         outline = imgui.get_color_u32(
@@ -399,6 +448,11 @@ class EquirectViewport:
         r = _MARKER_RADIUS + (1.5 if highlighted else 0.0)
         draw_list.add_circle_filled(center, r, fill, 16)
         draw_list.add_circle(center, r, outline, 16, 2.0 if highlighted else 1.5)
+        if selected:
+            # distinct outer ring (cyan) so a selected-but-not-dragged marker
+            # reads differently from the white drag-highlight ring.
+            sel_col = imgui.get_color_u32(imgui.ImVec4(0.30, 0.85, 1.0, 1.0))
+            draw_list.add_circle(center, r + 3.0, sel_col, 20, 2.0)
         text_col = imgui.get_color_u32(imgui.ImVec4(0.05, 0.05, 0.05, 1.0))
         ts = imgui.calc_text_size(glyph)
         draw_list.add_text(

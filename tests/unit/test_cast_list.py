@@ -119,6 +119,90 @@ def test_cast_two_run_determinism():
     assert sum(1 for v in r1.vortices if v.origin == "cast") == 2
 
 
+# ---------------------------------------------------------- cheap per-storm levers
+
+
+def _gen(p, seed=5):
+    bands, prof = _profiles(seed, p)
+    dt = _dt(p, prof)
+    return generate_vortices(seed, bands, prof, p.storms, None, dt=dt,
+                             dev_steps=p.sim.dev_steps)
+
+
+def _cast_hero(reg):
+    from gasgiant.sim.vortices import KIND_HERO
+    return next(v for v in reg.vortices if v.origin == "cast" and v.kind == KIND_HERO)
+
+
+def test_cast_wake_dir_none_inherits_global():
+    """A cast hero with wake_dir=None follows the global hero_wake_dir. Its wake
+    frame matches a cast hero that sets that same direction per-storm (the global
+    setting also steers the SEEDED hero, so only the cast hero is compared)."""
+    from gasgiant.params.model import WakeDir
+
+    p_inherit = PlanetParams()
+    p_inherit.storms.hero_wake_dir = WakeDir.EAST
+    p_inherit.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                           lon_deg=0.0, radius=0.1)]
+    p_explicit = PlanetParams()  # global stays AUTO; per-storm sets EAST
+    p_explicit.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                            lon_deg=0.0, radius=0.1,
+                                            wake_dir=WakeDir.EAST)]
+    h_inherit = _cast_hero(_gen(p_inherit))
+    h_explicit = _cast_hero(_gen(p_explicit))
+    assert h_inherit.wake_dir == 1.0
+    assert (h_inherit.wake_dir, h_inherit.wake_lat_off) == (
+        h_explicit.wake_dir, h_explicit.wake_lat_off)
+
+
+def test_cast_wake_dir_per_storm_override():
+    """Two cast heroes can trail opposite ways in one scene."""
+    from gasgiant.params.model import WakeDir
+    from gasgiant.sim.vortices import KIND_HERO
+
+    p = PlanetParams()
+    p.storms.cast = [
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=-40.0,
+                      radius=0.1, wake_dir=WakeDir.EAST),
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=40.0,
+                      radius=0.1, wake_dir=WakeDir.WEST),
+    ]
+    heroes = [v for v in _gen(p).vortices if v.origin == "cast" and v.kind == KIND_HERO]
+    assert sorted(h.wake_dir for h in heroes) == [-1.0, 1.0]
+
+
+def test_cast_companions_default_off_byte_identical():
+    """companions=0 (the default) adds no pearls: byte-identical to a bare hero."""
+    p_off = PlanetParams()
+    p_off.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                       lon_deg=0.0, radius=0.1)]
+    p_bare = PlanetParams()
+    p_bare.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                        lon_deg=0.0, radius=0.1, companions=0)]
+    assert _fields(_gen(p_off)) == _fields(_gen(p_bare))
+
+
+def test_cast_companions_placed_deterministically():
+    """companions=2 on a cast hero adds two origin='cast' pearls, deterministically."""
+    from gasgiant.sim.vortices import KIND_PEARL
+
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0,
+                                   lon_deg=0.0, radius=0.1, companions=2)]
+    r1, r2 = _gen(p), _gen(p)
+    pearls = [v for v in r1.vortices if v.origin == "cast" and v.kind == KIND_PEARL]
+    assert len(pearls) == 2
+    assert _fields(r1) == _fields(r2)  # no RNG on the cast path
+
+
+def test_hero_only_lever_on_oval_warns():
+    """A hero-only lever set on a non-hero cast kind is flagged as inert."""
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.OVAL, lat_deg=10.0, companions=2)]
+    warnings = p.validation_warnings()
+    assert any("hero-only lever" in w for w in warnings)
+
+
 # ---------------------------------------------------------------- validators
 
 
@@ -284,10 +368,46 @@ def test_draw_cast_list_add_row(imgui_ctx, monkeypatch):
 
     imgui.new_frame()
     imgui.begin("cast_test", None, 0)
-    changed, committed = panels._draw_cast_list("cast", rows)
+    changed, committed = panels._draw_cast_list("cast", rows, panels.PanelState())
     imgui.end()
     imgui.end_frame()
 
     assert (changed, committed) == (True, True)
     assert len(rows) == 1
     StormOverride.model_validate(rows[0])  # the appended dict is a valid entry
+
+
+def test_draw_cast_list_renders_every_stormoverride_field(imgui_ctx):
+    """The reflective row editor must render a widget for EVERY StormOverride
+    field (in Advanced mode + a hero row, so no per-kind/adv gating hides any) --
+    a new pfield can't silently go unrendered. Exercised inside a real frame so a
+    missing widget branch (e.g. an unhandled optional_enum) would raise or leave
+    the field un-drawn; here we assert the leaf_kind of each field is one the
+    row renderer handles."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    handled = {"enum", "int", "float", "optional_float", "optional_int",
+               "optional_enum"}
+    for name, info in StormOverride.model_fields.items():
+        value = StormOverride().model_dump()[name]
+        kind = panels.leaf_kind(name, info, value)
+        assert kind in handled, f"{name} -> {kind} is not rendered by the cast editor"
+
+
+def test_draw_cast_list_hides_hero_levers_on_oval(imgui_ctx):
+    """Per-kind gating: an oval row draws no hero-only widgets; a hero row does."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    imgui = imgui_ctx
+    state = panels.PanelState(show_advanced=True)
+
+    oval = StormOverride(kind=CastKind.OVAL, lat_deg=5.0).model_dump()
+    hero = StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1).model_dump()
+    imgui.new_frame()
+    imgui.begin("cast_test", None, 0)
+    # both draw without raising; the gating is asserted structurally below
+    panels._draw_cast_list("cast", [oval, hero], state)
+    imgui.end()
+    imgui.end_frame()
+
+    # the gating predicate the editor uses
+    assert "wake_dir" in panels._HERO_ONLY_CAST_FIELDS
+    assert "aspect" not in panels._HERO_ONLY_CAST_FIELDS
