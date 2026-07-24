@@ -158,11 +158,21 @@ def _vort_params(solid_core, second_solid_core) -> PlanetParams:
     return p
 
 
-def _dev0_omega(p: PlanetParams, gpu) -> np.ndarray:
+def _omega(p: PlanetParams, gpu) -> np.ndarray:
+    """The omega texture after developing ``p`` for however many steps it asks."""
     sim = Simulation(p, gpu)
     sim.run_to_completion(chunk=64)
     q = np.asarray(sim.gpu.read_texture(sim.solver._omega_state.cur))
     return np.squeeze(q).astype(np.float64)
+
+
+def _dev0_omega(p: PlanetParams, gpu) -> np.ndarray:
+    """dev-0 alias. The NAME is the claim every byte-exact caller here rides on
+    (CLAUDE.md's one vorticity carve-out is legal only because the texture is
+    read before any SOR/advection touches it), so assert it rather than trust
+    the caller to have set dev_steps=0."""
+    assert p.sim.dev_steps == 0, "the byte-exact vorticity carve-out is dev-0 only"
+    return _omega(p, gpu)
 
 
 def test_cast_solid_core_matching_global_is_byte_identical(gpu):
@@ -384,3 +394,44 @@ def test_same_hero_spelled_two_ways_renders_the_same(gpu):
     from_global = spelled(0.9, None)     # inherits -> effective 0.9
     from_override = spelled(0.0, 0.9)    # cast-only -> effective 0.9
     assert np.abs(from_global - from_override).max() < 1e-2
+
+
+def test_emergence_reaches_omega_force_per_storm(gpu):
+    """M2-C: the omega_force hero sites (the 60x core anchor and the wake eddy
+    injection) follow per storm, via heroAnchorBoost/heroWakeInject.
+
+    ISOLATION — solid_core is 0 on both heroes, so the omega side never enters
+    the ring branch and emergence cannot reach omega_INIT at all. Part (a)
+    asserts that byte-exactly on the dev-0 texture, which is what makes part (b)
+    mean anything: with the initial state provably identical, a difference after
+    stepping can only have come from the per-step path. Without (a) this would
+    be the kind of test that passes because SOMETHING differs.
+
+    Scope, stated honestly: (b) pins that per-storm emergence reaches the
+    stepping solver, which is omega_force's two sites plus psi's wake wedge --
+    it does not separate those. The no-op direction for omega_force (the
+    CAST_LEVERS-off arm reproducing the legacy lines bit-for-bit) is not
+    assertable in-process at all and is gated by scripts/m2c_omega_equiv.py.
+
+    Tolerance, not byte-equality, in (b): past step 0 the SOR noise applies."""
+    def scene(e_a: float, e_b: float, steps: int) -> PlanetParams:
+        p = _vort_params(solid_core=0.0, second_solid_core=0.0)
+        p.sim.dev_steps = steps
+        p.storms.hero_emergence = 0.9
+        p.storms.wake_turbulence = 1.0
+        p.storms.cast[0].emergence = e_a
+        p.storms.cast[1].emergence = e_b
+        return p
+
+    # (a) the setup really is emergence-blind before any force pass runs
+    np.testing.assert_array_equal(
+        _dev0_omega(scene(0.9, 0.1, 0), gpu), _dev0_omega(scene(0.1, 0.9, 0), gpu)
+    )
+
+    # (b) ...and swapping which hero is emergent moves the stepped state.
+    # Discriminating against the PRE-change code, which is the point: both
+    # omega_force sites then read the scene max (0.9) in either scene, and both
+    # windows are position-only, so the old code gave the same q both ways.
+    a = _omega(scene(0.9, 0.1, 8), gpu)
+    b = _omega(scene(0.1, 0.9, 8), gpu)
+    assert np.abs(a - b).max() > 1e-2

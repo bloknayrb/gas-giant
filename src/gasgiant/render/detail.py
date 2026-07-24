@@ -149,10 +149,11 @@ class DetailSynth:
                 _assert_fx_uniforms(prog)  # loud at build, never a silent no-op
             if spread:
                 _assert_spread_uniforms(prog)
-            if hero_emergence and _absent(prog, "u_hero_emergence"):
+            if hero_emergence and _absent(prog, "u_hero_emergence_arr"):
                 raise RuntimeError(
-                    "detail.comp HERO_EMERGENCE variant is missing u_hero_emergence: "
-                    "the hero-anatomy remap would silently no-op."
+                    "detail.comp HERO_EMERGENCE variant is missing "
+                    "u_hero_emergence_arr: per-storm emergence would silently "
+                    "collapse to the scene scalar."
                 )
             self._progs[key] = prog
         return self._progs[key]
@@ -193,8 +194,6 @@ class DetailSynth:
         spread_on = spread_enabled(params)  # SPREAD variant selector
         he_on = hero_emergence > 0.0 and bool(heroes)
         prog = self._program(fx=fx_on, spread=spread_on, hero_emergence=he_on)
-        if he_on:
-            _set(prog, "u_hero_emergence", hero_emergence)
         size = out_tex.size
         if fx_on:
             _set(prog, "u_intermittency", params.intermittency)
@@ -293,14 +292,29 @@ class DetailSynth:
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)
         aspects = np.ones(3, dtype=np.float32)   # default 1.0 -> exact short-circuit
-        n_heroes = 0
-        for h in (heroes or [])[:3]:
-            packed[n_heroes] = h[:4]
-            aspects[n_heroes] = h[5] if len(h) > 5 else 1.0
-            n_heroes += 1
-        prog["u_hero_count"].value = n_heroes
+        # Per-hero emergence (M2-C). hero_centers appends it as a 9th field; a
+        # legacy 8-tuple (every caller that is not the facade/snapshot) falls
+        # back to the scene scalar, so a uniform scene is byte-identical either
+        # way. Which read sites are exact substitutions and which are the new
+        # cross-hero formulation is proved at detail.comp's heroMaskFaded.
+        emergences = np.full(3, hero_emergence, dtype=np.float32)
+        hero_list = (heroes or [])[:3]
+        for i, h in enumerate(hero_list):
+            packed[i] = h[:4]
+            aspects[i] = h[5] if len(h) > 5 else 1.0
+            if len(h) > 8:
+                emergences[i] = h[8]
+        prog["u_hero_count"].value = len(hero_list)
         prog["u_heroes"].write(packed.tobytes())
         prog["u_hero_aspect"].write(aspects.tobytes())
+        # HERO_EMERGENCE alone, NOT `and fx_on`: the array is read from the base
+        # path too (heroMaskFaded/heroCalmFloor), so narrowing this to the
+        # DETAIL_FX case would leave those two reads on a stale buffer. Raw
+        # .write, not contextlib.suppress: _program's tripwire already proves
+        # the uniform is there, and suppressing would turn a wiring regression
+        # into a silent scene-wide fallback.
+        if he_on:
+            prog["u_hero_emergence_arr"].write(emergences.tobytes())
         vel_tex.use(location=0)
         prog["u_vel"].value = 0
         tracers_tex.use(location=1)

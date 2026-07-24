@@ -101,7 +101,8 @@ rolled billows: it brightens the pale entrained tracer cores and darkens the
 fold-boundary rims, keyed to the sim's OWN advected tracer folds (not a
 synthetic strand pattern). The per-hero wake frame (direction + lane-latitude
 offset) is threaded from the vortex registry through the hero-centers snapshot
-(8-field tuple), so the braid auto-tracks wherever the flow puts the wake.
+(fields 7-8 of the tuple), so the braid auto-tracks wherever the flow puts the
+wake.
 
 ### White ovals
 Compact bright anticyclones (the Oval BA lineage), often in same-latitude

@@ -620,7 +620,7 @@ class Simulation:
             self.detail_synth.synthesize(
                 p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
                 self.profile_dyn, detail_tex, p.detail,
-                heroes=hero_centers(self.vortices),
+                heroes=hero_centers(self.vortices, p.storms),
                 polar=PolarRoute(
                     s.north.vel_tex, s.south.vel_tex,
                     s.north.tracers.cur, s.south.tracers.cur, RHO_MAX,

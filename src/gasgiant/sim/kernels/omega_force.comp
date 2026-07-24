@@ -142,9 +142,20 @@ void main() {
         // ~half a core radius across the 512..2048 range. Rate-clamped for
         // stability. Variant-compiled: the default program keeps the
         // pre-feature line below.
+        // Per storm under CAST_LEVERS (M2-C): 60.0 is folded into each hero's
+        // own candidate before the cross-hero max, so a placed hero anchors at
+        // ITS emergence rather than the scene max. The #else arm is the legacy
+        // line VERBATIM and must stay that way — the two are not bit-identical
+        // even for a uniform scene (a measured 1-ULP FMA-contraction delta that
+        // this chaotic field amplifies; see heroAnchorBoost).
+#ifdef CAST_LEVERS
+        q += (q_target - q)
+           * min((1.0 + heroAnchorBoost(p, 60.0)) / u_relax_tau, 0.5);
+#else
         float wa = heroAnchorWindow(p);
         q += (q_target - q)
            * min((1.0 + 60.0 * u_hero_emergence * wa) / u_relax_tau, 0.5);
+#endif
 #else
         q += (q_target - q) / u_relax_tau;
 #endif
@@ -196,7 +207,20 @@ void main() {
     // the transient, the advection CFL is velocity-based and unchanged in
     // kind). Reference-anchored: the real GRS wake IS a turbulence source —
     // distinct from the falsified GLOBAL/interior injection.
+    // u_hero_emergence is the SCENE max (VortexRegistry.scene_emergence), so
+    // this gate opens whenever ANY hero is emergent.
     if (u_hero_wake_turb > 0.0 && u_hero_emergence > 0.0) {
+#ifdef CAST_LEVERS
+        // Per storm: a hero at emergence 0 contributes exactly 0 and can never
+        // win heroWakeInject's max, so the open gate costs it nothing. (In the
+        // #else arm below, everything scales by the scene max instead.)
+        float amp = heroWakeInject(p, 0.6 * u_hero_wake_turb);
+        if (amp > 0.0) {
+            vec3 np = p * u_hero_wake_freq + u_turb_offset.zxy
+                    + vec3(u_turb_time, 0.0, 0.0);
+            q += amp * fbm(np, 4, 2.0, 0.5);
+        }
+#else
         float wmask = heroWakeWindow(p);
         if (wmask > 0.0) {
             vec3 np = p * u_hero_wake_freq + u_turb_offset.zxy
@@ -204,6 +228,7 @@ void main() {
             q += 0.6 * u_hero_wake_turb * u_hero_emergence * wmask
                * fbm(np, 4, 2.0, 0.5);
         }
+#endif
     }
 #endif
 
