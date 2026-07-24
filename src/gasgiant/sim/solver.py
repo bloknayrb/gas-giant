@@ -33,6 +33,12 @@ from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
 from gasgiant.sim.flow_renorm import hero_flow_renorm
 from gasgiant.sim.profiles import LatProfiles
+from gasgiant.sim.resolution_scaling import (
+    scale_decay_fraction,
+    scale_factor,
+    scale_relax_tau,
+    scale_stochastic_amp,
+)
 from gasgiant.sim.tracers import TracerState
 from gasgiant.sim.vortices import VortexRegistry
 
@@ -167,6 +173,14 @@ class Solver:
     ) -> None:
         self.gpu = gpu
         self.params = params
+        # Resolution-invariant step scale s = resolution / reference_resolution
+        # (1.0 = feature off / at reference). Per-step forcing/relaxation uniforms
+        # below are pushed through the resolution_scaling transforms with this so
+        # their PHYSICAL rate is preserved as dt (in proportion to 1/resolution)
+        # changes. Fixed for the solver's lifetime (resolution/reference are
+        # RESTART, so a change rebuilds the solver). s == 1 => raw uniforms
+        # (structural no-op, byte-identical).
+        self._step_scale = scale_factor(params)
         self.profiles = profiles
         self.vortices = vortices
         self.profile_dyn = profile_dyn_tex
@@ -626,9 +640,18 @@ class Solver:
         _set(kf0, "u_lap_omega_rel", 2)
         _set(kf0, "u_vortex_count", len(self.vortices.vortices))
         _set(kf0, "u_coriolis_f0", p.solver.coriolis_f0)
-        _set(kf0, "u_relax_tau", p.solver.vort_relax_tau)
+        s = self._step_scale
+        _set(kf0, "u_relax_tau", scale_relax_tau(p.solver.vort_relax_tau, s))
+        # Hyperviscosity is NORMALIZED to the grid-Nyquist mode (omega_force.comp),
+        # i.e. its dissipation scale is the grid itself -- it is deliberately NOT
+        # scaled here. That grid-locked cutoff (and the inverse cascade it feeds)
+        # is the documented reason turbulence-dominated presets stay only
+        # partially resolution-invariant. See docs/architecture.md.
         _set(kf0, "u_hypervisc", p.solver.vort_hypervisc)
-        _set(kf0, "u_vort_inject", p.solver.vort_inject)
+        # vort_inject injects a fresh (white-in-time) stochastic eddy field each
+        # step; the amplitude scales as 1/sqrt(s) to preserve the variance-injection
+        # RATE per physical time (a deterministic 1/s would over/under-inject).
+        _set(kf0, "u_vort_inject", scale_stochastic_amp(p.solver.vort_inject, s))
         _set(kf0, "u_inject_freq", p.bands.detail_freq * p.solver.vort_inject_scale)
         # Hero wake-wedge eddy injection (HERO_EMERGENCE variant only;
         # KeyError-guarded no-op otherwise). wake_turbulence's semantics
@@ -636,7 +659,7 @@ class Solver:
         # the churn scale is storm-relative. 0.9/rc: reference-anchored
         # review — the GRS wake is CHUNKY curd-like folded turbulence, and
         # the 2.0/rc grain read thready; features ~rc at the base octave.
-        _set(kf0, "u_hero_wake_turb", p.storms.wake_turbulence)
+        _set(kf0, "u_hero_wake_turb", scale_stochastic_amp(p.storms.wake_turbulence, s))
         _set(kf0, "u_hero_wake_freq", 0.9 / max(p.storms.hero_radius, 0.01))
         # Spatial localization mask for eddy injection (0=global,1=belt,2=shear).
         self.profile_dyn.use(location=3)
@@ -644,9 +667,12 @@ class Solver:
         _set(kf0, "u_inject_mask", INJECT_MASK_CODE[p.solver.vort_inject_mask])
         _set(kf0, "u_turb_offset", self._turb_offset)
         _set(kf0, "u_turb_time", turb_time)
-        _set(kf0, "u_vort_drag", p.solver.vort_drag)
-        _set(kf0, "u_vort_eddy_drag", p.solver.vort_eddy_drag)
-        _set(kf0, "u_vort_psi_drag", p.solver.vort_psi_drag)
+        # Rayleigh / eddy / psi drags are deterministic per-step decay fractions:
+        # decay-exact remap so the retained fraction over the scaled run matches
+        # the reference (a linear 1/s would exceed 1 and blow up at s < 1).
+        _set(kf0, "u_vort_drag", scale_decay_fraction(p.solver.vort_drag, s))
+        _set(kf0, "u_vort_eddy_drag", scale_decay_fraction(p.solver.vort_eddy_drag, s))
+        _set(kf0, "u_vort_psi_drag", scale_decay_fraction(p.solver.vort_psi_drag, s))
         if eddy_drag_on:
             state.mean_buf.bind_to_storage_buffer(3)  # keep ⟨q⟩_x bound for SUBPASS 0
         if psi_drag_on:
@@ -681,8 +707,8 @@ class Solver:
         _set(kf1, "u_lap_omega_rel", 2)
         _set(kf1, "u_vortex_count", len(self.vortices.vortices))
         _set(kf1, "u_coriolis_f0", p.solver.coriolis_f0)
-        _set(kf1, "u_relax_tau", p.solver.vort_relax_tau)
-        _set(kf1, "u_hypervisc", p.solver.vort_hypervisc)
+        _set(kf1, "u_relax_tau", scale_relax_tau(p.solver.vort_relax_tau, self._step_scale))
+        _set(kf1, "u_hypervisc", p.solver.vort_hypervisc)  # grid-locked; unscaled (see above)
         state.out.bind_to_image(0, read=False, write=True)
         kf1.run(gx, gy, 1)
         ctx.memory_barrier()
@@ -753,7 +779,10 @@ class Solver:
         # depend on the FESTOON2 toggle).
         self._fest2_phase = float(wave_rng.uniform(0.0, 2.0 * np.pi))
 
-        relax_k = 1.0 / max(p.turbulence.relax_tau, 1.0)
+        # Tracer relaxation is a per-step decay fraction (1/tau): decay-exact remap
+        # so the retained fraction over the scaled run matches the reference.
+        relax_k = scale_decay_fraction(1.0 / max(p.turbulence.relax_tau, 1.0),
+                                       self._step_scale)
         for dom in self.domains:
             pole = p.poles.north if dom.kind == DOMAIN_NORTH else p.poles.south
 
@@ -777,7 +806,12 @@ class Solver:
                 _set(prog, "u_rho_max", RHO_MAX)
                 if i == 2:
                     _set(prog, "u_relax_k", relax_k)
-                    _set(prog, "u_replenish", p.turbulence.replenish_rate)
+                    # replenish is a per-step blend weight that mixes in a fresh
+                    # detail field (an AR(1)-like process). Decay-exact keeps the
+                    # weight bounded in [0,1) at s < 1; the exact stochastic
+                    # exponent is a Phase-0 spike calibration target.
+                    _set(prog, "u_replenish",
+                         scale_decay_fraction(p.turbulence.replenish_rate, self._step_scale))
                     _set(prog, "u_rim_contrast", p.storms.rim_contrast)
                     _set(prog, "u_hero_mottle", p.storms.hero_mottle)
                     _set(prog, "u_hero_tint_var", p.storms.hero_tint_var)
@@ -794,7 +828,8 @@ class Solver:
                     _set(prog, "u_warp_freq", p.bands.warp_freq)
                     _set(prog, "u_detail_offset", self._detail_offset)
                     _set(prog, "u_detail_freq", p.bands.detail_freq)
-                    _set(prog, "u_belt_replenish", p.turbulence.belt_replenish)
+                    _set(prog, "u_belt_replenish",
+                         scale_decay_fraction(p.turbulence.belt_replenish, self._step_scale))
                     _set(prog, "u_belt_scale", p.turbulence.belt_replenish_scale)
                     if dom.kind == DOMAIN_EQUIRECT and p.turbulence.belt_replenish > 0.0:
                         import math
@@ -925,7 +960,12 @@ class Solver:
                 self._cast_ssbo.write(cast_data.tobytes())
                 self._cast_ssbo.bind_to_storage_buffer(5)
 
-            turb_time = self.step_index * self.params.turbulence.evolution_rate
+            # turb_time is a physical-time phase counter for the injection noise.
+            # step_index counts SCALED steps, so divide evolution_rate by s to keep
+            # the phase tracking physical time (turb_time = step * rate / s); at the
+            # end of the run it reaches the same value as the reference. s == 1 => raw.
+            turb_time = (self.step_index * self.params.turbulence.evolution_rate
+                         / self._step_scale)
 
             for dom in self.domains:
                 gx, gy = dom.groups()
