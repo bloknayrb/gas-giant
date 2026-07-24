@@ -49,6 +49,16 @@ Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)
 <td align="center"><img src="img/sliders/sim__dt_scale__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/sim__dt_scale__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
+### reference resolution
+
+`sim.reference_resolution` &mdash; range **512 to 8192**, default **2048**, tier `restart`.
+
+The sim resolution these settings were authored/tuned at; invariant scaling normalizes development to it. Only used when resolution_invariant is on (s == 1 at this resolution is a no-op).
+
+<table><tr>
+<td align="center"><sub>low &middot; 512<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2048</sub></td><td align="center"><sub>high &middot; 8192<br>(not rendered)</sub></td>
+</tr></table>
+
 ### resolution
 
 `sim.resolution` &mdash; range **512 to 8192**, default **2048**, tier `restart`.
@@ -56,6 +66,14 @@ Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)
 Sim grid width (2:1 equirect); 2048 interactive, 4096+ for final quality
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+### resolution invariant
+
+`sim.resolution_invariant` &mdash; toggle (on/off), default **`False`**, tier `restart`.
+
+Auto-scale time-axis settings so a sim tuned at a lower resolution develops similarly at higher resolution (iterate low, render high). Off = byte-identical. Scaling normalizes to reference_resolution. Fully effective for nudge-dominated presets; turbulence-dominated presets (strong vort_inject) improve only partially.
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
 
 ## Solver
