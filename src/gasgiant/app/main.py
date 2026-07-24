@@ -669,6 +669,10 @@ class StudioApp:
         self._drag_lonlat: tuple[float, float] | None = None  # live cursor lon/lat
         self._drag_press_lonlat: tuple[float, float] | None = None  # cursor at press
         self._selected_cast: int | None = None  # selected cast index (view state)
+        # Show/hide the storm-placement marker overlay so the bare render can be
+        # inspected without the pins on top. View state only (never committed);
+        # placement/drag/select still work when hidden (the caption reminds you).
+        self._show_markers = True
         # T12: in-GUI mask brush. The "paint" tool mode shares T4's single
         # _storm_tool_mode state machine (so paint and Place-storm can't both be
         # armed). _paint_buffer is the CPU-side single-channel equirect mask,
@@ -1975,12 +1979,13 @@ class StudioApp:
         if self.viewport.image_rect_min is not None:
             self._draw_compare_controls()
             if self.viewport.hit_testable:
-                self.viewport.draw_markers(
-                    self.params.storms.cast,
-                    drag_index=self._drag_index,
-                    drag_lonlat=self._drag_lonlat,
-                    selected_index=self._selected_cast,
-                )
+                if getattr(self, "_show_markers", True):
+                    self.viewport.draw_markers(
+                        self.params.storms.cast,
+                        drag_index=self._drag_index,
+                        drag_lonlat=self._drag_lonlat,
+                        selected_index=self._selected_cast,
+                    )
                 self._draw_storm_tool_ui()
                 self._draw_paint_tool_ui()
                 # The two tools share one mode machine; dispatch the mouse layer
@@ -2008,6 +2013,10 @@ class StudioApp:
             self._drag_index = None
             self._drag_lonlat = None
         imgui.end_disabled()
+        # View-only overlay toggle (available whether or not the tool is armed):
+        # hide the placement pins to inspect the bare render underneath.
+        imgui.same_line()
+        _, self._show_markers = imgui.checkbox("Show markers", self._show_markers)
         if not tool_on:
             return
         imgui.same_line()

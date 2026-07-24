@@ -223,6 +223,13 @@ def test_place_storm_respects_cap_of_16():
     assert len(app.params.storms.cast) == 16  # no-op when full
 
 
+def test_show_markers_defaults_on():
+    """The placement-marker overlay is shown by default; the equirect toggle only
+    hides it as view state (never committed)."""
+    app = _make_app_headless()
+    assert app._show_markers is True
+
+
 def test_place_storm_held_during_export():
     app = _make_app_headless()
     app.params.storms.cast = []
