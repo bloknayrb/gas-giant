@@ -149,17 +149,9 @@ class DetailSynth:
                 _assert_fx_uniforms(prog)  # loud at build, never a silent no-op
             if spread:
                 _assert_spread_uniforms(prog)
-            if hero_emergence and _absent(prog, "u_hero_emergence"):
+            if hero_emergence and _absent(prog, "u_hero_emergence_arr"):
                 raise RuntimeError(
-                    "detail.comp HERO_EMERGENCE variant is missing u_hero_emergence: "
-                    "the hero-anatomy remap would silently no-op."
-                )
-            # ...and `fx`: the array is DECLARED under HERO_EMERGENCE but READ
-            # only inside the DETAIL_FX spiral/collar block, so a HERO_EMERGENCE-
-            # only program legitimately prunes it.
-            if hero_emergence and fx and _absent(prog, "u_hero_emergence_arr"):
-                raise RuntimeError(
-                    "detail.comp HERO_EMERGENCE+DETAIL_FX variant is missing "
+                    "detail.comp HERO_EMERGENCE variant is missing "
                     "u_hero_emergence_arr: per-storm emergence would silently "
                     "collapse to the scene scalar."
                 )
@@ -202,8 +194,6 @@ class DetailSynth:
         spread_on = spread_enabled(params)  # SPREAD variant selector
         he_on = hero_emergence > 0.0 and bool(heroes)
         prog = self._program(fx=fx_on, spread=spread_on, hero_emergence=he_on)
-        if he_on:
-            _set(prog, "u_hero_emergence", hero_emergence)
         size = out_tex.size
         if fx_on:
             _set(prog, "u_intermittency", params.intermittency)
@@ -307,9 +297,10 @@ class DetailSynth:
         # 8-tuple (every caller that is not the facade/snapshot) falls back to
         # the scalar those sites read before this existed, so a uniform scene is
         # byte-identical either way. The two CROSS-hero sites (detail.comp's
-        # `heroQ` and the serene-moat `calm` floor) still take the scalar: they
-        # scale a SUMMED mask, so a per-storm form there is a new formulation,
-        # not a substitution.
+        # `heroQ` and the serene-moat `calm` floor) now follow per storm too,
+        # via heroMaskQuiet/heroCalmFloor — a new formulation rather than a
+        # substitution, exact for the single-hero scenes every factory preset
+        # ships and deliberately different once a scene has two or more.
         emergences = np.full(3, hero_emergence, dtype=np.float32)
         n_heroes = 0
         for h in (heroes or [])[:3]:
@@ -321,13 +312,13 @@ class DetailSynth:
         prog["u_hero_count"].value = n_heroes
         prog["u_heroes"].write(packed.tobytes())
         prog["u_hero_aspect"].write(aspects.tobytes())
-        # u_hero_emergence_arr's three read sites (spiral pitch, spiral window,
-        # collar window) all live in the DETAIL_FX-only spiral/collar block
-        # (like u_hero_spin), so the compiler strips the array whenever either
-        # variant is off. Raw .write, not contextlib.suppress: _program's
-        # tripwire below already proves the uniform is there, and suppressing
-        # would turn a wiring regression into a silent scene-wide fallback.
-        if he_on and fx_on:
+        # HERO_EMERGENCE alone, NOT `and fx_on`: the array is read from the base
+        # path too (heroMaskQuiet/heroCalmFloor), so narrowing this to the
+        # DETAIL_FX case would leave those two reads on a stale buffer. Raw
+        # .write, not contextlib.suppress: _program's tripwire already proves
+        # the uniform is there, and suppressing would turn a wiring regression
+        # into a silent scene-wide fallback.
+        if he_on:
             prog["u_hero_emergence_arr"].write(emergences.tobytes())
         vel_tex.use(location=0)
         prog["u_vel"].value = 0

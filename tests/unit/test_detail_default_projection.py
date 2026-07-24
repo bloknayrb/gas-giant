@@ -112,7 +112,17 @@ def _no_defines_projection() -> str:
 
 # Hash of the NO-DEFINES projection. Regenerate DELIBERATELY (paste the printed
 # value) ONLY when a real base-path change is intended.
-GOLDEN = "6e5b8dea2b676ca14fcb17a2b970472f3e7513db7896cde79f0402f095686172"
+#
+# Changelog:
+#   2026-07-24 (M2-C): heroMask's per-hero Gaussian extracted into heroTerm(p, i)
+#   so the HERO_EMERGENCE-only heroMaskQuiet/heroCalmFloor reuse the IDENTICAL
+#   geometry instead of duplicating the ellipse math (a copy could drift and
+#   silently weight the wrong hero). Pure code motion — same operations, same
+#   order — plus the removal of a dead `float d = acos(...)` the old body
+#   computed and never used. This pin moves because it hashes TEXT; the claim
+#   that OUTPUT is unchanged is carried by p05 (9/9 green across the change),
+#   which is the gate that can actually see arithmetic.
+GOLDEN = "f05cde26b8e6d2d455ae211553f5a1e5fecaeca01257d87f5f8f43d5f48e4e6b"
 
 
 def test_default_program_projection_is_stable():

@@ -75,18 +75,29 @@ uniform float u_hero_calm;
 // wound whirlpool inside a stagnant core is the exact tell the pack removes),
 // collar streamlines tightened onto the thin collar, legacy churn boosts
 // faded (quiet storm). Compiled as a variant so the default program text is
-// unchanged (byte-identical by construction). A BASE uniform (not DETAIL_FX):
+// unchanged (byte-identical by construction). BASE state (not DETAIL_FX):
 // HERO_EMERGENCE is selected independently of DETAIL_FX, and the quiet-storm
 // heroQ/calm remap it drives lives in the pre-FX path (as u_hero_calm does).
-uniform float u_hero_emergence;
+//
+// There is no longer a scalar `u_hero_emergence` here: M2-C moved its last two
+// reads to the per-hero array, and a declared-but-unread uniform gets pruned by
+// the driver, which tripped the build-time check that exists to catch exactly
+// that. The CPU keeps a scalar (the fallback that fills every slot for legacy
+// 8-tuple callers) — it is now packed, never bound on its own. The SIM kernels'
+// identically-named u_hero_emergence is a DIFFERENT uniform and still scalar.
+//
 // Per-hero EFFECTIVE emergence (M2-C), threaded as hero_centers' 9th field.
-// Read at the sites that already run inside the per-hero loop; a uniform scene
-// packs the scalar into every slot, so those reads are an operand substitution
-// with an equal value -- byte-identical, verified by the render_* configs in
-// scripts/m2b_emergence_hash.py. The two CROSS-hero sites keep the scalar:
-// heroMask SUMS over heroes and is scaled once afterwards, so distributing a
-// per-storm factor into that sum is a new formulation (and would move the
-// flagship preset's shipped output), not a substitution.
+// A uniform scene packs the scalar into every slot, so every read below is an
+// operand substitution with an equal value -- byte-identical, verified by the
+// render_* configs in scripts/m2b_emergence_hash.py.
+//   * three sites inside the DETAIL_FX per-hero loop (spiral pitch/window,
+//     collar window), which already indexed per hero for spin and aspect;
+//   * the two CROSS-hero sites, via heroMaskQuiet/heroCalmFloor below. Those
+//     are a genuinely NEW formulation rather than a substitution (a summed
+//     mask scaled once becomes a per-term sum), exact only because a
+//     single-hero sum has one term -- see the proof at those functions.
+// Read from the BASE path, so the CPU write is gated on HERO_EMERGENCE alone;
+// do NOT re-narrow it to (HERO_EMERGENCE && DETAIL_FX).
 uniform float u_hero_emergence_arr[3];
 #endif
 #ifdef DETAIL_FX
@@ -169,35 +180,82 @@ vec2 eqUV(vec2 ll) {
     return vec2((ll.x + PI) / (2.0 * PI), (0.5 * PI - ll.y) / PI);
 }
 
+// ONE hero's Gaussian falloff. Extracted from heroMask so the per-storm
+// emergence companions below reuse the IDENTICAL geometry — a duplicated copy
+// could drift and silently weight the wrong hero. Pure code motion: same
+// operations in the same order, so the default program's arithmetic is
+// unchanged (p05 is the gate that adjudicates that claim, not this comment).
+float heroTerm(vec3 p, int i) {
+    vec3 c = u_heroes[i].xyz;
+    float rc = max(u_heroes[i].w * 1.4, 1e-4);
+    float asp = u_hero_aspect[i];
+    float q;
+    if (asp == 1.0) {
+        q = acos(clamp(dot(p, c), -1.0, 1.0)) / rc;
+    } else {
+        vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
+        float ewl = length(ew);
+        if (ewl < 1e-4) {
+            q = acos(clamp(dot(p, c), -1.0, 1.0)) / rc;
+        } else {
+            vec3 e1 = ew / ewl;
+            vec3 e2 = cross(c, e1);
+            // Near-hemisphere gate: the tangent projection collapses to q~0
+            // at the antipode, which would amplify detail on the far side.
+            q = (dot(p, c) > 0.0)
+              ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / rc
+              : 1e3;
+        }
+    }
+    return exp(-q * q);
+}
+
 float heroMask(vec3 p) {
     float m = 0.0;
     for (int i = 0; i < u_hero_count; ++i) {
-        vec3 c = u_heroes[i].xyz;
-        float rc = max(u_heroes[i].w * 1.4, 1e-4);
-        float asp = u_hero_aspect[i];
-        float d = acos(clamp(dot(p, c), -1.0, 1.0));
-        float q;
-        if (asp == 1.0) {
-            q = acos(clamp(dot(p, c), -1.0, 1.0)) / rc;
-        } else {
-            vec3 ew = cross(vec3(0.0, 1.0, 0.0), c);
-            float ewl = length(ew);
-            if (ewl < 1e-4) {
-                q = acos(clamp(dot(p, c), -1.0, 1.0)) / rc;
-            } else {
-                vec3 e1 = ew / ewl;
-                vec3 e2 = cross(c, e1);
-                // Near-hemisphere gate: the tangent projection collapses to q~0
-                // at the antipode, which would amplify detail on the far side.
-                q = (dot(p, c) > 0.0)
-                  ? length(vec2(dot(p, e1) / asp, dot(p, e2))) / rc
-                  : 1e3;
-            }
-        }
-        m += exp(-q * q);
+        m += heroTerm(p, i);
     }
     return clamp(m, 0.0, 1.0);
 }
+
+#ifdef HERO_EMERGENCE
+// The two CROSS-hero emergence sites, per storm (M2-C). Both used to scale the
+// SUMMED mask by one scalar; each hero now contributes at ITS OWN emergence.
+//
+// SINGLE-HERO IDENTITY (why re-baking the shipped presets is not required):
+// with one hero the sum has one term and heroTerm() <= 1, so heroMask's clamp
+// is the identity and `hero == heroTerm(p, 0)` exactly. Both companions then
+// reduce, operation for operation, to the scalar expressions they replace:
+//   clamp(m*(1-E)) == clamp(m)*(1-E)                     [heroQ]
+//   min(1, 1 - 0.85*E*ss(m)) == 1 - 0.85*E*ss(clamp(m))  [calm floor]
+// Every factory preset ships hero_count=1 and cast=[], so all six are
+// byte-identical; the formulation only diverges once a scene genuinely has two
+// or more heroes, which is exactly the case that was wrong before. Gated by
+// render_bare/render_shape_taper (must not move) vs render_two_heroes (must).
+//
+// NOT expressible as `hero * (1 - Ebar)` for any per-pixel average Ebar: the
+// weighted mean needs a division, which does not return E exactly for uniform
+// emergence and would move the single-hero case for no benefit.
+float heroMaskQuiet(vec3 p) {
+    float m = 0.0;
+    for (int i = 0; i < u_hero_count; ++i) {
+        m += heroTerm(p, i) * (1.0 - u_hero_emergence_arr[i]);
+    }
+    return clamp(m, 0.0, 1.0);
+}
+
+// min(), not a sum: the moat floor is a "how quiet does any storm demand this
+// pixel be" query, so the most emergent nearby storm wins. Summing would let
+// two adjacent calm storms drive the floor below what either one asks for.
+float heroCalmFloor(vec3 p) {
+    float f = 1.0;
+    for (int i = 0; i < u_hero_count; ++i) {
+        f = min(f, 1.0 - 0.85 * u_hero_emergence_arr[i]
+                             * smoothstep(0.05, 0.45, heroTerm(p, i)));
+    }
+    return f;
+}
+#endif
 
 vec2 patchUV(vec2 ll) {
     float rho = 0.5 * PI - abs(ll.y);
@@ -283,7 +341,7 @@ void main() {
     // heroQ drives the legacy boosts and fades with the lever; `hero` keeps
     // the full mask so calm/coverage still see the enlarged oval. Deepen calm
     // toward a floor so the interior drops to reference quietness.
-    float heroQ = hero * (1.0 - u_hero_emergence);
+    float heroQ = heroMaskQuiet(pc);
     // SERENE MOAT (reference-anchored review): the GRS's strongest
     // morphological cue is a three-way texture gradient — chaotic wake,
     // near-FEATURELESS moat, laminar leading side — and a moat full of
@@ -292,8 +350,7 @@ void main() {
     // 1.6 true-radii) instead of fading with the Gaussian, so the quiet
     // region covers oval + moat and releases by ~2 radii. Floor ~0.24 at
     // e=0.9 re-admits sparse ~3%-contrast wisps (quiet, not glassy).
-    calm = min(calm, 1.0 - 0.85 * u_hero_emergence
-                         * smoothstep(0.05, 0.45, hero));
+    calm = min(calm, heroCalmFloor(pc));
 #endif
 
     // Route weight: 0 = pure equirect chart, 1 = pure patch chart. In the

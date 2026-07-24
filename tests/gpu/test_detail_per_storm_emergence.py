@@ -10,11 +10,11 @@ detail treatment. Its read sites split cleanly in two:
     `render_*` configs in scripts/m2b_emergence_hash.py (which drive the fx
     levers that own those sites, else DETAIL_FX does not compile and they are
     not in the program at all).
-  * two CROSS-hero sites (detail.comp's heroQ and the calm floor) still take the
-    scalar. heroMask SUMS over heroes and is scaled once afterwards, so a
-    per-storm form there is a new formulation -- and one that would move the
-    flagship preset's shipped output. Left for a visual review; asserted here as
-    a KNOWN limit rather than left to be rediscovered.
+  * two CROSS-hero sites (detail.comp's heroQ and the calm floor) follow via
+    heroMaskQuiet/heroCalmFloor. heroMask SUMS over heroes and was scaled once
+    afterwards, so this is a NEW formulation, not a substitution -- it cannot be
+    bit-identical in general. It IS exact for a single hero (one summed term,
+    clamp is the identity), which is every factory preset, so nothing re-bakes.
 
 These call synthesize() directly with hand-built hero tuples so the comparison
 isolates the DETAIL pass: driving emergence through params would also move the
@@ -102,14 +102,57 @@ def test_uniform_emergence_matches_the_scalar_path(gpu):
     np.testing.assert_array_equal(legacy, explicit)
 
 
-def test_cross_hero_sites_are_still_scene_wide(gpu):
-    """KNOWN LIMIT, pinned so it is not mistaken for per-storm coverage.
+def test_cross_hero_sites_are_per_storm_too(gpu):
+    """The CROSS-hero sites (heroQ, the serene-moat calm floor) follow per
+    storm as well, via heroMaskQuiet/heroCalmFloor.
 
-    heroQ and the calm floor scale a SUMMED hero mask by the scene scalar, so
-    they do not follow a per-hero value. With the fx levers OFF only those two
-    sites remain, and a per-hero swap must therefore leave the field EXACTLY
-    unchanged. When the cross-hero formulation goes per storm (a visual-review
-    change), this test is the one that should start failing."""
+    Turning the fx levers OFF strips DETAIL_FX entirely, so the three per-hero
+    loop sites are not in the program at all and ONLY the cross-hero pair can
+    account for a difference. This test previously pinned the opposite — that
+    those two sites were scene-wide — and was written to start failing exactly
+    here."""
+    a = _synth(gpu, (0.9, 0.1), fx=False)
+    b = _synth(gpu, (0.1, 0.9), fx=False)
+    assert np.abs(a - b).max() > 1e-3
+
+
+def test_single_hero_is_identical_to_the_old_scalar_formulation(gpu):
+    """The cross-hero pair is a NEW formulation (a summed mask scaled once
+    became a per-term sum), so it cannot be justified by substitution — but
+    with ONE hero the sum has a single term and heroTerm() <= 1 makes
+    heroMask's clamp the identity, so it reduces operation-for-operation to
+    the scalar expressions it replaced.
+
+    That is what lets every factory preset (all ship hero_count=1, cast=[])
+    keep its shipped output without a re-bake. Asserted byte-exact against a
+    hand-packed uniform scene rather than trusted from the algebra: the whole
+    point is that float rearrangement does NOT follow real arithmetic.
+
+    The scene-level companion of this check is scripts/m2b_emergence_hash.py,
+    where render_bare/render_shape_taper (one hero) must not move and
+    render_two_heroes must."""
+    p = _params()
+    p.storms.cast = p.storms.cast[:1]          # a single emergent hero
+    sim = Simulation(p, gpu)
+    s = sim.solver
+    heroes = hero_centers(sim.vortices, p.storms)
+    assert len(heroes) == 1
+
+    def render(hs):
+        out = gpu.texture2d((512, 256), 1, "f4", linear=True)
+        try:
+            sim.detail_synth.synthesize(
+                p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
+                sim.profile_dyn, out, p.detail, heroes=hs,
+                hero_emergence=sim.vortices.scene_emergence(p.storms),
+            )
+            return gpu.read_texture(out)[..., 0].astype(np.float64)
+        finally:
+            out.release()
+
+    # Legacy 8-tuple (scene scalar broadcast into every slot) vs the explicit
+    # per-hero value carrying that same scalar: byte-identical, or the
+    # single-hero exactness the presets rely on has been lost.
     np.testing.assert_array_equal(
-        _synth(gpu, (0.9, 0.1), fx=False), _synth(gpu, (0.1, 0.9), fx=False)
+        render([heroes[0][:8]]), render([heroes[0][:8] + (0.9,)])
     )
