@@ -655,6 +655,29 @@ class StormOverride(_Params):
         description="Per-storm solid-body core rotation (vorticity mode). None "
                     "inherits the global storms.hero_solid_core",
     )
+    # The emergence FAMILY (M2-B). emergence gates shape/taper exactly as the
+    # globals do, so a per-storm shape with an inherited emergence of 0 stays
+    # inert -- same coupling as the global levers, per storm.
+    emergence: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Dynamics",
+        description="Per-storm GRS-realism pack strength (annular ring, plateau "
+                    "fill, ragged rim release, band flush). None inherits the "
+                    "global storms.hero_emergence. The shape/taper levers below "
+                    "are scaled by it, so 0 makes this storm a legacy stamped "
+                    "hero even while another placed hero is fully emergent",
+    )
+    shape: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.5, adv=True, ui="Dynamics",
+        description="Per-storm low-order outline deformation (the egg). None "
+                    "inherits the global storms.hero_shape. The seeded lobe "
+                    "PHASES stay global (one hero_shape_seed substream), so two "
+                    "storms deform on the same phases at their own amplitude",
+    )
+    taper: float | None = pfield(
+        None, tier=Tier.RESTART, lo=0.0, hi=1.5, adv=True, ui="Dynamics",
+        description="Per-storm upstream-end wedge taper. None inherits the "
+                    "global storms.hero_taper. Follows THIS storm's wake_dir",
+    )
 
 
 # The M2 per-storm HERO appearance/dynamics levers: (StormOverride attr, the
@@ -671,8 +694,33 @@ CAST_LEVER_SPECS: tuple[tuple[str, str], ...] = (
     ("tint_var", "hero_tint_var"),
     ("wake_detail", "hero_wake_detail"),
     ("solid_core", "hero_solid_core"),
+    ("emergence", "hero_emergence"),
+    ("shape", "hero_shape"),
+    ("taper", "hero_taper"),
 )
 CAST_LEVER_FIELDS: frozenset[str] = frozenset(a for a, _ in CAST_LEVER_SPECS)
+# Flat-float COLUMN of each spec in the packed row. The GPU reads whole vec4, so
+# a lever must never move between vec4 when the layout grows: cols 0..6 are the
+# M2-A layout (vec4_0 = 0..3, vec4_1 = 4..7) and stay put; the M2-B emergence
+# family opens vec4_2 at 8..10. Cols 7 and 11 are reserved padding (packed 0).
+CAST_LEVER_COLS: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6, 8, 9, 10)
+# Floats per vortex in the CastLevers SSBO row (3 vec4).
+CAST_LEVER_WIDTH: int = 12
+_CAST_LEVER_GLOBALS: dict[str, str] = dict(CAST_LEVER_SPECS)
+
+
+def effective_cast_lever(storms: StormsParams, cast_ref: int, attr: str) -> float:
+    """The value a vortex actually runs for CastLevers lever ``attr``: its own
+    cast entry's override, else the global. ``cast_ref`` is the vortex's index
+    into ``storms.cast`` (-1 = seeded/non-hero -> always the global), matching
+    the resolution ``pack_cast_levers_ssbo`` does per row. CPU-side consumers
+    (the flow-renorm quadrature, predicates) must resolve the SAME way the GPU
+    buffer does or they silently key on a value that hero never sees."""
+    if 0 <= cast_ref < len(storms.cast):
+        override = getattr(storms.cast[cast_ref], attr)
+        if override is not None:
+            return float(override)
+    return float(getattr(storms, _CAST_LEVER_GLOBALS[attr]))
 
 
 class StormsParams(_Params):
@@ -2035,6 +2083,20 @@ class PlanetParams(_Params):
                     f"effect with the kinematic solver (vorticity-only lever); set "
                     f"solver.type=vorticity or reset it"
                 )
+            # shape/taper ride the emergence pack exactly as the globals do, so
+            # they are inert whenever THIS storm's effective emergence is 0 --
+            # its own override if it has one, else the global.
+            eff_emergence = (entry.emergence if entry.emergence is not None
+                             else self.storms.hero_emergence)
+            if eff_emergence <= 0.0:
+                for field_name in ("shape", "taper"):
+                    value = getattr(entry, field_name)
+                    if value is not None and value != 0.0:
+                        warnings.append(
+                            f"storms.cast[{i}].{field_name}={value:g} has no effect "
+                            f"at emergence 0 (it rides the emergence pack); set "
+                            f"storms.cast[{i}].emergence or storms.hero_emergence"
+                        )
             if entry.companions == 0 and (
                 entry.companion_aspect is not None
                 or entry.companion_brightness is not None

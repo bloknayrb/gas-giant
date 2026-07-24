@@ -36,7 +36,13 @@ _PINNED: dict[str, str] = {
     # wedge gains a HERO_EMERGENCE variant arm extending its length (rc*7 ->
     # mix to rc*10) with the pre-feature text verbatim in #else — default
     # program text unchanged after preprocessing; p05 9/9 verified same day.
-    "psi.comp":          "4abc2ea619b72c8181a83d2d081b34d4c15623ce",
+    # Updated 2026-07-24 (M2-B per-storm emergence family): the HERO_EMERGENCE
+    # wake-length arm reads a per-hero local `emergence_v` (default = the global
+    # uniform), overridden from THIS hero's binding-5 CastLevers row under
+    # `#ifdef CAST_LEVERS` — the VELOCITY wedge must track the per-storm TRACER
+    # wedge or a placed hero folds a mismatched wake. Default program: the local
+    # equals the uniform, so numerically identical (p05 9/9 same day).
+    "psi.comp":          "b03d6a49c3bd14f40716253ce2927dd412c43eff",
     "velocity.comp":     "a5edeb117303788431b9d1ab686f0dddae402fd6",
     # Updated 2026-07-10 (hero_emergence, GRS-realism pack): pass 2's relaxation
     # lines compile as a HERO_EMERGENCE preprocessor VARIANT (define selected when
@@ -210,7 +216,19 @@ _PINNED: dict[str, str] = {
     # uniforms, so numerically identical — p05 9/9 verified same day (byte-identical
     # by construction; the CAST_LEVERS variant compiles only when a cast hero
     # overrides a lever).
-    "vortex_stamp.glsl": "80aca740a7239e25d08ef9b58e013c7e658c7861",
+    # Updated 2026-07-24 (M2-B per-storm emergence family): emergence/shape/taper
+    # join the hoisted per-hero locals in all FOUR hero scopes (stamp anatomy,
+    # wake block, heroRelaxWeight, heroBandDeflect), each `#ifdef CAST_LEVERS`-
+    # overridden from vec4_2 of this hero's row (the row grew 2 -> 3 vec4, so every
+    # index moved 2*i -> 3*i). heroRelaxWeight's cross-hero max() combine could no
+    # longer scale by one global after the loop, so each accumulator carries the
+    # emergence of the hero that owns it and compares on the SCALED magnitude with a
+    # raw tie-break — arithmetically identical whenever every hero shares one
+    # emergence. Verified by a dedicated emergence-ON kinematic hash capture
+    # (bare / shape+taper / rim+wake / TWO heroes / aspect+interior, all 5
+    # byte-identical across the change) plus p05 9/9, which alone cannot see the
+    # variant.
+    "vortex_stamp.glsl": "3a1bf3124e4cae9ddfd205c1cb715dde636b8873",
     # NOT kinematic — pinned for the opposite reason (PR-43 test review,
     # 2026-07-16): vortex_omega.glsl hosts the vorticity-only hero levers
     # (solid core, emergence ring/skirt, shape/taper/flow-aspect arms), whose
@@ -232,7 +250,14 @@ _PINNED: dict[str, str] = {
     # the buffer). Default path == u_hero_solid_core (byte-identical); the levers-off
     # gate is the dev-0 omega byte-capture (test_hero_emergence.py::_dev0_omega),
     # re-run this pass. Variant-arm-only otherwise.
-    "vortex_omega.glsl": "3b098ac55a8c8e807c4593e07a86f19ee436bdd4",
+    # Updated 2026-07-24 (M2-B per-storm emergence family): emergence/shape/taper
+    # hoisted into per-hero locals inside the HERO_EMERGENCE arm of the solid-core
+    # branch, `#ifdef CAST_LEVERS`-overridden from vec4_2 (index 2*i -> 3*i). Per
+    # storm the omega side therefore acts only for a hero whose own solid_core > 0,
+    # mirroring the existing global coupling. Default path == the uniforms; the
+    # off-state gate is the dev-0 omega byte-capture (test_cast_levers.py /
+    # test_hero_emergence.py::_dev0_omega), re-run this pass.
+    "vortex_omega.glsl": "b749ef928a2f0c56bd62548e28306a1ff659da52",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
     # #ifdef HERO_EMERGENCE => contributes nothing to the default program.

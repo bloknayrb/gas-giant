@@ -28,6 +28,7 @@ from gasgiant.params.model import (
     PoleStyle,
     SolverType,
     StormsParams,
+    effective_cast_lever,
 )
 from gasgiant.params.seeds import subseed
 from gasgiant.sim.advance import advance_registry
@@ -271,9 +272,7 @@ class Solver:
         """
         defines = {"DOMAIN": str(kind)}
         s = self.params.storms
-        if s.hero_emergence > 0.0 and (
-            s.hero_count > 0 or any(c.kind == CastKind.HERO for c in s.cast)
-        ):
+        if self._hero_emergence_active(s):
             defines["HERO_EMERGENCE"] = "1"
         # Hero-adjacent festoon train: same variant discipline. The facade
         # passes hero_wave_lat=None when there is no hero or no band edge
@@ -291,6 +290,28 @@ class Solver:
         if self._cast_levers_active(self.params.storms):
             defines["CAST_LEVERS"] = "1"
         return defines
+
+    @staticmethod
+    def _hero_emergence_active(storms: StormsParams) -> bool:
+        """True when SOME hero runs the emergence pack: the global lever with a
+        hero to apply it to, or a cast HERO carrying its own emergence override
+        (M2-B) -- a placed hero can be emergent while the global is 0.
+
+        DUAL-GATE note: the per-storm emergence reads live in `#ifdef
+        HERO_EMERGENCE` arms and take their value from the CAST_LEVERS buffer,
+        so a cast-only emergent hero needs BOTH variants. That holds by
+        construction -- an `emergence` override is itself a CastLevers field, so
+        `_cast_levers_active` is True whenever this predicate is True for the
+        cast-only reason. Static (no GL context needed) like its sibling."""
+        if storms.hero_emergence > 0.0 and (
+            storms.hero_count > 0 or any(c.kind == CastKind.HERO for c in storms.cast)
+        ):
+            return True
+        return any(
+            (c.emergence if c.emergence is not None else storms.hero_emergence) > 0.0
+            for c in storms.cast
+            if c.kind == CastKind.HERO
+        )
 
     @staticmethod
     def _cast_levers_active(storms: StormsParams) -> bool:
@@ -442,9 +463,15 @@ class Solver:
             # The shader consumes the factor only inside the K arm of the
             # solid-core emergence branch — skip the quadrature whenever that
             # branch cannot run (also keeps the sane-band fallback from ever
-            # firing for a config where the lever is documented inert).
-            if (k == 1.0 or not heroes
-                    or p.hero_solid_core <= 0.0 or p.hero_emergence <= 0.0):
+            # firing for a config where the lever is documented inert). Both
+            # gating levers are per-storm (M2-B), so this asks whether ANY hero
+            # enters that branch, resolving each hero's own overrides — keying on
+            # the globals alone would skip the renorm for a placed hero that runs
+            # the branch on its own solid_core/emergence (globals 0).
+            if (k == 1.0 or not heroes or not any(
+                    effective_cast_lever(p, h.cast_ref, "solid_core") > 0.0
+                    and effective_cast_lever(p, h.cast_ref, "emergence") > 0.0
+                    for h in heroes)):
                 self._flow_renorm = 1.0
             else:
                 rc = float(np.mean([h.r_core for h in heroes]))

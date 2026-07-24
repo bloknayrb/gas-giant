@@ -26,7 +26,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from gasgiant.params.model import (
+    CAST_LEVER_COLS,
     CAST_LEVER_SPECS,
+    CAST_LEVER_WIDTH,
     CastKind,
     PolesParams,
     StormsParams,
@@ -174,11 +176,12 @@ class VortexRegistry:
         return out
 
     def pack_cast_levers_ssbo(self, storms: StormsParams) -> np.ndarray:
-        """(N, 8) float32, two vec4 per vortex, packed in the SAME row order as
+        """(N, 12) float32, THREE vec4 per vortex, packed in the SAME row order as
         ``pack_ssbo`` so row ``i`` indexes the same vortex in both buffers (the
         CAST_LEVERS variant reads it at binding 5):
         [rim_contrast, rim_tint, rim_warp, mottle],
-        [tint_var, wake_detail, solid_core, 0(reserved)].
+        [tint_var, wake_detail, solid_core, 0(reserved)],
+        [emergence, shape, taper, 0(reserved)].
 
         Every row is a fully-RESOLVED value -- no inherit flag reaches the GPU. A
         cast HERO with a per-storm override packs the override; every other vortex
@@ -187,27 +190,27 @@ class VortexRegistry:
         lever), un-overridden heroes still render exactly as the global-uniform
         path would. Re-resolved every step because the vortex list order can shift
         (mergers/trim); the row<->vortex mapping survives only by iterating the
-        same list in the same order as ``pack_ssbo``. Column ``j`` carries lever
-        ``CAST_LEVER_SPECS[j]``; the flat 8-float row is the two vec4 the shader
-        reads at ``2*i`` and ``2*i+1``.
+        same list in the same order as ``pack_ssbo``. Spec ``j`` lands in flat
+        column ``CAST_LEVER_COLS[j]``; the 12-float row is the three vec4 the
+        shader reads at ``3*i``, ``3*i+1`` and ``3*i+2``.
 
         A cast_ref out of range resolves to the global -- safe only because
         storms.cast is RESTART tier: any add/remove/reorder rebuilds the whole
         Solver (and this registry), so a live cast_ref can never point past a
         shortened/reordered list within one run."""
         n = len(self.vortices)
-        out = np.zeros((max(n, 1), 8), dtype=np.float32)
-        # Every row defaults to the resolved GLOBAL values (cols 0..6; col 7 stays
-        # 0); only cast-hero rows with an actual override differ, so patch just
-        # those cells rather than re-assigning every cell every step.
-        out[:n, :7] = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
+        out = np.zeros((max(n, 1), CAST_LEVER_WIDTH), dtype=np.float32)
+        # Every row defaults to the resolved GLOBAL values (the reserved columns
+        # stay 0); only cast-hero rows with an actual override differ, so patch
+        # just those cells rather than re-assigning every cell every step.
+        out[:n, CAST_LEVER_COLS] = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
         for i, v in enumerate(self.vortices):
             if 0 <= v.cast_ref < len(storms.cast):
                 entry = storms.cast[v.cast_ref]
                 for j, (cast_attr, _) in enumerate(CAST_LEVER_SPECS):
                     override = getattr(entry, cast_attr)
                     if override is not None:
-                        out[i, j] = float(override)
+                        out[i, CAST_LEVER_COLS[j]] = float(override)
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -973,7 +976,13 @@ def _add_cast(
             if kind == CastKind.HERO else 0.0
         )
         bow = 0.0
-        if kind == CastKind.HERO and storms.hero_emergence > 0.0:
+        # Per-storm emergence (M2-B) gates the CPU-side wake frame + bow gain for
+        # THIS entry: a placed hero with emergence 0 keeps the legacy WNW wake
+        # convention even while the global (or another placed hero) is emergent.
+        # None inherits the global -> byte-identical to the pre-per-storm path.
+        eff_emergence = (entry.emergence if entry.emergence is not None
+                         else storms.hero_emergence)
+        if kind == CastKind.HERO and eff_emergence > 0.0:
             wake_lat_off, wake_dir = _hero_wake_frame(profiles, lat, entry.radius)
             bow = _hero_bow_gain(profiles, lat, entry.radius)
         if kind == CastKind.HERO:

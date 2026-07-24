@@ -18,6 +18,7 @@ from gasgiant.params.model import (
     PlanetParams,
     StormOverride,
     StormsParams,
+    WakeDir,
 )
 from gasgiant.sim.bands import generate_bands
 from gasgiant.sim.profiles import LatProfiles, build_profiles
@@ -278,18 +279,23 @@ def test_pack_cast_levers_all_global_when_no_overrides():
     """No per-storm overrides -> every row packs the GLOBAL lever values. This is
     the byte-identity-off contract for the CAST_LEVERS variant: an un-overridden
     hero packs exactly what the global-uniform path reads."""
-    from gasgiant.params.model import CAST_LEVER_SPECS
+    from gasgiant.params.model import (
+        CAST_LEVER_COLS,
+        CAST_LEVER_SPECS,
+        CAST_LEVER_WIDTH,
+    )
 
     p = PlanetParams()
     p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
                                    radius=0.1)]
     reg = _gen(p)
     levers = reg.pack_cast_levers_ssbo(p.storms)
-    assert levers.shape == (len(reg.vortices), 8)
+    assert levers.shape == (len(reg.vortices), CAST_LEVER_WIDTH)
     expected = [float(getattr(p.storms, g)) for _, g in CAST_LEVER_SPECS]
+    reserved = sorted(set(range(CAST_LEVER_WIDTH)) - set(CAST_LEVER_COLS))
     for row in levers:
-        assert list(row[:7]) == pytest.approx(expected)
-        assert row[7] == 0.0  # reserved column
+        assert [row[c] for c in CAST_LEVER_COLS] == pytest.approx(expected)
+        assert [row[c] for c in reserved] == [0.0] * len(reserved)
 
 
 def test_pack_cast_levers_override_only_on_that_hero():
@@ -692,3 +698,136 @@ def test_draw_optional_enum_toggle_none_to_value(imgui_ctx, monkeypatch):
 
     assert doc["wake_dir"] == [e.value for e in WakeDir][0]
     assert (changed, committed) == (True, True)
+
+
+# ------------------------------------------- M2-B emergence family (CPU side)
+
+
+def test_cast_lever_cols_match_specs():
+    """CAST_LEVER_COLS is the layout contract: one column per spec, in range, no
+    duplicates, and the M2-A prefix PINNED to columns 0..6 -- the GPU reads whole
+    vec4, so an existing lever that slid to another column (or into another vec4)
+    would silently re-read a different value on the shipped path."""
+    from gasgiant.params.model import (
+        CAST_LEVER_COLS,
+        CAST_LEVER_SPECS,
+        CAST_LEVER_WIDTH,
+    )
+
+    assert len(CAST_LEVER_COLS) == len(CAST_LEVER_SPECS)
+    assert len(set(CAST_LEVER_COLS)) == len(CAST_LEVER_COLS)
+    assert all(0 <= c < CAST_LEVER_WIDTH for c in CAST_LEVER_COLS)
+    assert CAST_LEVER_COLS[:7] == (0, 1, 2, 3, 4, 5, 6)
+    assert [a for a, _ in CAST_LEVER_SPECS][7:] == ["emergence", "shape", "taper"]
+    # ...and the emergence family lands in the THIRD vec4 (cols 8..11).
+    assert all(8 <= c <= 11 for c in CAST_LEVER_COLS[7:])
+
+
+def test_pack_cast_levers_emergence_family_columns():
+    """The emergence family resolves into vec4_2 (cols 8/9/10) on the overriding
+    hero's row only, leaving both reserved columns (7, 11) zero."""
+    p = PlanetParams()
+    p.storms.cast = [
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=-40.0, radius=0.1,
+                      emergence=0.8, shape=1.2, taper=0.4),
+        StormOverride(kind=CastKind.HERO, lat_deg=20.0, lon_deg=40.0, radius=0.1),
+    ]
+    reg = _gen(p)
+    levers = reg.pack_cast_levers_ssbo(p.storms)
+    row = next(levers[i] for i, v in enumerate(reg.vortices) if v.cast_ref == 0)
+    assert row[8] == pytest.approx(0.8)
+    assert row[9] == pytest.approx(1.2)
+    assert row[10] == pytest.approx(0.4)
+    assert row[7] == 0.0 and row[11] == 0.0
+    other = next(levers[i] for i, v in enumerate(reg.vortices) if v.cast_ref == 1)
+    assert other[8] == pytest.approx(p.storms.hero_emergence)
+    assert other[9] == pytest.approx(p.storms.hero_shape)
+    assert other[10] == pytest.approx(p.storms.hero_taper)
+
+
+def test_hero_emergence_predicate_sees_cast_overrides():
+    """HERO_EMERGENCE must compile for a cast hero that is emergent on its OWN
+    override while the global is 0 -- otherwise the per-storm value packs into a
+    buffer whose read sites were never compiled in (a silent legacy hero)."""
+    from gasgiant.sim.solver import Solver
+
+    cast_only = StormsParams(hero_count=0, hero_emergence=0.0, cast=[
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1, emergence=0.8)])
+    inherits_zero = StormsParams(hero_count=0, hero_emergence=0.0, cast=[
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1)])
+    opted_out = StormsParams(hero_count=0, hero_emergence=0.0, cast=[
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1, emergence=0.0)])
+    global_on = StormsParams(hero_count=1, hero_emergence=0.9)
+    global_on_no_hero = StormsParams(hero_count=0, hero_emergence=0.9)
+
+    assert Solver._hero_emergence_active(cast_only) is True
+    assert Solver._hero_emergence_active(inherits_zero) is False
+    assert Solver._hero_emergence_active(opted_out) is False
+    assert Solver._hero_emergence_active(global_on) is True
+    assert Solver._hero_emergence_active(global_on_no_hero) is False  # nothing to apply to
+    # A cast-only emergent hero also selects CAST_LEVERS -- the read sites are
+    # dual-gated, so one predicate without the other renders the wrong hero.
+    assert Solver._cast_levers_active(cast_only) is True
+
+
+def test_cast_entry_emergence_gates_its_own_wake_frame():
+    """The CPU wake frame / bow gain is chosen per ENTRY: a placed hero that opts
+    out of emergence keeps the legacy WNW convention (wake_dir -1, the fixed
+    equatorward lane, bow 0) even while the GLOBAL pack is on -- and vice versa."""
+    def hero(emergence):
+        p = PlanetParams(seed=5)
+        p.storms.hero_count = 0
+        p.storms.hero_emergence = 0.9
+        p.storms.hero_wake_dir = WakeDir.AUTO
+        p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
+                                       radius=0.1, emergence=emergence)]
+        return _cast_hero(_gen(p))
+
+    opted_out = hero(0.0)
+    assert opted_out.wake_dir == -1.0
+    assert opted_out.wake_lat_off == pytest.approx(0.5 * 0.1)   # southern hero lane
+    assert opted_out.bow_gain == 0.0
+    # Inheriting the global (None) keeps the emergent frame: the derived lane
+    # differs from the legacy 0.5*radius one, and the bow gate is live.
+    inherits = hero(None)
+    assert (inherits.wake_lat_off != opted_out.wake_lat_off
+            or inherits.bow_gain != 0.0)
+
+
+def test_flow_renorm_gate_resolves_per_storm_levers():
+    """_hero_flow_renorm skips its quadrature when no hero can enter the K arm.
+    With per-storm levers that question is per hero: a placed hero carrying its own
+    solid_core + emergence must still get the renorm even though both GLOBALS are 0
+    (keying on the globals alone left that hero's widened ring un-renormalized)."""
+    from gasgiant.sim.solver import Solver
+
+    def renorm(**entry_levers):
+        p = PlanetParams(seed=5)
+        p.storms.hero_count = 0
+        p.storms.hero_solid_core = 0.0
+        p.storms.hero_emergence = 0.0
+        p.storms.hero_flow_aspect = 2.0
+        p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
+                                       radius=0.1, **entry_levers)]
+        solver = Solver.__new__(Solver)      # no GL: only params + registry are read
+        solver.params = p
+        solver.vortices = _gen(p)
+        solver._flow_renorm = None
+        return Solver._hero_flow_renorm(solver)
+
+    assert renorm() == 1.0                                    # globals 0 -> skipped
+    assert renorm(solid_core=0.9) == 1.0                      # emergence still 0
+    assert renorm(solid_core=0.9, emergence=0.9) != 1.0       # this hero DOES run it
+
+
+def test_shape_taper_inert_at_zero_emergence_warns():
+    """shape/taper ride the emergence pack, so they are inert at effective
+    emergence 0 -- warn rather than silently ignore (the GUI toasts these)."""
+    p = PlanetParams()
+    p.storms.hero_emergence = 0.0
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, radius=0.1,
+                                   shape=1.2)]
+    assert any("no effect at emergence 0" in w for w in p.validation_warnings())
+    # Its own emergence override lifts the gate -> no warning.
+    p.storms.cast[0].emergence = 0.8
+    assert not any("no effect at emergence 0" in w for w in p.validation_warnings())

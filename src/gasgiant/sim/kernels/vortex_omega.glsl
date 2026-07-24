@@ -243,7 +243,7 @@ float vortexOmegaAccum(vec3 p) {
         // it declares Vortices). Default path == u_hero_solid_core (byte-identical).
         float solidcore_v = u_hero_solid_core;
 #ifdef CAST_LEVERS
-        solidcore_v = cast_lever_data[2 * i + 1].z;
+        solidcore_v = cast_lever_data[3 * i + 1].z;
 #endif
         if (b.y == VKIND_HERO && solidcore_v > 0.0) {
             // ('patch' is a reserved GLSL keyword — use 'disk'.)
@@ -259,6 +259,20 @@ float vortexOmegaAccum(vec3 p) {
             // raggedness exactly where the real storm has it, no injected
             // noise. (Amplitude/placement rationale lives with the code below.)
 #ifdef HERO_EMERGENCE
+            // Per-storm emergence family (M2-B): the globals by default, THIS
+            // hero's own row under CAST_LEVERS -- the same resolution
+            // solidcore_v above uses. Reached only for a hero with
+            // solidcore_v > 0, so per-storm emergence acts on the omega side
+            // exactly where the global one does (documented coupling).
+            float emergence_v = u_hero_emergence;
+            float shape_v = u_hero_shape;
+            float taper_v = u_hero_taper;
+#ifdef CAST_LEVERS
+            {
+                vec4 cl2 = cast_lever_data[3 * i + 2];
+                emergence_v = cl2.x; shape_v = cl2.y; taper_v = cl2.z;
+            }
+#endif
             // Ring placed so its shear peaks just inside the visible oval edge
             // (the plateau fill's edge sits at q~1.0, the authored hero_radius):
             // folding happens at the color boundary, matching the real GRS.
@@ -278,7 +292,7 @@ float vortexOmegaAccum(vec3 p) {
                 // full-shield regime; watch for roll-up per the note below.
                 float qh = q;
                 float tcomp = 1.0;
-                if (u_hero_shape > 0.0 || u_hero_taper > 0.0
+                if (shape_v > 0.0 || taper_v > 0.0
                         || u_hero_flow_aspect != 1.0) {
                     vec3 hcs = a.xyz;
                     vec3 hews = cross(vec3(0.0, 1.0, 0.0), hcs);
@@ -308,19 +322,19 @@ float vortexOmegaAccum(vec3 p) {
                             tcomp = u_hero_flow_renorm;
                         }
                         float Rrs = 1.0;
-                        if (u_hero_shape > 0.0) {
+                        if (shape_v > 0.0) {
                             vec3 hs2 = cross(hcs, hs1);
                             float hths = atan(dot(p, hs2), dot(p, hs1));
                             float thps = 3.14159265 - hths;   // 0 = local EAST
                             float neqs = (a.y < 0.0) ? max(sin(hths), 0.0)
                                                      : max(-sin(hths), 0.0);
                             vec3 sphs = u_hero_shape_phase;
-                            Rrs -= u_hero_shape * u_hero_emergence
+                            Rrs -= shape_v * emergence_v
                                    * (0.11 * neqs * neqs
                                       - 0.075 * sin(2.0 * thps + sphs.x)
                                       - 0.055 * sin(3.0 * thps + sphs.y));
                         }
-                        if (u_hero_taper > 0.0) {
+                        if (taper_v > 0.0) {
                             // Upstream-signed SQUASHED cosine over r_core*qb
                             // = |squashed offset| in the FLOW metric (aspf,
                             // qb): the wedge deforms the ring it rides, so it
@@ -337,7 +351,7 @@ float vortexOmegaAccum(vec3 p) {
                             float tc = max(uct, 0.0);
                             float tc2 = tc * tc;
                             float tw = 6.75 * tc2 * tc2 * (1.0 - tc2);
-                            Rrs -= 0.25 * u_hero_taper * u_hero_emergence * tw;
+                            Rrs -= 0.25 * taper_v * emergence_v * tw;
                             // Same slider-space clamp, same guard placement
                             // as the tracer sites.
                             Rrs = max(Rrs, 0.4);
@@ -353,8 +367,8 @@ float vortexOmegaAccum(vec3 p) {
                             // UNIFORMLY (cancellation fraction untouched);
                             // the local deficit stays where the wedge is,
                             // the planet-scale moment does not move.
-                            tcomp *= 1.0 / (1.0 - 0.105 * u_hero_taper
-                                                  * u_hero_emergence);
+                            tcomp *= 1.0 / (1.0 - 0.105 * taper_v
+                                                  * emergence_v);
                         }
                         qh = qb / Rrs;
                     }
@@ -396,7 +410,7 @@ float vortexOmegaAccum(vec3 p) {
                 // (cancellation fraction untouched). tcomp = 1.0 exactly
                 // whenever taper is off -> byte-identical.
                 ring *= tcomp;
-                disk = mix(disk, ring, u_hero_emergence);
+                disk = mix(disk, ring, emergence_v);
             }
 #endif
             contrib = mix(contrib, disk, solidcore_v);
