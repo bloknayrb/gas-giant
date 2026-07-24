@@ -335,6 +335,19 @@ class SimParams(_Params):
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Simulation",
         description="Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)",
     )
+    resolution_invariant: bool = pfield(
+        False, tier=Tier.RESTART, adv=True, ui="Simulation",
+        description="Auto-scale time-axis settings so a sim tuned at a lower resolution develops "
+        "similarly at higher resolution (iterate low, render high). Off = byte-identical. Scaling "
+        "normalizes to reference_resolution. Fully effective for nudge-dominated presets; "
+        "turbulence-dominated presets (strong vort_inject) improve only partially.",
+    )
+    reference_resolution: int = pfield(
+        2048, tier=Tier.RESTART, lo=512, hi=8192, adv=True, ui="Simulation",
+        description="The sim resolution these settings were authored/tuned at; invariant "
+        "scaling normalizes development to it. Only used when resolution_invariant is on "
+        "(s == 1 at this resolution is a no-op).",
+    )
 
 
 class JetsParams(_Params):

@@ -405,6 +405,62 @@ How far "same seed → same bytes" goes is **solver-mode-dependent**:
   tests; llvmpipe in CI is stable). Never write a byte-exact assertion
   against vorticity-mode output.
 
+## Resolution invariance (opt-in)
+
+`sim.resolution_invariant` (default off) lets a user tune settings at a low
+sim resolution for fast iteration and render at a high one without the
+development changing character. Off, or when `sim.resolution ==
+sim.reference_resolution`, it is a **structural no-op — byte-identical** (the
+p05 gate is kinematic@512 with the flag off).
+
+The sim is already spatially resolution-robust at t=0: initial fields are
+continuous functions of sphere position sampled at pixel centers (not
+per-pixel random draws), and all geometry is in radians / core-radius units,
+so raising resolution just samples the same structure more finely. The drift
+is on the **time axis**. `compute_dt` already sets `dt` in proportion to
+`1/resolution` (a ~1.2-cell CFL), but `dev_steps` and every per-step rate are
+authored as fixed *step counts*, so at a different resolution the developed
+physical time (`dev_steps · dt`) and the forcing-vs-relaxation balance both
+move. The scaling layer (`sim/resolution_scaling.py`) derives one factor
+`s = resolution / reference_resolution` and rescales, all as structural no-ops
+at `s == 1`:
+
+- **Durations × s** (`dev_steps`, event/merger/debris lifetimes, baroclinic
+  update cadence) via a single `effective_dev_steps` threaded through the whole
+  seeded timeline — drift compensation, merger + outbreak scheduling — so storms
+  land at the same physical longitude/time at any resolution (intent guards stay
+  on raw `dev_steps`).
+- **Deterministic per-step decays decay-exact** `1 − (1−f)^(1/s)`
+  (`vort_drag`, `vort_eddy_drag`, relaxation τ, tracer relax/replenish — all
+  genuine `[0,1)` retained fractions): the linear `f/s` would exceed 1 and invert
+  a `mix()` at `s < 1`.
+- **Additive per-step rate coefficients that write the persistent state ÷ s**
+  (`vort_psi_drag`, `q += r·ψ′`, `hi=20`): a rate, *not* a fraction — its induced
+  per-mode decay `r/(k²+1/L_d²)` is linear in `r`, so linear `r/s` is the correct
+  first-order remap and stays continuous across the whole range (decay-exact would
+  mistreat `r` as a fraction and silently no-op at `r ≥ 1`).
+- **White-in-time stochastic forcings ÷√s** (`vort_inject`, `hero_wake_turb`):
+  variance-injection-rate preserving.
+- **`turb_time` reframed onto physical time** (`evolution_rate / s`).
+- **Not scaled — already invariant:** the baroclinic overlay `gain` is injected
+  into the instantaneous Poisson RHS (never accumulated into `q`), so its only
+  effect is dt-weighted advection (`gain·dt·steps` is fixed); only its refresh
+  *cadence* scales ×s. Grid-Nyquist hyperviscosity is likewise unscaled (below).
+
+**Honest scope — this is calibration, not a physics guarantee.** It fully
+holds for **nudge-dominated** presets (the large scale is set by the painted
+template + nudge). **Turbulence-dominated** presets — the flagship
+`gas_giant_warm` (`vort_inject 1.8`, weak `relax_tau`) — improve but do **not**
+fully collapse: hyperviscosity is normalized to the grid-Nyquist mode
+(`omega_force.comp`), so its dissipation scale *is* the grid, and the 2-D
+inverse cascade feeds the growing resolved inertial range up into the jets and
+dominant eddies. That effective-Reynolds drift (~s²–s³ at a fixed physical
+scale) is intrinsic and deliberately **left unscaled**. Exact fine-detail match
+(a finer grid resolves filaments a coarse grid cannot) and cross-resolution
+byte-identity are likewise out of reach and not goals. The GUI surfaces the live
+`s` with a turbulence-dominated caveat so the low-res preview never implies
+false fidelity.
+
 ## Testing
 
 - Unit (no GPU): params/presets/migrations, randomize determinism, palette,

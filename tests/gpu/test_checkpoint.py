@@ -109,6 +109,41 @@ def test_velocity_edit_checkpoint_restores_adaptation(gpu, tmp_path):
     )
 
 
+def test_velocity_edit_checkpoint_restores_adaptation_scaled(gpu, tmp_path):
+    """The _extra_steps checkpoint change (store sim._extra_steps directly, not
+    steps_target - dev_steps) only BITES when effective_dev_steps != dev_steps,
+    i.e. resolution_invariant on at s != 1 -- the flag-off adaptation test cannot
+    distinguish the new formula from the old. Here s == 2, so steps_target =
+    2*dev_steps + _extra_steps and the old `steps_target - dev_steps` would have
+    folded the scaling delta (dev_steps) into the resumed adaptation budget."""
+    p = PlanetParams(seed=9)
+    p.sim.resolution = 1024
+    p.sim.dev_steps = 60
+    p.sim.resolution_invariant = True
+    p.sim.reference_resolution = 512  # s = 2 -> effective_dev_steps = 120
+    sim = Simulation(p, gpu)
+    sim.run_to_completion()
+
+    edited = sim.params.model_copy(deep=True)
+    edited.jets.strength = sim.params.jets.strength * 1.2
+    sim.update_params(edited)
+    assert not sim.is_developed  # adaptation window open
+    assert sim._extra_steps > 0
+    # The change under test: _extra_steps is the adaptation budget ALONE, not
+    # steps_target - dev_steps (which would be inflated by the +dev_steps scaling).
+    assert sim._extra_steps != sim.steps_target - p.sim.dev_steps
+    target = sim.steps_target
+    sim.solver.step(10)  # mid-adaptation
+
+    path = tmp_path / "mid_adapt_scaled.npz"
+    save_checkpoint(sim, path)
+    restored = load_checkpoint(path, gpu)
+
+    assert restored.steps_target == target
+    assert restored._extra_steps == sim._extra_steps
+    assert not restored.is_developed
+
+
 def test_merger_checkpoint_round_trips_cooldowns(gpu, tmp_path):
     """With mergers enabled, the serialized registry (incl. cooldown) must
     restore exactly and continue bit-identically."""

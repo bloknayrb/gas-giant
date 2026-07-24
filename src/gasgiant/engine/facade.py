@@ -37,6 +37,11 @@ from gasgiant.sim.profiles import (
 from gasgiant.sim.profiles import (
     seat_quality as _seat_quality,
 )
+from gasgiant.sim.resolution_scaling import (
+    effective_dev_steps,
+    scale_duration,
+    scale_factor,
+)
 from gasgiant.sim.solver import BLEND_BAND, RHO_MAX, Solver, compute_dt
 from gasgiant.sim.vortices import generate_vortices
 
@@ -112,10 +117,17 @@ class Simulation:
         )
         self._seat_profile = None  # invalidate the bracket-off meter cache
         dt = compute_dt(p.sim.resolution, p.sim.dt_scale, self.profiles.max_speed)
+        # Resolution-invariant scaling: dt already tracks 1/resolution, so the
+        # seeded timeline (drift compensation, merger + outbreak scheduling,
+        # transient lifetimes) is anchored to the EFFECTIVE step count the solver
+        # will run -- step_scale=1.0 (flag off or authored-at-reference) keeps
+        # every registry/event byte-identical.
+        step_scale = scale_factor(p)
         self.vortices = generate_vortices(
             p.seed, self.bands, self.profiles, p.storms, p.poles,
             dt=dt,
             dev_steps=p.sim.dev_steps,
+            step_scale=step_scale,
         )
         self.lanes = select_lanes(p.seed, self.bands, p.bands.lane_density)
 
@@ -210,7 +222,27 @@ class Simulation:
         genuine unexpected error propagates loudly."""
         bp = self.params.solver.baroclinic
         self._baro_next_update = 0
-        self._baro_update_every = bp.update_every
+        # Resolution-invariant cadence: the main run is effective_dev_steps long
+        # (dev_steps * s), so refreshing the source every s-scaled main-steps keeps
+        # the REFRESH COUNT -- and hence the driver's total internal advancement --
+        # constant across resolution. The warmup and per-refresh internal step
+        # budget stay UNSCALED: the driver runs on a fixed SRC_W x SRC_H grid whose
+        # dt does not track sim resolution, so scaling them would change the
+        # baroclinic physical time. s == 1 (flag off / at reference) => bp.update_every.
+        s = scale_factor(self.params)
+        # Reuse scale_duration (round(n*s), structural no-op at s==1), flooring the
+        # scaled branch only so the s==1 / flag-off path passes bp.update_every
+        # through byte-identically (mirrors how effective_dev_steps floors it).
+        eff_cadence = scale_duration(bp.update_every, s)
+        self._baro_update_every = eff_cadence if s == 1.0 else max(1, eff_cadence)
+        # Gain is deliberately NOT scaled. The source is injected into the Poisson
+        # RHS only (omega_recover.comp: orel = q - f + gain*f0*src) -- an INSTANTANEOUS
+        # per-step overlay, never accumulated into the persistent q. Its only effect on
+        # the carried state is via the psi -> velocity -> advection channel, which is
+        # dt-weighted, so its total contribution ~ gain*dt*eff = gain*dt_ref*dev_steps
+        # is already resolution-invariant. Scaling gain by 1/s would inject a spurious
+        # 1/s and BREAK that invariance. (Contrast vort_psi_drag, which writes the
+        # persistent q directly with no dt and so DOES scale -- see scale_rate.)
         self._baro_gain = bp.gain
         self._baro_steps_per_update = bp.baro_steps_per_update
         self._baro_degraded_reason = None
@@ -497,7 +529,9 @@ class Simulation:
 
     @property
     def steps_target(self) -> int:
-        return self.params.sim.dev_steps + self._extra_steps
+        # Effective (resolution-scaled) development length: dev_steps * s, so the
+        # same physical time elapses at any resolution (s == 1 => raw dev_steps).
+        return effective_dev_steps(self.params) + self._extra_steps
 
     @property
     def is_developed(self) -> bool:

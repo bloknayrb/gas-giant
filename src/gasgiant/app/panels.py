@@ -180,6 +180,40 @@ def _draw_bracket_note(doc: dict[str, Any]) -> None:
         )
 
 
+def _draw_resolution_scale_meter(doc: dict[str, Any]) -> None:
+    """Live resolution-invariant scale readout under the Simulation group.
+
+    When ``resolution_invariant`` is on, shows the effective scale
+    ``s = resolution / reference_resolution`` (what the time-axis auto-scaling is
+    doing) and, for turbulence-dominated presets, the honest caveat that the large
+    scale is only PARTIALLY invariant -- grid-locked hyperviscosity + the 2-D
+    inverse cascade mean fine detail and even some eddy structure still drift with
+    resolution. Reads the draft doc so it tracks slider drags; silent when off."""
+    sim = doc.get("sim", {})
+    if not sim.get("resolution_invariant", False):
+        return
+    ref = sim.get("reference_resolution", 0) or 0
+    res = sim.get("resolution", 0)
+    if ref <= 0:
+        return
+    s = res / ref
+    if abs(s - 1.0) < 1e-9:
+        imgui.text_colored(imgui.ImVec4(*_SEAT_COLORS["green"]),
+                           "resolution scale s = 1.00 (at reference — no scaling)")
+        return
+    imgui.text_colored(
+        imgui.ImVec4(*_SEAT_COLORS["green"]),
+        f"resolution scale s = {s:.2f} (development time + per-step rates auto-scaled)",
+    )
+    solver = doc.get("solver", {})
+    if solver.get("type") == "vorticity" and solver.get("vort_inject", 0.0) > 0.5:
+        imgui.text_colored(
+            imgui.ImVec4(*_SEAT_COLORS["amber"]),
+            "turbulence-dominated preset: large scale is only PARTIALLY invariant; "
+            "fine detail will still differ from the low-res preview",
+        )
+
+
 def draw_params_panel(
     params: PlanetParams, state: PanelState | None = None, sim: Any = None
 ) -> tuple[dict[str, Any], bool, bool]:
@@ -501,6 +535,8 @@ def _draw_model(
                 _draw_seat_meter(sim, doc[name])
             if name == "jets":
                 _draw_bracket_note(doc)
+            if name == "sim":
+                _draw_resolution_scale_meter(doc)
             if name == "emission":
                 _draw_emission_aurora_note(doc[name])
             if opened:

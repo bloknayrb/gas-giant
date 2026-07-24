@@ -132,7 +132,12 @@ def save_checkpoint(sim: Simulation, path: Path) -> None:
         preset=json.dumps(to_preset_doc(sim.params)),
         generation_version=GENERATION_VERSION,
         step_index=s.step_index,
-        extra_steps=np.int32(sim.steps_target - sim.params.sim.dev_steps),
+        # The VELOCITY-tier adaptation budget only (restored verbatim into
+        # _extra_steps on load). Saved directly rather than as
+        # steps_target - dev_steps: under resolution-invariant scaling
+        # steps_target = effective_dev_steps + _extra_steps, so subtracting raw
+        # dev_steps would fold the scaling delta into the resumed budget.
+        extra_steps=np.int32(sim._extra_steps),
         tracers_eq=sim.gpu.read_texture(s.equirect.tracers.cur),
         tracers_n=sim.gpu.read_texture(s.north.tracers.cur),
         tracers_s=sim.gpu.read_texture(s.south.tracers.cur),
