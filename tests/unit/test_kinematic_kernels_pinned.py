@@ -224,11 +224,18 @@ _PINNED: dict[str, str] = {
     # longer scale by one global after the loop, so each accumulator carries the
     # emergence of the hero that owns it and compares on the SCALED magnitude with a
     # raw tie-break — arithmetically identical whenever every hero shares one
-    # emergence. Verified by a dedicated emergence-ON kinematic hash capture
-    # (bare / shape+taper / rim+wake / TWO heroes / aspect+interior, all 5
-    # byte-identical across the change) plus p05 9/9, which alone cannot see the
-    # variant.
-    "vortex_stamp.glsl": "3a1bf3124e4cae9ddfd205c1cb715dde636b8873",
+    # emergence. Verified by `uv run python scripts/m2b_emergence_hash.py --check`
+    # (bare / shape+taper / rim+wake / TWO CONTENDING heroes / aspect+interior,
+    # all 5 byte-identical across the change) — that is the gate for THIS file's
+    # variant arms; p05 9/9 cannot see them at all (every p05 config has
+    # hero_emergence 0, so HERO_EMERGENCE never compiles).
+    # Re-pinned 2026-07-24 (M2-B review): heroRelaxWeight's hero loop now skips
+    # heroes at emergence 0 outright. Without that skip their scaled candidate
+    # (0) TIED the initial accumulator and the raw tie-break handed them the
+    # slot, so an opted-out storm's raw wake window rode `flush *= 1.0 - wrel`
+    # into a DIFFERENT, emergent hero's flush. Byte-identical for a shared
+    # emergence > 0 (the guard is then always true) — same 5 hashes, p05 9/9.
+    "vortex_stamp.glsl": "e1f250b233d880d191de2d8c0da50500513f6f65",
     # NOT kinematic — pinned for the opposite reason (PR-43 test review,
     # 2026-07-16): vortex_omega.glsl hosts the vorticity-only hero levers
     # (solid core, emergence ring/skirt, shape/taper/flow-aspect arms), whose

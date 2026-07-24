@@ -11,10 +11,14 @@ cannot see (p05 renders only the DEFAULT program; the source-pin guards file tex
   3. per-storm-ness — SWAPPING which of two heroes carries an override changes the
      output, which is impossible if the value were still a single global uniform;
   4. dev-0 omega: a per-storm solid_core lands on the right hero's vorticity patch
-     (the byte-exact vorticity carve-out — read before any SOR/advection).
+     (the byte-exact vorticity carve-out — read before any SOR/advection);
+  5. (M2-B) the emergence family — emergence/shape/taper — on both the stamp and
+     the omega side, plus the two-spellings equivalence that keeps a cast-only
+     emergent hero identical to the same storm expressed through the global.
 
-Stamp levers (rim_*/mottle/tint_var/wake_detail) are exercised on the KINEMATIC path
-(byte-exact developed tracers); solid_core on the vorticity omega_init texture.
+Stamp levers (rim_*/mottle/tint_var/wake_detail) and the emergence family are
+exercised on the KINEMATIC path (byte-exact developed tracers); solid_core and the
+omega-side shape/taper on the vorticity omega_init texture.
 """
 from __future__ import annotations
 
@@ -107,7 +111,7 @@ def test_cast_levers_are_per_storm(gpu):
 
 
 def test_cast_wake_detail_override_reaches_gpu(gpu):
-    """wake_detail rides a SEPARATE index in the wake block (cast_lever_data[2*i+1].y,
+    """wake_detail rides a SEPARATE index in the wake block (cast_lever_data[3*i+1].y,
     hand-written apart from the interior cl0/cl1 reads). Drive it non-zero — no other
     test exercises that column, so a typo there would otherwise pass silently."""
     p_off = _kin_params()
@@ -182,37 +186,52 @@ def test_cast_solid_core_is_per_storm_on_omega(gpu):
 # =============================================== M2-B: the emergence family
 # emergence/shape/taper live in vec4_2 of the row and, unlike the M2-A levers,
 # feed a CROSS-HERO max() combine (heroRelaxWeight) that used to scale by one
-# global after its loop. The equivalence test below is the gate on that
-# restructure; the swap tests prove the values are genuinely per storm.
+# global after its loop. Each accumulator there now carries the emergence of the
+# hero that owns it. NOTE what the equivalence test below does and does NOT gate:
+# the `_e` companions are in the plain HERO_EMERGENCE program, NOT behind
+# CAST_LEVERS, so BOTH sides of it run the restructured combine — it gates
+# SSBO-vs-uniform value resolution. The restructure against the pre-M2-B
+# single-scale arithmetic is gated by `scripts/m2b_emergence_hash.py --check`
+# (machine-local baseline, kinematic/byte-exact), not by anything in-repo.
 
-def _emergent_kin(global_emergence: float = 0.9, **globals_) -> PlanetParams:
-    """Kinematic cast-only scene running the emergence pack from the GLOBAL lever
-    (hero_count 0, so the variant is selected by the cast hero's existence)."""
+# Two heroes ~14 deg apart at one latitude: close enough that each sits inside
+# the other's q<=4.2 rim/flush window AND its wake wedge, so heroRelaxWeight's
+# cross-hero max() genuinely CONTENDS. (The obvious far-apart pair -- opposite
+# hemispheres, 80+ deg -- has disjoint windows and silently degenerates into two
+# independent single-hero scenes, where the max never contends at all.)
+_PAIR = ((-20.0, -7.0), (-20.0, 7.0))
+
+
+def _emergent_kin(emergence: float = 0.9, taper: float = 0.0) -> PlanetParams:
+    """Kinematic cast-only scene running the emergence pack from the GLOBAL levers
+    (hero_count 0, so the variant is selected by the cast heroes' existence).
+    hero_shape rides its 1.0 model default — the outline deformation is already
+    live in every scene here."""
     p = _kin_params()
-    p.storms.hero_emergence = global_emergence
-    for k, v in globals_.items():
-        setattr(p.storms, k, v)
+    p.storms.hero_emergence = emergence
+    p.storms.hero_taper = taper
     return p
 
 
 def test_emergence_family_matching_global_is_byte_identical(gpu):
-    """THE M2-B equivalence gate. TWO cast heroes at one global emergence, once
-    with the levers left None (default program, emergence scaled once after
-    heroRelaxWeight's cross-hero max) and once with every hero carrying that same
-    value explicitly (CAST_LEVERS variant, each accumulator scaled by its owner's
-    emergence). The restructure is only legitimate if these are byte-identical:
-    max(E*a, E*b) picks the same candidate as E*max(a,b), and the final combine
-    keeps the winner's emergence, so a uniform-emergence scene is unchanged.
+    """Forced-variant no-op for the emergence family: TWO CONTENDING cast heroes
+    at one global emergence, once with the levers left None (values reach the
+    shader as uniforms) and once with every hero carrying that same value
+    explicitly (values reach it through the binding-5 row). Byte-identical is the
+    only legitimate outcome — same numbers, different transport.
 
-    Two heroes is load-bearing — with one hero the max() never contends and the
-    restructure would be trivially safe."""
-    p_none = _emergent_kin(hero_shape=1.0, hero_taper=0.8)
-    p_none.storms.cast = [_hero(-20.0, -40.0), _hero(20.0, 40.0)]
+    Contention is load-bearing: these two heroes overlap, so heroRelaxWeight's
+    max() actually compares candidates from different heroes and the `_e`
+    bookkeeping is exercised. With a far-apart pair the max never contends."""
+    g = _emergent_kin(taper=0.8).storms
+    p_none = _emergent_kin(taper=0.8)
+    p_none.storms.cast = [_hero(*_PAIR[0]), _hero(*_PAIR[1])]
 
-    p_match = _emergent_kin(hero_shape=1.0, hero_taper=0.8)
+    p_match = _emergent_kin(taper=0.8)
     p_match.storms.cast = [
-        _hero(-20.0, -40.0, emergence=0.9, shape=1.0, taper=0.8),
-        _hero(20.0, 40.0, emergence=0.9, shape=1.0, taper=0.8),
+        _hero(*pos, emergence=g.hero_emergence, shape=g.hero_shape,
+              taper=g.hero_taper)
+        for pos in _PAIR
     ]
 
     np.testing.assert_array_equal(_tracers(p_none, gpu), _tracers(p_match, gpu))
@@ -225,12 +244,39 @@ def test_emergence_is_per_storm(gpu):
     def scene(first: float, second: float) -> np.ndarray:
         p = _emergent_kin()
         p.storms.cast = [
-            _hero(-20.0, -40.0, emergence=first),
-            _hero(20.0, 40.0, emergence=second),
+            _hero(*_PAIR[0], emergence=first),
+            _hero(*_PAIR[1], emergence=second),
         ]
         return _tracers(p, gpu).astype(np.float64)
 
     assert np.abs(scene(0.9, 0.0) - scene(0.0, 0.9)).max() > 1e-3
+
+
+def test_opted_out_hero_does_not_touch_its_neighbours_relax_weight(gpu):
+    """A hero at emergence 0 opted OUT: it must not reach heroRelaxWeight's
+    accumulators at all. Its scaled candidate is 0, which TIES the initial
+    `_e * acc` of 0 — without the loop-top guard the raw tie-break hands it the
+    slot, and its RAW wake window then rides `flush *= 1.0 - wrel` into the
+    EMERGENT neighbour's flush (and its zero `_e` zeroes the neighbour's `infl`).
+
+    So: an emergent hero alone must render identically to the same hero with an
+    opted-out neighbour ADDED far enough away to have no stamp of its own inside
+    the emergent hero's neighborhood... which is not achievable while keeping the
+    windows overlapping. Instead assert the invariant that IS separable: moving
+    the opted-out neighbour's own levers (which only its stamp reads) must not
+    disturb the emergent hero's relax weight, i.e. the two scenes differ only
+    where the opted-out hero itself is stamped."""
+    def scene(neighbour_taper: float) -> np.ndarray:
+        p = _emergent_kin(taper=0.8)
+        p.storms.cast = [
+            _hero(*_PAIR[0], emergence=0.9),
+            _hero(*_PAIR[1], emergence=0.0, taper=neighbour_taper),
+        ]
+        return _tracers(p, gpu).astype(np.float64)
+
+    # taper is emergence-scaled, so on an emergence-0 hero it is inert
+    # EVERYWHERE — including through the accumulators it must not reach.
+    np.testing.assert_array_equal(scene(0.0), scene(1.4))
 
 
 def test_cast_only_emergence_selects_the_variant(gpu):
@@ -238,44 +284,103 @@ def test_cast_only_emergence_selects_the_variant(gpu):
     emergence override must still select HERO_EMERGENCE (dual-gated with
     CAST_LEVERS, which its own presence satisfies). Off-by-predicate would
     silently render the legacy stamped hero, so compare against emergence 0."""
-    p_off = _emergent_kin(global_emergence=0.0)
+    p_off = _emergent_kin(0.0)
     p_off.storms.cast = [_hero(-20.0, 0.0, emergence=0.0)]
-    p_on = _emergent_kin(global_emergence=0.0)
+    p_on = _emergent_kin(0.0)
     p_on.storms.cast = [_hero(-20.0, 0.0, emergence=0.9)]
 
     assert np.abs(_tracers(p_on, gpu).astype(np.float64)
                   - _tracers(p_off, gpu).astype(np.float64)).max() > 1e-3
 
 
-def test_shape_and_taper_are_per_storm(gpu):
+@pytest.mark.parametrize("lever", ["shape", "taper"])
+def test_shape_and_taper_are_per_storm(gpu, lever):
     """shape (vec4_2.y) and taper (vec4_2.z) ride their own columns and their own
     read sites (stamp anatomy, heroRelaxWeight's Rr/twr, heroBandDeflect's hold).
-    Swap them between two equally-emergent heroes: a wrong column or a stale
-    global would leave the two scenes identical."""
-    def scene(first: tuple[float, float], second: tuple[float, float]) -> np.ndarray:
+    Swap ONE at a time between two equally-emergent heroes: driving both together
+    would still differ if the two columns were SWAPPED, or if one of them were
+    never read at all — which is exactly the defect a column test must catch."""
+    def scene(first: float, second: float) -> np.ndarray:
         p = _emergent_kin()
         p.storms.cast = [
-            _hero(-20.0, -40.0, emergence=0.9, shape=first[0], taper=first[1]),
-            _hero(20.0, 40.0, emergence=0.9, shape=second[0], taper=second[1]),
+            _hero(*_PAIR[0], emergence=0.9, **{lever: first}),
+            _hero(*_PAIR[1], emergence=0.9, **{lever: second}),
         ]
         return _tracers(p, gpu).astype(np.float64)
 
-    assert np.abs(scene((1.4, 1.2), (0.0, 0.0))
-                  - scene((0.0, 0.0), (1.4, 1.2))).max() > 1e-3
+    assert np.abs(scene(1.4, 0.0) - scene(0.0, 1.4)).max() > 1e-3
 
 
-def test_per_storm_emergence_on_omega_needs_that_heros_solid_core(gpu):
+def _omega_scene(solid: float, **overrides) -> PlanetParams:
+    """Vorticity dev-0 scene, both cast heroes at the same solid_core, each
+    carrying whatever emergence-family overrides the caller passes as
+    ``{lever}`` / ``{lever}2`` pairs."""
+    p = _vort_params(solid_core=solid, second_solid_core=solid)
+    p.storms.hero_emergence = 0.9
+    for name, value in overrides.items():
+        idx = 1 if name.endswith("2") else 0
+        setattr(p.storms.cast[idx], name.rstrip("2"), value)
+    return p
+
+
+def test_per_storm_emergence_on_omega_is_a_noop_without_solid_core(gpu):
     """Documented coupling, both directions, on the byte-exact dev-0 omega:
 
     (a) with solid_core 0 on both heroes the omega side never enters the ring
         branch, so per-storm emergence cannot move omega -> byte-identical;
-    (b) with solid_core on, swapping which hero is emergent DOES move it."""
-    def scene(solid: float, e_first: float, e_second: float) -> np.ndarray:
-        p = _vort_params(solid_core=solid, second_solid_core=solid)
-        p.storms.hero_emergence = 0.9
-        p.storms.cast[0].emergence = e_first
-        p.storms.cast[1].emergence = e_second
-        return _dev0_omega(p, gpu)
+    (b) with solid_core on, swapping which hero is emergent DOES move it.
 
-    np.testing.assert_array_equal(scene(0.0, 0.9, 0.0), scene(0.0, 0.0, 0.9))
-    assert np.abs(scene(0.9, 0.9, 0.0) - scene(0.9, 0.0, 0.9)).max() > 1e-3
+    Named `..._is_a_noop_...` deliberately: gpu-smoke selects on
+    "identical or noop or no_op", and (a) is the branch's only byte-exact
+    assertion on the omega path — off the blocking job it would run nightly
+    only."""
+    def omega(solid, e_first, e_second):
+        return _dev0_omega(_omega_scene(solid, emergence=e_first,
+                                        emergence2=e_second), gpu)
+
+    np.testing.assert_array_equal(omega(0.0, 0.9, 0.0), omega(0.0, 0.0, 0.9))
+    assert np.abs(omega(0.9, 0.9, 0.0) - omega(0.9, 0.0, 0.9)).max() > 1e-3
+
+
+@pytest.mark.parametrize("lever", ["shape", "taper"])
+def test_shape_and_taper_are_per_storm_on_omega(gpu, lever):
+    """vortex_omega.glsl hoists shape (col 9) and taper (col 10) with their OWN
+    read sites (the ring Rrs deformation + the tcomp circulation compensation).
+    The kinematic swap tests cannot reach them — solid_core is a documented
+    kinematic no-op — so without this a stale global or a swapped column on the
+    omega side fails nothing."""
+    def omega(first, second):
+        return _dev0_omega(
+            _omega_scene(0.9, **{lever: first, f"{lever}2": second}), gpu)
+
+    assert np.abs(omega(1.4, 0.0) - omega(0.0, 1.4)).max() > 1e-3
+
+
+def test_same_hero_spelled_two_ways_renders_the_same(gpu):
+    """The regression test for the M2-B review's Critical. `_hero_emergence_active`
+    learned to select the variant for a cast-only emergent hero, which made a
+    state reachable that never was before: global emergence 0 with a hero
+    emergent on its own override. omega_force's 60x core anchor and its wake
+    eddy-injection still scaled by the raw GLOBAL uniform, so in that state both
+    silently vanished — the SAME storm spelled two equivalent ways rendered 0.86
+    apart in vorticity mode (86x GPU_NOISE_ATOL). The uniform now carries
+    VortexRegistry.scene_emergence (the strongest EFFECTIVE emergence), so the
+    two spellings agree.
+
+    Tolerance, not byte-equality: this runs the vorticity solver past step 0, so
+    SOR noise applies (CLAUDE.md)."""
+    def spelled(global_e: float, override_e: float | None) -> np.ndarray:
+        p = _vort_params(solid_core=0.9, second_solid_core=0.9)
+        p.sim.dev_steps = 40
+        p.storms.hero_emergence = global_e
+        p.storms.wake_turbulence = 1.0
+        for entry in p.storms.cast:
+            entry.emergence = override_e
+        sim = Simulation(p, gpu)
+        sim.run_to_completion(chunk=64)
+        return np.asarray(
+            sim.gpu.read_texture(sim.solver.equirect.tracers.cur)).astype(np.float64)
+
+    from_global = spelled(0.9, None)     # inherits -> effective 0.9
+    from_override = spelled(0.0, 0.9)    # cast-only -> effective 0.9
+    assert np.abs(from_global - from_override).max() < 1e-2

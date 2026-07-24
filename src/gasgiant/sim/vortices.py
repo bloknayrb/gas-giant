@@ -33,6 +33,7 @@ from gasgiant.params.model import (
     PolesParams,
     StormsParams,
     WakeDir,
+    effective_cast_lever,
     hero_latitude_cap,
 )
 from gasgiant.params.seeds import subseed
@@ -142,12 +143,41 @@ class VortexRegistry:
     def heroes(self) -> list[Vortex]:
         return [v for v in self.vortices if v.kind == KIND_HERO]
 
+    def scene_emergence(self, storms: StormsParams) -> float:
+        """The strongest EFFECTIVE hero emergence in the scene (M2-B).
+
+        Feeds the `u_hero_emergence` uniform. Every per-hero read resolves its
+        own value from the CastLevers row instead, so this uniform only still
+        matters where a pass has no per-hero value to resolve against: the
+        omega_force position-window terms (the 60x core anchor at :147 and the
+        wake eddy-injection at :199) and the render detail variant. Keying
+        those on the raw global broke once `_hero_emergence_active` learned to
+        select the variant for a cast-only emergent hero -- the anchor and the
+        wake injection then read 0.0 and silently vanished, so the SAME storm
+        spelled `hero_emergence=0.9` + an inheriting cast hero and spelled
+        `hero_emergence=0` + `cast[].emergence=0.9` rendered differently
+        (measured 0.86 apart in vorticity mode, 86x GPU_NOISE_ATOL).
+
+        The empty-hero fallback returns the global unchanged so a scene with no
+        heroes at all keeps today's uniform value bit-for-bit (nothing reads it
+        there -- every consumer sits behind a hero loop or window that is
+        identically 0 -- but the fallback keeps that a fact rather than an
+        argument about -0.0). Mixed-emergence scenes share this one value in
+        those two passes; true per-storm anchoring/detail is M2-C."""
+        heroes = self.heroes()
+        if not heroes:
+            return float(storms.hero_emergence)
+        return max(
+            effective_cast_lever(storms, h.cast_ref, "emergence") for h in heroes
+        )
+
     def pack_ssbo(self) -> np.ndarray:
         """(N, 12) float32, three vec4 per vortex:
         [x, y, z, r_core], [strength, kind, tint, brightness],
         [wake_dir, aspect, wake_lat_off, bow_gain].
-        (bow_gain is 0 for every vortex unless hero_emergence is on — the
-        default programs never read the .w slot, so the previously-constant
+        (bow_gain is 0 for every vortex unless that hero's EFFECTIVE emergence
+        is on — the global, or its own storms.cast[].emergence override (M2-B);
+        the default programs never read the .w slot, so the previously-constant
         zero stays byte-equivalent for them.) Vectorized: runs every sim step."""
         n = len(self.vortices)
         if n == 0:
@@ -980,9 +1010,10 @@ def _add_cast(
         # THIS entry: a placed hero with emergence 0 keeps the legacy WNW wake
         # convention even while the global (or another placed hero) is emergent.
         # None inherits the global -> byte-identical to the pre-per-storm path.
-        eff_emergence = (entry.emergence if entry.emergence is not None
-                         else storms.hero_emergence)
-        if kind == CastKind.HERO and eff_emergence > 0.0:
+        # Resolved exactly as pack_cast_levers_ssbo resolves the GPU row, so the
+        # CPU wake frame and the shader's emergence can never disagree.
+        if (kind == CastKind.HERO
+                and effective_cast_lever(storms, cast_idx, "emergence") > 0.0):
             wake_lat_off, wake_dir = _hero_wake_frame(profiles, lat, entry.radius)
             bow = _hero_bow_gain(profiles, lat, entry.radius)
         if kind == CastKind.HERO:

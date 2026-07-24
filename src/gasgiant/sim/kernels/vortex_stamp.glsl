@@ -786,8 +786,15 @@ vec3 vortexStamp(vec3 p) {
 // SCALED magnitude (emergence_v * candidate) with a raw tie-break. That keeps the
 // final combine arithmetically IDENTICAL when every hero shares one emergence
 // (the winner's _e is then that shared value and the max picks the same
-// candidate), so the shipped single-hero path is bit-for-bit unchanged; it
-// diverges only when two heroes carry different emergence — the feature.
+// candidate); it diverges only when two heroes carry different emergence — the
+// feature. Byte-identity of the shipped single-hero path is EMPIRICAL, not a
+// construction guarantee: the emergence factor moved from a uniform read to a
+// loop-local, which is the FMA-contraction/rescheduling class that has moved a
+// p05 hash before. It is verified by scripts/m2b_emergence_hash.py (kinematic,
+// byte-exact) — p05 cannot see this code at all, since every p05 config has
+// hero_emergence 0 and so never compiles HERO_EMERGENCE.
+// The comparison assumes emergence >= 0 (it is order-preserving only for a
+// non-negative scale); both pfields are lo=0.0, i.e. pydantic ge=0.0.
 float heroRelaxWeight(vec3 p) {
     float infl = 0.0;    // strongest rim-band fade at this pixel, in [0,1.4]
     float flush = 0.0;   // strongest neighborhood-flush boost, in [0,1]
@@ -809,6 +816,20 @@ float heroRelaxWeight(vec3 p) {
             emergence_v = cl2.x; shape_v = cl2.y; taper_v = cl2.z;
         }
 #endif
+        // A hero at emergence 0 opted OUT of the pack: it must not touch these
+        // accumulators AT ALL. Without this guard its scaled candidate (0) TIES
+        // the initial `_e * acc` of 0, so the raw tie-break hands it the slot —
+        // and then its RAW wake window rides `flush *= 1.0 - wrel` into a
+        // DIFFERENT, emergent hero's flush, while its zero `_e` zeroes an
+        // emergent hero's `infl`. One storm's opt-out degrading its neighbour,
+        // reachable exactly where the placement studio puts storms (measured:
+        // ~2.4k px of overlap at a plausible two-storm geometry). With the
+        // guard an opted-out hero's pixels return the far-field 1.0, which is
+        // what the pre-feature #else arm does (it never calls this function).
+        // Byte-identical whenever every hero shares one emergence > 0 (the
+        // guard is then always true), and a UNIFORM 0 never selects the variant
+        // at all (Solver._hero_emergence_active).
+        if (emergence_v <= 0.0) continue;
         // Wake-sector relaxation RELEASE. Advection must OWN the wake: the
         // smooth stamped wedge is the relaxation TARGET, so full-rate
         // relaxation (and the flush boost below) actively erases every fold
@@ -1045,8 +1066,12 @@ float heroRelaxWeight(vec3 p) {
         infl = rcand; infl_e = wrel_e;
     }
     // The flush exemption uses the RAW release window (a geometric wake sector,
-    // not an amplitude), exactly as before — so this line is untouched by the
-    // per-storm scaling and stays identical for the single-hero path.
+    // not an amplitude), exactly as before — so this line's VALUE is untouched
+    // by the per-storm scaling and stays identical for the single-hero path.
+    // Its OWNER is not: with differing emergence the sector is chosen by the
+    // scaled comparison above, so a strongly-emergent hero's narrow window can
+    // win over a weaker neighbour's wider one (heroes at emergence 0 are out of
+    // the running entirely — see the loop-top guard).
     flush *= 1.0 - wrel;
     // Fade in the rim band (down to 0), boost in the flush annulus (up to
     // x12: tau_eff ~ relax_tau/12 ~ 170 steps -> the wound arcs decay well

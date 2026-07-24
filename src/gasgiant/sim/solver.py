@@ -293,9 +293,16 @@ class Solver:
 
     @staticmethod
     def _hero_emergence_active(storms: StormsParams) -> bool:
-        """True when SOME hero runs the emergence pack: the global lever with a
-        hero to apply it to, or a cast HERO carrying its own emergence override
-        (M2-B) -- a placed hero can be emergent while the global is 0.
+        """True when SOME hero's EFFECTIVE emergence is > 0: a seeded hero on
+        the global lever, or a cast HERO whose resolved value is > 0 (M2-B) --
+        a placed hero can be emergent while the global is 0, and an override of
+        exactly 0 opts that hero out.
+
+        Both clauses ask about a RESOLVED value, which is why the global alone
+        cannot select the variant: with hero_count 0 and a single cast hero at
+        `emergence=0.0`, no hero is emergent no matter what the global says, and
+        compiling the variant there would render that config differently from
+        the identical `global=0` spelling of the same scene.
 
         DUAL-GATE note: the per-storm emergence reads live in `#ifdef
         HERO_EMERGENCE` arms and take their value from the CAST_LEVERS buffer,
@@ -303,13 +310,11 @@ class Solver:
         construction -- an `emergence` override is itself a CastLevers field, so
         `_cast_levers_active` is True whenever this predicate is True for the
         cast-only reason. Static (no GL context needed) like its sibling."""
-        if storms.hero_emergence > 0.0 and (
-            storms.hero_count > 0 or any(c.kind == CastKind.HERO for c in storms.cast)
-        ):
+        if storms.hero_count > 0 and storms.hero_emergence > 0.0:
             return True
         return any(
-            (c.emergence if c.emergence is not None else storms.hero_emergence) > 0.0
-            for c in storms.cast
+            effective_cast_lever(storms, i, "emergence") > 0.0
+            for i, c in enumerate(storms.cast)
             if c.kind == CastKind.HERO
         )
 
@@ -454,8 +459,11 @@ class Solver:
         """u_hero_flow_renorm: net-circulation renorm for the K-widened
         emergence ring/skirt (sim/flow_renorm.py). Computed from the ACTUAL
         (seeded-jittered) hero r_core/aspect — mean over heroes when there is
-        more than one (mean-field; no shipped preset has hero_count > 1).
-        1.0 whenever the lever is off or no hero exists."""
+        more than one (mean-field). 1.0 whenever the lever is off or no hero
+        exists. Cast lists make multi-hero scenes first-class (and hero_count
+        does not count them), but this stays ONE mean-field factor shared by
+        every hero: the per-storm resolution below decides only WHETHER to
+        compute it, never a per-storm value."""
         if self._flow_renorm is None:
             p = self.params.storms
             k = p.hero_flow_aspect
@@ -468,10 +476,12 @@ class Solver:
             # enters that branch, resolving each hero's own overrides — keying on
             # the globals alone would skip the renorm for a placed hero that runs
             # the branch on its own solid_core/emergence (globals 0).
-            if (k == 1.0 or not heroes or not any(
-                    effective_cast_lever(p, h.cast_ref, "solid_core") > 0.0
-                    and effective_cast_lever(p, h.cast_ref, "emergence") > 0.0
-                    for h in heroes)):
+            ring_branch_heroes = [
+                h for h in heroes
+                if effective_cast_lever(p, h.cast_ref, "solid_core") > 0.0
+                and effective_cast_lever(p, h.cast_ref, "emergence") > 0.0
+            ]
+            if k == 1.0 or not ring_branch_heroes:
                 self._flow_renorm = 1.0
             else:
                 rc = float(np.mean([h.r_core for h in heroes]))
@@ -498,7 +508,7 @@ class Solver:
         for k in [state.k_init, state.k_force0]:
             _set(k, "u_hero_solid_core", p.storms.hero_solid_core)
             _set(k, "u_oval_solid_core", p.storms.oval_solid_core)
-            _set(k, "u_hero_emergence", p.storms.hero_emergence)
+            _set(k, "u_hero_emergence", self.vortices.scene_emergence(p.storms))
             _set(k, "u_hero_shape", p.storms.hero_shape)
             _set(k, "u_hero_shape_phase", self._shape_phase)
             _set(k, "u_hero_taper", p.storms.hero_taper)
@@ -851,7 +861,7 @@ class Solver:
                     _set(prog, "u_hero_rim_warp", p.storms.hero_rim_warp)
                     _set(prog, "u_hero_rim_tint", p.storms.hero_rim_tint)
                     _set(prog, "u_hero_wake_detail", p.storms.hero_wake_detail)
-                    _set(prog, "u_hero_emergence", p.storms.hero_emergence)
+                    _set(prog, "u_hero_emergence", self.vortices.scene_emergence(p.storms))
                     _set(prog, "u_hero_noise_offset", self._detail_offset)
                     _set(prog, "u_hero_shape", p.storms.hero_shape)
                     _set(prog, "u_hero_shape_phase", self._shape_phase)
@@ -889,7 +899,7 @@ class Solver:
             _set(k, "u_size", dom.size)
             _set(k, "u_rho_max", RHO_MAX)
             _set(k, "u_rim_contrast", p.storms.rim_contrast)
-            _set(k, "u_hero_emergence", p.storms.hero_emergence)
+            _set(k, "u_hero_emergence", self.vortices.scene_emergence(p.storms))
             _set(k, "u_hero_mottle", p.storms.hero_mottle)
             _set(k, "u_hero_tint_var", p.storms.hero_tint_var)
             _set(k, "u_hero_rim_warp", p.storms.hero_rim_warp)
@@ -937,7 +947,7 @@ class Solver:
             _set(k, "u_kh_phase", self._kh_phase)
             _set(k, "u_wake_gain", p.storms.wake_turbulence)
             # Extended wake wedge (HERO_EMERGENCE variant; guarded no-op else).
-            _set(k, "u_hero_emergence", p.storms.hero_emergence)
+            _set(k, "u_hero_emergence", self.vortices.scene_emergence(p.storms))
 
     def set_profiles(self, profiles: LatProfiles) -> None:
         self.profiles = profiles
@@ -962,6 +972,10 @@ class Solver:
                 # (mirror step()/the omega passes) instead of relying on the
                 # construction-time bind, in case a future dispatch rebinds 5
                 # before init_tracers -- load-bearing for dev_steps==0 renders.
+                # Binding-5 readers: init.comp, vortex_omega's callers
+                # (omega_init/omega_force) and psi.comp (M2-B). psi.comp's own
+                # dispatch sites do NOT rebind -- they run inside step(), which
+                # binds 5 before the domain loop.
                 self._cast_ssbo.bind_to_storage_buffer(5)
             gx, gy = dom.groups()
             k.run(gx, gy, 1)

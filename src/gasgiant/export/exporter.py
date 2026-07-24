@@ -111,7 +111,7 @@ def derive_tile(
             ),
             clouds=snap.clouds,
             profile_stamp=snap.profile_stamp,
-            hero_emergence=params.storms.hero_emergence,
+            hero_emergence=snap.hero_emergence,
         )
     sim.deriver.derive(
         snap.tracers_eq, snap.tracers_n, snap.tracers_s,
