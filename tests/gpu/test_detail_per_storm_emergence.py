@@ -11,7 +11,7 @@ detail treatment. Its read sites split cleanly in two:
     levers that own those sites, else DETAIL_FX does not compile and they are
     not in the program at all).
   * two CROSS-hero sites (detail.comp's heroQ and the calm floor) follow via
-    heroMaskQuiet/heroCalmFloor. heroMask SUMS over heroes and was scaled once
+    heroMaskFaded/heroCalmFloor. heroMask SUMS over heroes and was scaled once
     afterwards, so this is a NEW formulation, not a substitution -- it cannot be
     bit-identical in general. It IS exact for a single hero (one summed term,
     clamp is the identity), which is every factory preset, so nothing re-bakes.
@@ -65,19 +65,28 @@ def _synth(gpu, emergences: tuple[float, float] | None, *, fx: bool = True) -> n
         p.detail.hero_spiral = 0.0
         p.detail.hero_collar_wrap = 0.0
     sim = Simulation(p, gpu)
-    s = sim.solver
     heroes = hero_centers(sim.vortices, p.storms)
     assert len(heroes) == 2 and len(heroes[0]) == 9, "hero_centers must carry emergence"
     if emergences is None:
         heroes = [h[:8] for h in heroes]
     else:
         heroes = [h[:8] + (e,) for h, e in zip(heroes, emergences, strict=True)]
+    return _render(gpu, sim, p, heroes)
+
+
+def _render(gpu, sim, params: PlanetParams,
+            heroes: list[tuple[float, ...]]) -> np.ndarray:
+    """Run ONLY the detail pass over an already-developed sim, for a hand-built
+    hero list. Isolating the pass is the whole point of this file: driving
+    emergence through params would also move the sim, and the tracer difference
+    would swamp the render difference."""
+    s = sim.solver
     out = gpu.texture2d((512, 256), 1, "f4", linear=True)
     try:
         sim.detail_synth.synthesize(
-            p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
-            sim.profile_dyn, out, p.detail, heroes=heroes,
-            hero_emergence=sim.vortices.scene_emergence(p.storms),
+            params.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
+            sim.profile_dyn, out, params.detail, heroes=heroes,
+            hero_emergence=sim.vortices.scene_emergence(params.storms),
         )
         return gpu.read_texture(out)[..., 0].astype(np.float64)
     finally:
@@ -104,7 +113,7 @@ def test_uniform_emergence_matches_the_scalar_path(gpu):
 
 def test_cross_hero_sites_are_per_storm_too(gpu):
     """The CROSS-hero sites (heroQ, the serene-moat calm floor) follow per
-    storm as well, via heroMaskQuiet/heroCalmFloor.
+    storm as well, via heroMaskFaded/heroCalmFloor.
 
     Turning the fx levers OFF strips DETAIL_FX entirely, so the three per-hero
     loop sites are not in the program at all and ONLY the cross-hero pair can
@@ -116,43 +125,35 @@ def test_cross_hero_sites_are_per_storm_too(gpu):
     assert np.abs(a - b).max() > 1e-3
 
 
-def test_single_hero_is_identical_to_the_old_scalar_formulation(gpu):
-    """The cross-hero pair is a NEW formulation (a summed mask scaled once
-    became a per-term sum), so it cannot be justified by substitution — but
-    with ONE hero the sum has a single term and heroTerm() <= 1 makes
-    heroMask's clamp the identity, so it reduces operation-for-operation to
-    the scalar expressions it replaced.
+def test_single_hero_fallback_matches_the_scene_scalar(gpu):
+    """The 8-tuple fallback again at hero_count=1 — the arity every factory
+    preset actually ships.
 
-    That is what lets every factory preset (all ship hero_count=1, cast=[])
-    keep its shipped output without a re-bake. Asserted byte-exact against a
-    hand-packed uniform scene rather than trusted from the algebra: the whole
-    point is that float rearrangement does NOT follow real arithmetic.
+    SCOPE, because an earlier version of this test claimed more than it can
+    deliver: it does NOT compare the new cross-hero formulation against the old
+    scalar one. It cannot. The old formulation no longer exists in the process
+    (detail.comp's scalar u_hero_emergence was deleted once its last two reads
+    moved to the array), so both sides here run the SAME program, and the CPU
+    packs byte-identical uniform data for each — np.full(3, scene_emergence)
+    for the 8-tuple, an explicit 0.9 into slot 0 for the 9-tuple. Identical
+    float32 in, identical pixels out, whatever the shader does.
 
-    The scene-level companion of this check is scripts/m2b_emergence_hash.py,
-    where render_bare/render_shape_taper (one hero) must not move and
-    render_two_heroes must."""
+    The single-hero exactness claim — that all six presets keep their shipped
+    output — is a CROSS-TREE claim and only a cross-tree measurement can carry
+    it: scripts/m2b_emergence_hash.py's render_bare/render_shape_taper, checked
+    out against the pre-change sources (measured 7/8 identical, render_two_heroes
+    the only mover). This test guards the narrower thing it can see: that the
+    fallback fill still resolves correctly when only one hero is present."""
     p = _params()
     p.storms.cast = p.storms.cast[:1]          # a single emergent hero
     sim = Simulation(p, gpu)
-    s = sim.solver
     heroes = hero_centers(sim.vortices, p.storms)
     assert len(heroes) == 1
 
-    def render(hs):
-        out = gpu.texture2d((512, 256), 1, "f4", linear=True)
-        try:
-            sim.detail_synth.synthesize(
-                p.seed, s.equirect.vel_tex, s.equirect.tracers.cur,
-                sim.profile_dyn, out, p.detail, heroes=hs,
-                hero_emergence=sim.vortices.scene_emergence(p.storms),
-            )
-            return gpu.read_texture(out)[..., 0].astype(np.float64)
-        finally:
-            out.release()
-
     # Legacy 8-tuple (scene scalar broadcast into every slot) vs the explicit
-    # per-hero value carrying that same scalar: byte-identical, or the
-    # single-hero exactness the presets rely on has been lost.
+    # per-hero value carrying that same scalar: byte-identical, or the fallback
+    # fill has stopped resolving.
     np.testing.assert_array_equal(
-        render([heroes[0][:8]]), render([heroes[0][:8] + (0.9,)])
+        _render(gpu, sim, p, [heroes[0][:8]]),
+        _render(gpu, sim, p, [heroes[0][:8] + (0.9,)]),
     )

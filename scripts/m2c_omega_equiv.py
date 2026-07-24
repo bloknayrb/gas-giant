@@ -17,21 +17,21 @@ assumed — verify it with two runs of one tree before trusting a comparison
 cannot adjudicate anything and the run is void).
 
     uv run python scripts/m2c_omega_equiv.py out/audit/omega_new
-    git stash push -- src/gasgiant/sim/kernels/vortex_omega.glsl \
-                      src/gasgiant/sim/kernels/omega_force.comp
+    git checkout <pre-change-rev> -- src/gasgiant/sim/kernels/vortex_omega.glsl \
+                                     src/gasgiant/sim/kernels/omega_force.comp
     uv run python scripts/m2c_omega_equiv.py out/audit/omega_old
-    git stash pop
-    uv run python scripts/m2c_omega_equiv.py --diff out/audit/omega_old \
-                                                    out/audit/omega_new
+    git checkout HEAD -- src/gasgiant/sim/kernels/vortex_omega.glsl \
+                         src/gasgiant/sim/kernels/omega_force.comp
+    uv run python scripts/m2c_omega_equiv.py out/audit/omega_old \
+                                             --diff out/audit/omega_new
 
-WHY IT EARNED ITS PLACE (M2-C): the per-storm restructure of heroAnchorWindow
-was written to preserve expression shape, which is normally sufficient for
-bit-identity. This probe measured it at 1 ULP (9.5e-07) on 0.007% of pixels
-after ONE step — the compiler had been FMA-contracting `1.0 + 60.0*E*wa`, and
-interposing max() forces the product to round first. Being a chaotic advected
-field, that grew to O(OMEGA_CEILING) in q and ~0.039 in the tracers by step 40,
-past GPU_NOISE_ATOL. The fix was to put the per-storm form behind CAST_LEVERS
-and keep the legacy lines verbatim; this script is what proved both halves.
+(Commit or copy first: `git checkout --` discards UNCOMMITTED edits to those
+files, which has already cost one round of work here.)
+
+It earned its place by measuring the M2-C anchor restructure at 1 ULP after one
+step, amplified past GPU_NOISE_ATOL by step 40 — the reason the per-storm form
+rides CAST_LEVERS instead of replacing the legacy lines. Full derivation at
+vortex_omega.glsl::heroAnchorBoost.
 
 Both hero sites must be live or the comparison is vacuous: hero_emergence > 0
 drives the anchor, wake_turbulence > 0 drives the injection. Asserted below.
@@ -94,18 +94,16 @@ def diff(old: Path, new: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("out", type=Path, help="path prefix for the .npy pair")
-    ap.add_argument("other", type=Path, nargs="?", help="second prefix, with --diff")
-    ap.add_argument("--diff", action="store_true", help="compare two captures")
+    ap.add_argument("prefix", type=Path, help="path prefix for the .npy pair")
+    ap.add_argument("--diff", type=Path, metavar="OTHER_PREFIX",
+                    help="compare PREFIX against OTHER_PREFIX instead of capturing")
     ap.add_argument("--steps", type=int, default=STEPS)
     args = ap.parse_args()
 
-    if args.diff:
-        if args.other is None:
-            raise SystemExit("--diff needs two prefixes")
-        diff(args.out, args.other)
+    if args.diff is not None:
+        diff(args.prefix, args.diff)
     else:
-        capture(args.out, args.steps)
+        capture(args.prefix, args.steps)
 
 
 if __name__ == "__main__":

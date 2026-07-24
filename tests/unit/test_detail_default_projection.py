@@ -115,7 +115,7 @@ def _no_defines_projection() -> str:
 #
 # Changelog:
 #   2026-07-24 (M2-C): heroMask's per-hero Gaussian extracted into heroTerm(p, i)
-#   so the HERO_EMERGENCE-only heroMaskQuiet/heroCalmFloor reuse the IDENTICAL
+#   so the HERO_EMERGENCE-only heroMaskFaded/heroCalmFloor reuse the IDENTICAL
 #   geometry instead of duplicating the ellipse math (a copy could drift and
 #   silently weight the wrong hero). Pure code motion — same operations, same
 #   order — plus the removal of a dead `float d = acos(...)` the old body

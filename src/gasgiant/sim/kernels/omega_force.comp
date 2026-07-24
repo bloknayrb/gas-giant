@@ -208,10 +208,12 @@ void main() {
     // kind). Reference-anchored: the real GRS wake IS a turbulence source —
     // distinct from the falsified GLOBAL/interior injection.
     // u_hero_emergence is the SCENE max (VortexRegistry.scene_emergence), so
-    // this gate opens whenever ANY hero is emergent; a hero at 0 then
-    // contributes exactly 0 to the injection amplitude.
+    // this gate opens whenever ANY hero is emergent.
     if (u_hero_wake_turb > 0.0 && u_hero_emergence > 0.0) {
 #ifdef CAST_LEVERS
+        // Per storm: a hero at emergence 0 contributes exactly 0 and can never
+        // win heroWakeInject's max, so the open gate costs it nothing. (In the
+        // #else arm below, everything scales by the scene max instead.)
         float amp = heroWakeInject(p, 0.6 * u_hero_wake_turb);
         if (amp > 0.0) {
             vec3 np = p * u_hero_wake_freq + u_turb_offset.zxy

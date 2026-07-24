@@ -292,28 +292,23 @@ class DetailSynth:
         prog["u_full_size"].value = full_size if full_size is not None else size
         packed = np.zeros((3, 4), dtype=np.float32)
         aspects = np.ones(3, dtype=np.float32)   # default 1.0 -> exact short-circuit
-        # Per-hero emergence (M2-C) for the read sites that already run INSIDE
-        # the per-hero loop. hero_centers appends it as a 9th field; a legacy
-        # 8-tuple (every caller that is not the facade/snapshot) falls back to
-        # the scalar those sites read before this existed, so a uniform scene is
-        # byte-identical either way. The two CROSS-hero sites (detail.comp's
-        # `heroQ` and the serene-moat `calm` floor) now follow per storm too,
-        # via heroMaskQuiet/heroCalmFloor — a new formulation rather than a
-        # substitution, exact for the single-hero scenes every factory preset
-        # ships and deliberately different once a scene has two or more.
+        # Per-hero emergence (M2-C). hero_centers appends it as a 9th field; a
+        # legacy 8-tuple (every caller that is not the facade/snapshot) falls
+        # back to the scene scalar, so a uniform scene is byte-identical either
+        # way. Which read sites are exact substitutions and which are the new
+        # cross-hero formulation is proved at detail.comp's heroMaskFaded.
         emergences = np.full(3, hero_emergence, dtype=np.float32)
-        n_heroes = 0
-        for h in (heroes or [])[:3]:
-            packed[n_heroes] = h[:4]
-            aspects[n_heroes] = h[5] if len(h) > 5 else 1.0
+        hero_list = (heroes or [])[:3]
+        for i, h in enumerate(hero_list):
+            packed[i] = h[:4]
+            aspects[i] = h[5] if len(h) > 5 else 1.0
             if len(h) > 8:
-                emergences[n_heroes] = h[8]
-            n_heroes += 1
-        prog["u_hero_count"].value = n_heroes
+                emergences[i] = h[8]
+        prog["u_hero_count"].value = len(hero_list)
         prog["u_heroes"].write(packed.tobytes())
         prog["u_hero_aspect"].write(aspects.tobytes())
         # HERO_EMERGENCE alone, NOT `and fx_on`: the array is read from the base
-        # path too (heroMaskQuiet/heroCalmFloor), so narrowing this to the
+        # path too (heroMaskFaded/heroCalmFloor), so narrowing this to the
         # DETAIL_FX case would leave those two reads on a stale buffer. Raw
         # .write, not contextlib.suppress: _program's tripwire already proves
         # the uniform is there, and suppressing would turn a wiring regression

@@ -31,7 +31,8 @@ which the tracer configs never touch and which are LIVE in the flagship preset.
 The omega side is deliberately NOT here: vorticity output cannot carry a stored
 byte-exact hash, so its equivalence is asserted same-process in
 tests/gpu/test_cast_levers.py against the dev-0 omega texture (CLAUDE.md's one
-byte-exact carve-out for vorticity mode).
+byte-exact carve-out for vorticity mode) — and for the STEPPED path, which that
+carve-out cannot reach, by scripts/m2c_omega_equiv.py's two-tree .npy diff.
 """
 
 from __future__ import annotations
@@ -128,6 +129,11 @@ def _render_hash(p: PlanetParams, gpu) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--expect-moved", nargs="*", default=[], metavar="KEY",
+                    help="config(s) this change is SUPPOSED to move; --check then "
+                         "passes only if they move and nothing else does")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite an existing baseline (re-baseline everything)")
     args = ap.parse_args()
 
     gpu = GpuContext.headless()
@@ -142,15 +148,36 @@ def main() -> None:
         if missing:
             raise SystemExit(
                 f"NO BASELINE for {missing}: these configs are newer than the stored "
-                f"baseline. Re-capture (drop --check) once the shared configs are "
-                f"green -- this is NOT a numeric regression."
+                f"baseline. Re-capture (--force) once the shared configs are green -- "
+                f"this is NOT a numeric regression."
             )
-        bad = [k for k in out if old[k] != out[k]]
+        bad = [k for k in out if old[k] != out[k] and k not in args.expect_moved]
+        stale = [k for k in args.expect_moved if k in old and old[k] == out[k]]
         if bad:
             raise SystemExit(f"MISMATCH in {bad}\n  was {[old[k] for k in bad]}")
-        print(f"OK: all {len(out)} emergence hashes match baseline.")
+        if stale:
+            raise SystemExit(
+                f"--expect-moved named {stale}, but they did NOT move. Either the "
+                f"change did not do what you think, or the flag is stale."
+            )
+        moved = [k for k in args.expect_moved if k in old]
+        print(f"OK: all {len(out) - len(moved)} emergence hashes match baseline"
+              + (f" ({moved} moved as declared)." if moved else "."))
     else:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
+        # p05's guard, for the reason M2-C ran into: --check is all-or-nothing, so
+        # a DELIBERATE mover (render_two_heroes) makes it exit non-zero, and the
+        # natural remedy -- rerun without --check -- silently overwrote every OTHER
+        # key too, destroying the very baseline that proves the unmoved ones did
+        # not move. Acknowledge an expected mover with --expect-moved instead; only
+        # --force overwrites, and then deliberately.
+        if BASELINE.exists() and not args.force:
+            raise SystemExit(
+                f"{BASELINE} exists -- refusing to overwrite (that would erase the "
+                f"evidence for every UNCHANGED config). Use --check, or --check "
+                f"--expect-moved KEY to acknowledge a deliberate mover, or --force "
+                f"if you really mean to re-baseline all {len(out)}."
+            )
         BASELINE.write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
         print(f"wrote {BASELINE}")
 

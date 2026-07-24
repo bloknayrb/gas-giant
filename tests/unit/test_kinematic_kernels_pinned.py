@@ -264,23 +264,13 @@ _PINNED: dict[str, str] = {
     # mirroring the existing global coupling. Default path == the uniforms; the
     # off-state gate is the dev-0 omega byte-capture (test_cast_levers.py /
     # test_hero_emergence.py::_dev0_omega), re-run this pass.
-    # 2026-07-24 (M2-C): heroAnchorWindow/heroWakeWindow are UNCHANGED; two
-    # CAST_LEVERS-only companions (heroAnchorBoost/heroWakeInject) were added
-    # beside them, folding each hero's own emergence into its candidate before
-    # the cross-hero max so a placed hero anchors and injects at ITS value
-    # rather than the scene max. omega_force keeps the legacy lines verbatim in
-    # its #else arms.
-    #
-    # The companions are a separate variant arm rather than a rewrite because
-    # bit-identity for a uniform scene was MEASURED AND FAILED: scaling each
-    # candidate before the max is exact in isolation (rounding is monotone), but
-    # the legacy site `1.0 + 60.0*E*wa` can be FMA-contracted and interposing
-    # max() forces the product to round first. 9.5e-07 on 0.007% of pixels after
-    # ONE step, amplified by the chaotic field to O(OMEGA_CEILING) in q by step
-    # 40. Preserving expression SHAPE was not enough — see
-    # scripts/m2c_omega_equiv.py, which is the gate for this path (p05 is
-    # kinematic and cannot reach omega_force; the dev-0 omega carve-out cannot
-    # see a step>0 pass). That script now measures maxdiff 0 across 40 steps.
+    # 2026-07-24 (M2-C): heroAnchorWindow/heroWakeWindow UNCHANGED; two
+    # CAST_LEVERS-only companions (heroAnchorBoost/heroWakeInject) added beside
+    # them, resolving emergence per hero. They are a separate variant arm rather
+    # than a rewrite because bit-identity for a uniform scene was measured and
+    # FAILED (FMA contraction; full derivation at heroAnchorBoost). omega_force
+    # keeps the legacy lines verbatim in its #else arms; the gate for both
+    # halves is scripts/m2c_omega_equiv.py, which measures maxdiff 0.
     "vortex_omega.glsl": "37e4bd9de5a74ed94f7cdd14f5b2805b8ba3eb0e",
     # New 2026-07-10 with hero_emergence: heroEllipQ, the shared elliptical-q
     # helper for the variant-only heroRelaxWeight/heroAnchorWindow. Entirely
@@ -325,4 +315,59 @@ def test_kinematic_kernel_sources_unchanged():
             f"  {f}: expected {exp}\n          got     {got}"
             for f, (exp, got) in mismatches.items()
         )
+    )
+
+
+def _function_body(src: str, name: str) -> str:
+    """Text between the braces of `float <name>(...) {` ... matching `}`."""
+    start = src.index(f"float {name}(")
+    depth, i = 0, src.index("{", start)
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i + 1:j]
+    raise AssertionError(f"unterminated body for {name}")
+
+
+def test_hero_wake_wedge_geometry_is_mirrored_exactly():
+    """heroWakeInject repeats heroWakeWindow's wedge geometry line for line, and
+    HAS to: the legacy function's emitted code is the byte-identity guarantee
+    for the six factory presets (they all take omega_force's non-CAST_LEVERS
+    arm), so it cannot be refactored into a shared helper that both call — that
+    would make `w = max(...)` run unconditionally instead of only inside the
+    window `if`, which is precisely the algebraically-identical-but-structurally
+    -different class this branch already measured diverging at the anchor site
+    (see heroAnchorBoost's FMA note).
+
+    Duplication is therefore the right call, but it is unguarded by anything
+    else: retuning the wedge in one copy and not the other would silently aim
+    the per-storm injection at a different sector than the legacy one, and no
+    hash or GPU test would notice. This is that guard, at the text level.
+
+    The two INTENDED differences are excluded: the emergence lookup, and the
+    accumulate line that folds it in."""
+    src = ir.files(_PKG).joinpath("vortex_omega.glsl").read_text(encoding="utf-8")
+
+    def geometry(name: str) -> list[str]:
+        return [
+            line.strip()
+            for line in _function_body(src, name).splitlines()
+            if line.strip()
+            and not line.strip().startswith("//")
+            and "emergence_v" not in line
+            and not line.strip().startswith("w = max(")
+        ]
+
+    legacy, per_storm = geometry("heroWakeWindow"), geometry("heroWakeInject")
+    assert legacy == per_storm, (
+        "heroWakeWindow / heroWakeInject wedge geometry has drifted:\n"
+        + "\n".join(
+            f"  {a!r} != {b!r}"
+            for a, b in zip(legacy, per_storm, strict=False) if a != b
+        )
+        + (f"\n  length {len(legacy)} vs {len(per_storm)}"
+           if len(legacy) != len(per_storm) else "")
     )

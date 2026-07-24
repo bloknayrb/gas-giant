@@ -158,11 +158,21 @@ def _vort_params(solid_core, second_solid_core) -> PlanetParams:
     return p
 
 
-def _dev0_omega(p: PlanetParams, gpu) -> np.ndarray:
+def _omega(p: PlanetParams, gpu) -> np.ndarray:
+    """The omega texture after developing ``p`` for however many steps it asks."""
     sim = Simulation(p, gpu)
     sim.run_to_completion(chunk=64)
     q = np.asarray(sim.gpu.read_texture(sim.solver._omega_state.cur))
     return np.squeeze(q).astype(np.float64)
+
+
+def _dev0_omega(p: PlanetParams, gpu) -> np.ndarray:
+    """dev-0 alias. The NAME is the claim every byte-exact caller here rides on
+    (CLAUDE.md's one vorticity carve-out is legal only because the texture is
+    read before any SOR/advection touches it), so assert it rather than trust
+    the caller to have set dev_steps=0."""
+    assert p.sim.dev_steps == 0, "the byte-exact vorticity carve-out is dev-0 only"
+    return _omega(p, gpu)
 
 
 def test_cast_solid_core_matching_global_is_byte_identical(gpu):
@@ -418,13 +428,10 @@ def test_emergence_reaches_omega_force_per_storm(gpu):
         _dev0_omega(scene(0.9, 0.1, 0), gpu), _dev0_omega(scene(0.1, 0.9, 0), gpu)
     )
 
-    # (b) ...and swapping which hero is emergent moves the stepped state
-    def stepped(p: PlanetParams) -> np.ndarray:
-        sim = Simulation(p, gpu)
-        sim.run_to_completion(chunk=64)
-        q = np.asarray(sim.gpu.read_texture(sim.solver._omega_state.cur))
-        return np.squeeze(q).astype(np.float64)
-
-    a = stepped(scene(0.9, 0.1, 8))
-    b = stepped(scene(0.1, 0.9, 8))
+    # (b) ...and swapping which hero is emergent moves the stepped state.
+    # Discriminating against the PRE-change code, which is the point: both
+    # omega_force sites then read the scene max (0.9) in either scene, and both
+    # windows are position-only, so the old code gave the same q both ways.
+    a = _omega(scene(0.9, 0.1, 8), gpu)
+    b = _omega(scene(0.1, 0.9, 8), gpu)
     assert np.abs(a - b).max() > 1e-2
