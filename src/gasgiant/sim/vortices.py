@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from gasgiant.params.model import (
+    CAST_LEVER_SPECS,
     CastKind,
     PolesParams,
     StormsParams,
@@ -117,6 +118,11 @@ class Vortex:
     # "cast" for art-directed cast-list storms. Cast storms are exempt from the
     # population cap and runtime mergers so a director's storm survives the run.
     origin: str = "seeded"
+    # CPU-only: index into storms.cast for a cast HERO carrying per-storm
+    # appearance/dynamics overrides (M2 CastLevers); -1 otherwise. Never packed
+    # into the base SSBO -- consulted only by pack_cast_levers_ssbo, which
+    # resolves each override-or-global lever value at pack time.
+    cast_ref: int = -1
 
 
 @dataclass
@@ -157,6 +163,38 @@ class VortexRegistry:
         out[:, 9] = fields[:, 8]
         out[:, 10] = fields[:, 9]
         out[:, 11] = fields[:, 10]
+        return out
+
+    def pack_cast_levers_ssbo(self, storms: StormsParams) -> np.ndarray:
+        """(N, 8) float32, two vec4 per vortex, packed in the SAME row order as
+        ``pack_ssbo`` so row ``i`` indexes the same vortex in both buffers (the
+        CAST_LEVERS variant reads it at binding 5):
+        [rim_contrast, rim_tint, rim_warp, mottle],
+        [tint_var, wake_detail, solid_core, 0(reserved)].
+
+        Every row is a fully-RESOLVED value -- no inherit flag reaches the GPU. A
+        cast HERO with a per-storm override packs the override; every other vortex
+        (seeded hero, non-hero, companion) packs the live GLOBAL ``storms.*`` value.
+        So once the variant is compiled in (because SOME cast hero overrides a
+        lever), un-overridden heroes still render exactly as the global-uniform
+        path would. Re-resolved every step because the vortex list order can shift
+        (mergers/trim); the row<->vortex mapping survives only by iterating the
+        same list in the same order as ``pack_ssbo``. Column ``j`` carries lever
+        ``CAST_LEVER_SPECS[j]``; the flat 8-float row is the two vec4 the shader
+        reads at ``2*i`` and ``2*i+1``."""
+        n = len(self.vortices)
+        out = np.zeros((max(n, 1), 8), dtype=np.float32)
+        global_vals = [float(getattr(storms, g)) for _, g in CAST_LEVER_SPECS]
+        for i, v in enumerate(self.vortices):
+            entry = (storms.cast[v.cast_ref]
+                     if 0 <= v.cast_ref < len(storms.cast) else None)
+            for j, (cast_attr, _) in enumerate(CAST_LEVER_SPECS):
+                val = global_vals[j]
+                if entry is not None:
+                    override = getattr(entry, cast_attr)
+                    if override is not None:
+                        val = float(override)
+                out[i, j] = val  # cols 0..6 = the 7 levers; col 7 stays 0
         return out
 
     def drift(self, profiles: LatProfiles, dt: float) -> None:
@@ -867,7 +905,7 @@ def _add_cast(
     kind-aware trim) and from runtime mergers (resolve_mergers). Appearance
     falls back to the per-kind seeded defaults (copied from the seeded blocks in
     generate_vortices) when tint/brightness are None."""
-    for entry in storms.cast:
+    for cast_idx, entry in enumerate(storms.cast):
         lat = float(np.deg2rad(entry.lat_deg))
         lon = drift_compensated_lon(profiles, lat, entry.lon_deg, dt, dev_steps)
         sign = -_ambient_sign(profiles, lat)
@@ -915,12 +953,15 @@ def _add_cast(
                 wake_dir = 1.0
             elif eff_wake == WakeDir.WEST:
                 wake_dir = -1.0
+        # Only a cast HERO carries per-storm CastLevers overrides; other kinds
+        # (and heroes with no overrides) resolve to the global at pack time.
+        cast_ref = cast_idx if kind == CastKind.HERO else -1
         reg.vortices.append(
             Vortex(lat, lon, entry.radius, s, k,
                    tint=tint, brightness=brightness,
                    wake_dir=wake_dir, wake_lat_off=wake_lat_off,
                    bow_gain=bow,
-                   aspect=entry.aspect, origin="cast")
+                   aspect=entry.aspect, origin="cast", cast_ref=cast_ref)
         )
         # Per-cast companion pearls (opt-in, default companions=0 -> no-op, so
         # existing presets are byte-identical). Deterministic placement (no RNG:

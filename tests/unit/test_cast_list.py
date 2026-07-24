@@ -271,6 +271,79 @@ def test_companion_appearance_without_companions_warns():
     assert any("companions=0" in w for w in p.validation_warnings())
 
 
+# ---------------------------------------------- M2 CastLevers CPU pack machinery
+
+
+def test_pack_cast_levers_all_global_when_no_overrides():
+    """No per-storm overrides -> every row packs the GLOBAL lever values. This is
+    the byte-identity-off contract for the CAST_LEVERS variant: an un-overridden
+    hero packs exactly what the global-uniform path reads."""
+    from gasgiant.params.model import CAST_LEVER_SPECS
+
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=0.0,
+                                   radius=0.1)]
+    reg = _gen(p)
+    levers = reg.pack_cast_levers_ssbo(p.storms)
+    assert levers.shape == (len(reg.vortices), 8)
+    expected = [float(getattr(p.storms, g)) for _, g in CAST_LEVER_SPECS]
+    for row in levers:
+        assert list(row[:7]) == pytest.approx(expected)
+        assert row[7] == 0.0  # reserved column
+
+
+def test_pack_cast_levers_override_only_on_that_hero():
+    """A per-storm override lands ONLY on that cast hero's row; other rows (a
+    second cast hero, seeded vortices) keep the global value."""
+    p = PlanetParams()
+    p.storms.cast = [
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=-40.0, radius=0.1,
+                      mottle=0.7, solid_core=0.5),
+        StormOverride(kind=CastKind.HERO, lat_deg=20.0, lon_deg=40.0, radius=0.1),
+    ]
+    reg = _gen(p)
+    levers = reg.pack_cast_levers_ssbo(p.storms)
+    # CAST_LEVER_SPECS order: mottle is column 3, solid_core column 6.
+    overridden = [levers[i] for i, v in enumerate(reg.vortices) if v.cast_ref == 0]
+    assert len(overridden) == 1
+    assert overridden[0][3] == pytest.approx(0.7)   # mottle override
+    assert overridden[0][6] == pytest.approx(0.5)   # solid_core override
+    other = [levers[i] for i, v in enumerate(reg.vortices) if v.cast_ref == 1][0]
+    assert other[3] == pytest.approx(p.storms.hero_mottle)  # inherits global
+
+
+def test_cast_ref_set_only_on_cast_heroes():
+    """cast_ref indexes storms.cast on a cast HERO, -1 on non-hero cast + seeded."""
+    from gasgiant.sim.vortices import KIND_HERO
+
+    p = PlanetParams()
+    p.storms.cast = [
+        StormOverride(kind=CastKind.OVAL, lat_deg=10.0, lon_deg=0.0),
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=30.0, radius=0.1),
+    ]
+    reg = _gen(p)
+    heroes = [v for v in reg.vortices if v.origin == "cast" and v.kind == KIND_HERO]
+    assert len(heroes) == 1 and heroes[0].cast_ref == 1  # hero is cast index 1
+    ovals = [v for v in reg.vortices if v.origin == "cast" and v.kind == KIND_OVAL]
+    assert ovals and all(v.cast_ref == -1 for v in ovals)
+    assert all(v.cast_ref == -1 for v in reg.vortices if v.origin == "seeded")
+
+
+def test_appearance_lever_on_oval_warns():
+    """A per-storm appearance lever on a non-hero cast kind is flagged inert."""
+    p = PlanetParams()
+    p.storms.cast = [StormOverride(kind=CastKind.OVAL, lat_deg=10.0, mottle=0.5)]
+    assert any("hero-only lever" in w for w in p.validation_warnings())
+
+
+def test_appearance_levers_gated_to_hero_rows():
+    """The editor hides every per-storm appearance/dynamics lever on non-hero rows."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    from gasgiant.params.model import CAST_LEVER_FIELDS
+
+    assert CAST_LEVER_FIELDS <= panels._HERO_ONLY_CAST_FIELDS
+
+
 # ---------------------------------------------------------------- validators
 
 
@@ -384,14 +457,20 @@ def test_checkpoint_rejects_version_6(tmp_path):
 
 @pytest.mark.gpu
 def test_cast_origin_survives_checkpoint(gpu, tmp_path):
-    """The CPU-side origin marker round-trips through a checkpoint save/load."""
+    """The CPU-side origin marker AND the M2 cast_ref back-reference round-trip
+    through a checkpoint save/load (a restored cast hero must keep the storms.cast
+    index it resolves its per-storm overrides against)."""
     from gasgiant.engine import Simulation
     from gasgiant.engine.checkpoint import load_checkpoint, save_checkpoint
 
     p = PlanetParams(seed=9)
     p.sim.resolution = 512
     p.sim.dev_steps = 20
-    p.storms.cast = [StormOverride(kind=CastKind.OVAL, lat_deg=5.0, lon_deg=10.0)]
+    p.storms.cast = [
+        StormOverride(kind=CastKind.OVAL, lat_deg=5.0, lon_deg=10.0),
+        StormOverride(kind=CastKind.HERO, lat_deg=-20.0, lon_deg=30.0, radius=0.1,
+                      mottle=0.6),
+    ]
     sim = Simulation(p, gpu)
     path = tmp_path / "cast.npz"
     save_checkpoint(sim, path)
@@ -400,7 +479,14 @@ def test_cast_origin_survives_checkpoint(gpu, tmp_path):
     before = [v.origin for v in sim.solver.vortices.vortices]
     after = [v.origin for v in restored.solver.vortices.vortices]
     assert before == after
-    assert after.count("cast") == 1
+    assert after.count("cast") == 2
+    assert ([v.cast_ref for v in sim.solver.vortices.vortices]
+            == [v.cast_ref for v in restored.solver.vortices.vortices])
+    # the restored registry resolves the per-storm override identically
+    levers = restored.solver.vortices.pack_cast_levers_ssbo(p.storms)
+    hero_rows = [levers[i] for i, v in enumerate(restored.solver.vortices.vortices)
+                 if v.cast_ref == 1]
+    assert hero_rows and hero_rows[0][3] == pytest.approx(0.6)  # mottle = column 3
 
 
 # ---------------------------------------------------------------- panels

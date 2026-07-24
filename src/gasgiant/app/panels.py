@@ -31,7 +31,12 @@ from imgui_bundle import imgui
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from gasgiant.params.model import FieldMeta, PlanetParams, hero_latitude_cap
+from gasgiant.params.model import (
+    CAST_LEVER_FIELDS,
+    FieldMeta,
+    PlanetParams,
+    hero_latitude_cap,
+)
 
 
 def _bounds(info: FieldInfo) -> tuple[float | None, float | None]:
@@ -992,7 +997,7 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
 # never shows a dead emergence/wake slider (validation_warnings also flags them).
 _HERO_ONLY_CAST_FIELDS = frozenset(
     {"wake_dir", "companions", "companion_aspect", "companion_brightness"}
-)
+) | CAST_LEVER_FIELDS
 
 
 def _draw_cast_field(

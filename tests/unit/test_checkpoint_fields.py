@@ -17,7 +17,7 @@ import pytest
 from gasgiant.engine.checkpoint import _REG_FIELDS, GENERATION_VERSION, load_checkpoint
 from gasgiant.sim.vortices import Vortex
 
-_SEPARATELY_SERIALIZED = {"cooldown", "ttl", "origin"}
+_SEPARATELY_SERIALIZED = {"cooldown", "ttl", "origin", "cast_ref"}
 
 
 def test_every_vortex_field_has_a_serialization_home():
