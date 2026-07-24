@@ -86,6 +86,15 @@ class PanelState:
     locked: set[str] = dataclasses.field(default_factory=set)
     focus_search_requested: bool = False
     mask_browse_requested: bool = False
+    # T4 placement studio: the selected cast-storm index, shared with the
+    # equirect viewport. ``StudioApp.draw_controls`` copies its ``_selected_cast``
+    # in before the panel walk and reads any panel-side change back after, so a
+    # marker click highlights its list row and a list-row click highlights the
+    # marker (one bidirectional selection, no second window). ``cast_scroll_...``
+    # is a one-shot request to scroll the selected row into view (set when the
+    # selection changed in the viewport, consumed by the cast editor).
+    selected_cast: int | None = None
+    cast_scroll_requested: bool = False
 
 
 _DEFAULTS_BASELINE: dict[str, Any] | None = None
@@ -239,6 +248,12 @@ def _leaf_visible(name: str, info: FieldInfo, doc: dict[str, Any], state: PanelS
     """
     query = state.search.strip().lower()
     if not query:
+        # T4: the cast editor (storms.cast, an adv=True leaf) stays reachable in
+        # Basic mode whenever storms are placed -- you placed them, you must be
+        # able to edit/remove them without toggling Advanced. Empty cast (the
+        # default) keeps the adv gate, so empty-cast presets are unchanged.
+        if name == "cast" and doc.get(name):
+            return True
         return _advanced_visible(info, state)
     label = name.replace("_", " ")
     haystack = f"{name} {label} {info.description or ''}".lower()
@@ -537,6 +552,10 @@ def leaf_kind(name: str, info: FieldInfo, value: Any) -> str | None:
             # unset. Placed beside optional_float/int so str|None doesn't fall
             # through to None (which fails test_panels_coverage).
             return "optional_str"
+        if len(inner) == 1 and isinstance(inner[0], type) and issubclass(inner[0], StrEnum):
+            # Optional enum (StormOverride.wake_dir): a checkbox toggles None
+            # (inherit the global default) <-> an explicit combo choice.
+            return "optional_enum"
     if isinstance(ann, type) and issubclass(ann, StrEnum):
         return "enum"
     if isinstance(value, bool):
@@ -704,13 +723,16 @@ def _draw_leaf(
     elif kind == "palette_rows":
         changed, committed = _draw_palette_rows(label, value)
     elif kind == "model_list":
-        changed, committed = _draw_cast_list(label, value)
+        changed, committed = _draw_cast_list(label, value, state)
     elif kind == "optional_str":
         changed, committed = _draw_optional_str(name, label, doc, state)
     elif kind == "optional_float":
         changed, committed = _draw_optional_float(name, label, doc, lo, hi)
     elif kind == "optional_int":
         changed, committed = _draw_optional_int(name, label, doc, lo, hi)
+    elif kind == "optional_enum":
+        inner = _optional_inner_type(ann)
+        changed, committed = _draw_optional_enum(name, label, doc, inner)
     elif kind == "optional_model":
         imgui.text_disabled(f"{label}: {'set (preset-only)' if value else 'none'}")
     else:
@@ -873,6 +895,42 @@ def _draw_optional_int(
     return changed, committed
 
 
+def _optional_inner_type(ann: Any) -> type:
+    """The non-None member of an ``X | None`` annotation (the enum class of an
+    ``optional_enum`` leaf)."""
+    from typing import get_args
+    return next(a for a in get_args(ann) if a is not type(None))
+
+
+def _draw_optional_enum(
+    name: str, label: str, doc: dict[str, Any], enum_cls: type
+) -> tuple[bool, bool]:
+    """Optional-enum twin of ``_draw_optional_float`` (``StormOverride.wake_dir``):
+    an "override" checkbox toggles None (inherit the global/kind default) <-> an
+    explicit combo choice. Returns ``(changed, committed)``."""
+    changed = committed = False
+    options = [e.value for e in enum_cls]
+    overridden = doc[name] is not None
+    clicked, want = imgui.checkbox(f"override##{name}", overridden)
+    if clicked and want != overridden:
+        doc[name] = options[0] if want else None
+        changed = committed = True
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("overridden: this storm's value is used; off: inherit "
+                          "the global/kind default")
+    imgui.same_line()
+    if doc[name] is not None:
+        current = options.index(doc[name]) if doc[name] in options else 0
+        c, idx = imgui.combo(label, current, options)
+        if c:
+            doc[name] = options[idx]
+            changed = True
+        committed = committed or imgui.is_item_deactivated_after_edit()
+    else:
+        imgui.text_disabled(f"{label}: inherit")
+    return changed, committed
+
+
 def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]:
     """Latitude-anchored palette rows: a latitude slider plus the shared
     stops editor per row.
@@ -929,14 +987,111 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
     return changed, committed
 
 
-def _draw_cast_list(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]:
-    """Editor for the art-directed cast list (``storms.cast``): one row per
-    StormOverride with a kind combo, position/size/strength/aspect sliders, and
-    optional tint/brightness overrides (a checkbox toggles None = kind default
-    vs an explicit value). Add/remove rows; the list may be empty. Returns
-    ``(changed, committed)`` with the same semantics as ``_draw_palette_rows``
-    (per-sub-widget release OR a synthetic commit on a structural mutation --
-    plain buttons never raise the imgui end-of-edit signal)."""
+# StormOverride levers that only act on a cast HERO (the oval/barge/pearl stamp
+# paths carry no wake or companions). Hidden on non-hero rows so a placed oval
+# never shows a dead emergence/wake slider (validation_warnings also flags them).
+_HERO_ONLY_CAST_FIELDS = frozenset(
+    {"wake_dir", "companions", "companion_aspect", "companion_brightness"}
+)
+
+
+def _draw_cast_field(
+    name: str, info: FieldInfo, row: dict[str, Any], state: PanelState
+) -> tuple[bool, bool]:
+    """Render one ``StormOverride`` leaf inside a cast row: a tier badge plus the
+    same widget dispatch ``_draw_leaf`` uses, but WITHOUT its ``*``/lock/Reset
+    chrome. A cast row has no meaningful per-field default (every placed storm
+    sits at a non-zero lat/lon, so ``*`` would stick and Reset would teleport it
+    to 0,0), and lock-for-randomize is meaningless (cast carries no ``rand``).
+    The pfield description tooltip is kept. Returns ``(changed, committed)``."""
+    value = row[name]
+    label = name.replace("_", " ")
+    meta = FieldMeta.of(info)
+    lo, hi = _bounds(info)
+    ann = info.annotation
+    changed = committed = False
+    imgui.push_id(name)
+    _draw_tier_badge(meta.tier)
+    imgui.same_line()
+    kind = leaf_kind(name, info, value)
+    if kind == "enum":
+        options = [e.value for e in ann]
+        current = options.index(value) if value in options else 0
+        changed, idx = imgui.combo(label, current, options)
+        if changed:
+            row[name] = options[idx]
+    elif kind == "int":
+        ilo = int(lo) if lo is not None else 0
+        ihi = int(hi) if hi is not None else 100
+        changed, row[name] = imgui.slider_int(label, value, ilo, ihi)
+    elif kind == "float":
+        flo = lo if lo is not None else 0.0
+        fhi = hi if hi is not None else 1.0
+        changed, row[name] = imgui.slider_float(label, float(value), flo, fhi)
+    elif kind == "optional_float":
+        changed, committed = _draw_optional_float(name, label, row, lo, hi)
+    elif kind == "optional_int":
+        changed, committed = _draw_optional_int(name, label, row, lo, hi)
+    elif kind == "optional_enum":
+        changed, committed = _draw_optional_enum(
+            name, label, row, _optional_inner_type(ann)
+        )
+    else:
+        imgui.text_disabled(f"{label}: {value!r}")
+    if kind in _SINGLE_ITEM_KINDS:
+        committed = imgui.is_item_deactivated_after_edit()
+    if info.description and imgui.is_item_hovered():
+        imgui.set_tooltip(info.description)
+    imgui.pop_id()
+    return changed, committed
+
+
+def _draw_flat_model_fields(
+    model: type[BaseModel], row: dict[str, Any], state: PanelState,
+    *, skip: frozenset[str], kind: str,
+) -> tuple[bool, bool]:
+    """Render a flat model's leaves (a StormOverride cast row) reflectively, so a
+    newly declared ``pfield`` appears with no extra GUI code. Honors the Basic/
+    Advanced gate (a search never filters WITHIN a row -- the whole cast leaf is
+    the search target) and per-kind gating (hero-only levers hidden on non-hero
+    rows), and emits a ``separator_text`` on each ``ui`` sub-label change (the
+    Wake / Companions groups). ``skip`` excludes fields drawn bespoke (``kind``).
+    Returns ``(changed, committed)``."""
+    changed = committed = False
+    prev_ui: str | None = None
+    for name, info in model.model_fields.items():
+        if name in skip:
+            continue
+        if kind != "hero" and name in _HERO_ONLY_CAST_FIELDS:
+            continue
+        if not _advanced_visible(info, state):
+            continue
+        ui = FieldMeta.of(info).ui or None
+        if ui and prev_ui is not None and ui != prev_ui:
+            imgui.separator_text(ui)
+        if ui:
+            prev_ui = ui
+        c, cm = _draw_cast_field(name, info, row, state)
+        changed |= c
+        committed |= cm
+    return changed, committed
+
+
+def _draw_cast_list(
+    label: str, rows: list[dict[str, Any]], state: PanelState
+) -> tuple[bool, bool]:
+    """Editor for the art-directed cast list (``storms.cast``): one selectable
+    row per StormOverride. The kind combo is bespoke (it drives per-kind field
+    gating); every other field is rendered reflectively by
+    ``_draw_flat_model_fields`` (tier badges, tooltips, None=inherit toggles --
+    all from ``pfield`` metadata, no per-field code). Clicking a row selects it
+    (bridged to the equirect marker via ``state.selected_cast``); the selected
+    row is highlighted and scrolled into view on request. Add/remove rows; the
+    list may be empty. Returns ``(changed, committed)`` with the same semantics
+    as ``_draw_palette_rows`` (per-sub-widget release OR a synthetic commit on a
+    structural mutation -- plain buttons never raise the imgui end-of-edit
+    signal)."""
+    from gasgiant.app.viewport import selection_after_delete
     from gasgiant.params.model import CastKind, StormOverride
 
     changed = False
@@ -946,40 +1101,35 @@ def _draw_cast_list(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]
     remove_index = None
     for i, row in enumerate(rows):
         imgui.push_id(2000 + i)
-        imgui.separator_text(f"storm {i + 1}")
+        selected = state.selected_cast == i
+        clicked, _sel = imgui.selectable(
+            f"storm {i + 1}  ({row['kind']})", selected
+        )
+        if selected and state.cast_scroll_requested:
+            imgui.set_scroll_here_y(0.5)
+            state.cast_scroll_requested = False
+        if clicked:
+            state.selected_cast = i
         cur = kinds.index(row["kind"]) if row["kind"] in kinds else 0
         c, idx = imgui.combo("kind", cur, kinds)
         if c:
             row["kind"] = kinds[idx]
             changed = True
+            # Re-kinding away from HERO strands the hero-only levers: _add_cast
+            # ignores them (kind != HERO) and _draw_flat_model_fields hides them,
+            # so the user could neither see nor clear the dead values. Reset them
+            # to their inherit/off defaults on the transition (silent-failure
+            # review); committed follows from the combo's end-of-edit below.
+            if row["kind"] != "hero":
+                defaults = StormOverride().model_dump()
+                for f in _HERO_ONLY_CAST_FIELDS:
+                    row[f] = defaults[f]
         committed |= imgui.is_item_deactivated_after_edit()
-        for key, lo, hi, lbl in (
-            ("lat_deg", -68.0, 68.0, "latitude"),
-            ("lon_deg", -180.0, 180.0, "longitude"),
-            ("radius", 0.01, 0.15, "radius"),
-            ("strength_scale", 0.0, 3.0, "strength"),
-            ("aspect", 1.0, 3.0, "aspect"),
-        ):
-            cc, v = imgui.slider_float(lbl, float(row[key]), lo, hi)
-            if cc:
-                row[key] = v
-                changed = True
-            committed |= imgui.is_item_deactivated_after_edit()
-        for key, lo, hi in (("tint", -1.0, 1.0), ("brightness", -0.5, 0.5)):
-            enabled = row[key] is not None
-            ec, want = imgui.checkbox(f"set {key}##{key}", enabled)
-            if ec and want != enabled:
-                row[key] = 0.0 if want else None
-                changed = committed = True
-            imgui.same_line()
-            if row[key] is not None:
-                sc, sv = imgui.slider_float(key, float(row[key]), lo, hi)
-                if sc:
-                    row[key] = sv
-                    changed = True
-                committed |= imgui.is_item_deactivated_after_edit()
-            else:
-                imgui.text_disabled(f"{key}: kind default")
+        fc, fcm = _draw_flat_model_fields(
+            StormOverride, row, state, skip=frozenset({"kind"}), kind=row["kind"]
+        )
+        changed |= fc
+        committed |= fcm
         if imgui.small_button("remove storm"):
             remove_index = i
         imgui.pop_id()
@@ -987,10 +1137,14 @@ def _draw_cast_list(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bool]
         rows.pop(remove_index)
         changed = True
         committed = True
+        # Reconcile the panel selection when a row is removed here, reusing the
+        # viewport's pure index math (both are app-layer -- no layering break).
+        state.selected_cast = selection_after_delete(state.selected_cast, remove_index)
     if imgui.small_button(f"add storm##{label}"):
         rows.append(StormOverride().model_dump())
         changed = True
         committed = True
+        state.selected_cast = len(rows) - 1
     return changed, committed
 
 
