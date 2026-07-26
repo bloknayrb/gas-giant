@@ -49,18 +49,24 @@ def test_multi_row_palettes_anchor_both_hemispheres(name: str):
     The bound is +-60, not merely "one anchor either side of 0": rows at (-2, +78)
     would satisfy the weaker test while still clamping -2..-90 -- nearly half the
     planet, the whole south cap included -- to a near-equatorial row, which is the
-    same defect. Every shipped multi-row preset clears +-60 today (jupiter_like and
-    jupiter_vorticity -78.5/+66, saturn_pale -78/+72, ember_dwarf -78/+78).
+    same defect. Every shipped preset with latitude-varying rows clears +-60 today
+    (jupiter_like and jupiter_vorticity -78.5/+66, saturn_pale -78/+72,
+    ember_dwarf -78/+78).
 
     Palettes whose rows all carry IDENTICAL stops are exempt, as is a single row:
     bake_rows blends between equal endpoints, so no hemispheric asymmetry is
-    expressible and the result is uniform by construction. That exemption is what
-    gas_giant_warm relies on -- its 12 rows share one stop set, so it is immune to
-    this bug by degeneracy rather than by deliberate anchoring.
+    expressible and the result is uniform by construction. The presets that
+    actually depend on that exemption are the single-row ones, ice_giant and
+    neptune. gas_giant_warm also takes it -- its 12 rows share one stop set -- but
+    does not RELY on it: those rows span -78.5..+66 and would clear the bound
+    anyway, so do not read warm as evidence that the exemption is load-bearing for
+    the flagship, or that the flagship is unanchored.
     """
     rows = load_factory_preset(name).appearance.palette_rows
     distinct = {tuple((s.pos, *s.color) for s in r.stops) for r in rows}
-    if len(distinct) == 1:
+    # <= 1, not == 1: palette_rows carries no min_length, and an empty list would
+    # otherwise fall through to lats[0] and raise IndexError instead of asserting.
+    if len(distinct) <= 1:
         return
     lats = sorted(r.latitude for r in rows)
     assert lats[0] <= -60.0 and lats[-1] >= 60.0, (

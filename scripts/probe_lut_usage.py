@@ -46,7 +46,6 @@ def main() -> None:
     args = ap.parse_args()
 
     p = resolve_preset(args.preset)
-    apply_overrides(p, args.sets)
     p.sim.resolution = args.sim_res
     if args.dev_steps is not None:
         p.sim.dev_steps = args.dev_steps
@@ -61,6 +60,12 @@ def main() -> None:
     })
     if not args.keep_detail:
         p.detail = p.detail.model_copy(update={"intensity": 0.0})
+    # Overrides go LAST, matching preview_globe's precedence. Applied first they
+    # would be printed as accepted and then silently clobbered by the lines above:
+    # `--set sim.resolution=4096` would report 4096 and measure at 1024, i.e.
+    # hand back the 13.0% histogram while the operator reads it as the 20.2% one.
+    # Same trap for `--set appearance.chroma_aging=...`, a documented A/B here.
+    apply_overrides(p, args.sets)
 
     gpu = GpuContext.headless()
     sim = Simulation(p, gpu)
@@ -68,8 +73,13 @@ def main() -> None:
     tex, _ = sim.ensure_preview(1024)
     lum = np.asarray(gpu.read_texture(tex), dtype=np.float32)[..., 0].ravel()
 
+    # Resolution and dev_steps belong in the header, not just in the invocation:
+    # the numbers this tool prints move materially with sim-res (ember_dwarf's
+    # ember fraction is 13.0% at 1024 vs 20.2% at 4096), so a pasted histogram
+    # without them is unattributable.
     print(f"{args.preset}: LUT index distribution "
-          f"(detail {'on' if args.keep_detail else 'off'})")
+          f"(sim-res {p.sim.resolution}, dev_steps {p.sim.dev_steps}, "
+          f"detail {'on' if args.keep_detail else 'off'})")
     print(f"  min {lum.min():.3f}  p01 {np.percentile(lum, 1):.3f}  "
           f"p50 {np.percentile(lum, 50):.3f}  "
           f"p99 {np.percentile(lum, 99):.3f}  max {lum.max():.3f}")

@@ -11,8 +11,9 @@ Blender user gets.
 
 Writes <out>_eq.png and <out>_globe.png. Orientation is checkable two ways, which
 matters because this tool SHIPPED once with the globe vertically flipped:
-  --selftest  renders a synthetic north-white hemisphere and asserts north is up
-              (no GL, no preset needed) -- run it after touching globe();
+  --selftest  renders synthetic north-white and east-white maps and asserts that
+              north is up and east is right, pinning both axes and the column-0
+              longitude origin (no GL, no preset) -- run it after touching globe();
   --probe     prints zonal-mean luminance at a ladder of latitudes plus the
               latitude of the darkest row, so a flip shows up as numbers.
 Sanity anchor: gas_giant_warm's hero sits at latitude -24, so it must appear in
@@ -85,10 +86,16 @@ def _sample(eq: np.ndarray, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     Row 0 is NORTH -- established by a convention-free pole probe on the exported
     map during the 2026-07-24 orientation investigation, and re-checkable here at
     any time with --probe. So latitude +pi/2 maps to row 0.
+
+    Column 0 is longitude -PI, not 0: the engine's equirect convention is
+    ``lon = uv.x * 2*PI - PI`` (derive.comp:182, :285, :318). Without the +0.5
+    shift, --lon0 0 centers on map longitude -180 and a --views sheet starts at
+    the antimeridian, so sweeping --lon0 to find a feature at a known map
+    longitude (or a pinned storms.hero_longitude) lands on its antipode.
     """
     h, w = eq.shape[:2]
     v = (0.5 - lat / np.pi)               # +pi/2 -> 0.0 (north, row 0)
-    u = (lon / (2.0 * np.pi)) % 1.0
+    u = (lon / (2.0 * np.pi) + 0.5) % 1.0  # lon -PI -> column 0
     r = np.clip((v * (h - 1)).astype(np.int32), 0, h - 1)
     c = np.clip((u * (w - 1)).astype(np.int32), 0, w - 1)
     return eq[r, c]
@@ -140,13 +147,18 @@ def save_png(path: Path, img: np.ndarray) -> None:
 
 
 def selftest() -> None:
-    """Pin the globe's north/south orientation with a synthetic hemisphere.
+    """Pin the globe's north/south AND east/west orientation with synthetic maps.
 
     Needs no GL and no sim. Worth having because the orientation of this tool is
     the one property everything judged through it depends on, it is invisible in
     any real render of a roughly symmetric planet, and it was in fact WRONG on
     first write (u = cross(n, e), which points south). This repo has already lost
     a multi-day investigation to the same class of confusion.
+
+    The longitude half pins BOTH facts a globe view can get wrong about the
+    east-west axis: handedness (east to the right) and the column-0 origin
+    (-180, not 0). A quadrant map catches either independently -- a mirror puts
+    the bright wedge on the wrong side, a missing +0.5 shift puts it off-disc.
     """
     eq = np.zeros((256, 512, 3), np.float32)
     eq[:128] = 1.0                      # northern half white; row 0 is north
@@ -158,6 +170,20 @@ def selftest() -> None:
         f"top={top:.3f} bottom={bottom:.3f}; north must be up"
     )
     print(f"selftest OK: north renders up (top {top:.3f} > bottom {bottom:.3f})")
+
+    # Columns 256..383 are longitude 0..+90 under `lon = uv.x*2*PI - PI`, so
+    # centering on lon0=0 must light the RIGHT (east) half of the disc.
+    eq = np.zeros((256, 512, 3), np.float32)
+    eq[:, 256:384] = 1.0
+    g = globe(eq, size=200, lat0=0.0, lon0=0.0, limb=0.0, bg=0.5)
+    left = float(g[90:110, 40:80].mean())
+    right = float(g[90:110, 120:160].mean())
+    assert right > left, (
+        f"globe() longitude is wrong: an east-white quadrant (map columns "
+        f"256..383 = lon 0..+90) rendered left={left:.3f} right={right:.3f}; "
+        f"east of the center meridian must fall on the RIGHT of the disc"
+    )
+    print(f"selftest OK: east renders right (right {right:.3f} > left {left:.3f})")
 
 
 def probe(eq: np.ndarray) -> None:

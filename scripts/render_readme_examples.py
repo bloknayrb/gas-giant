@@ -1,9 +1,14 @@
 """Render one showcase image per factory preset for the README.
 
 Each preset is developed for a fixed number of steps (default 1000) on a
-reduced sim grid so the whole set renders in a couple of hours under software
-GL (llvmpipe); the exported color map is downsampled to an 8-bit sRGB PNG under
+reduced sim grid so the set stays tractable under software GL (llvmpipe); the
+exported color map is downsampled to an 8-bit sRGB PNG under
 ``docs/img/presets/``.
+
+One exception dominates the runtime: ``ember_dwarf`` is pinned to its shipped
+sim-res 4096 (see ``SIM_RES_OVERRIDES``), which is 16x the pixels of the default
+grid, so budget for it separately -- ``--presets`` a subset, or ``--force-sim-res``
+to override the pin for a fast smoke render (which must NOT be committed).
 
 Usage (needs a GL 4.3 context; llvmpipe works):
 
@@ -63,6 +68,10 @@ def main() -> None:
     ap.add_argument("--dev-steps", type=int, default=1000)
     ap.add_argument("--sim-res", type=int, default=1024,
                     help="sim grid width (reduced for tractable software-GL renders)")
+    ap.add_argument("--force-sim-res", action="store_true",
+                    help="apply --sim-res even to presets pinned by SIM_RES_OVERRIDES. "
+                         "For fast smoke renders only -- the resulting images "
+                         "misrepresent those presets and must not be committed.")
     ap.add_argument("--export-res", type=int, default=2048,
                     help="equirect map width fed to the exporter")
     ap.add_argument("--out-width", type=int, default=2048,
@@ -81,8 +90,14 @@ def main() -> None:
         # STRUCTURAL, not advisory: a plain `uv run python scripts/render_readme_examples.py`
         # would otherwise re-render ember_dwarf at the reduced default and overwrite
         # its committed image with the very render this file calls misrepresentative.
-        # A comment cannot enforce that, so the override lives in code.
-        sim_res = SIM_RES_OVERRIDES.get(name, args.sim_res)
+        # A comment cannot enforce that, so the override lives in code -- but it is
+        # escapable with --force-sim-res, because a 16x-pixel preset silently
+        # ignoring --sim-res makes a fast full-set smoke run impossible.
+        sim_res = args.sim_res if args.force_sim_res else SIM_RES_OVERRIDES.get(
+            name, args.sim_res)
+        if sim_res != SIM_RES_OVERRIDES.get(name, sim_res):
+            print(f"[{name}] WARNING: --force-sim-res overrides the pinned "
+                  f"{SIM_RES_OVERRIDES[name]}; do NOT commit this image.", flush=True)
         params.sim.resolution = sim_res
         params.sim.dev_steps = args.dev_steps
         params.export.width = args.export_res
