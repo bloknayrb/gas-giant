@@ -29,9 +29,16 @@ uv run python scripts/build_addon.py # -> dist/gasgiant_importer-*.zip
 
 Markers: `gpu` (needs a GL 4.3 context) and `slow` (heavy CPU reference-solver files).
 Factory presets (`src/gasgiant/presets/`): gas_giant_warm (flagship; GUI startup default),
-jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune, ember_dwarf (the only
-non-solar-system one: a brown dwarf — dark magenta deck, ember tears, `sim.resolution`
-4096 and unusually resolution-sensitive). The GUI (post PR #13) has
+jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune, ember_dwarf (a brown
+dwarf — dark magenta deck, ember tears, `sim.resolution` 4096 and unusually
+resolution-sensitive), cobalt_gale (a tidally locked hot Jupiter — scattering-blue not
+absorption-blue, bright = thick haze, zero emission; the only preset whose subject is a JET
+not a storm: `hero_count` 0 plus a ±13° equatorial zone. The only preset with its OWN band
+geometry — warm/jupiter_like/jupiter_vorticity/neptune all carry the identical 12-band
+JOVIAN skeleton, so a band-template change touches four presets at once; cobalt_gale's is a
+9-band authored one. Band identity is `values < median` and must strictly alternate, so a
+band CENTRED on the equator needs `count ≡ 1 (mod 4)`). The last two are the
+non-solar-system ones. The GUI (post PR #13) has
 searchable auto-generated panels, per-slider help, undo/redo, and playback controls.
 
 ## Testing policy

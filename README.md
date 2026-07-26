@@ -44,7 +44,7 @@ uv run gasgiant-studio
 
 # Headless: render a map set (factory presets: gas_giant_warm [default],
 # jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune,
-# ember_dwarf)
+# ember_dwarf, cobalt_gale)
 uv run gasgiant export --preset jupiter_like --res 4096 --out out/jove
 uv run gasgiant validate out/jove        # seam/pole invariants
 
@@ -61,7 +61,7 @@ uv run gasgiant export --preset jupiter_vorticity --frames 120 \
 
 ## Presets
 
-Seven factory presets ship in `src/gasgiant/presets/`. Each image below is that
+Eight factory presets ship in `src/gasgiant/presets/`. Each image below is that
 preset developed for 1,000 steps, exported as the raw equirectangular color map
 — the same texture that wraps onto the sphere. Parameter details and the
 manifest contract: `docs/presets.md`.
@@ -117,6 +117,23 @@ many narrow bands.
 > the fraction of the disc reaching ember grows by about half again between sim-res
 > 1024 and 4096 (13% → 20% of the disc), and the reduced grid understates it. The
 > generator enforces this per-preset, so a plain regen cannot overwrite it.
+
+**`cobalt_gale`** — a tidally locked hot Jupiter, after HD 189733b. Blue for the
+opposite reason to `neptune`: not methane *absorbing* the red end, but Rayleigh
+scattering off a high silicate haze, which throws back blue as λ⁻⁴. That inverts
+the tonal structure, because the haze is the only reflector — bright means thick
+cloud, and dark means clearer air seen down into a hot, near-black,
+alkali-absorbing depth. At ~1200 K it glows in the infrared, not the visible, so
+unlike `ember_dwarf` every bright pixel here is reflected light and emission is
+zero. It is also the only preset whose subject is a **jet** rather than a storm:
+tidally locked giants develop equatorial superrotation, one broad prograde jet
+instead of Jupiter's many alternating bands, so there is no hero at all and the
+composition is an authored 9-band skeleton with a ±13° equatorial zone. Its
+rotation is tidally locked to a ~2.2-day orbit — five times slower than Jupiter —
+which sets the rest, and makes it the mirror of `ember_dwarf`: low Coriolis, a
+large deformation radius, few very wide bands.
+
+![cobalt_gale developed for 1,000 steps](docs/img/presets/cobalt_gale.png)
 
 > Generated with `scripts/render_readme_examples.py` (a reduced sim grid keeps
 > the set tractable under software GL; the shipped presets develop at

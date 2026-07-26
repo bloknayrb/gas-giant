@@ -56,7 +56,20 @@ alternating bands — and the engine has a first-class lever for it.
 - `jets.equatorial_speed` ≈ 3.0–3.4, `jets.equatorial_width` ≈ 0.30–0.36 rad (17–21°).
   Deliberately broad; `ember_dwarf` runs 2.1 / 0.16 rad for comparison.
 - `jets.polar_decay` ≈ 0.9 to quiet the mid-latitudes.
-- Low `bands.count` (8–12) so what survives reads as a few broad zones, not stripes.
+- **An AUTHORED 9-band template**, which reverses this document's original "seeded bands,
+  low count" plan. Reason, measured: bands are laid out in *sin-latitude* space with
+  jittered widths (`sim/bands.py`), so at `count` 10 the near-equator bands are only ~11°
+  wide and their edges fall wherever the seed puts them. One landed on the equator and split
+  the jet into two bright lanes with a dim one between (rendered luma +5 0.577, 0 0.436, −5
+  0.343, −10 0.607). The equator was *already* dominant over the mid-latitudes by then
+  (0.58–0.61 vs 0.38) — it just was not a *jet*, and no seed roulette fixes that reliably.
+  The original argument against the template path was that the shipped template **is
+  Jupiter's layout**; that argues against inheriting warm's, not against authoring one.
+  Authoring it also makes the band values — which *are* the LUT index — numbers in the build
+  script rather than emergent accidents.
+  Constraint worth recording: identity is derived as `values < median(values)` and must
+  strictly alternate, so a band *centred* on the equator requires `count ≡ 1 (mod 4)`.
+  9 works; 11 would put a **belt** (dark lane) on the equator.
 - `solver.vort_inject_mask = "shear"` so eddies form on the jet flanks as chevrons.
   Unmasked injection is a known failure: `gas_giant_warm` needed exactly this masking to
   stop broadband churn from washing out its band structure.
@@ -99,7 +112,12 @@ These are inherited-lever traps already paid for once; see the
    outermost anchor, so a one-sided ladder paints an entire hemisphere with the row at 0.0.
 4. **`bands.value_contrast` is inert on the band-template path and drastic on the seeded
    path.** Pick a path and state which, rather than inheriting a number that does nothing
-   in its source and everything here.
+   in its source and everything here. *Resolved:* the template path was chosen (above), so
+   `value_contrast`, `count`, `width_jitter`, `width_tail` and `hue_jitter` are all inert and
+   are pinned to inert values rather than left carrying warm's numbers — nothing should read
+   as a tuning decision that cannot have an effect. `faded_sector` **is** live on the
+   template path (its geometry is picked in `_finish_layout`, which both paths run) and is
+   pinned to 0: it is Jupiter's SEB-fade epoch feature and would be an accidental import.
 
 Prefer `chroma_scale` (Oklab) over `saturation` (sRGB mix).
 
@@ -123,9 +141,15 @@ Prefer `chroma_scale` (Oklab) over `saturation` (sRGB mix).
    (`p05 --check` 9/9, `pytest -m "not gpu and not slow"`, `ruff`, `lint-imports`, the
    palette-anchoring test), PR.
 
-`sim.resolution` 4096 is the intended ship value, matching the other modern presets. If it
-is pinned, `SIM_RES_OVERRIDES` in `render_readme_examples.py` may need an entry so a plain
-full-set run cannot overwrite the committed image at the reduced default grid.
+`sim.resolution` 4096 is the ship value, matching the other modern presets.
+
+**Outcome (measured):** it does NOT need a `SIM_RES_OVERRIDES` entry, unlike `ember_dwarf`.
+Fraction of the disc above LUT index 0.80, detail on: 7.8% at 1024 → 8.5% at 4096, ≈1.09×,
+against `ember_dwarf`'s 13.0% → 20.2% (≈1.55×). Structural reason: `ember_dwarf`'s premise
+is the fraction of the deck torn open by *convective excursions*, which is
+resolution-dependent; this preset's composition is an authored band template with verbatim
+values, which is resolution-independent by construction. Confirmed visually — the reduced
+grid renders the same planet with coarser filaments, not a different one.
 
 ## Risks
 

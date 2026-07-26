@@ -39,6 +39,7 @@ PRESETS = [
     "ice_giant",
     "neptune",
     "ember_dwarf",
+    "cobalt_gale",
 ]
 
 # Presets whose committed image must NOT use the reduced default sim grid.
@@ -48,6 +49,14 @@ PRESETS = [
 # above LUT index 0.80, measured with scripts/probe_lut_usage.py --keep-detail).
 # The reduced grid understates it badly, so it is always rendered at its shipped
 # resolution regardless of --sim-res.
+#
+# cobalt_gale also ships sim.resolution 4096 but is deliberately NOT listed, and the
+# contrast is the useful part: its composition is an AUTHORED band template with
+# verbatim values, so it is resolution-independent by construction, where
+# ember_dwarf's premise is a resolution-dependent convective fraction. Measured the
+# same way (fraction of the disc above LUT index 0.80, detail on), 1024 -> 4096:
+# cobalt_gale 7.8% -> 8.5% (~1.09x) against ember_dwarf's 13.0% -> 20.2% (~1.55x).
+# Shipping 4096 is therefore NOT on its own a reason to appear here.
 SIM_RES_OVERRIDES = {"ember_dwarf": 4096}
 
 
