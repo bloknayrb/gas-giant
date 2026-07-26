@@ -32,6 +32,49 @@ from gasgiant.params.presets import resolve_preset
 
 GRAY = [GradientStop(pos=p, color=[p, p, p]) for p in (0.0, 0.25, 0.5, 0.75, 1.0)]
 
+# The fields the neutralization block below overwrites. An `--set` on any of them
+# is REFUSED rather than applied, because overrides run LAST (see the note in
+# main()) and would therefore win -- silently breaking the one invariant that
+# makes this tool mean anything, that rendered luminance IS the palette index.
+#
+# This is the mirror image of the bug the ordering fixed, and the more dangerous
+# half. Applying overrides first made `--set sim.resolution=4096` silently
+# IGNORED: wrong, but the printed histogram was still a real histogram. Applying
+# them last makes `--set appearance.chroma_aging=0.35` silently EFFECTIVE: a
+# nonzero chroma_aging modulates the very red channel this tool reads back, so the
+# output stops being a LUT-index distribution while the header still labels it
+# one -- and preset knee positions are authored from exactly these numbers.
+#
+# For a chroma A/B, use the REAL palette and compare mean on-disc RGB (how
+# chroma_aging was actually measured on ember_dwarf), or scripts/preview_globe.py
+# --set. Not this tool: it has no palette left to tint.
+_NEUTRALIZED = frozenset(
+    f"appearance.{f}" for f in (
+        "palette_rows", "storm_tints", "haze_amount", "contrast", "saturation",
+        "gamma", "chroma_variance", "hue_variance", "chroma_aging",
+        "detail_chroma", "polar_tint_strength", "polar_canvas_value",
+    )
+)
+
+
+def _reject_neutralized(sets: list[str], keep_detail: bool) -> None:
+    blocked = dict.fromkeys(_NEUTRALIZED)
+    if not keep_detail:
+        blocked["detail.intensity"] = None    # zeroed unless --keep-detail
+    for spec in sets:
+        path = spec.partition("=")[0].strip()
+        if path in blocked:
+            raise SystemExit(
+                f"refusing --set {path}: this tool overwrites that field to make "
+                f"rendered luminance equal the palette INDEX, and overrides are "
+                f"applied last, so the override would win and the printed "
+                f"histogram would no longer be a LUT-index distribution.\n"
+                f"For a chroma/appearance A/B use scripts/preview_globe.py --set "
+                f"(real palette) and compare mean on-disc RGB."
+                + ("" if keep_detail or not path.startswith("detail.")
+                   else "\nFor detail.intensity specifically: pass --keep-detail.")
+            )
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
@@ -44,6 +87,10 @@ def main() -> None:
                     help="leave the detail pass on (default: off, so the "
                          "histogram reflects the SIM/band structure alone)")
     args = ap.parse_args()
+
+    # Before any GL work: an override that would invalidate the measurement is a
+    # usage error, and failing in under a second beats failing after a 4096 develop.
+    _reject_neutralized(args.sets, args.keep_detail)
 
     p = resolve_preset(args.preset)
     p.sim.resolution = args.sim_res
@@ -64,7 +111,11 @@ def main() -> None:
     # would be printed as accepted and then silently clobbered by the lines above:
     # `--set sim.resolution=4096` would report 4096 and measure at 1024, i.e.
     # hand back the 13.0% histogram while the operator reads it as the 20.2% one.
-    # Same trap for `--set appearance.chroma_aging=...`, a documented A/B here.
+    #
+    # Ordering last is only SAFE because _reject_neutralized() already refused any
+    # override that targets a field the block above overwrites -- otherwise this
+    # line would hand the operator a silently invalid histogram, which is worse
+    # than the ignored-override bug it fixes. The two must stay together.
     apply_overrides(p, args.sets)
 
     gpu = GpuContext.headless()

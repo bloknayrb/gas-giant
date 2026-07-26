@@ -85,7 +85,8 @@ PRESETS_DIR = Path("src/gasgiant/presets")
 #         --sim-res 4096 --keep-detail
 #
 # It swaps in a linear grayscale ramp so rendered luminance IS the palette index.
-# MEASURED_HISTOGRAM below records what the shipped tuning actually produces.
+# MEASURED_HISTOGRAM below is the BASELINE to diff a re-measurement against --
+# without it, "re-measure if either moves" has nothing to compare to.
 #
 # THE KNEE LADDER IS THE COMPOSITION, and it is set by measurement. The first
 # build made this concrete: the equatorial jet did not read as the subject at all,
@@ -107,6 +108,18 @@ PRESETS_DIR = Path("src/gasgiant/presets")
 # LATE knees poleward (the 0.82 rail at -40 lands mid-cobalt, not pale). The jet
 # becomes the subject without touching the dynamics, and the mid-latitudes keep
 # their structure instead of being flattened to get out of its way.
+#
+# The shipped baseline, both at `--keep-detail` (decile shares of the disc, in %).
+# Diff a re-measurement against THIS, not against the ember_dwarf numbers.
+MEASURED_HISTOGRAM = {
+    #        0.0-0.1  .1-.2  .2-.3  .3-.4  .4-.5  .5-.6  .6-.7  .7-.8  .8-.9  .9-1
+    1024: (0.0, 0.0, 5.2, 23.7, 15.4, 19.2, 18.7, 10.0, 4.8, 3.0),   # p50 0.540
+    4096: (0.0, 0.2, 6.8, 22.9, 15.4, 17.3, 17.9, 11.0, 5.0, 3.5),   # p50 0.533
+}
+# The pair is also the evidence for NOT pinning the README render resolution (see
+# SIM): above index 0.80 it is 7.8% -> 8.5%, only ~1.09x, where ember_dwarf's
+# convection-driven premise moves ~1.55x.
+
 EQUATOR = [   # the superrotation jet: EARLY knees, the only row reaching a crest
     (0.00, (0.035, 0.045, 0.105)),
     (0.25, (0.085, 0.130, 0.290)),
@@ -219,9 +232,11 @@ SOLVER = {
 #
 # This reverses the preset's first attempt, so the reasoning is worth keeping.
 # The argument against the template path is that the shipped template IS
-# JUPITER'S band layout, and a 22-band Jovian skeleton is the most Jupiter-like
-# thing this preset could inherit while trying not to look like Jupiter. That
-# argument is against inheriting WARM'S template. It is not an argument against
+# JUPITER'S band layout, and a 12-band Jovian skeleton is the most Jupiter-like
+# thing this preset could inherit while trying not to look like Jupiter. (12, not
+# 22: warm's `bands.count` is 22 but that value is INERT on the template path --
+# exactly the conflation the BANDS block below warns about, and one this comment
+# originally made.) That argument is against inheriting WARM'S template. It is not an argument against
 # authoring one, and the seeded path turned out to be unable to deliver the
 # composition:
 #
@@ -614,9 +629,17 @@ def build() -> None:
     # makes the jet dominant is the same thing that leaves the caps unforced.
     # The 0.40 threshold is looser than ember_dwarf's 0.30 because a cold slate
     # blue at 0.34 is still unmistakably not a haze crest.
+    #
+    # Checks EVERY stop, not `stops[-1]`. GradientStop carries no ordering
+    # validator (`params/model.py`; bake_lut sorts internally), so `stops[-1]` is
+    # list order, not the brightest stop -- a polar ramp with an appended dark stop
+    # or a non-monotone crest would sail through while the unforced cap still went
+    # pale, i.e. the exact ember_dwarf defect this guard exists to catch. The
+    # neighbouring knee-ladder guard was already written per-channel for the same
+    # reason; this one was not, which made the file inconsistent with itself.
     for row in r.appearance.palette_rows:
         if abs(row.latitude) >= 70.0:
-            assert max(row.stops[-1].color) < 0.40, row.latitude
+            assert max(max(s.color) for s in row.stops) < 0.40, row.latitude
     # The knee ladder IS the composition (see EQUATOR): the equator must reach a
     # pale crest EARLIER than the deck does, or the brightest zone of the seeded
     # band lottery takes over as the subject wherever it happens to land.

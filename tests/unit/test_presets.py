@@ -51,7 +51,7 @@ def test_multi_row_palettes_anchor_both_hemispheres(name: str):
     planet, the whole south cap included -- to a near-equatorial row, which is the
     same defect. Every shipped preset with latitude-varying rows clears +-60 today
     (jupiter_like and jupiter_vorticity -78.5/+66, saturn_pale -78/+72,
-    ember_dwarf -78/+78).
+    ember_dwarf and cobalt_gale -78/+78).
 
     Palettes whose rows all carry IDENTICAL stops are exempt, as is a single row:
     bake_rows blends between equal endpoints, so no hemispheric asymmetry is
