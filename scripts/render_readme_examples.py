@@ -33,6 +33,13 @@ PRESETS = [
     "saturn_pale",
     "ice_giant",
     "neptune",
+    # ember_dwarf is unusually resolution-sensitive: its tears are made by
+    # convective excursions, and the fraction of the disc that clears the ember
+    # knee roughly DOUBLES between sim-res 1024 and its shipped 4096 (measured
+    # with scripts/probe_lut_usage.py). The default reduced grid below
+    # therefore misrepresents it badly, so its committed image was rendered with
+    # `--presets ember_dwarf --sim-res 4096`.
+    "ember_dwarf",
 ]
 
 

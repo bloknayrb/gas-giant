@@ -43,7 +43,8 @@ uv run gasgiant-studio
 # What each slider does, shown on the planet: docs/sliders.md
 
 # Headless: render a map set (factory presets: gas_giant_warm [default],
-# jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune)
+# jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune,
+# ember_dwarf)
 uv run gasgiant export --preset jupiter_like --res 4096 --out out/jove
 uv run gasgiant validate out/jove        # seam/pole invariants
 
@@ -60,7 +61,7 @@ uv run gasgiant export --preset jupiter_vorticity --frames 120 \
 
 ## Presets
 
-Six factory presets ship in `src/gasgiant/presets/`. Each image below is that
+Seven factory presets ship in `src/gasgiant/presets/`. Each image below is that
 preset developed for 1,000 steps, exported as the raw equirectangular color map
 — the same texture that wraps onto the sphere. Parameter details and the
 manifest contract: `docs/presets.md`.
@@ -97,6 +98,24 @@ belt churn), a dark Great-Dark-Spot anticyclone with bright companion clouds,
 and wind-sheared cirrus streaks.
 
 ![neptune developed for 1,000 steps](docs/img/presets/neptune.png)
+
+**`ember_dwarf`** — not a planet: a cloudy L/T-transition brown dwarf, and the
+one preset here that is lit from *below*. Broad sodium and potassium absorption
+eats the green out of a brown dwarf's spectrum, so the cloud deck is a dim
+magenta-plum; the L/T transition is the regime where that silicate deck breaks
+apart, and through the tears you see down to hotter gas. Bright means a hole,
+not a cloud — so the ramp tops out in ember orange and gold instead of white
+cirrus, the fire is made by convective excursions rather than painted on by band
+values, and the hero storm is a giant glowing clearing ringed by a dark moat.
+Fast rotation (2–5 h) sets the rest: high Coriolis, small deformation radius,
+many narrow bands.
+
+![ember_dwarf developed for 1,000 steps](docs/img/presets/ember_dwarf.png)
+
+> `ember_dwarf`'s image is rendered at its shipped `sim.resolution` 4096, not the
+> reduced grid used for the others: its tears come from convective excursions, so
+> the fraction of the disc that reaches ember roughly doubles between sim-res 1024
+> and 4096, and the reduced grid understates it badly.
 
 > Generated with `scripts/render_readme_examples.py` (a reduced sim grid keeps
 > the set tractable under software GL; the shipped presets develop at

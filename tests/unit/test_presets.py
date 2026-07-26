@@ -28,6 +28,35 @@ def test_factory_presets_exist_and_load():
         assert isinstance(params, PlanetParams)
 
 
+@pytest.mark.parametrize("name", factory_preset_names())
+def test_multi_row_palettes_anchor_both_hemispheres(name: str):
+    """A multi-row latitude palette must have anchors on BOTH sides of the equator.
+
+    ``palette.gradient.bake_rows`` blends anchors across SIGNED latitude (-90..+90)
+    and CLAMPS outside the outermost anchor. So a ladder authored only at
+    non-negative latitudes (0/32/56/78, an easy mistake when thinking of latitude
+    as a distance from the equator) paints the ENTIRE southern hemisphere with the
+    single row at 0.0 -- including the south polar cap, which then wears the
+    equatorial palette.
+
+    That is not a subtle defect: on ember_dwarf, whose equator row is the only one
+    allowed to reach hot gold, it rendered a bright orange laminar south cap that
+    survived several dynamics-side "fixes" because it was misdiagnosed as a seeded
+    band-value lottery. It is invisible to any hash gate (the output is wrong, not
+    unstable) and easy to miss on a globe preview, which shows one hemisphere at a
+    time. A single-row palette is exempt: bake_rows reproduces it on every output
+    row by construction, so it is uniform rather than asymmetric.
+    """
+    rows = load_factory_preset(name).appearance.palette_rows
+    if len(rows) == 1:
+        return
+    lats = sorted(r.latitude for r in rows)
+    assert lats[0] < 0.0 < lats[-1], (
+        f"{name}: palette rows span {lats[0]:+.1f}..{lats[-1]:+.1f}, which leaves one "
+        f"hemisphere clamped to the outermost anchor. Mirror the rows across the equator."
+    )
+
+
 def _luma(rgb: tuple[float, float, float]) -> float:
     r, g, b = rgb
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
