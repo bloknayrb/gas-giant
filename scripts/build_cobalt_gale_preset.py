@@ -23,8 +23,10 @@ bright pixel is reflected light. That is also what keeps it clear of
 `ember_dwarf`, whose grammar is the opposite ("bright = a hole in the deck, with
 hotter gas showing through").
 
-**The composition is a JET, not a storm** — the first factory preset of which
-that is true. Tidally locked giants develop equatorial superrotation: one broad
+**The composition is a JET, not a storm** — the first factory preset that is LED
+by one. (NOT the first without a hero: `saturn_pale` also ships `hero_count=0`.
+It merely lacks a focal feature, where this preset has a jet AS its subject.)
+Tidally locked giants develop equatorial superrotation: one broad
 prograde equatorial jet dominating rather than Jupiter's many alternating bands.
 A hero storm would have made this read as the Great Red Spot in blue.
 
@@ -50,6 +52,7 @@ Run: uv run python scripts/build_cobalt_gale_preset.py
 """
 from __future__ import annotations
 
+import statistics
 from pathlib import Path
 
 from gasgiant.params.model import BandTemplate, GradientStop, InjectMask, PaletteRow
@@ -243,7 +246,7 @@ SOLVER = {
 # zone-majority class so they are symmetric. (11 would put a BELT on the equator,
 # i.e. a dark lane exactly where the jet belongs.)
 BAND_TEMPLATE = {
-    # +-14 deg equatorial zone: one broad bright lane, deliberately symmetric.
+    # +-13 deg equatorial zone: one broad bright lane, deliberately symmetric.
     # Everything else is slightly asymmetric on purpose -- real giants are not
     # mirror-symmetric, and a perfectly even skeleton reads mechanical (the same
     # failure that killed the festoon spiral-amplification idea).
@@ -298,7 +301,8 @@ BANDS = {
 # The superrotation jet -- the subject of the preset.
 #
 # Deliberately BROAD and FAST: 0.33 rad is a ~19 deg half-width, versus
-# ember_dwarf's 0.16 and the 0.12 model default. polar_decay 0.9 (warm ~0.5)
+# ember_dwarf's 0.16 and the 0.12 model default. polar_decay 0.9 (warm 0.648 --
+# 0.5 is the MODEL DEFAULT, not warm's value)
 # quiets the mid-latitude jets so the equator is unmistakably dominant rather
 # than merely the strongest of many.
 #
@@ -344,13 +348,25 @@ TURBULENCE = {
 # become a real one the moment anybody raised hero_count to debug something.
 #
 # The vortex population that remains is modest and large-scale: a slow rotator
-# with a large L_d supports few, big eddies. small_density stays at its 0.0
-# default (warm ships 3.5) because fine speckle is the wrong texture at this
-# deformation radius, and pearls/barges are Jovian belt furniture.
+# with a large L_d supports few, big eddies. small_density is RESET to 0.0 (warm
+# ships 3.5) because fine speckle is the wrong texture at this deformation
+# radius, and pearls/barges are Jovian belt furniture.
 STORMS = {
     "hero_count": 0,
     "hero_latitude": None,
     "hero_longitude": None,
+    # The AMPLITUDE-side hero levers, pinned for the reason stated above -- these
+    # four were initially left inherited, which made the claim above broader than
+    # the code: warm's GRS values (hero_strength 1.9, hero_radius 0.108,
+    # wake_turbulence 3.2, companion_brightness 0.55) were still sitting in the
+    # emitted JSON, inert at hero_count 0 but ready to become a real Great Red
+    # Spot the moment anybody raised the count. hero_strength especially: it is
+    # the single most consequential hero lever, and inheriting it by omission is
+    # not a decision. Same set the sibling ember_dwarf script pins.
+    "hero_strength": 1.0,
+    "hero_radius": 0.1,
+    "wake_turbulence": 1.8,
+    "companion_brightness": 0.32,
     "hero_companions": 0,
     "hero_solid_core": 0.0,
     "hero_emergence": 0.0,
@@ -484,6 +500,10 @@ def _stops(
 
 def build() -> None:
     p = load_factory_preset("gas_giant_warm")
+    # Captured BEFORE p.bands is replaced below, so the "not warm's template"
+    # assert needs no second load from disk -- and so a warm without a template
+    # would fail here on a clear AttributeError rather than inside the assert.
+    warm_edges = p.bands.template.edges_deg
     # A distinct seed, so this preset's band/storm/turbulence draws are its own
     # rather than warm's 4201 replayed through a different tuning (ember_dwarf
     # kept 4201, which makes it the third preset drawing the same substreams).
@@ -550,13 +570,19 @@ def build() -> None:
     # An AUTHORED template, and specifically NOT warm's Jovian one.
     t = r.bands.template
     assert t is not None
-    assert t.edges_deg != load_factory_preset("gas_giant_warm").bands.template.edges_deg
+    assert t.edges_deg != warm_edges
     # 9 bands with a band CENTRED on the equator -- the geometric point of the
     # whole layout. Identity must strictly alternate, which forces count = 1 (mod 4)
     # for a centred band; at 11 a BELT lands on the equator instead.
     assert len(t.values) == 9
-    assert len(t.values) % 4 == 1, len(t.values)
     assert t.edges_deg[4] == 13.0 and t.edges_deg[5] == -13.0, t.edges_deg
+    # ...and the centred band must actually be a ZONE. This is the thing the
+    # mod-4 rule exists to guarantee, so assert the CONSEQUENCE rather than the
+    # rule: `len(values) % 4 == 1` would be a tautology under the length pin
+    # above and could never fail on its own, whereas identity is derived from
+    # the VALUES and a future retune could silently push the equatorial band
+    # below the median and turn the jet into a dark lane.
+    assert t.values[4] >= statistics.median(t.values), t.values
     # The equatorial zone must be the brightest band on the planet by a clear
     # margin -- but NOT by so much that it clips. 0.88 measured mean 0.917 / max
     # 1.000 and rendered as flat white; the upper bound is the real lesson.
@@ -594,10 +620,16 @@ def build() -> None:
     # The knee ladder IS the composition (see EQUATOR): the equator must reach a
     # pale crest EARLIER than the deck does, or the brightest zone of the seeded
     # band lottery takes over as the subject wherever it happens to land.
+    #
+    # Take max() over the CHANNELS, not over the colour tuples: `max(s.color ...)`
+    # compares tuples LEXICOGRAPHICALLY, i.e. picks the largest RED channel rather
+    # than the brightest stop. It happens to give the right answer on these two
+    # ramps (both are monotone in R), so the guard would have passed for the wrong
+    # reason and silently stopped meaning anything on a bluer ramp.
     by_lat = {row.latitude: row for row in r.appearance.palette_rows}
-    eq_at_75 = max(s.color for s in by_lat[0.0].stops if s.pos <= 0.75)
-    mid_at_78 = max(s.color for s in by_lat[-32.0].stops if s.pos <= 0.78)
-    assert max(eq_at_75) > max(mid_at_78) * 1.5, (eq_at_75, mid_at_78)
+    eq_at_75 = max(max(s.color) for s in by_lat[0.0].stops if s.pos <= 0.75)
+    mid_at_78 = max(max(s.color) for s in by_lat[-32.0].stops if s.pos <= 0.78)
+    assert eq_at_75 > mid_at_78 * 1.5, (eq_at_75, mid_at_78)
     print(f"wrote + verified {out}", flush=True)
 
 
