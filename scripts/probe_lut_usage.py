@@ -1,7 +1,7 @@
 """Which part of the palette LUT does a preset actually USE?
 
-Authoring a beautiful 4-stop ramp is pointless if the sim's tracer only ever
-lands in its top third -- the dark end is then dead code and the planet reads as
+A carefully authored ramp is wasted if the sim's tracer only ever lands in one
+slice of it -- the dark end is then dead code and the planet reads as
 the bright end alone. (Exactly that happened to ember_dwarf v1: a dark plum low
 end that never appeared, so a "dim magenta" object rendered as uniform lava red.)
 
@@ -16,6 +16,14 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
+
+# Reuse the sibling preview tool's override parser rather than keeping a second
+# copy: it walks any nesting depth (``poles.north.strength``), which a local
+# rpartition-based version did NOT -- it built the attribute name "poles.north"
+# and raised AttributeError, exactly on the polar levers worth A/B-ing against a
+# LUT histogram. Sibling-script imports are house precedent (see
+# scripts/build_legacy_presets.py).
+from preview_globe import apply_overrides  # noqa: E402
 
 from gasgiant.engine import Simulation
 from gasgiant.gl import GpuContext
@@ -38,16 +46,7 @@ def main() -> None:
     args = ap.parse_args()
 
     p = resolve_preset(args.preset)
-    import ast
-    for spec in args.sets:
-        path, _, raw = spec.partition("=")
-        section, _, field = path.strip().rpartition(".")
-        try:
-            value = ast.literal_eval(raw)
-        except (ValueError, SyntaxError):
-            value = raw
-        setattr(getattr(p, section) if section else p, field, value)
-        print(f"  override {path} = {value!r}")
+    apply_overrides(p, args.sets)
     p.sim.resolution = args.sim_res
     if args.dev_steps is not None:
         p.sim.dev_steps = args.dev_steps
@@ -78,7 +77,7 @@ def main() -> None:
     edges = np.linspace(0.0, 1.0, 11)
     hist, _ = np.histogram(np.clip(lum, 0, 1), bins=edges)
     frac = hist / hist.sum()
-    for i in range(10):
+    for i in range(len(hist)):
         bar = "#" * int(round(frac[i] * 60))
         print(f"  [{edges[i]:.1f},{edges[i+1]:.1f})  {frac[i]*100:5.1f}%  {bar}")
 

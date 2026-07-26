@@ -9,19 +9,25 @@ Blender user gets.
     uv run python scripts/preview_globe.py --preset gas_giant_warm \
         --out out/pv/warm --sim-res 1024 --dev-steps 700
 
-Writes <out>_eq.png and <out>_globe.png. Orientation is self-checked: pass
---probe to print the latitude of the darkest/brightest rows so a north/south
-flip cannot slip through (gas_giant_warm's hero sits at latitude -24, so it must
-appear in the LOWER half of the globe).
+Writes <out>_eq.png and <out>_globe.png. Orientation is checkable two ways, which
+matters because this tool SHIPPED once with the globe vertically flipped:
+  --selftest  renders a synthetic north-white hemisphere and asserts north is up
+              (no GL, no preset needed) -- run it after touching globe();
+  --probe     prints zonal-mean luminance at a ladder of latitudes plus the
+              latitude of the darkest row, so a flip shows up as numbers.
+Sanity anchor: gas_giant_warm's hero sits at latitude -24, so it must appear in
+the LOWER half of the globe.
 
-Not a gate, not a doc asset — a working tool. scripts/scratch/ is gitignored.
+Not a gate and not a doc-asset generator -- a working tool.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from gasgiant.engine import Simulation
@@ -33,7 +39,6 @@ def apply_overrides(params, sets: list[str]) -> None:
     """Apply ``section.field=value`` overrides so a lever can be A/B'd WITHOUT
     rebuilding the preset JSON. Values are parsed as Python literals, falling
     back to the raw string (so enums like ``global`` work)."""
-    import ast
     for spec in sets:
         path, _, raw = spec.partition("=")
         *parents, field = path.strip().split(".")
@@ -77,8 +82,9 @@ def develop(preset: str, sim_res: int | None, dev_steps: int | None,
 def _sample(eq: np.ndarray, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     """Bilinear-free nearest sample of an equirect by latitude/longitude (rad).
 
-    Row 0 is NORTH (verified by the convention-free pole probe recorded in
-    docs/architecture.md), so latitude +pi/2 -> row 0.
+    Row 0 is NORTH -- established by a convention-free pole probe on the exported
+    map during the 2026-07-24 orientation investigation, and re-checkable here at
+    any time with --probe. So latitude +pi/2 maps to row 0.
     """
     h, w = eq.shape[:2]
     v = (0.5 - lat / np.pi)               # +pi/2 -> 0.0 (north, row 0)
@@ -105,9 +111,13 @@ def globe(eq: np.ndarray, size: int = 900, lat0: float = 8.0, lon0: float = 0.0,
 
     p0, l0 = np.radians(lat0), np.radians(lon0)
     # Camera basis at (lat0, lon0): n = view axis, e = east, u = north.
+    # u must be cross(e, n), NOT cross(n, e) -- the latter points SOUTH and renders
+    # the planet upside down (at lat0=lon0=0: n=(1,0,0), e=(0,0,1), n x e =
+    # (0,-1,0)). This tool shipped with that flip and it inverted every
+    # hemisphere claim made from a globe view. `--selftest` pins it.
     n = np.array([np.cos(p0) * np.cos(l0), np.sin(p0), np.cos(p0) * np.sin(l0)])
     e = np.array([-np.sin(l0), 0.0, np.cos(l0)])
-    u = np.cross(n, e)
+    u = np.cross(e, n)
 
     px = x * e[0] + y * u[0] + z * n[0]
     py = x * e[1] + y * u[1] + z * n[1]
@@ -123,11 +133,31 @@ def globe(eq: np.ndarray, size: int = 900, lat0: float = 8.0, lon0: float = 0.0,
 
 
 def save_png(path: Path, img: np.ndarray) -> None:
-    import cv2
     path.parent.mkdir(parents=True, exist_ok=True)
     out8 = (img * 255.0 + 0.5).astype(np.uint8)[..., ::-1]   # RGB -> BGR
     cv2.imwrite(str(path), out8, [cv2.IMWRITE_PNG_COMPRESSION, 6])
     print(f"wrote {path}", flush=True)
+
+
+def selftest() -> None:
+    """Pin the globe's north/south orientation with a synthetic hemisphere.
+
+    Needs no GL and no sim. Worth having because the orientation of this tool is
+    the one property everything judged through it depends on, it is invisible in
+    any real render of a roughly symmetric planet, and it was in fact WRONG on
+    first write (u = cross(n, e), which points south). This repo has already lost
+    a multi-day investigation to the same class of confusion.
+    """
+    eq = np.zeros((256, 512, 3), np.float32)
+    eq[:128] = 1.0                      # northern half white; row 0 is north
+    g = globe(eq, size=200, lat0=0.0, lon0=0.0, limb=0.0, bg=0.5)
+    top = float(g[40:80, 90:110].mean())
+    bottom = float(g[120:160, 90:110].mean())
+    assert top > bottom, (
+        f"globe() is vertically FLIPPED: a north-white equirect rendered "
+        f"top={top:.3f} bottom={bottom:.3f}; north must be up"
+    )
+    print(f"selftest OK: north renders up (top {top:.3f} > bottom {bottom:.3f})")
 
 
 def probe(eq: np.ndarray) -> None:
@@ -144,8 +174,10 @@ def probe(eq: np.ndarray) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--preset", required=True)
-    ap.add_argument("--out", type=Path, required=True, help="path PREFIX")
+    ap.add_argument("--preset", help="factory preset name or .json path")
+    ap.add_argument("--selftest", action="store_true",
+                    help="verify globe() orientation (no GL, no preset needed)")
+    ap.add_argument("--out", type=Path, help="path PREFIX")
     ap.add_argument("--sim-res", type=int, default=1024)
     ap.add_argument("--dev-steps", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)
@@ -163,31 +195,32 @@ def main() -> None:
                     help="override a param without rebuilding the preset")
     args = ap.parse_args()
 
-    eq = develop(args.preset, args.sim_res, args.dev_steps, args.seed,
-                 args.preview_width, args.sets)
+    if args.selftest:
+        selftest()
+        return
+    if not args.preset or args.out is None:
+        ap.error("--preset and --out are required unless --selftest is given")
+
+    eq = develop(args.preset, sim_res=args.sim_res, dev_steps=args.dev_steps,
+                 seed=args.seed, preview_width=args.preview_width, sets=args.sets)
     if args.probe:
         probe(eq)
 
-    import cv2
     eqs = cv2.resize(eq, (args.eq_width, args.eq_width // 2),
                      interpolation=cv2.INTER_AREA)
     save_png(Path(f"{args.out}_eq.png"), eqs)
 
-    if args.views > 1:
-        # One image showing the WHOLE planet: N globes at evenly spaced
-        # longitudes. A single view hides half the storms and every seam.
-        gap = 10
-        s = args.globe_size
-        sheet = np.full((s, s * args.views + gap * (args.views - 1), 3), 0.045)
-        for i in range(args.views):
-            lon = args.lon0 + 360.0 * i / args.views
-            g = globe(eq, s, args.lat0, lon)
-            x0 = i * (s + gap)
-            sheet[:, x0:x0 + s] = g
-        save_png(Path(f"{args.out}_globe.png"), sheet)
-    else:
-        save_png(Path(f"{args.out}_globe.png"),
-                 globe(eq, args.globe_size, args.lat0, args.lon0))
+    # One image showing the WHOLE planet: --views N globes at evenly spaced
+    # longitudes. A single view hides half the storms and every seam. N=1 is the
+    # same path with no gaps, so there is no separate single-globe branch.
+    views = max(1, args.views)
+    gap = 10
+    s = args.globe_size
+    sheet = np.full((s, s * views + gap * (views - 1), 3), 0.045)
+    for i in range(views):
+        lon = args.lon0 + 360.0 * i / views
+        sheet[:, i * (s + gap):i * (s + gap) + s] = globe(eq, s, args.lat0, lon)
+    save_png(Path(f"{args.out}_globe.png"), sheet)
 
 
 if __name__ == "__main__":

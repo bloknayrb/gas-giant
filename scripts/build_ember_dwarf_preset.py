@@ -28,8 +28,9 @@ the neptune lesson that a different object is a whole-preset job, not a recolor:
     value_contrast -- the template path uses its values VERBATIM and ignores it);
   * the storm field re-cast as cloud clearings: a bright gold hero (a giant
     hole, the inverse of the GRS's dark-cored red oval) with no red collar;
-  * emission actually populated, because for once it is not decorative: these
-    objects genuinely glow at depth. Blender users get the ember through the gaps.
+  * emission turned up and made load-bearing (thermal 0.35 -> 0.9) rather than
+    left as the near-decorative default: these objects genuinely glow at depth,
+    so Blender users get real ember through the gaps.
 
 Run: uv run python scripts/build_ember_dwarf_preset.py
 """
@@ -44,25 +45,34 @@ PRESETS_DIR = Path("src/gasgiant/presets")
 
 # Four latitude PROFILES (equator/midlat/subpolar/polar), mirrored into seven
 # palette rows at build time -- see the comment on `rows` for why the mirroring is
-# mandatory. Each runs near-black violet -> dark plum -> magenta -> ember -> gold,
-# and what changes with latitude is how far up that ramp the deck lets you see:
-# the equator reaches gold, the poles are clamped well short of it. The bright end stays CHROMATIC (gold, not white) -- the
+# mandatory. Each starts near-black violet and climbs through plum into magenta;
+# how far up it goes is what changes with latitude. The equatorial and mid-latitude
+# rows reach ember and gold; the subpolar row is authored to stop at dull rose and
+# the polar row at dark violet, so no bright colour is even available up there.
+# Where the bright end IS reached it stays CHROMATIC (gold, not white) -- the
 # "frosted glass" failure that dogged the warm preset was a desaturated bright end,
 # not a value-range problem.
 #
-# The stop POSITIONS are measured, not guessed, and they are COUPLED to the field
-# -- if the band/turbulence tuning below ever moves, RE-MEASURE before trusting
-# them. scripts/probe_lut_usage.py swaps in a grayscale ramp so rendered
-# luminance IS the palette index. For the shipped tuning it reports a bell centred
-# near 0.57 with ~10% of the disc above 0.80 and ~4% above 0.90.
+# The stop POSITIONS are measured, not guessed, and they are COUPLED both to the
+# field tuning below AND to sim resolution -- so RE-MEASURE if either moves, with
+# the exact invocation (the tool defaults to 1024 and detail OFF, which is a
+# different distribution):
 #
-# Both directions of getting this wrong were hit while building the preset:
-#   * ember knee too EARLY (0.72) painted ~65% of the disc ember-or-brighter and
-#     rendered a uniform lava red -- no dark deck, the whole premise lost;
-#   * ember knee too LATE (0.93) sat past p99, so the tears vanished entirely and
-#     the planet read as a flat purple ball with one gold spot.
-# The knee is now ~0.84, just above the bulk, which spends the top ~10% of the
-# distribution on fire and leaves the remaining 90% as dim magenta deck.
+#     uv run python scripts/probe_lut_usage.py --preset ember_dwarf \
+#         --sim-res 4096 --keep-detail
+#
+# It swaps in a grayscale ramp so rendered luminance IS the palette index. At the
+# shipped sim.resolution 4096 that reports p50 0.58, 20.2% of the disc above 0.80
+# and 8.6% above 0.90; at the tool's default 1024 it is 13.0% / 5.8% (the ~1.55x
+# resolution sensitivity the README calls out).
+#
+# Both directions of getting the knee wrong were hit while building the preset:
+#   * too EARLY (0.72) put ~35% of the disc ember-or-brighter, which rendered as
+#     uniform lava red -- no dark deck at all, the whole premise lost;
+#   * too LATE (0.93) left only the top few percent, so the tears vanished and the
+#     planet read as a flat purple ball with a single gold spot.
+# The knee now sits at 0.84 (equator) / 0.86 (mid-latitudes), just above the bulk,
+# which spends roughly the top fifth of the disc on fire at shipping resolution.
 EQUATOR = [   # hottest: tears open widest and run gold
     (0.00, (0.048, 0.020, 0.078)),
     (0.28, (0.105, 0.034, 0.130)),
@@ -89,12 +99,13 @@ SUBPOLAR = [  # deck thickening: tears go dull rose and never reach gold
     (0.88, (0.360, 0.120, 0.265)),
     (1.00, (0.500, 0.215, 0.260)),
 ]
-# The polar rows exist to CAP the caps. Poleward of ~50 deg the field is laminar
-# (the shear injection mask plus polar_decay leave no eddies there), so whatever
-# value the outermost seeded bands happen to hold gets painted flat across the
-# whole cap -- and at sim resolution 4096 that produced blazing gold laminar
-# streaks over the south pole even after the polar TINT had been strengthened
-# enough to look fixed at 1024. Tint alone cannot fix it: it is a hue push, and
+# The polar rows exist to CAP the caps. Poleward of ~65-70 deg the field is
+# essentially unforced (the shear injection mask plus polar_decay leave almost no
+# shear to inject against -- weakly forced from 50-60, not dead), so whatever value
+# the outermost seeded bands happen to hold gets painted nearly flat across the cap
+# -- and at sim resolution 4096 that produced blazing gold laminar streaks over the
+# south pole even after the polar TINT had been strengthened enough to look fixed
+# at 1024. Tint alone cannot fix it: it is a hue push, and
 # the problem is LUMINANCE. Clamping the bright end of the polar rows is the only
 # dynamics-independent fix -- there is simply no bright colour available up here,
 # whatever the band lottery or the resolution does.
@@ -116,7 +127,14 @@ STORM_TINTS = [
 
 # Longer than warm's 700: the higher injection + smaller L_d need depth to fold
 # the deck into genuinely torn patches rather than smooth wavy bands.
-SIM = {"dev_steps": 900}
+SIM = {
+    "dev_steps": 900,
+    # Inheritance pin. Both the README note and render_readme_examples.py make
+    # load-bearing claims about "the shipped sim.resolution 4096" (this preset's
+    # ember fraction is ~1.6x higher at 4096 than at 1024), so it is pinned here
+    # rather than silently inherited.
+    "resolution": 4096,
+}
 
 # Fast rotator, vigorous field. coriolis_f0 3 -> 5.5 tightens the geostrophic
 # constraint (more, narrower bands); L_d 0.18 -> 0.11 shrinks the eddies;
@@ -140,12 +158,18 @@ SOLVER = {
 # TEMPLATE, and the template path uses its values VERBATIM and ignores
 # value_contrast entirely -- so warm's 1.7 is inert and inheriting it here was
 # inheriting a number that does nothing in its source and everything here. At 1.9
-# it saturated every band to an extreme (zones 0.94-1.0, belts 0.00-0.17, no
-# midtone anywhere): the deck became a binary square wave, the magenta mid-ramp
-# went unaddressed, and a 12.8-deg-wide zone pinned at value 1.000 rendered as a
-# flat razor-edged gold ring at -53 where the poleward field is too calm to break
-# it up. 1.15 keeps real zone/belt separation while leaving the values spread
-# across the middle of the ramp, which is where the deck's color lives.
+# it saturated every band to an extreme (measured: zones 0.935-1.000, belts
+# 0.000-0.174, with an empty gap between): the deck became a binary square wave and
+# the magenta mid-ramp went unaddressed. At the count=28 layout the preset started
+# from, that also handed one 12.8-deg-wide zone a value of exactly 1.000, which
+# rendered as a flat razor-edged gold ring near -53 where the poleward field is too
+# calm to break it up.
+#
+# At 1.15 the measured table is belts 0.169-0.354, zones 0.755-0.893 -- real
+# zone/belt separation, nothing pinned at 1.0, and no interior band wider than
+# 10.5 deg. The zone rail lands just around the 0.84/0.86 ember knee rather than
+# far above it, so the brightest zones contribute to the fire without any single
+# band being able to paint a saturated stripe on its own.
 BANDS = {
     "template": None,
     "count": 24,
@@ -156,6 +180,14 @@ BANDS = {
     "contrast_envelope": 0.36,
     "edge_diversity": 0.6,
     "variance_amount": 0.28,
+    # Inheritance pins (warm bakes both; neither belongs on a brown dwarf):
+    #   faded_sector 0.55 is Jupiter's SEB-FADE epoch feature -- a paled ~100-deg
+    #     longitude sector on one belt. Inheriting a named Jupiter epoch event here
+    #     would be accidental, not authored.
+    #   hue_jitter perturbs per-band values on precisely the "band lottery" axis
+    #     that the value_contrast note above exists to defend against.
+    "faded_sector": 0.0,
+    "hue_jitter": 0.0,
 }
 
 JETS = {
@@ -219,6 +251,21 @@ STORMS = {
     "accent_latitude": None,
     "accent_tint": 1.0,
     "accent_brightness": 0.35,
+    # Inheritance pins. This preset sets ten hero levers, so the ones it does NOT
+    # set read as deliberate -- make them actually deliberate, the way neptune pins
+    # hero_taper / hero_flow_aspect against a future warm bake:
+    #   hero_strength is the hero's core amplitude, the single most consequential
+    #     hero lever; inheriting warm's GRS value by omission is not a decision.
+    #   wake_detail / wake_turbulence: this hero is a CLEARING, not a red oval
+    #     dragging a turbulent Jupiter wake. Held well below warm's 3.2.
+    #   hero_shape / hero_taper / hero_flow_aspect at their inert defaults so a
+    #     future warm bake of any GRS shape lever cannot leak in.
+    "hero_strength": 1.9,
+    "hero_wake_detail": 0.6,
+    "wake_turbulence": 1.4,
+    "hero_shape": 1.0,
+    "hero_taper": 0.0,
+    "hero_flow_aspect": 1.0,
 }
 
 WAVES = {
@@ -240,6 +287,11 @@ DETAIL = {
     "hero_calm": 0.6,
     "hero_spiral": 0.4,
     "hero_collar_wrap": 0.0,
+    # Inheritance pin, the highest-risk one on this preset: CLAUDE.md records the
+    # warm hero_wake_braid bake as HELD at ~1.0 pending a visual review, so a bump
+    # is expected upstream. It inks a Jupiter-GRS turbulent wake from the tracer
+    # folds, which is the wrong read for a cloud clearing.
+    "hero_wake_braid": 0.0,
 }
 
 # Dark violet polar caps via polar_tint (NOT polar_canvas_value, whose floor is
@@ -254,37 +306,65 @@ APPEARANCE = {
     "haze_color": (0.42, 0.20, 0.26),
     "chroma_variance": 0.5,
     "hue_variance": 0.24,
-    # Both of these were measured pushing the deck RED and destroying the magenta
-    # the whole preset is built on, so both are off:
-    #   detail_chroma shades DARK detail excursions toward "warm belt material"
-    #     -- and on a dark deck nearly every pixel is a dark excursion, so warm's
-    #     baked 0.55 dragged the entire planet to maroon (neptune zeroes it for
-    #     the same reason, from the cool side);
-    #   chroma_aging adds "reddish-brown chromophore" with tracer age, which is a
-    #     Jupiter chromophore story and simply the wrong pigment here.
+    # Both inherited chroma levers are off, but they are NOT equally guilty and it
+    # is worth recording which is which, because they were first switched off
+    # together as a bundle and the credit was initially assigned to the wrong one.
+    # Measured individually on the shipped preset (mean on-disc RGB):
+    #
+    #   chroma_aging 0.35 -> 0.0   (0.308, 0.001, 0.061) -> (0.210, 0.004, 0.183)
+    #   detail_chroma 0.6 -> 0.0   (0.206, 0.004, 0.189) -> (0.210, 0.004, 0.183)
+    #
+    # chroma_aging is the one that destroyed the magenta: it ties saturation to the
+    # freshness tracer and deposits "reddish-brown chromophore" in aged air, which
+    # collapsed blue from 0.183 to 0.061 and turned the deck maroon. That is a
+    # Jupiter chromophore story and simply the wrong pigment for a brown dwarf.
+    #
+    # detail_chroma is very nearly inert here by comparison (a ~1% shift). It keys
+    # on the SYNTHESIZED DETAIL field, not on scene brightness -- derive.comp takes
+    # ex = (dsyn - 0.5) * 2, so roughly half of all pixels get the warm push
+    # whatever the deck's value, and the warm half is the WEAK side (0.3x versus
+    # 1.0x). It is held at 0 because the strong half pushes BRIGHT excursions COOL,
+    # and the bright excursions here are the ember tears, which must not desaturate.
+    # (warm bakes 0.6; neptune also zeroes it, from the cool side.)
     "detail_chroma": 0.0,
     "chroma_aging": 0.0,
-    # The polar caps get no eddy injection (the shear mask plus polar_decay leave
-    # the caps laminar), so whichever value the outermost seeded band lands on
-    # paints a FLAT cap -- a seed lottery that on this seed produced a bright pink
-    # laminar smear over the whole southern cap, brighter than the deck and reading
-    # as a lighting error. Decisive violet tinting from 50 deg, plus a firmer
-    # poleward contrast collapse (bands.contrast_envelope), makes the caps read as
-    # cold cloud regardless of which value the lottery hands them.
+    # Polar treatment, third of three layers -- and the WEAKEST, so do not read it
+    # as the fix. The caps are essentially unforced poleward of ~65-70 deg (little
+    # shear for the mask to inject against), so whichever value the outermost seeded
+    # band lands on paints a nearly flat cap. Violet tinting from 50 deg plus the firmer poleward
+    # contrast collapse (bands.contrast_envelope) push that flat cap toward cold
+    # cloud whatever value the band lottery hands it.
+    #
+    # It is only cosmetic hardening. A bright cap has TWO causes here and tinting
+    # addresses neither: the dominant one was the palette rows clamping the whole
+    # southern hemisphere to the equator row (see `rows` in build()), and the
+    # residual one is luminance, which a hue push cannot touch (see POLAR above).
+    # Strengthening the tint made the cap look fixed at sim-res 1024 while both real
+    # causes were still live -- that false confirmation cost two rounds of work.
     "polar_tint_strength": 0.74,
     "polar_tint_start_lat": 50.0,
     "polar_tint_color": (0.20, 0.09, 0.28),
     "polar_canvas_value": 0.0,
 }
 
-# Emission is normally decoration here (invisible in the GUI preview, Blender
-# only). On a brown dwarf it is the point: the object really does glow through
-# its cloud gaps. Keyed high so only the tears blaze.
-# Vigorous polar cyclone clusters suit a fast rotator, but at 1.8 they rendered as
-# blazing gold blobs sitting in a cold cap (any bright storm samples the gold top of
-# the storm LUT). 1.15 keeps the cap populated without lighting it up.
+# Vigorous polar cyclone clusters suit a fast rotator, but at 1.8 the caps rendered
+# noticeably brighter and busier than a cold cap should; 1.15 keeps them populated
+# without lighting them up.
+#
+# Recorded as an OBSERVATION on purpose, because the obvious explanation is wrong:
+# polar features are DARK stamps (sim/vortices.py gives them tint 0.15-0.3 and
+# NEGATIVE brightness), so they never sample the gold top of the storm LUT, and
+# poles.strength only scales the vorticity amplitude -- it cannot change stamp
+# colour at all. The likely real mechanism is stronger polar stirring dragging
+# bright mid-latitude material into the cap, but that was not isolated, so it is
+# not asserted here.
 POLES = {"strength": 1.15, "field_density": 1.15}
 
+# Emission is usually near-decorative here (the Color view never composites it;
+# the viewport has a separate Emission channel, and Blender reads emission.exr).
+# On a brown dwarf it is the point: the object really does glow through its cloud
+# gaps. So thermal is re-keyed from the 0.35 every other preset ships up to 0.9,
+# with a high threshold so only the tears blaze.
 EMISSION = {
     "thermal_strength": 0.9,
     "thermal_color": (1.0, 0.52, 0.16),
@@ -295,7 +375,9 @@ EMISSION = {
 }
 
 
-def _stops(spec):
+def _stops(
+    spec: list[tuple[float, tuple[float, float, float]]],
+) -> list[GradientStop]:
     return [GradientStop(pos=p, color=list(c)) for p, c in spec]
 
 
@@ -321,8 +403,11 @@ def build() -> None:
     # row, right over the south pole. That is what produced a bright orange
     # laminar south cap that survived every dynamics-side fix, and it was
     # initially misread as a band-value seed lottery. The `latitude` field is
-    # signed, not an absolute value; gas_giant_warm ships 12 rows from -78.5 to
-    # +66 for exactly this reason.
+    # signed, not an absolute value. The precedent to copy is jupiter_like /
+    # jupiter_vorticity, which anchor 12 DISTINCT rows across -78.5..+66;
+    # gas_giant_warm spans the same latitudes but all 12 of its rows carry
+    # identical stops, so it is immune to this bug by degeneracy rather than by
+    # deliberate anchoring, and is the wrong preset to reason from here.
     rows = [
         PaletteRow(latitude=-78.0, stops=_stops(POLAR)),
         PaletteRow(latitude=-56.0, stops=_stops(SUBPOLAR)),
@@ -336,6 +421,10 @@ def build() -> None:
         update={**APPEARANCE, "palette_rows": rows, "storm_tints": _stops(STORM_TINTS)}
     )
 
+    # save_preset only writes the ENVELOPE name; without this the inner
+    # params.name stays "gas_giant_warm" (a wart neptune.json also carries).
+    p.name = "ember_dwarf"
+
     out = PRESETS_DIR / "ember_dwarf.json"
     save_preset(p, out, name="ember_dwarf")
     # save_preset does NOT re-validate; load_preset does. Prove in-bounds.
@@ -345,11 +434,18 @@ def build() -> None:
     # The trap this preset was bitten by: warm's value_contrast 1.7 is inert on
     # its template path and saturates the band table on the seeded path.
     assert r.bands.value_contrast == 1.15
-    assert r.appearance.detail_chroma == 0.0   # warm bakes 0.55; drags deck red
+    assert r.appearance.detail_chroma == 0.0   # warm bakes 0.6; cools the tears
     assert r.appearance.chroma_aging == 0.0    # warm bakes 0.35; wrong pigment
     assert r.solver.vort_inject_mask == "shear"  # global destroys the banding
     assert r.solver.coriolis_f0 == 5.5
     assert r.storms.hero_tint == 1.0
+    # Inheritance pins actually landed (warm bakes the opposite, or is expected to).
+    assert r.sim.resolution == 4096
+    assert r.detail.hero_wake_braid == 0.0
+    assert r.bands.faded_sector == 0.0
+    assert r.bands.hue_jitter == 0.0
+    assert r.storms.hero_taper == 0.0
+    assert r.storms.hero_flow_aspect == 1.0
     assert r.emission.thermal_strength == 0.9
     assert len(r.appearance.palette_rows) == 7
     lats = [row.latitude for row in r.appearance.palette_rows]

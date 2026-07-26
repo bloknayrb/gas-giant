@@ -39,21 +39,34 @@ def test_multi_row_palettes_anchor_both_hemispheres(name: str):
     single row at 0.0 -- including the south polar cap, which then wears the
     equatorial palette.
 
-    That is not a subtle defect: on ember_dwarf, whose equator row is the only one
-    allowed to reach hot gold, it rendered a bright orange laminar south cap that
-    survived several dynamics-side "fixes" because it was misdiagnosed as a seeded
-    band-value lottery. It is invisible to any hash gate (the output is wrong, not
-    unstable) and easy to miss on a globe preview, which shows one hemisphere at a
-    time. A single-row palette is exempt: bake_rows reproduces it on every output
-    row by construction, so it is uniform rather than asymmetric.
+    That is not a subtle defect: on ember_dwarf, where only the equatorial and
+    mid-latitude rows are allowed to reach hot gold and the polar rows are authored
+    to stop short, it rendered a bright orange laminar south cap that survived
+    several dynamics-side "fixes" because it was misdiagnosed as a seeded band-value
+    lottery. It is invisible to any hash gate (the output is wrong, not unstable)
+    and easy to miss on a globe preview, which shows one hemisphere at a time.
+
+    The bound is +-60, not merely "one anchor either side of 0": rows at (-2, +78)
+    would satisfy the weaker test while still clamping -2..-90 -- nearly half the
+    planet, the whole south cap included -- to a near-equatorial row, which is the
+    same defect. Every shipped multi-row preset clears +-60 today (jupiter_like and
+    jupiter_vorticity -78.5/+66, saturn_pale -78/+72, ember_dwarf -78/+78).
+
+    Palettes whose rows all carry IDENTICAL stops are exempt, as is a single row:
+    bake_rows blends between equal endpoints, so no hemispheric asymmetry is
+    expressible and the result is uniform by construction. That exemption is what
+    gas_giant_warm relies on -- its 12 rows share one stop set, so it is immune to
+    this bug by degeneracy rather than by deliberate anchoring.
     """
     rows = load_factory_preset(name).appearance.palette_rows
-    if len(rows) == 1:
+    distinct = {tuple((s.pos, *s.color) for s in r.stops) for r in rows}
+    if len(distinct) == 1:
         return
     lats = sorted(r.latitude for r in rows)
-    assert lats[0] < 0.0 < lats[-1], (
-        f"{name}: palette rows span {lats[0]:+.1f}..{lats[-1]:+.1f}, which leaves one "
-        f"hemisphere clamped to the outermost anchor. Mirror the rows across the equator."
+    assert lats[0] <= -60.0 and lats[-1] >= 60.0, (
+        f"{name}: palette rows span {lats[0]:+.1f}..{lats[-1]:+.1f}, so latitudes "
+        f"beyond the outermost anchor clamp to it -- leaving a hemisphere (or a cap) "
+        f"wearing the wrong row. Mirror the rows across the equator."
     )
 
 

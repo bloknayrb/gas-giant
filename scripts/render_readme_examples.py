@@ -33,14 +33,17 @@ PRESETS = [
     "saturn_pale",
     "ice_giant",
     "neptune",
-    # ember_dwarf is unusually resolution-sensitive: its tears are made by
-    # convective excursions, and the fraction of the disc that clears the ember
-    # knee roughly DOUBLES between sim-res 1024 and its shipped 4096 (measured
-    # with scripts/probe_lut_usage.py). The default reduced grid below
-    # therefore misrepresents it badly, so its committed image was rendered with
-    # `--presets ember_dwarf --sim-res 4096`.
     "ember_dwarf",
 ]
+
+# Presets whose committed image must NOT use the reduced default sim grid.
+# ember_dwarf is unusually resolution-sensitive: its tears are made by convective
+# excursions, and the fraction of the disc clearing the ember knee grows by about
+# half again between sim-res 1024 and its shipped 4096 (13.0% -> 20.2% of the disc
+# above LUT index 0.80, measured with scripts/probe_lut_usage.py --keep-detail).
+# The reduced grid understates it badly, so it is always rendered at its shipped
+# resolution regardless of --sim-res.
+SIM_RES_OVERRIDES = {"ember_dwarf": 4096}
 
 
 def _to_srgb8_png(src_png16: Path, dst_png8: Path, width: int) -> None:
@@ -75,7 +78,12 @@ def main() -> None:
     for name in args.presets:
         t0 = time.perf_counter()
         params = resolve_preset(name)
-        params.sim.resolution = args.sim_res
+        # STRUCTURAL, not advisory: a plain `uv run python scripts/render_readme_examples.py`
+        # would otherwise re-render ember_dwarf at the reduced default and overwrite
+        # its committed image with the very render this file calls misrepresentative.
+        # A comment cannot enforce that, so the override lives in code.
+        sim_res = SIM_RES_OVERRIDES.get(name, args.sim_res)
+        params.sim.resolution = sim_res
         params.sim.dev_steps = args.dev_steps
         params.export.width = args.export_res
         sim = Simulation(params)
@@ -84,7 +92,7 @@ def main() -> None:
         dst = args.out_dir / f"{name}.png"
         _to_srgb8_png(work / "color.png", dst, args.out_width)
         sim.gpu.release()
-        print(f"[{name}] {args.dev_steps} steps @ {args.sim_res} -> {dst} "
+        print(f"[{name}] {args.dev_steps} steps @ {sim_res} -> {dst} "
               f"({time.perf_counter() - t0:.0f}s)", flush=True)
 
 

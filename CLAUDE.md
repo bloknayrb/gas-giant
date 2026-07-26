@@ -29,7 +29,9 @@ uv run python scripts/build_addon.py # -> dist/gasgiant_importer-*.zip
 
 Markers: `gpu` (needs a GL 4.3 context) and `slow` (heavy CPU reference-solver files).
 Factory presets (`src/gasgiant/presets/`): gas_giant_warm (flagship; GUI startup default),
-jupiter_like, jupiter_vorticity, saturn_pale, ice_giant. The GUI (post PR #13) has
+jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune, ember_dwarf (the only
+non-solar-system one: a brown dwarf — dark magenta deck, ember tears, `sim.resolution`
+4096 and unusually resolution-sensitive). The GUI (post PR #13) has
 searchable auto-generated panels, per-slider help, undo/redo, and playback controls.
 
 ## Testing policy

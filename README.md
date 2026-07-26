@@ -114,8 +114,9 @@ many narrow bands.
 
 > `ember_dwarf`'s image is rendered at its shipped `sim.resolution` 4096, not the
 > reduced grid used for the others: its tears come from convective excursions, so
-> the fraction of the disc that reaches ember roughly doubles between sim-res 1024
-> and 4096, and the reduced grid understates it badly.
+> the fraction of the disc reaching ember grows by about half again between sim-res
+> 1024 and 4096 (13% → 20% of the disc), and the reduced grid understates it. The
+> generator enforces this per-preset, so a plain regen cannot overwrite it.
 
 > Generated with `scripts/render_readme_examples.py` (a reduced sim grid keeps
 > the set tractable under software GL; the shipped presets develop at
