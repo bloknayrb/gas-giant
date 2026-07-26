@@ -45,6 +45,17 @@ seeded amplitudes and poleward decay, plus the equatorial jet
 the spherical pairing `u = −∂ψ/∂φ`, `v = (1/cosφ)∂ψ/∂λ`, the only pairing
 that is divergence-free on a sphere. Streaking EMERGEs.
 
+The **superrotation-DOMINATED** regime is a separate case, shipped as
+`cobalt_gale`: on a tidally locked hot Jupiter the equatorial jet is not an
+addition to ~30 alternating jets but the whole circulation, so
+`jets.equatorial_speed/width` go broad and fast (3.2 / 0.33 rad ≈ 19°) and
+`polar_decay` (0.9) quiets what remains. Two non-obvious consequences, both
+measured: the jet does **not** brighten its own latitude — it shapes flow, while
+the BAND VALUES set the color index, so a jet-led *composition* is a band
+problem, not a jet one; and the high `polar_decay` that makes the jet dominant
+is the same thing that leaves the caps unforced, so such a preset needs its
+poleward palette rows clamped (`build_cobalt_gale_preset.py`, `POLAR`).
+
 ### Band-boundary meander
 Real band edges are not parallel circles — they wander at planetary
 wavenumbers 5–20. Straight band edges are the single biggest "procedural
