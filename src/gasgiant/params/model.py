@@ -93,7 +93,10 @@ def pfield(
         # hides everything after it; '|' and newlines break the generated
         # markdown. A test alone would also be skippable in a GUI-extra-free
         # environment, which is exactly where nobody would notice.
-        if not isinstance(label, str) or not label.strip() or label.strip() != label:
+        # `label.strip() != label` already covers the whitespace-only case (it
+        # strips to "", which differs from the original), so there is no third
+        # clause here.
+        if not isinstance(label, str) or label.strip() != label:
             raise ValueError(f"pfield(label={label!r}) must be a stripped, non-empty str")
         if any(c in label for c in "#|\n"):
             raise ValueError(
@@ -2205,6 +2208,11 @@ class FieldMeta:
             rand=extra.get("rand"),
         )
 
+    def caption(self, name: str) -> str:
+        """The widget caption for the field named ``name``: the authored
+        ``label`` if there is one, else the derived form."""
+        return self.label or derived_label(name)
+
 
 def field_meta(model: type[BaseModel], field_name: str) -> FieldMeta:
     """The typed ``FieldMeta`` for a field (an all-default ``FieldMeta`` if the
@@ -2294,5 +2302,9 @@ def field_label(name: str, info: Any) -> str:
     headless/CLI env has no GUI extra. The derivation had NINE call sites:
     three in panels and six in the generator. A helper in panels could only
     ever have removed the three, leaving the doc free to drift from the app.
+
+    Callers that already hold a ``FieldMeta`` should call ``meta.caption(name)``
+    instead -- this convenience form builds a throwaway one, which is waste in a
+    per-frame draw loop.
     """
-    return FieldMeta.of(info).label or derived_label(name)
+    return FieldMeta.of(info).caption(name)

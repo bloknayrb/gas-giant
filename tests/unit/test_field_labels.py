@@ -11,18 +11,19 @@ breaks something else: search, the docs, or an imgui id.
 from __future__ import annotations
 
 import re
-import typing
 
 import pytest
-from pydantic import BaseModel
 
 from gasgiant.params.model import (
     FieldMeta,
     PlanetParams,
     StormOverride,
     StormsParams,
+    Tier,
     derived_label,
     field_label,
+    iter_pfields,
+    pfield,
 )
 
 # NOT a module-level importorskip: only two tests below need the GUI layer, and
@@ -35,21 +36,18 @@ def _panels():
 
 
 def _leaves():
-    """``(dotted_path, field_name, FieldInfo)`` for every pfield leaf."""
-    out, seen = [], set()
+    """``(dotted_path, field_name, FieldInfo)`` for every pfield leaf.
 
-    def walk(model, prefix=""):
-        for name, info in model.model_fields.items():
-            for member in (info.annotation, *typing.get_args(info.annotation)):
-                if isinstance(member, type) and issubclass(member, BaseModel):
-                    walk(member, f"{prefix}{name}.")
-            if "tier" in (info.json_schema_extra or {}):
-                key = (model.__name__, name)
-                if key not in seen:
-                    seen.add(key)
-                    out.append((f"{prefix}{name}", name, info))
-
-    walk(PlanetParams)
+    One entry per DECLARATION, not per path: ``poles.north`` and ``poles.south``
+    are two ``PoleParams`` instances, and a caption is a property of the
+    declaration, so checking both would just double-report every pole finding.
+    """
+    seen, out = set(), []
+    for leaf in iter_pfields():
+        key = (leaf.model, leaf.name)
+        if key not in seen:
+            seen.add(key)
+            out.append((leaf.path, leaf.name, leaf.info))
     return out
 
 
@@ -68,21 +66,38 @@ def test_unlabelled_fields_fall_back_to_the_derived_caption():
             assert field_label(name, info) == derived_label(name)
 
 
-def test_authored_captions_are_plain_text():
-    """Second net under ``pfield``'s own import-time validation -- that is the
-    guard that cannot be skipped, this one reports every offender at once.
+@pytest.mark.parametrize(
+    "bad",
+    [5, None, ("tuple",), " padded", "padded ", "a##b", "a#b", "a|b", "two\nlines", "   "],
+    ids=repr,
+)
+def test_pfield_rejects_a_caption_that_is_not_plain_text(bad):
+    """Tests the VALIDATOR, not the shipped captions.
+
+    Asserting the charset over ``_labelled()`` instead would be a test that can
+    never fail: ``pfield`` raises at import, so a bad caption takes this whole
+    module down before any assertion in it runs. Driving ``pfield`` directly is
+    the only way to observe the rule actually rejecting something.
 
     ``##`` is imgui's id separator and silently hides everything after it. A
     lone ``#`` and ``|`` are harmless in the ``### {label}`` heading the doc
-    generator emits today; they are banned pre-emptively so a caption stays
+    generator emits today; they are rejected pre-emptively so a caption stays
     safe the day it lands somewhere stricter.
     """
-    for path, name, info in _labelled():
-        label = field_label(name, info)
-        assert label.strip() == label, f"{path}: padded caption {label!r}"
-        assert "#" not in label, f"{path}: '#' is imgui id syntax"
-        assert "|" not in label, f"{path}: reserved for markdown tables"
-        assert "\n" not in label, f"{path}: captions are single-line"
+    with pytest.raises(ValueError, match="label"):
+        pfield(0.0, tier=Tier.POST, label=bad)
+
+
+def test_pfield_accepts_an_ordinary_caption():
+    """Pins that the validator above is not simply rejecting everything."""
+    extra = pfield(0.0, tier=Tier.POST, label="Swirl brake (large only)").json_schema_extra
+    assert extra["label"] == "Swirl brake (large only)"
+
+
+def test_an_absent_caption_stores_no_label_key():
+    """``label`` is omitted rather than stored empty, so ``FieldMeta.label``
+    falls back through the same path as every pre-existing field."""
+    assert "label" not in pfield(0.0, tier=Tier.POST).json_schema_extra
 
 
 def test_authored_captions_drop_the_engine_vocabulary():
@@ -162,7 +177,7 @@ def test_relabelled_fields_show_their_name_in_the_tooltip():
     appears nowhere on screen."""
     panels = _panels()
     for path, name, info in _labelled():
-        tip = panels._leaf_tip(name, info)
+        tip = panels._leaf_tip(name, info, FieldMeta.of(info))
         assert name in tip, f"{path}: tooltip never names the field"
         assert (info.description or "") in tip, f"{path}: tooltip lost its description"
 
@@ -173,7 +188,7 @@ def test_unlabelled_fields_get_a_bare_description_tooltip():
     panels = _panels()
     for _path, name, info in _leaves():
         if not FieldMeta.of(info).label:
-            assert panels._leaf_tip(name, info) == (info.description or "")
+            assert panels._leaf_tip(name, info, FieldMeta.of(info)) == (info.description or "")
 
 
 # -- the invariant the params-layer placement exists to protect ----------------
@@ -286,3 +301,38 @@ EXPECTED_LABELS = {
 
 def test_authored_captions_match_the_pin():
     assert {p: field_label(n, i) for p, n, i in _labelled()} == EXPECTED_LABELS
+
+
+def test_no_panel_tooltip_bypasses_the_name_prefix():
+    """Every leaf tooltip must go through ``_leaf_tip``.
+
+    The rule is easy to satisfy at the site you are looking at and easy to miss
+    at the other three: when ``_leaf_tip`` first landed it was wired into 2 of
+    4 sites, leaving ``_draw_cast_field`` and ``_draw_leaf``'s modal-only branch
+    passing ``info.description`` raw -- so a relabelled field drawn through
+    either showed a tooltip that never named it, which is the exact regression
+    ``_leaf_tip`` exists to prevent. Nothing was red.
+
+    An AST scan rather than a draw-time spy because the two missed sites need a
+    populated cast list and a MODAL_ONLY field respectively; this catches both
+    without staging either.
+    """
+    import ast
+    import pathlib
+
+    panels = _panels()
+    source = pathlib.Path(panels.__file__).read_text(encoding="utf-8")
+    offenders = [
+        f"line {node.lineno}"
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "item_tooltip"
+        and node.args
+        and isinstance(node.args[0], ast.Attribute)
+        and node.args[0].attr == "description"
+    ]
+    assert not offenders, (
+        f"panels.py passes a raw description to item_tooltip at {offenders}; "
+        "use _leaf_tip(name, info, meta) so a relabelled field still names itself"
+    )
