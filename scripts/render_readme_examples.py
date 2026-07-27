@@ -5,9 +5,11 @@ reduced sim grid so the set stays tractable under software GL (llvmpipe); the
 exported color map is downsampled to an 8-bit sRGB PNG under
 ``docs/img/presets/``.
 
-One exception dominates the runtime: ``ember_dwarf`` is pinned to its shipped
-sim-res 4096 (see ``SIM_RES_OVERRIDES``), which is 16x the pixels of the default
-grid, so budget for it separately -- ``--presets`` a subset, or ``--force-sim-res``
+TWO presets dominate the runtime: ``ember_dwarf`` and ``green_giant`` are each
+pinned to their shipped sim-res 4096 (see ``SIM_RES_OVERRIDES``), which is 16x the
+pixels of the default grid. Budget for BOTH separately -- a plain full-set regen
+pays that cost twice, which under software GL is hours, not minutes. Either
+``--presets`` a subset, or ``--force-sim-res``
 to override the pin for a fast smoke render (which is written under
 ``--work-dir/forced``, never over the committed asset).
 

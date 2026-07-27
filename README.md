@@ -112,8 +112,9 @@ many narrow bands.
 
 ![ember_dwarf developed for 1,000 steps](docs/img/presets/ember_dwarf.png)
 
-> `ember_dwarf`'s image is rendered at its shipped `sim.resolution` 4096, not the
-> reduced grid used for the others: its tears come from convective excursions, so
+> `ember_dwarf`'s image is rendered at its shipped `sim.resolution` 4096 rather
+> than the reduced grid (it is one of two presets pinned this way — see
+> `green_giant` below): its tears come from convective excursions, so
 > the fraction of the disc reaching ember grows by about half again between sim-res
 > 1024 and 4096 (13% → 20% of the disc), and the reduced grid understates it. The
 > generator enforces this per-preset, so a plain regen cannot overwrite it.

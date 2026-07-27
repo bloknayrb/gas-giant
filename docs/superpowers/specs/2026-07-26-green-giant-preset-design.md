@@ -91,9 +91,19 @@ Mean-mask matching gives 0.36 (`1.8 × 0.096 ≈ 0.36 × 0.475`). That is where 
 where to stop: the same integral spread over 12× the area still reads much busier, and the
 shipped value is **0.30**.
 
-Second trap: the mask samples an **unwarped** latitude profile (`omega_force.comp`) while
-visible band edges ride `bands.warp_amount`. At warm's 0.04 (~2.3°) the churn would stop on
-razor-straight latitude lines while the bands meander across them. Shipped at 0.01.
+Second trap, **and it turned out not to be one** — recorded because the reasoning was
+plausible and wrong. The mask samples an **unwarped** latitude profile
+(`omega_force.comp`) while visible band edges ride `bands.warp_amount`, which suggests a
+large meander leaves churn stopping on razor-straight lines across meandering bands. The
+preset initially shipped `warp_amount` 0.01 on that basis. Two things refute it: the
+concern is **not new to `belts`** (`detail.comp` samples the same unwarped `u_profile_dyn`
+for `zone_texture` and the lightning gate, so `gas_giant_warm` already ships
+0.04-with-unwarped without the defect), and measured, 0.01 against 0.04 gives a mean
+absolute on-disc difference of **0.007** — at this injection amplitude the advection smears
+the mask boundary long before it can read as a straight edge. Reverted to the
+library-standard 0.04, since `docs/formations.md` calls straight band edges "the single
+biggest 'procedural planet' tell" and trading a documented realism lever for an unmeasured
+worry is the wrong direction.
 
 **The mask was proved before being committed to** — a detail-off A/B at sim-res 1024,
 `belts @0.30` against `shear @1.8`. `belts` won decisively: crisp lane alternation with
@@ -172,8 +182,17 @@ and would not have filled the gap it exists to fill. The build script now assert
 
 Polar rows are clamped (no stop above 0.40): poleward of ~60–64° `omega_force.comp` zeroes
 relative vorticity, and bands lay out in sin-latitude so the outermost are ~33° wide — a
-large unforced cap that paints whatever the outer bands hold. Measured on the shipped
-preset: lat +85 luma 0.143, −85 0.161. The clamp works.
+large unforced cap that paints whatever the outer bands hold.
+
+**The clamp is applied at two ceilings, because the unforced cap is wider than the ±78
+rows cover.** At seed 3216 the southernmost band spans **−56.95°..−90° with value 0.772**
+— a 33°-wide *bright zone* sitting almost entirely inside the unforced region — and
+between ~57° and ~78° `bake_rows` is dominated by `SUBPOLAR`, not `POLAR`. The shipped
+render is fine (zonal-mean luma 0.29 at −60° falling to 0.19 at −85°, against 0.67 at the
+equator, so there is no bright ring), but nothing *asserted* that, so a future brightening
+of `SUBPOLAR` could repaint the cap silently. The build script now also caps the ≥55° rows
+at a looser 0.66 — enough to exclude a haze-crest-grade value while leaving those rows
+their legitimate mid-tones. This is a regression guard, not a bug fix.
 
 ## `chroma_aging` is disqualifying — analytically, not by taste
 

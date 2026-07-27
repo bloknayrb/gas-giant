@@ -39,7 +39,7 @@
       "width_jitter": 0.32,
       "edge_softness": 0.012,
       "value_contrast": 1.15,
-      "warp_amount": 0.01,
+      "warp_amount": 0.04,
       "warp_freq": 3.5,
       "detail_amount": 0.16,
       "hue_jitter": 0.0,

@@ -323,13 +323,25 @@ BANDS = {
     "contrast_envelope": 0.50,
     "edge_diversity": 0.55,
     "variance_amount": 0.24,
-    # The BELTS inject mask samples an UNWARPED latitude profile
-    # (omega_force.comp), while the visible band edges ride bands.warp_amount.
-    # At warm's 0.04 (~2.3 deg) the churn would stop on razor-straight latitude
-    # lines while the bands it fills meander across them -- a strong candidate for
-    # the "banding reads as imposed" percept this repo has fought before. Keeping
-    # the meander small keeps the two aligned.
-    "warp_amount": 0.01,
+    # warp_amount stays at the library-standard 0.04, and this REVERSES an earlier
+    # cut to 0.01 that was reasoned rather than measured.
+    #
+    # The reasoning was: the BELTS inject mask samples an UNWARPED latitude profile
+    # (omega_force.comp) while visible band edges ride warp_amount, so a large
+    # meander should leave churn stopping on razor-straight lines across meandering
+    # bands. Two things refute it. (a) The concern is NOT new to BELTS --
+    # detail.comp samples the same unwarped u_profile_dyn for zone_texture and the
+    # lightning gate, so gas_giant_warm already ships 0.04-with-unwarped and shows
+    # no such defect. (b) Measured: rendering 0.01 against 0.04 gives a mean
+    # absolute on-disc difference of 0.007, i.e. nothing -- at this injection
+    # amplitude the advection smears the mask boundary well before it can read as
+    # a straight edge.
+    #
+    # Meanwhile 0.01 has a real cost: it is the smallest in the library (every
+    # other preset ships 0.04) and docs/formations.md calls straight band edges
+    # "the single biggest 'procedural planet' tell". Trading a documented realism
+    # lever for an unmeasured alignment worry is the wrong direction.
+    "warp_amount": 0.04,
     # Inheritance pins (warm bakes both; neither belongs here):
     #   faded_sector 0.55 is Jupiter's SEB-FADE epoch feature -- a paled ~100-deg
     #     longitude sector on one belt. Importing a named Jovian epoch event onto a
@@ -628,12 +640,18 @@ def build() -> None:
     assert r.storms.small_density < 2.0, r.storms.small_density
 
     # --- the mask, and the amplitude that has to move with it ------------------
+    # The solver MODE is asserted first, and it is not a formality: the whole
+    # composition rests on vort_inject_mask, which is a NO-OP in kinematic mode.
+    # The mode is inherited from gas_giant_warm rather than set here, so nothing
+    # else in this file would notice it changing -- the same class of silent
+    # inheritance drift the coriolis_f0 == 3.0 assert exists to catch.
+    assert r.solver.type == "vorticity", r.solver.type
     assert r.solver.vort_inject_mask == "belts"
-    # A mask is a MULTIPLIER. belt_mask covers ~38.6% of latitudes against
-    # shear_norm's ~3.3%, so carrying warm's 1.8 across would have applied ~3.3x
-    # warm's integrated forcing -- nearer GLOBAL, which the project record says
-    # dissolves the planet. This assert is the one that would catch a future
-    # "restore the inherited value" edit.
+    # A mask is a MULTIPLIER. belt_mask covers ~47.6% of latitudes against
+    # shear_norm's ~3.9%, so carrying warm's 1.8 across would have applied ~4.9x
+    # warm's integrated forcing (1.8 * 0.475 / 0.173) -- nearer GLOBAL, which the
+    # project record says dissolves the planet. This assert is the one that would
+    # catch a future "restore the inherited value" edit.
     assert r.solver.vort_inject < 1.0, (
         f"vort_inject={r.solver.vort_inject} is un-retuned for the BELTS mask"
     )
@@ -694,9 +712,24 @@ def build() -> None:
     # TUPLES lexicographically, i.e. pick the largest RED channel -- which on a
     # green ramp is not the brightest stop at all. Both are documented bugs in the
     # sibling cobalt_gale script.
+    # TWO ceilings, because the unforced cap is WIDER than the >= 70 rows cover.
+    # omega_force.comp zeroes relative vorticity from ~60-64 deg, and at this seed
+    # the southernmost band spans -56.95..-90 with value 0.772 -- a 33-deg-wide
+    # BRIGHT zone sitting almost entirely inside the unforced region. Between ~57
+    # and ~78 deg bake_rows is dominated by SUBPOLAR, not POLAR, so guarding only
+    # the +-78 rows leaves the equatorward half of that cap unguarded.
+    #
+    # The shipped render is fine -- measured zonal-mean luma runs 0.29 at -60 down
+    # to 0.19 at -85, against 0.67 at the equator, so there is no bright ring
+    # today. This is a REGRESSION guard, not a bug fix: without it a future
+    # brightening of SUBPOLAR would repaint that cap with nothing objecting.
+    # The subpolar ceiling is looser (0.66 vs 0.40) because those rows legitimately
+    # carry mid-tones -- it only has to exclude a haze-crest-grade value.
     for row in r.appearance.palette_rows:
         if abs(row.latitude) >= 70.0:
             assert max(max(s.color) for s in row.stops) < 0.40, row.latitude
+        elif abs(row.latitude) >= 55.0:
+            assert max(max(s.color) for s in row.stops) < 0.66, row.latitude
 
     # Anti-frosting: a flat/pale ramp collapses structure to one pale colour. The
     # repo's own guard (tests/unit/test_presets.py::test_palette_has_value_contrast)

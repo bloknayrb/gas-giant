@@ -46,7 +46,7 @@ it. Seeded band path, and on that path `count` must be EVEN — at an odd count 
 in the majority the median IS the top belt value, so `values < median` silently
 misclassifies one belt as a zone; the model's alternation validator only runs on the
 TEMPLATE path). saturn_pale, cobalt_gale and green_giant are the three `hero_count=0`
-presets; ember_dwarf and cobalt_gale are the non-solar-system ones. The GUI (post PR #13) has
+presets; ember_dwarf, cobalt_gale and green_giant are the non-solar-system ones. The GUI (post PR #13) has
 searchable auto-generated panels, per-slider help, undo/redo, and playback controls.
 
 ## Testing policy

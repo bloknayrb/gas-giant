@@ -17,6 +17,7 @@ from gasgiant.params.presets import (
     save_preset,
     user_preset_names,
 )
+from gasgiant.sim.bands import generate_bands
 
 
 def test_factory_presets_exist_and_load():
@@ -110,6 +111,56 @@ def test_vorticity_preset_is_live():
     # gravest-mode insurance, well under the over-flatten regime.
     assert 0.0 < p.solver.vort_psi_drag <= 0.3, p.solver.vort_psi_drag
     assert p.storms.hero_solid_core == 1.0, "hero reverted to Gaussian whirlpool"
+
+
+def test_green_giant_composition_invariants():
+    """green_giant's load-bearing invariants, pinned where CI actually runs them.
+
+    These are also asserted in scripts/build_green_giant_preset.py, but NOTHING in
+    the test suite or ci.yml executes that script -- so a hand-edit of the shipped
+    JSON, or a change to generate_bands, would pass CI in silence. The build-script
+    asserts guard the BUILD; this guards the SHIPPED ARTIFACT.
+
+    Each pin corresponds to a way the preset can be silently destroyed:
+
+    * solver mode -- vort_inject_mask is a NO-OP in kinematic mode, and the mode is
+      inherited from gas_giant_warm rather than set explicitly, so nothing in the
+      preset itself would notice it changing.
+    * the mask AND its amplitude together. A mask is a MULTIPLIER, and belt_mask
+      covers ~48% of latitudes against shear_norm's ~4%, so restoring warm's
+      inherited vort_inject=1.8 would apply ~5x warm's integrated forcing and
+      dissolve the banding. The mask is only half the setting.
+    * EVEN band count on the seeded path. is_belt is `values < median(values)`, so
+      at an odd count with belts in the majority the median IS the top belt value
+      and one belt is silently reclassified as a zone (measured: count 15 fails on
+      204/400 seeds, count 16 on 0). The model's alternation validator runs ONLY on
+      the template path, which this preset does not use.
+    * the palette is actually GREEN. An earlier draft measured hue 60-72 deg --
+      yellow -- with a brightest stop at R == G, i.e. zero green content. For a
+      preset named green_giant that is the one defect worth a dedicated test.
+    """
+    p = load_factory_preset("green_giant")
+    assert p.solver.type.value == "vorticity", "belts mask is inert in kinematic mode"
+    assert p.solver.vort_inject_mask.value == "belts"
+    assert 0.0 < p.solver.vort_inject < 1.0, (
+        f"vort_inject={p.solver.vort_inject} is un-retuned for the wide BELTS mask"
+    )
+    assert p.storms.hero_count == 0, "the composition is an alternation, not a hero"
+
+    # Seeded path, even count, and identity that actually alternates. Assert the
+    # CONSEQUENCE (run the real layout) rather than the parity rule, so a future
+    # seed or generate_bands change is caught too.
+    assert p.bands.template is None, "inherited warm's 12-band Jovian template"
+    assert p.bands.count % 2 == 0, f"odd count {p.bands.count} can misclassify a belt"
+    flags = list(generate_bands(p.seed, p.bands).is_belt)
+    assert all(a != b for a, b in zip(flags, flags[1:], strict=False)), flags
+
+    # Green, not khaki: G must lead R through the upper half of the mid rows.
+    for row in p.appearance.palette_rows:
+        if abs(row.latitude) <= 32.0:
+            for s in (s for s in row.stops if s.pos >= 0.5):
+                red, green, _ = s.color
+                assert green - red >= 0.08, (row.latitude, s.pos, s.color)
 
 
 def test_jupiter_vorticity_polar_values_persist():
