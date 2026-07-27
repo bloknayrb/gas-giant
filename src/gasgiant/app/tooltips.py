@@ -61,9 +61,10 @@ HEIGHT_BUDGET_FRAC = 0.85
 # Termination comes from the `width < max_wrap` bound in _layout, not from a
 # step budget.
 _WIDEN_STEP = 1.15
-# Absolute floor for the wrap, in ems. Only binds on a viewport far too narrow
-# to be usable; its job is to keep the wrap POSITIVE (see _layout).
-_MIN_WRAP_EM = 4.0
+# Absolute floor for max_wrap, in ems -- distinct from WRAP_MIN_EM above, which
+# floors the CHOSEN wrap. This one only binds on a viewport far too narrow to be
+# usable, and its job is to keep the cap POSITIVE (see _layout).
+_ABSOLUTE_MIN_EM = 4.0
 # Texts already reported as truncated. Truncation is a per-frame condition --
 # it re-fires ~60x/s while the pointer rests -- so the warning is deduplicated
 # by content rather than logged every frame.
@@ -98,7 +99,7 @@ def _layout(text: str) -> tuple[float, float]:
     # so imgui never clamps it and grows a scrollbar. Measured: it holds the
     # guarantee at every viewport from 1700x980 down to 200x150; a tighter
     # margin leaked 1-4 px of horizontal scroll at some sizes.
-    max_wrap = max(view.x - 2.0 * pad.x - 8.0, _MIN_WRAP_EM * max(font_size, 1.0))
+    max_wrap = max(view.x - 2.0 * pad.x - 8.0, _ABSOLUTE_MIN_EM * max(font_size, 1.0))
     budget = max(HEIGHT_BUDGET_FRAC * view.y - 2.0 * pad.y, line)
     if font_size <= 0.0:
         # Reachable ONLY before the first new_frame(), i.e. only by misuse.
@@ -108,10 +109,10 @@ def _layout(text: str) -> tuple[float, float]:
         log.warning("tooltip layout requested outside a frame; using default font metrics")
         return min(WRAP_EM * 13.0, max_wrap), budget
     preferred = min(WRAP_EM * font_size, WRAP_VIEWPORT_FRAC * view.x)
-    # A floor past the cap would push the wrap back outside the viewport and
-    # re-create the horizontal overflow this function exists to prevent.
-    floor = min(WRAP_MIN_EM * font_size, max_wrap)
-    width = min(max(preferred, floor), max_wrap)
+    # The outer min is what keeps a floor past the cap from pushing the wrap
+    # back outside the viewport and re-creating the horizontal overflow this
+    # function exists to prevent.
+    width = min(max(preferred, WRAP_MIN_EM * font_size), max_wrap)
     # Terminates structurally: width climbs monotonically toward max_wrap and
     # the loop is bounded by `width < max_wrap`, so a viewport too short to fit
     # even one line exits at the cap instead of spinning forever (a bare
@@ -120,11 +121,6 @@ def _layout(text: str) -> tuple[float, float]:
     while width < max_wrap and imgui.calc_text_size(text, wrap_width=width).y > budget:
         width = min(width * _WIDEN_STEP, max_wrap)
     return width, budget
-
-
-def wrap_width(text: str) -> float:
-    """Wrap position (px) for ``text``, widened to fit the viewport height."""
-    return _layout(text)[0]
 
 
 def _fit(text: str, width: float, budget: float) -> str:
@@ -157,12 +153,14 @@ def _fit(text: str, width: float, budget: float) -> str:
             "(full text is in docs/sliders.md)",
             len(text) - lo, len(text), width, budget,
         )
-    # Postcondition: the binary search assumes SOME prefix fits. On a viewport
-    # too small for even one line that premise fails and the bare "..." still
-    # overflows -- say so rather than return a string that breaks the module's
-    # own invariant silently.
-    if imgui.calc_text_size(out, wrap_width=width).y > budget:
-        log.warning("tooltip cannot fit any prefix at wrap %.0f / budget %.0f", width, budget)
+        # Postcondition, checked under the same dedup guard: the binary search
+        # assumes SOME prefix fits, and on a viewport too small for even one
+        # line that premise fails and the bare "..." still overflows. Inside the
+        # guard because truncation is a per-frame condition -- outside it, both
+        # this warning AND its calc_text_size re-fired ~60x/s for as long as the
+        # pointer rested, which is the spam _TRIMMED exists to prevent.
+        if imgui.calc_text_size(out, wrap_width=width).y > budget:
+            log.warning("tooltip cannot fit any prefix at wrap %.0f / budget %.0f", width, budget)
     return out
 
 

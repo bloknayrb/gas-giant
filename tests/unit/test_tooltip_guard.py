@@ -18,17 +18,36 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import tomllib
 
-# Opening a tooltip window without pushing the wrap is the regression here, so
-# the begin_* forms are banned alongside set_tooltip -- a set_tooltip-only
-# check would be blind to a bare begin_tooltip().
-BANNED = {
-    "set_tooltip",
-    "set_item_tooltip",
-    "begin_tooltip",
-    "begin_item_tooltip",
-    "begin_tooltip_ex",
-}
+_PYPROJECT = pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+
+def _banned_names() -> set[str]:
+    """The banned callables, read from ruff's own ``TID251`` table.
+
+    Derived rather than restated: a hardcoded copy drifts the moment a sixth
+    entry point is added to ``pyproject.toml``, and it drifts SILENTLY -- this
+    guard exists to catch what ruff cannot see, so a stale list defeats its
+    whole purpose with nothing red to say so. ``tomllib`` is stdlib on 3.13, so
+    reading it keeps this module dependency-free.
+
+    Opening a tooltip window without pushing the wrap is the regression here,
+    so the table bans the ``begin_*`` forms alongside ``set_tooltip`` -- a
+    ``set_tooltip``-only check would be blind to a bare ``begin_tooltip()``.
+    """
+    cfg = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    table = cfg["tool"]["ruff"]["lint"]["flake8-tidy-imports"]["banned-api"]
+    return {key.rsplit(".", 1)[-1] for key in table}
+
+
+BANNED = _banned_names()
+
+
+def test_the_banned_list_is_populated():
+    """Without this, a renamed or deleted ruff table would empty ``BANNED`` and
+    turn the scan below into a test that passes by checking nothing."""
+    assert {"set_tooltip", "begin_tooltip"} <= BANNED, BANNED
 
 
 def _called_name(node: ast.Call) -> str | None:

@@ -22,9 +22,10 @@ stays GUI-agnostic in fact, not just in name.
 from __future__ import annotations
 
 import statistics
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -2156,3 +2157,65 @@ def field_meta(model: type[BaseModel], field_name: str) -> FieldMeta:
     """The typed ``FieldMeta`` for a field (an all-default ``FieldMeta`` if the
     field carries no ``pfield`` metadata)."""
     return FieldMeta.of(model.model_fields[field_name])
+
+
+@dataclass(frozen=True)
+class PfieldLeaf:
+    """One tunable in the tree, addressed by its dotted path."""
+
+    path: str          # e.g. "storms.cast.radius" -- unique across the tree
+    name: str          # the leaf field name alone
+    model: type[BaseModel]
+    info: Any          # pydantic FieldInfo
+
+    @property
+    def meta(self) -> FieldMeta:
+        return FieldMeta.of(self.info)
+
+    @property
+    def description(self) -> str:
+        return self.info.description or ""
+
+
+def iter_pfields(
+    model: type[BaseModel] | None = None, prefix: str = "", _depth: int = 0
+) -> Iterator[PfieldLeaf]:
+    """Walk every ``pfield`` leaf under ``model`` (default: the whole tree).
+
+    Lives in the params layer rather than in a test or in ``app.panels`` because
+    four callers need it and only one of them may import a GUI: ``app.panels``
+    draws from it, ``scripts/render_slider_examples.py`` generates docs from it
+    headlessly, and the params guard tests walk it. Hand-rolled copies had
+    already drifted apart -- see the two subtleties below, each of which was
+    fixed in some copies and not others, and each of which fails SILENTLY as
+    missing coverage rather than as a red test.
+
+    A leaf counts as a pfield iff its ``json_schema_extra`` carries ``"tier"``.
+    That is deliberately structural: ``GradientStop``, ``PaletteRow`` and
+    ``BandTemplate`` declare their leaves with a plain ``Field()`` and so drop
+    out for free, whereas excluding them BY NAME would turn a future ``pfield``
+    added there into exactly the silent gap this guards against.
+
+    Two subtleties, both load-bearing:
+
+    * ``get_args`` is walked alongside the bare annotation, because
+      ``storms.cast`` is ``list[StormOverride]`` -- which fails ``issubclass``,
+      so an annotation-only walk misses all 22 cast levers.
+    * Yields by dotted PATH, not by ``(model, name)``. ``poles.north`` and
+      ``poles.south`` are two instances of one ``PoleParams`` declaration, so a
+      ``(model, name)`` key silently collapses 5 real leaves. Callers that want
+      one entry per DECLARATION should dedupe on ``(leaf.model, leaf.name)``
+      themselves, where the intent is visible.
+    """
+    if model is None:
+        model = PlanetParams
+    if _depth > 6:  # structural stop; the real tree is 3 deep
+        return
+    for name, info in model.model_fields.items():
+        path = f"{prefix}{name}"
+        for member in (info.annotation, *get_args(info.annotation)):
+            if isinstance(member, type) and issubclass(member, BaseModel):
+                yield from iter_pfields(member, f"{path}.", _depth + 1)
+        extra = info.json_schema_extra
+        if isinstance(extra, dict) and "tier" in extra:
+            yield PfieldLeaf(path=path, name=name, model=model, info=info)

@@ -8,11 +8,9 @@ silently truncating on the other axis.
 
 from __future__ import annotations
 
-import typing
-
 import pytest
 
-from gasgiant.params.model import PlanetParams, StormsParams
+from gasgiant.params.model import PlanetParams, StormsParams, iter_pfields
 
 panels = pytest.importorskip("gasgiant.app.panels")
 tooltips = pytest.importorskip("gasgiant.app.tooltips")
@@ -25,30 +23,8 @@ LONGEST = StormsParams.model_fields["hero_emergence"].description or ""
 
 
 def _all_descriptions():
-    """``(dotted_path, description)`` for every pfield leaf.
-
-    Descends ``get_args`` as well as bare annotations: ``storms.cast`` is
-    ``list[StormOverride]``, which fails an ``issubclass(ann, BaseModel)``
-    test, so a naive walk silently skips all 22 cast-lever descriptions.
-    """
-    from pydantic import BaseModel
-
-    out: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def walk(model, prefix=""):
-        for name, info in model.model_fields.items():
-            for member in (info.annotation, *typing.get_args(info.annotation)):
-                if isinstance(member, type) and issubclass(member, BaseModel):
-                    walk(member, f"{prefix}{name}.")
-            if "tier" in (info.json_schema_extra or {}) and info.description:
-                key = (model.__name__, name)
-                if key not in seen:
-                    seen.add(key)
-                    out.append((f"{prefix}{name}", info.description))
-
-    walk(PlanetParams)
-    return out
+    """``(dotted_path, description)`` for every pfield leaf that has one."""
+    return [(leaf.path, leaf.description) for leaf in iter_pfields() if leaf.description]
 
 
 @pytest.fixture
@@ -110,7 +86,7 @@ def _live_tooltip_window():
 def test_long_tooltip_wraps_instead_of_running_off_screen(imgui_ctx):
     win = _draw(LONGEST)
     assert win is not None, "no live tooltip window"
-    expected = tooltips.wrap_width(LONGEST)
+    expected = tooltips._layout(LONGEST)[0]
     padding = imgui.get_style().window_padding.x
     assert win.size.x <= expected + 2.0 * padding, "wider than the wrap position"
     assert win.size.x < imgui.get_io().display_size.x * 0.6, "still eating the screen"
@@ -189,7 +165,7 @@ def test_widen_loop_cannot_spin_forever(imgui_ctx, monkeypatch):
     imgui.new_frame()
     monkeypatch.setattr(tooltips.imgui, "calc_text_size", budgeted)
     try:
-        width = tooltips.wrap_width(LONGEST)
+        width = tooltips._layout(LONGEST)[0]
     finally:
         monkeypatch.undo()
         imgui.end_frame()
@@ -282,7 +258,7 @@ def test_no_shipped_description_ever_needs_trimming(imgui_ctx):
     assert not over, f"descriptions too long to display at 640x360: {over}"
 
 
-def test_wrap_width_is_safe_before_the_first_frame():
+def test_layout_is_safe_before_the_first_frame():
     """``calc_text_size`` segfaults the interpreter before the first
     ``new_frame()`` (exit 139, no traceback). ``get_font_size()`` reports 0.0
     there, which is the signal the guard keys on."""
@@ -291,7 +267,7 @@ def test_wrap_width_is_safe_before_the_first_frame():
     imgui.get_io().display_size = imgui.ImVec2(800.0, 600.0)
     try:
         assert imgui.get_font_size() == 0.0, "premise: no font metrics yet"
-        assert tooltips.wrap_width(LONGEST) > 0.0
+        assert tooltips._layout(LONGEST)[0] > 0.0
     finally:
         imgui.destroy_context(ctx)
 

@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from gasgiant.params.model import BandsParams, PlanetParams, Tier, field_meta
+from gasgiant.params.model import (
+    BandsParams,
+    PlanetParams,
+    Tier,
+    field_meta,
+    iter_pfields,
+)
 
 
 def test_defaults_validate():
@@ -64,52 +70,25 @@ def test_field_meta_helper():
 
 def test_every_pfield_has_a_description():
     """Every pfield leaf needs a description: panels.py surfaces it as the
-    slider tooltip. The pfield-leaf set is derived programmatically -- a leaf
-    is a pfield if its json_schema_extra carries 'tier' -- so non-pfield
-    leaves (GradientStop.pos/.color, PaletteRow.latitude, BandTemplate's
-    edges_deg/values/heights, all declared with plain Field()) are excluded
-    without a hand-maintained skip list.
-
-    Descends get_args too: storms.cast is list[StormOverride], which fails an
-    issubclass() test, so a bare-annotation walk silently skipped all 22
-    cast-lever pfields -- every one of which panels.py surfaces as a tooltip
-    via _draw_cast_field. They all have descriptions today; this keeps a new
-    one from shipping without."""
-    import typing
-
-    from pydantic import BaseModel
-
-    def walk(model: type[BaseModel], prefix: str) -> None:
-        for name, info in model.model_fields.items():
-            path = f"{prefix}{name}"
-            extra = info.json_schema_extra
-            if isinstance(extra, dict) and "tier" in extra:
-                assert info.description, f"pfield {path} has no description"
-            ann = info.annotation
-            for member in (ann, *typing.get_args(ann)):
-                if isinstance(member, type) and issubclass(member, BaseModel):
-                    walk(member, f"{path}.")
-
-    walk(PlanetParams, "")
+    slider tooltip. ``iter_pfields`` supplies the leaf set (see its docstring
+    for why the walk is structural rather than a skip list, and for the two
+    traversal subtleties that silently under-count if you re-roll it)."""
+    for leaf in iter_pfields():
+        assert leaf.description, f"pfield {leaf.path} has no description"
 
 
 # -- Phase 4: Basic/Advanced curation guard tests (consolidated list #6, #10) --
 
 
-def _pfield_leaves(model: type[BaseModel] = PlanetParams, prefix: str = ""):
-    """Every pfield leaf as (dotted path, top-level section name, extra
-    dict), derived the same programmatic way as test_every_pfield_has_a_description
-    ('tier' in json_schema_extra) -- never a hand-maintained skip list."""
-    for name, info in model.model_fields.items():
-        path = f"{prefix}{name}"
-        ann = info.annotation
-        if isinstance(ann, type) and issubclass(ann, BaseModel):
-            yield from _pfield_leaves(ann, f"{path}.")
-            continue
-        extra = info.json_schema_extra
-        if isinstance(extra, dict) and "tier" in extra:
-            top = path.split(".", 1)[0]
-            yield path, top, extra
+def _pfield_leaves():
+    """``(dotted path, top-level section, extra dict)`` for every pfield leaf.
+
+    Kept as a thin adapter over ``iter_pfields`` rather than its own walk: this
+    file previously carried a second, subtly different traversal, and the two
+    disagreed by 22 leaves -- every ``storms.cast.*`` lever was invisible to the
+    three curation guards below, with nothing red to say so."""
+    for leaf in iter_pfields():
+        yield leaf.path, leaf.path.split(".", 1)[0], leaf.info.json_schema_extra
 
 
 def test_adv_is_a_bool_on_every_pfield_leaf():
