@@ -333,7 +333,11 @@ def enumerate_sliders() -> list[Slider]:
         s.preset_value = float(node)
 
     order = {g: i for i, g in enumerate(GROUP_ORDER)}
-    sliders.sort(key=lambda s: (order.get(s.group, 99), s.path))
+    # Sort by the LABEL, which is what the heading shows. These were the same
+    # string until captions became authorable; sorting by path now yields
+    # headings in no discernible order, and the --check gate cannot see it
+    # because it compares generated output to generated output.
+    sliders.sort(key=lambda s: (order.get(s.group, 99), s.label.lower(), s.path))
     return sliders
 
 

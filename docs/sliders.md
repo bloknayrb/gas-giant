@@ -39,16 +39,6 @@ _High example capped below the slider maximum so it renders in reasonable time; 
 <td align="center"><img src="img/sliders/sim__dev_steps__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 150</sub></td><td align="center"><img src="img/sliders/sim__dev_steps__hi.jpg" width="320"><br><sub>high &middot; 1000</sub></td>
 </tr></table>
 
-### Time step
-
-`sim.dt_scale` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
-
-Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)
-
-<table><tr>
-<td align="center"><img src="img/sliders/sim__dt_scale__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/sim__dt_scale__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
-</tr></table>
-
 ### reference resolution
 
 `sim.reference_resolution` &mdash; range **512 to 8192**, default **2048**, tier `restart`.
@@ -75,6 +65,16 @@ Auto-scale time-axis settings so a sim tuned at a lower resolution develops simi
 
 _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
+### Time step
+
+`sim.dt_scale` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
+
+Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)
+
+<table><tr>
+<td align="center"><img src="img/sliders/sim__dt_scale__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/sim__dt_scale__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
+</tr></table>
+
 
 ## Solver
 
@@ -86,6 +86,48 @@ Internal pacing of the baroclinic storm generator — leave at default (baroclin
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### Churn placement
+
+`solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
+
+Spatial localization of eddy injection: global = churn everywhere; belts = cyclonic dark bands only (anticyclonic zones stay smooth); shear = jet-shear flanks only (filaments where shear is high). Vorticity mode.
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
+
+### Churn scale
+
+`solver.vort_inject_scale` &mdash; range **0.1 to 4**, default **0.5**, tier `restart`.
+
+Size of the injected churn: higher = finer speckle that the shear folds into thin filaments; lower = big blobs (injection frequency as a multiple of bands.detail_freq; vorticity mode)
+
+_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/solver__vort_inject_scale__lo.jpg" width="320"><br><sub>low &middot; 0.1</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 2.5</sub></td><td align="center"><img src="img/sliders/solver__vort_inject_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
+</tr></table>
+
+### Churn strength
+
+`solver.vort_inject` &mdash; range **0 to 5**, default **0**, tier `restart`.
+
+Broadband eddy-vorticity injection amplitude per step; the jet shear folds it into filaments (the emergent-turbulence source; 0 = off, smooth jets stay zonal). Vorticity mode.
+
+_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/solver__vort_inject__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/solver__vort_inject__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
+</tr></table>
+
+### Eddy brake (all scales, jets spared)
+
+`solver.vort_eddy_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
+
+Linear drag fraction on the EDDY vorticity q - <q>_x (the deviation from the per-latitude zonal mean) per step. Leaves the zonal-mean jets intact, but is FLAT in wavenumber, so it damps medium eddies (festoons, band-edge waves) as hard as the gravest-mode swirl -> over-flattens the field. Prefer vort_psi_drag (scale-selective). Equirect only. 0 = off (byte-identical). Vorticity mode.
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_eddy_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
+</tr></table>
+
 ### enabled
 
 `solver.baroclinic.enabled` &mdash; toggle (on/off), default **`False`**, tier `restart`.
@@ -93,6 +135,30 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 Inject the evolving baroclinic vorticity source into the vorticity solver (adds physically-grounded mid-latitude storms; requires solver type=vorticity). Off = plain v1.6. No rand: randomize() must never silently enable it.
 
 _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
+
+### Fine smoothing
+
+`solver.vort_hypervisc` &mdash; range **0 to 10**, default **1**, tier `restart`.
+
+Fine-scale smoothing: cleans up pixel-level crackle; too high blurs away the thinnest filaments (scale-selective biharmonic hyperviscosity; vorticity mode)
+
+_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/solver__vort_hypervisc__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/solver__vort_hypervisc__hi.jpg" width="320"><br><sub>high &middot; 10</sub></td>
+</tr></table>
+
+### Flow leash
+
+`solver.vort_relax_tau` &mdash; range **20 to 2000**, default **120**, tier `restart`, log scale.
+
+How tightly the flow is leashed to the painted jets and storms: low = tidy and band-locked, high = free-running turbulence that can wander off the template (nudging timescale in steps; vorticity mode)
+
+_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/solver__vort_relax_tau__lo.jpg" width="320"><br><sub>low &middot; 20</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 600</sub></td><td align="center"><img src="img/sliders/solver__vort_relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
+</tr></table>
 
 ### gain
 
@@ -105,6 +171,74 @@ _Rendered against the `baroclinic` solver baseline (inert under the default kine
 <table><tr>
 <td align="center"><img src="img/sliders/solver__baroclinic__gain__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__gain__hi.jpg" width="320"><br><sub>high &middot; 8</sub></td>
 </tr></table>
+
+### Rotation strength
+
+`solver.coriolis_f0` &mdash; range **0 to 20**, default **2**, tier `restart`.
+
+Planet-rotation strength: higher = more, narrower bands and flatter storms; lower = fewer, fatter bands (f0 in f = f0*sin(lat), sets the Rhines/band scale; vorticity mode)
+
+_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/solver__coriolis_f0__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><img src="img/sliders/solver__coriolis_f0__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
+</tr></table>
+
+### Solver accuracy
+
+`solver.poisson_iters` &mdash; range **8 to 512**, default **48**, tier `restart`.
+
+Solver accuracy per step: too low leaves smeared, laggy swirls; higher is slower with diminishing returns (fixed red-black SOR iterations; vorticity mode)
+
+_Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+### Solver convergence speed
+
+`solver.sor_omega` &mdash; range **1 to 2**, default **1.7**, tier `restart`.
+
+Solver convergence speed — leave at 1.7: it changes solve time, not the picture, unless set so low the swirls lag (SOR over-relaxation factor, must be in (1,2) exclusive; vorticity mode)
+
+_Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+### Storm reach (0 = unlimited)
+
+`solver.deformation_radius` &mdash; range **0 to 3.14**, default **0**, tier `restart`.
+
+Storm locality: how far each vortex's swirl reaches. Smaller = more local — a dominant hero stirs its own band without destabilizing the rest of the map; 0 = off (infinite reach, plain 2D, byte-identical). Values in the (0, 0.05) rad band are rejected (degenerate solve). (Physics: Rossby deformation radius L_d in RADIANS, 1 rad = 57.3 deg; vorticity mode. Screens the inversion to (nabla^2 - 1/L_d^2)psi = omega — equivalent-barotropic / 1.5-layer reduced gravity — so induced velocity decays ~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail; real Jupiter has L_d << the GRS. With screening on, the advected q is equivalent-barotropic QGPV, so vortex/inject/relax strengths tuned for the plain 2D path read weaker and more localized -- expect to re-tune. No rand.)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__deformation_radius__hi.jpg" width="320"><br><sub>high &middot; 3.14</sub></td>
+</tr></table>
+
+### Swirl brake (all scales)
+
+`solver.vort_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
+
+Global brake on swirling: tames runaway planet-scale swirl but also weakens every storm — prefer vort_psi_drag, which targets only the oversized swirl (linear Rayleigh drag fraction on relative vorticity per step, absorbing the 2D inverse-cascade pileup at large scales; 0 = off; vorticity mode)
+
+_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
+</tr></table>
+
+### Swirl brake (large only)
+
+`solver.vort_psi_drag` &mdash; range **0 to 20**, default **0**, tier `restart`.
+
+Removes oversized planet-scale swirl while PRESERVING festoons, band-edge waves, and mid-size vortices — the scale-selective brake to reach for before vort_drag or vort_eddy_drag. 0 = off (byte-identical). (Physics: large-scale hypofriction — a vorticity sink proportional to the EDDY STREAMFUNCTION psi - <psi>_x; because psi ~ omega/(k^2 + 1/L_d^2), the effective drag rate ~1/(k^2+1/L_d^2) hits the gravest-mode inverse-cascade swirl far harder than medium eddies, unlike the flat-in-k vort_eddy_drag. Reuses the screened-Poisson psi the solver already computes (one step stale); coefficient runs numerically larger than vort_eddy_drag since psi << omega. Equirect only. Vorticity mode.)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_psi_drag__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
+</tr></table>
+
+### type
+
+`solver.type` &mdash; dropdown, one of `kinematic` / `vorticity`, default **`kinematic`**, tier `restart`.
+
+How clouds move: kinematic = fast and painterly, bands stay where they are painted (analytic streamfunction, v1.5); vorticity = a real fluid sim — storms interact and shed filaments, slower, and required by the solid-core storm levers (prognostic vorticity, v1.6+)
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 ### update every
 
@@ -122,142 +256,28 @@ Internal pacing of the baroclinic storm generator — leave at default; only aff
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
-### Rotation strength
-
-`solver.coriolis_f0` &mdash; range **0 to 20**, default **2**, tier `restart`.
-
-Planet-rotation strength: higher = more, narrower bands and flatter storms; lower = fewer, fatter bands (f0 in f = f0*sin(lat), sets the Rhines/band scale; vorticity mode)
-
-_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
-
-<table><tr>
-<td align="center"><img src="img/sliders/solver__coriolis_f0__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><img src="img/sliders/solver__coriolis_f0__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
-</tr></table>
-
-### Storm reach
-
-`solver.deformation_radius` &mdash; range **0 to 3.14**, default **0**, tier `restart`.
-
-Storm locality: how far each vortex's swirl reaches. Smaller = more local — a dominant hero stirs its own band without destabilizing the rest of the map; 0 = off (infinite reach, plain 2D, byte-identical). Values in the (0, 0.05) rad band are rejected (degenerate solve). (Physics: Rossby deformation radius L_d in RADIANS, 1 rad = 57.3 deg; vorticity mode. Screens the inversion to (nabla^2 - 1/L_d^2)psi = omega — equivalent-barotropic / 1.5-layer reduced gravity — so induced velocity decays ~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail; real Jupiter has L_d << the GRS. With screening on, the advected q is equivalent-barotropic QGPV, so vortex/inject/relax strengths tuned for the plain 2D path read weaker and more localized -- expect to re-tune. No rand.)
-
-<table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__deformation_radius__hi.jpg" width="320"><br><sub>high &middot; 3.14</sub></td>
-</tr></table>
-
-### Solver accuracy
-
-`solver.poisson_iters` &mdash; range **8 to 512**, default **48**, tier `restart`.
-
-Solver accuracy per step: too low leaves smeared, laggy swirls; higher is slower with diminishing returns (fixed red-black SOR iterations; vorticity mode)
-
-_Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
-
-### Solver convergence
-
-`solver.sor_omega` &mdash; range **1 to 2**, default **1.7**, tier `restart`.
-
-Solver convergence speed — leave at 1.7: it changes solve time, not the picture, unless set so low the swirls lag (SOR over-relaxation factor, must be in (1,2) exclusive; vorticity mode)
-
-_Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
-
-### type
-
-`solver.type` &mdash; dropdown, one of `kinematic` / `vorticity`, default **`kinematic`**, tier `restart`.
-
-How clouds move: kinematic = fast and painterly, bands stay where they are painted (analytic streamfunction, v1.5); vorticity = a real fluid sim — storms interact and shed filaments, slower, and required by the solid-core storm levers (prognostic vorticity, v1.6+)
-
-_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
-
-### Swirl brake (all scales)
-
-`solver.vort_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
-
-Global brake on swirling: tames runaway planet-scale swirl but also weakens every storm — prefer vort_psi_drag, which targets only the oversized swirl (linear Rayleigh drag fraction on relative vorticity per step, absorbing the 2D inverse-cascade pileup at large scales; 0 = off; vorticity mode)
-
-_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
-
-<table><tr>
-<td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
-</tr></table>
-
-### Eddy brake (flat)
-
-`solver.vort_eddy_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
-
-Linear drag fraction on the EDDY vorticity q - <q>_x (the deviation from the per-latitude zonal mean) per step. Leaves the zonal-mean jets intact, but is FLAT in wavenumber, so it damps medium eddies (festoons, band-edge waves) as hard as the gravest-mode swirl -> over-flattens the field. Prefer vort_psi_drag (scale-selective). Equirect only. 0 = off (byte-identical). Vorticity mode.
-
-<table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_eddy_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
-</tr></table>
-
-### Fine smoothing
-
-`solver.vort_hypervisc` &mdash; range **0 to 10**, default **1**, tier `restart`.
-
-Fine-scale smoothing: cleans up pixel-level crackle; too high blurs away the thinnest filaments (scale-selective biharmonic hyperviscosity; vorticity mode)
-
-_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
-
-<table><tr>
-<td align="center"><img src="img/sliders/solver__vort_hypervisc__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/solver__vort_hypervisc__hi.jpg" width="320"><br><sub>high &middot; 10</sub></td>
-</tr></table>
-
-### Churn strength
-
-`solver.vort_inject` &mdash; range **0 to 5**, default **0**, tier `restart`.
-
-Broadband eddy-vorticity injection amplitude per step; the jet shear folds it into filaments (the emergent-turbulence source; 0 = off, smooth jets stay zonal). Vorticity mode.
-
-_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
-
-<table><tr>
-<td align="center"><img src="img/sliders/solver__vort_inject__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/solver__vort_inject__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
-</tr></table>
-
-### Churn placement
-
-`solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
-
-Spatial localization of eddy injection: global = churn everywhere; belts = cyclonic dark bands only (anticyclonic zones stay smooth); shear = jet-shear flanks only (filaments where shear is high). Vorticity mode.
-
-_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
-
-### Churn size
-
-`solver.vort_inject_scale` &mdash; range **0.1 to 4**, default **0.5**, tier `restart`.
-
-Size of the injected churn: higher = finer speckle that the shear folds into thin filaments; lower = big blobs (injection frequency as a multiple of bands.detail_freq; vorticity mode)
-
-_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
-
-<table><tr>
-<td align="center"><img src="img/sliders/solver__vort_inject_scale__lo.jpg" width="320"><br><sub>low &middot; 0.1</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 2.5</sub></td><td align="center"><img src="img/sliders/solver__vort_inject_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
-</tr></table>
-
-### Swirl brake (large only)
-
-`solver.vort_psi_drag` &mdash; range **0 to 20**, default **0**, tier `restart`.
-
-Removes oversized planet-scale swirl while PRESERVING festoons, band-edge waves, and mid-size vortices — the scale-selective brake to reach for before vort_drag or vort_eddy_drag. 0 = off (byte-identical). (Physics: large-scale hypofriction — a vorticity sink proportional to the EDDY STREAMFUNCTION psi - <psi>_x; because psi ~ omega/(k^2 + 1/L_d^2), the effective drag rate ~1/(k^2+1/L_d^2) hits the gravest-mode inverse-cascade swirl far harder than medium eddies, unlike the flat-in-k vort_eddy_drag. Reuses the screened-Poisson psi the solver already computes (one step stale); coefficient runs numerically larger than vort_eddy_drag since psi << omega. Equirect only. Vorticity mode.)
-
-<table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_psi_drag__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
-</tr></table>
-
-### Flow leash
-
-`solver.vort_relax_tau` &mdash; range **20 to 2000**, default **120**, tier `restart`, log scale.
-
-How tightly the flow is leashed to the painted jets and storms: low = tidy and band-locked, high = free-running turbulence that can wander off the template (nudging timescale in steps; vorticity mode)
-
-_Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
-
-<table><tr>
-<td align="center"><img src="img/sliders/solver__vort_relax_tau__lo.jpg" width="320"><br><sub>low &middot; 20</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 600</sub></td><td align="center"><img src="img/sliders/solver__vort_relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
-</tr></table>
-
 
 ## Bands
+
+### Band detail scale
+
+`bands.detail_freq` &mdash; range **2 to 64**, default **12**, tier `restart`, log scale.
+
+Small-scale noise spatial frequency
+
+<table><tr>
+<td align="center"><img src="img/sliders/bands__detail_freq__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><img src="img/sliders/bands__detail_freq__hi.jpg" width="320"><br><sub>high &middot; 64</sub></td>
+</tr></table>
+
+### Band meander scale
+
+`bands.warp_freq` &mdash; range **0.5 to 16**, default **3**, tier `restart`, log scale.
+
+Band-boundary meander spatial frequency
+
+<table><tr>
+<td align="center"><img src="img/sliders/bands__warp_freq__lo.jpg" width="320"><br><sub>low &middot; 0.5</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3.5</sub></td><td align="center"><img src="img/sliders/bands__warp_freq__hi.jpg" width="320"><br><sub>high &middot; 16</sub></td>
+</tr></table>
 
 ### belt fade
 
@@ -297,16 +317,6 @@ Small-scale color-index noise amplitude
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__detail_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/bands__detail_amount__hi.jpg" width="320"><br><sub>high &middot; 0.5</sub></td>
-</tr></table>
-
-### Band detail scale
-
-`bands.detail_freq` &mdash; range **2 to 64**, default **12**, tier `restart`, log scale.
-
-Small-scale noise spatial frequency
-
-<table><tr>
-<td align="center"><img src="img/sliders/bands__detail_freq__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><img src="img/sliders/bands__detail_freq__hi.jpg" width="320"><br><sub>high &middot; 64</sub></td>
 </tr></table>
 
 ### edge diversity
@@ -395,16 +405,6 @@ Band-boundary meander amplitude, radians of latitude (1 rad = 57.3 deg; default 
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__warp_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><img src="img/sliders/bands__warp_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
-</tr></table>
-
-### Band meander scale
-
-`bands.warp_freq` &mdash; range **0.5 to 16**, default **3**, tier `restart`, log scale.
-
-Band-boundary meander spatial frequency
-
-<table><tr>
-<td align="center"><img src="img/sliders/bands__warp_freq__lo.jpg" width="320"><br><sub>low &middot; 0.5</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3.5</sub></td><td align="center"><img src="img/sliders/bands__warp_freq__hi.jpg" width="320"><br><sub>high &middot; 16</sub></td>
 </tr></table>
 
 ### width jitter
@@ -613,6 +613,26 @@ Belt replenishment frequency multiplier relative to the base detail frequency
 <td align="center"><img src="img/sliders/turbulence__belt_replenish_scale__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/turbulence__belt_replenish_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
+### Billow count
+
+`turbulence.kh_wavenumber` &mdash; range **4 to 80**, default **24**, tier `velocity`.
+
+KH billow longitudinal wavenumber
+
+<table><tr>
+<td align="center"><img src="img/sliders/turbulence__kh_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 24</sub></td><td align="center"><img src="img/sliders/turbulence__kh_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 80</sub></td>
+</tr></table>
+
+### Billow strength
+
+`turbulence.kh_amplitude` &mdash; range **0 to 2**, default **0.35**, tier `velocity`.
+
+Kelvin-Helmholtz wave amplitude along high-shear band boundaries
+
+<table><tr>
+<td align="center"><img src="img/sliders/turbulence__kh_amplitude__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/turbulence__kh_amplitude__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
+</tr></table>
+
 ### evolution rate
 
 `turbulence.evolution_rate` &mdash; range **0 to 0.1**, default **0.012**, tier `velocity`.
@@ -631,36 +651,6 @@ Global turbulence (curl-noise) amplitude
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__intensity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__intensity__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
-</tr></table>
-
-### Billow strength
-
-`turbulence.kh_amplitude` &mdash; range **0 to 2**, default **0.35**, tier `velocity`.
-
-Kelvin-Helmholtz wave amplitude along high-shear band boundaries
-
-<table><tr>
-<td align="center"><img src="img/sliders/turbulence__kh_amplitude__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/turbulence__kh_amplitude__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
-</tr></table>
-
-### Billow count
-
-`turbulence.kh_wavenumber` &mdash; range **4 to 80**, default **24**, tier `velocity`.
-
-KH billow longitudinal wavenumber
-
-<table><tr>
-<td align="center"><img src="img/sliders/turbulence__kh_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 24</sub></td><td align="center"><img src="img/sliders/turbulence__kh_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 80</sub></td>
-</tr></table>
-
-### Turbulence leash
-
-`turbulence.relax_tau` &mdash; range **50 to 2000**, default **350**, tier `restart`, log scale.
-
-Relaxation time (steps) pulling band color/height back toward the stamp
-
-<table><tr>
-<td align="center"><img src="img/sliders/turbulence__relax_tau__lo.jpg" width="320"><br><sub>low &middot; 50</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 350</sub></td><td align="center"><img src="img/sliders/turbulence__relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
 </tr></table>
 
 ### replenish rate
@@ -691,6 +681,16 @@ Extra turbulence where jet shear is strong
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__shear_coupling__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__shear_coupling__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
+</tr></table>
+
+### Turbulence leash
+
+`turbulence.relax_tau` &mdash; range **50 to 2000**, default **350**, tier `restart`, log scale.
+
+Relaxation time (steps) pulling band color/height back toward the stamp
+
+<table><tr>
+<td align="center"><img src="img/sliders/turbulence__relax_tau__lo.jpg" width="320"><br><sub>low &middot; 50</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 350</sub></td><td align="center"><img src="img/sliders/turbulence__relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
 </tr></table>
 
 
@@ -1159,14 +1159,14 @@ Turbulence boost in the wake wedge downstream of hero storms
 
 ## Waves
 
-### festoon hero strength
+### Festoon count
 
-`waves.festoon_hero_strength` &mdash; range **0 to 3**, default **0**, tier `restart`.
+`waves.festoon_wavenumber` &mdash; range **4 to 24**, default **12**, tier `restart`.
 
-Second festoon train rooted on the band edge nearest the hero storm (plumes only, no hot spots): streamers weaving through the hero's wake lane, tails brushing the collar. 0 = off; a silent no-op without a hero, without a band edge within 0.15 rad of it, or when that edge IS the primary festoon's root (one edge is never double-trained)
+How many festoon plumes fit around the equator (higher = more, smaller plumes; the Rossby wavenumber of the train)
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/waves__festoon_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><img src="img/sliders/waves__festoon_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 24</sub></td>
 </tr></table>
 
 ### Festoon count (hero)
@@ -1179,6 +1179,16 @@ Wavenumber of the hero-adjacent festoon train (the default deliberately differs 
 <td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 11</sub></td><td align="center"><sub>high &middot; 24<br>(not rendered)</sub></td>
 </tr></table>
 
+### festoon hero strength
+
+`waves.festoon_hero_strength` &mdash; range **0 to 3**, default **0**, tier `restart`.
+
+Second festoon train rooted on the band edge nearest the hero storm (plumes only, no hot spots): streamers weaving through the hero's wake lane, tails brushing the collar. 0 = off; a silent no-op without a hero, without a band edge within 0.15 rad of it, or when that edge IS the primary festoon's root (one edge is never double-trained)
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
+</tr></table>
+
 ### festoon strength
 
 `waves.festoon_strength` &mdash; range **0 to 3**, default **0.8**, tier `restart`.
@@ -1187,16 +1197,6 @@ Festoon plumes + hot spots on the equatorial belt edge (0 = off)
 
 <table><tr>
 <td align="center"><img src="img/sliders/waves__festoon_strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2.6</sub></td><td align="center"><img src="img/sliders/waves__festoon_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
-</tr></table>
-
-### Festoon count
-
-`waves.festoon_wavenumber` &mdash; range **4 to 24**, default **12**, tier `restart`.
-
-How many festoon plumes fit around the equator (higher = more, smaller plumes; the Rossby wavenumber of the train)
-
-<table><tr>
-<td align="center"><img src="img/sliders/waves__festoon_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><img src="img/sliders/waves__festoon_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 24</sub></td>
 </tr></table>
 
 ### hotspot depth
@@ -1219,7 +1219,7 @@ Saturn-style ribbon wave on one mid-latitude jet (0 = off)
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/waves__ribbon_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
-### Ribbon count
+### Ribbon wave count
 
 `waves.ribbon_wavenumber` &mdash; range **4 to 30**, default **12**, tier `restart`.
 
@@ -1242,44 +1242,6 @@ Ring cyclones around the central one (cyclone_cluster style)
 <td align="center"><img src="img/sliders/poles__north__cyclone_count__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 8</sub></td><td align="center"><img src="img/sliders/poles__north__cyclone_count__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
 </tr></table>
 
-### field density
-
-`poles.north.field_density` &mdash; range **0 to 2**, default **0**, tier `restart`.
-
-Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's dense cyclone hierarchy; 0 = off)
-
-<table><tr>
-<td align="center"><img src="img/sliders/poles__north__field_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/poles__north__field_density__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
-</tr></table>
-
-### polygon sides
-
-`poles.north.polygon_sides` &mdash; range **3 to 9**, default **6**, tier `restart`.
-
-Polygon wavenumber of the polar jet (polygon_jet style)
-
-<table><tr>
-<td align="center"><img src="img/sliders/poles__north__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__north__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
-</tr></table>
-
-### strength
-
-`poles.north.strength` &mdash; range **0 to 3**, default **1**, tier `restart`.
-
-Polar feature vorticity amplitude (central cyclone / polygon jet)
-
-<table><tr>
-<td align="center"><img src="img/sliders/poles__north__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__north__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
-</tr></table>
-
-### style
-
-`poles.north.style` &mdash; dropdown, one of `cyclone_cluster` / `polygon_jet` / `plain_vortex` / `calm`, default **`cyclone_cluster`**, tier `restart`.
-
-Polar feature style
-
-_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
-
 ### cyclone count
 
 `poles.south.cyclone_count` &mdash; range **3 to 9**, default **6**, tier `restart`.
@@ -1288,6 +1250,16 @@ Ring cyclones around the central one (cyclone_cluster style)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__cyclone_count__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 5</sub></td><td align="center"><img src="img/sliders/poles__south__cyclone_count__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
+</tr></table>
+
+### field density
+
+`poles.north.field_density` &mdash; range **0 to 2**, default **0**, tier `restart`.
+
+Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's dense cyclone hierarchy; 0 = off)
+
+<table><tr>
+<td align="center"><img src="img/sliders/poles__north__field_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/poles__north__field_density__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
 ### field density
@@ -1302,12 +1274,32 @@ Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's de
 
 ### polygon sides
 
+`poles.north.polygon_sides` &mdash; range **3 to 9**, default **6**, tier `restart`.
+
+Polygon wavenumber of the polar jet (polygon_jet style)
+
+<table><tr>
+<td align="center"><img src="img/sliders/poles__north__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__north__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
+</tr></table>
+
+### polygon sides
+
 `poles.south.polygon_sides` &mdash; range **3 to 9**, default **6**, tier `restart`.
 
 Polygon wavenumber of the polar jet (polygon_jet style)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__south__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
+</tr></table>
+
+### strength
+
+`poles.north.strength` &mdash; range **0 to 3**, default **1**, tier `restart`.
+
+Polar feature vorticity amplitude (central cyclone / polygon jet)
+
+<table><tr>
+<td align="center"><img src="img/sliders/poles__north__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__north__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
 ### strength
@@ -1319,6 +1311,14 @@ Polar feature vorticity amplitude (central cyclone / polygon jet)
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__south__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
+
+### style
+
+`poles.north.style` &mdash; dropdown, one of `cyclone_cluster` / `polygon_jet` / `plain_vortex` / `calm`, default **`cyclone_cluster`**, tier `restart`.
+
+Polar feature style
+
+_Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 ### style
 

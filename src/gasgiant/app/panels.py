@@ -299,7 +299,10 @@ def _leaf_visible(name: str, info: FieldInfo, doc: dict[str, Any], state: PanelS
         return _advanced_visible(info, state)
     # BOTH caption forms, never just the shown one: the spaced field name is
     # the only thing that matches a search for "vort psi", and an authored
-    # label that REPLACED it would silently un-find every relabelled field.
+    # label that REPLACED it un-finds 21 of the 22 relabelled fields (only
+    # deformation_radius survives, because its own description happens to
+    # contain the phrase). For an unlabelled field the two are equal and the
+    # haystack simply repeats the term -- harmless, not a bug.
     haystack = (
         f"{name} {derived_label(name)} {field_label(name, info)} {info.description or ''}"
     ).lower()
@@ -459,6 +462,24 @@ def _draw_emission_aurora_note(emission_doc: dict[str, Any]) -> None:
     if emission_doc.get("aurora_strength", 0.0) <= 0.0:
         return
     imgui.text_colored(imgui.ImVec4(*_MODIFIED_COLOR), _AURORA_PREVIEW_NOTE)
+
+
+def _leaf_tip(name: str, info: FieldInfo) -> str:
+    """The tooltip text for a leaf: its description, prefixed with the field
+    NAME when an authored caption has displaced it.
+
+    The caption used to be the only place the name appeared in the GUI, and
+    other text still addresses fields by name -- eight descriptions cross-
+    reference a now-relabelled field ("prefer vort_psi_drag"), and validator
+    errors surface through toasts naming the field ("sor_omega=2.0 must be
+    strictly in (1.0, 2.0)"). Without this, dragging "Solver convergence
+    speed" to its max reports an error about a string that appears nowhere on
+    screen.
+    """
+    desc = info.description or ""
+    if not FieldMeta.of(info).label:
+        return desc
+    return f"{name}\n\n{desc}" if desc else name
 
 
 def _draw_help_marker(text: str) -> None:
@@ -790,7 +811,7 @@ def _draw_leaf(
     if kind in _SINGLE_ITEM_KINDS:
         committed = imgui.is_item_deactivated_after_edit()
 
-    item_tooltip(info.description)
+    item_tooltip(_leaf_tip(name, info))
 
     # Right-click affordances, tied to the leaf's last-drawn item.
     #
@@ -1147,6 +1168,10 @@ def _draw_cast_list(
             state.selected_cast = i
         cur = kinds.index(row["kind"]) if row["kind"] in kinds else 0
         c, idx = imgui.combo("kind", cur, kinds)
+        # `kind` is drawn bespoke here and skipped by _draw_flat_model_fields
+        # below, so without this its description is the one cast-lever
+        # description the GUI never shows anywhere.
+        item_tooltip(_leaf_tip("kind", StormOverride.model_fields["kind"]))
         if c:
             row["kind"] = kinds[idx]
             changed = True

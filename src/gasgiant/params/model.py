@@ -66,12 +66,16 @@ def pfield(
     the rest of the tree uses for its nested models).
 
     ``label`` overrides the widget caption an artist reads while SCANNING the
-    panel. Without it the caption is derived as ``name.replace("_", " ")``, so
-    a field named ``vort_psi_drag`` reads as "vort psi drag" -- engine
-    vocabulary, and the tooltip that explains it only appears on hover. Set it
-    for jargon-named levers; leave it empty everywhere the derived form is
-    already plain English. The field NAME is unaffected (presets, the schema
-    and every cross-reference keep using it), and both forms stay searchable.
+    panel. Without it the caption is derived as ``name.replace("_", " ")`` --
+    engine vocabulary for a jargon-named lever (``sor_omega`` reads as "sor
+    omega"), and the tooltip that explains it only appears on hover. Set it for
+    those; leave it empty wherever the derived form is already plain English.
+
+    The field NAME is unaffected -- presets, validator messages and every
+    cross-reference between descriptions keep using it -- and BOTH caption
+    forms stay searchable, so a relabelled field is still found by its old
+    name. Because the caption was the only place the name appeared in the GUI,
+    ``panels._leaf_tip`` puts it back into the tooltip of any relabelled field.
 
     ``fx=True`` marks a DetailParams lever that lives in the DETAIL_FX kernel
     variant: render/detail.py derives its variant-selection predicate AND its
@@ -81,7 +85,21 @@ def pfield(
     for the SPREAD (uniform-detail-coverage) variant. Both are stored only when
     True, like rand -- they never affect the randomize draw order."""
     extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
-    if label:
+    if label != "":
+        # Validated HERE, at import, rather than only in a test: a caption is
+        # display-only, so a bad one produces a plausible-looking widget and a
+        # plausible-looking docs entry with every gate green (label=5 rendered
+        # a slider captioned "5"). '#' is imgui's id separator and silently
+        # hides everything after it; '|' and newlines break the generated
+        # markdown. A test alone would also be skippable in a GUI-extra-free
+        # environment, which is exactly where nobody would notice.
+        if not isinstance(label, str) or not label.strip() or label.strip() != label:
+            raise ValueError(f"pfield(label={label!r}) must be a stripped, non-empty str")
+        if any(c in label for c in "#|\n"):
+            raise ValueError(
+                f"pfield(label={label!r}): '#' is imgui id syntax, '|' and newlines "
+                "break the generated markdown"
+            )
         extra["label"] = label
     if rand is not None:
         extra["rand"] = list(rand)
@@ -1263,7 +1281,7 @@ class WavesParams(_Params):
     )
     ribbon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
-        label="Ribbon count",
+        label="Ribbon wave count",
         description="Wavenumber of the Saturn-style ribbon wave",
     )
     festoon_hero_strength: float = pfield(
@@ -1538,14 +1556,14 @@ class SolverParams(_Params):
                     "swirls; higher is slower with diminishing returns "
                     "(fixed red-black SOR iterations; vorticity mode)")
     sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, adv=True, ui="Solver",
-        label="Solver convergence",
+        label="Solver convergence speed",
         description="Solver convergence speed — leave at 1.7: it changes solve "
                     "time, not the picture, unless set so low the swirls lag "
                     "(SOR over-relaxation factor, must be in (1,2) exclusive; "
                     "vorticity mode)")
     deformation_radius: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, adv=True, ui="Solver",
-        label="Storm reach",
+        label="Storm reach (0 = unlimited)",
         description="Storm locality: how far each vortex's swirl reaches. "
                     "Smaller = more local — a dominant hero stirs its own band "
                     "without destabilizing the rest of the map; 0 = off "
@@ -1583,7 +1601,7 @@ class SolverParams(_Params):
                     "jet shear folds it into filaments (the emergent-turbulence "
                     "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
     vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, adv=True, ui="Solver",
-        label="Churn size",
+        label="Churn scale",
         description="Size of the injected churn: higher = finer speckle that "
                     "the shear folds into thin filaments; lower = big blobs "
                     "(injection frequency as a multiple of bands.detail_freq; "
@@ -1604,7 +1622,7 @@ class SolverParams(_Params):
                     "inverse-cascade pileup at large scales; 0 = off; vorticity "
                     "mode)")
     vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
-        label="Eddy brake (flat)",
+        label="Eddy brake (all scales, jets spared)",
         description="Linear drag fraction on the EDDY vorticity q - <q>_x (the "
                     "deviation from the per-latitude zonal mean) per step. Leaves "
                     "the zonal-mean jets intact, but is FLAT in wavenumber, so it "
@@ -2257,7 +2275,11 @@ def iter_pfields(
 
 
 def derived_label(name: str) -> str:
-    """The widget caption for a field with no authored ``label``."""
+    """The pre-label caption: shown when no ``label`` is authored, and ALWAYS
+    kept in the search haystack so a relabelled field stays findable by the
+    name it used to display. Do not assume the unconditional call in
+    ``panels._leaf_visible`` is redundant -- dropping it un-finds 21 of the 22
+    relabelled fields."""
     return name.replace("_", " ")
 
 
@@ -2266,10 +2288,11 @@ def field_label(name: str, info: Any) -> str:
     otherwise the derived ``name.replace("_", " ")``.
 
     Lives in the PARAMS layer, not in ``app.panels``, because the doc generator
-    needs it too and cannot import panels -- ``scripts/render_slider_examples.py``
-    deliberately inlines mirrors of panels' pure helpers, since panels imports
-    imgui_bundle at module load and the headless/CLI env has no GUI extra. A
-    helper in panels would have become a fourth copy of the derivation rather
-    than removing the existing three.
+    needs it too and deliberately does not import panels --
+    ``scripts/render_slider_examples.py`` inlines mirrors of panels' pure
+    helpers, since panels imports imgui_bundle at module load and the
+    headless/CLI env has no GUI extra. The derivation had NINE call sites:
+    three in panels and six in the generator. A helper in panels could only
+    ever have removed the three, leaving the doc free to drift from the app.
     """
     return FieldMeta.of(info).label or derived_label(name)

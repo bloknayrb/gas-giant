@@ -115,8 +115,14 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
 - **Params**: every tunable is `pfield()` (`src/gasgiant/params/model.py`) carrying
   `json_schema_extra` metadata — `tier` (POST = re-derive maps; VELOCITY = rebuild ψ, run
   continues; RESTART = dev run restarts), `rand` (seeded-randomize range), `log`, `ui`
-  (panel group; GUI panels are auto-generated from this). Metadata is plain JSON — no
-  callables, no GUI imports. Unknown preset keys are hard errors (strict models).
+  (panel group; GUI panels are auto-generated from this), `label` (artist-facing widget
+  caption; without it the caption is `name.replace("_", " ")`, so a jargon-named lever
+  reads as engine vocabulary on the one string that is always visible — set it for those,
+  and the field NAME is unaffected). Metadata is plain JSON — no callables, no GUI imports.
+  Unknown preset keys are hard errors (strict models). Captions resolve through
+  `field_label()` in the params layer, NOT in `app.panels` — the doc generator consumes it
+  too and deliberately does not import panels; changing a caption moves a `###` heading in
+  `docs/sliders.md`, so regenerate it in the same commit.
 - **Shaders**: loaded via `GpuContext.compute(package, name, defines)` (`src/gasgiant/gl/context.py`);
   `#include "file.glsl"` expands with error line-mapping; cross-package form:
   `#include "gasgiant.sim.kernels:noise3d.glsl"`. `defines` are injected after `#version`
@@ -168,7 +174,8 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
 
 ## Lever-author checklist (adding a new opt-in visual lever)
 
-1. `pfield()` in the params model (tier + rand + ui metadata; default = no-op).
+1. `pfield()` in the params model (tier + rand + ui metadata; default = no-op; add
+   `label=` if the field name is engine vocabulary).
 2. Shader uniform + preprocessor block (variant define, not a runtime branch).
 3. Variant-selection predicate: for detail-FX levers, tag the pfield `fx=True` — the
    DETAIL_FX predicate, the build-time uniform tripwire, AND the cross-ref test all derive
