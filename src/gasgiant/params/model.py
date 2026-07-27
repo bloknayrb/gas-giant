@@ -53,6 +53,7 @@ def pfield(
     adv: bool = False,
     fx: bool = False,
     spread: bool = False,
+    label: str = "",
     description: str = "",
     factory: Any = None,
 ) -> Any:
@@ -64,6 +65,14 @@ def pfield(
     no-shared-singleton form (and matches the ``Field(default_factory=...)`` idiom
     the rest of the tree uses for its nested models).
 
+    ``label`` overrides the widget caption an artist reads while SCANNING the
+    panel. Without it the caption is derived as ``name.replace("_", " ")``, so
+    a field named ``vort_psi_drag`` reads as "vort psi drag" -- engine
+    vocabulary, and the tooltip that explains it only appears on hover. Set it
+    for jargon-named levers; leave it empty everywhere the derived form is
+    already plain English. The field NAME is unaffected (presets, the schema
+    and every cross-reference keep using it), and both forms stay searchable.
+
     ``fx=True`` marks a DetailParams lever that lives in the DETAIL_FX kernel
     variant: render/detail.py derives its variant-selection predicate AND its
     build-time uniform tripwire (u_<field-name> must exist in the compiled fx
@@ -72,6 +81,8 @@ def pfield(
     for the SPREAD (uniform-detail-coverage) variant. Both are stored only when
     True, like rand -- they never affect the randomize draw order."""
     extra: dict[str, Any] = {"tier": tier.value, "ui": ui, "log": log, "adv": adv}
+    if label:
+        extra["label"] = label
     if rand is not None:
         extra["rand"] = list(rand)
     if fx:
@@ -234,6 +245,7 @@ class BandsParams(_Params):
     )
     warp_freq: float = pfield(
         3.0, tier=Tier.RESTART, lo=0.5, hi=16.0, rand=(1.5, 6.0), log=True, adv=True, ui="Bands",
+        label="Band meander scale",
         description="Band-boundary meander spatial frequency",
     )
     detail_amount: float = pfield(
@@ -301,6 +313,7 @@ class BandsParams(_Params):
     )
     detail_freq: float = pfield(
         12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, adv=True, ui="Bands",
+        label="Band detail scale",
         description="Small-scale noise spatial frequency",
     )
     template: BandTemplate | None = pfield(
@@ -334,6 +347,7 @@ class SimParams(_Params):
     )
     dt_scale: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Simulation",
+        label="Time step",
         description="Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)",
     )
     resolution_invariant: bool = pfield(
@@ -474,6 +488,7 @@ class TurbulenceParams(_Params):
     )
     relax_tau: float = pfield(
         350.0, tier=Tier.RESTART, lo=50.0, hi=2000.0, log=True, adv=True, ui="Turbulence",
+        label="Turbulence leash",
         description="Relaxation time (steps) pulling band color/height back toward the stamp",
     )
     replenish_rate: float = pfield(
@@ -484,10 +499,12 @@ class TurbulenceParams(_Params):
     )
     kh_amplitude: float = pfield(
         0.35, tier=Tier.VELOCITY, lo=0.0, hi=2.0, rand=(0.1, 0.8), adv=True, ui="Turbulence",
+        label="Billow strength",
         description="Kelvin-Helmholtz wave amplitude along high-shear band boundaries",
     )
     kh_wavenumber: int = pfield(
         24, tier=Tier.VELOCITY, lo=4, hi=80, rand=(14, 40), adv=True, ui="Turbulence",
+        label="Billow count",
         description="KH billow longitudinal wavenumber",
     )
     belt_replenish: float = pfield(
@@ -1231,6 +1248,7 @@ class WavesParams(_Params):
     )
     festoon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=24, rand=(8, 16), ui="Waves",
+        label="Festoon count",
         description="How many festoon plumes fit around the equator "
                     "(higher = more, smaller plumes; the Rossby wavenumber of "
                     "the train)",
@@ -1245,6 +1263,7 @@ class WavesParams(_Params):
     )
     ribbon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
+        label="Ribbon count",
         description="Wavenumber of the Saturn-style ribbon wave",
     )
     festoon_hero_strength: float = pfield(
@@ -1259,6 +1278,7 @@ class WavesParams(_Params):
     )
     festoon_hero_wavenumber: int = pfield(
         11, tier=Tier.RESTART, lo=4, hi=24, adv=True, ui="Waves",
+        label="Festoon count (hero)",
         description="Wavenumber of the hero-adjacent festoon train (the "
                     "default deliberately differs from festoon_wavenumber — "
                     "twin wavenumbers read as a mechanical comb)",
@@ -1399,6 +1419,7 @@ class DetailParams(_Params):
     )
     cirrus_fiber_freq: float = pfield(
         6.0, tier=Tier.POST, lo=2.0, hi=24.0, log=True, ui="Detail",
+        label="Cirrus fiber scale",
         description="Strand density of the cirrus fibers: strands across "
                     "each bright-cloud streak half-width. Amplitude is "
                     "attenuated when strands approach the output pixel size "
@@ -1512,16 +1533,19 @@ class SolverParams(_Params):
                     "filaments, slower, and required by the solid-core storm "
                     "levers (prognostic vorticity, v1.6+)")
     poisson_iters: int = pfield(48, tier=Tier.RESTART, lo=8, hi=512, adv=True, ui="Solver",
+        label="Solver accuracy",
         description="Solver accuracy per step: too low leaves smeared, laggy "
                     "swirls; higher is slower with diminishing returns "
                     "(fixed red-black SOR iterations; vorticity mode)")
     sor_omega: float = pfield(1.7, tier=Tier.RESTART, lo=1.0, hi=2.0, adv=True, ui="Solver",
+        label="Solver convergence",
         description="Solver convergence speed — leave at 1.7: it changes solve "
                     "time, not the picture, unless set so low the swirls lag "
                     "(SOR over-relaxation factor, must be in (1,2) exclusive; "
                     "vorticity mode)")
     deformation_radius: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, adv=True, ui="Solver",
+        label="Storm reach",
         description="Storm locality: how far each vortex's swirl reaches. "
                     "Smaller = more local — a dominant hero stirs its own band "
                     "without destabilizing the rest of the map; 0 = off "
@@ -1538,34 +1562,41 @@ class SolverParams(_Params):
                     "localized -- expect to re-tune. No rand.)")
     vort_relax_tau: float = pfield(
         120.0, tier=Tier.RESTART, lo=20.0, hi=2000.0, log=True, adv=True, ui="Solver",
+        label="Flow leash",
         description="How tightly the flow is leashed to the painted jets and "
                     "storms: low = tidy and band-locked, high = free-running "
                     "turbulence that can wander off the template (nudging "
                     "timescale in steps; vorticity mode)")
     vort_hypervisc: float = pfield(1.0, tier=Tier.RESTART, lo=0.0, hi=10.0, adv=True, ui="Solver",
+        label="Fine smoothing",
         description="Fine-scale smoothing: cleans up pixel-level crackle; too "
                     "high blurs away the thinnest filaments (scale-selective "
                     "biharmonic hyperviscosity; vorticity mode)")
     coriolis_f0: float = pfield(2.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
+        label="Rotation strength",
         description="Planet-rotation strength: higher = more, narrower bands "
                     "and flatter storms; lower = fewer, fatter bands (f0 in "
                     "f = f0*sin(lat), sets the Rhines/band scale; vorticity mode)")
     vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, adv=True, ui="Solver",
+        label="Churn strength",
         description="Broadband eddy-vorticity injection amplitude per step; the "
                     "jet shear folds it into filaments (the emergent-turbulence "
                     "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
     vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, adv=True, ui="Solver",
+        label="Churn size",
         description="Size of the injected churn: higher = finer speckle that "
                     "the shear folds into thin filaments; lower = big blobs "
                     "(injection frequency as a multiple of bands.detail_freq; "
                     "vorticity mode)")
     vort_inject_mask: InjectMask = pfield(
         InjectMask.GLOBAL, tier=Tier.RESTART, adv=True, ui="Solver",
+        label="Churn placement",
         description="Spatial localization of eddy injection: global = churn "
                     "everywhere; belts = cyclonic dark bands only (anticyclonic "
                     "zones stay smooth); shear = jet-shear flanks only (filaments "
                     "where shear is high). Vorticity mode.")
     vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
+        label="Swirl brake (all scales)",
         description="Global brake on swirling: tames runaway planet-scale swirl "
                     "but also weakens every storm — prefer vort_psi_drag, which "
                     "targets only the oversized swirl (linear Rayleigh drag "
@@ -1573,6 +1604,7 @@ class SolverParams(_Params):
                     "inverse-cascade pileup at large scales; 0 = off; vorticity "
                     "mode)")
     vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
+        label="Eddy brake (flat)",
         description="Linear drag fraction on the EDDY vorticity q - <q>_x (the "
                     "deviation from the per-latitude zonal mean) per step. Leaves "
                     "the zonal-mean jets intact, but is FLAT in wavenumber, so it "
@@ -1581,6 +1613,7 @@ class SolverParams(_Params):
                     "vort_psi_drag (scale-selective). Equirect only. 0 = off "
                     "(byte-identical). Vorticity mode.")
     vort_psi_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
+        label="Swirl brake (large only)",
         description="Removes oversized planet-scale swirl while PRESERVING "
                     "festoons, band-edge waves, and mid-size vortices — the "
                     "scale-selective brake to reach for before vort_drag or "
@@ -2139,6 +2172,7 @@ class FieldMeta:
     ui: str = ""
     log: bool = False
     adv: bool = False
+    label: str = ""
     rand: list[Any] | None = None
 
     @classmethod
@@ -2149,6 +2183,7 @@ class FieldMeta:
             ui=extra.get("ui", ""),
             log=bool(extra.get("log", False)),
             adv=bool(extra.get("adv", False)),
+            label=str(extra.get("label", "")),
             rand=extra.get("rand"),
         )
 
@@ -2219,3 +2254,22 @@ def iter_pfields(
         extra = info.json_schema_extra
         if isinstance(extra, dict) and "tier" in extra:
             yield PfieldLeaf(path=path, name=name, model=model, info=info)
+
+
+def derived_label(name: str) -> str:
+    """The widget caption for a field with no authored ``label``."""
+    return name.replace("_", " ")
+
+
+def field_label(name: str, info: Any) -> str:
+    """The caption to show for a field: its authored ``label`` if it has one,
+    otherwise the derived ``name.replace("_", " ")``.
+
+    Lives in the PARAMS layer, not in ``app.panels``, because the doc generator
+    needs it too and cannot import panels -- ``scripts/render_slider_examples.py``
+    deliberately inlines mirrors of panels' pure helpers, since panels imports
+    imgui_bundle at module load and the headless/CLI env has no GUI extra. A
+    helper in panels would have become a fourth copy of the derivation rather
+    than removing the existing three.
+    """
+    return FieldMeta.of(info).label or derived_label(name)

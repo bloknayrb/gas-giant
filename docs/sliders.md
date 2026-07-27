@@ -39,7 +39,7 @@ _High example capped below the slider maximum so it renders in reasonable time; 
 <td align="center"><img src="img/sliders/sim__dev_steps__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 150</sub></td><td align="center"><img src="img/sliders/sim__dev_steps__hi.jpg" width="320"><br><sub>high &middot; 1000</sub></td>
 </tr></table>
 
-### dt scale
+### Time step
 
 `sim.dt_scale` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
@@ -122,7 +122,7 @@ Internal pacing of the baroclinic storm generator — leave at default; only aff
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
-### coriolis f0
+### Rotation strength
 
 `solver.coriolis_f0` &mdash; range **0 to 20**, default **2**, tier `restart`.
 
@@ -134,7 +134,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 <td align="center"><img src="img/sliders/solver__coriolis_f0__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><img src="img/sliders/solver__coriolis_f0__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
 </tr></table>
 
-### deformation radius
+### Storm reach
 
 `solver.deformation_radius` &mdash; range **0 to 3.14**, default **0**, tier `restart`.
 
@@ -144,7 +144,7 @@ Storm locality: how far each vortex's swirl reaches. Smaller = more local — a 
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__deformation_radius__hi.jpg" width="320"><br><sub>high &middot; 3.14</sub></td>
 </tr></table>
 
-### poisson iters
+### Solver accuracy
 
 `solver.poisson_iters` &mdash; range **8 to 512**, default **48**, tier `restart`.
 
@@ -152,7 +152,7 @@ Solver accuracy per step: too low leaves smeared, laggy swirls; higher is slower
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
-### sor omega
+### Solver convergence
 
 `solver.sor_omega` &mdash; range **1 to 2**, default **1.7**, tier `restart`.
 
@@ -168,7 +168,7 @@ How clouds move: kinematic = fast and painterly, bands stay where they are paint
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
-### vort drag
+### Swirl brake (all scales)
 
 `solver.vort_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
 
@@ -180,7 +180,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 <td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
 </tr></table>
 
-### vort eddy drag
+### Eddy brake (flat)
 
 `solver.vort_eddy_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
 
@@ -190,7 +190,7 @@ Linear drag fraction on the EDDY vorticity q - <q>_x (the deviation from the per
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_eddy_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
 </tr></table>
 
-### vort hypervisc
+### Fine smoothing
 
 `solver.vort_hypervisc` &mdash; range **0 to 10**, default **1**, tier `restart`.
 
@@ -202,7 +202,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 <td align="center"><img src="img/sliders/solver__vort_hypervisc__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/solver__vort_hypervisc__hi.jpg" width="320"><br><sub>high &middot; 10</sub></td>
 </tr></table>
 
-### vort inject
+### Churn strength
 
 `solver.vort_inject` &mdash; range **0 to 5**, default **0**, tier `restart`.
 
@@ -214,7 +214,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 <td align="center"><img src="img/sliders/solver__vort_inject__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/solver__vort_inject__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
 </tr></table>
 
-### vort inject mask
+### Churn placement
 
 `solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
 
@@ -222,7 +222,7 @@ Spatial localization of eddy injection: global = churn everywhere; belts = cyclo
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
-### vort inject scale
+### Churn size
 
 `solver.vort_inject_scale` &mdash; range **0.1 to 4**, default **0.5**, tier `restart`.
 
@@ -234,7 +234,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 <td align="center"><img src="img/sliders/solver__vort_inject_scale__lo.jpg" width="320"><br><sub>low &middot; 0.1</sub></td><td align="center"><img src="img/sliders/_baseline_vorticity.jpg" width="320"><br><sub>preset &middot; 2.5</sub></td><td align="center"><img src="img/sliders/solver__vort_inject_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
-### vort psi drag
+### Swirl brake (large only)
 
 `solver.vort_psi_drag` &mdash; range **0 to 20**, default **0**, tier `restart`.
 
@@ -244,7 +244,7 @@ Removes oversized planet-scale swirl while PRESERVING festoons, band-edge waves,
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_psi_drag__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
 </tr></table>
 
-### vort relax tau
+### Flow leash
 
 `solver.vort_relax_tau` &mdash; range **20 to 2000**, default **120**, tier `restart`, log scale.
 
@@ -299,7 +299,7 @@ Small-scale color-index noise amplitude
 <td align="center"><img src="img/sliders/bands__detail_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/bands__detail_amount__hi.jpg" width="320"><br><sub>high &middot; 0.5</sub></td>
 </tr></table>
 
-### detail freq
+### Band detail scale
 
 `bands.detail_freq` &mdash; range **2 to 64**, default **12**, tier `restart`, log scale.
 
@@ -397,7 +397,7 @@ Band-boundary meander amplitude, radians of latitude (1 rad = 57.3 deg; default 
 <td align="center"><img src="img/sliders/bands__warp_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><img src="img/sliders/bands__warp_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
 </tr></table>
 
-### warp freq
+### Band meander scale
 
 `bands.warp_freq` &mdash; range **0.5 to 16**, default **3**, tier `restart`, log scale.
 
@@ -633,7 +633,7 @@ Global turbulence (curl-noise) amplitude
 <td align="center"><img src="img/sliders/turbulence__intensity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__intensity__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
-### kh amplitude
+### Billow strength
 
 `turbulence.kh_amplitude` &mdash; range **0 to 2**, default **0.35**, tier `velocity`.
 
@@ -643,7 +643,7 @@ Kelvin-Helmholtz wave amplitude along high-shear band boundaries
 <td align="center"><img src="img/sliders/turbulence__kh_amplitude__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/turbulence__kh_amplitude__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
-### kh wavenumber
+### Billow count
 
 `turbulence.kh_wavenumber` &mdash; range **4 to 80**, default **24**, tier `velocity`.
 
@@ -653,7 +653,7 @@ KH billow longitudinal wavenumber
 <td align="center"><img src="img/sliders/turbulence__kh_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 24</sub></td><td align="center"><img src="img/sliders/turbulence__kh_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 80</sub></td>
 </tr></table>
 
-### relax tau
+### Turbulence leash
 
 `turbulence.relax_tau` &mdash; range **50 to 2000**, default **350**, tier `restart`, log scale.
 
@@ -1169,7 +1169,7 @@ Second festoon train rooted on the band edge nearest the hero storm (plumes only
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 3<br>(not rendered)</sub></td>
 </tr></table>
 
-### festoon hero wavenumber
+### Festoon count (hero)
 
 `waves.festoon_hero_wavenumber` &mdash; range **4 to 24**, default **11**, tier `restart`.
 
@@ -1189,7 +1189,7 @@ Festoon plumes + hot spots on the equatorial belt edge (0 = off)
 <td align="center"><img src="img/sliders/waves__festoon_strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2.6</sub></td><td align="center"><img src="img/sliders/waves__festoon_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
-### festoon wavenumber
+### Festoon count
 
 `waves.festoon_wavenumber` &mdash; range **4 to 24**, default **12**, tier `restart`.
 
@@ -1219,7 +1219,7 @@ Saturn-style ribbon wave on one mid-latitude jet (0 = off)
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/waves__ribbon_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
 </tr></table>
 
-### ribbon wavenumber
+### Ribbon count
 
 `waves.ribbon_wavenumber` &mdash; range **4 to 30**, default **12**, tier `restart`.
 
@@ -1494,7 +1494,7 @@ Convective cell (closed-cell/popcorn) texture in quiet zones
 <td align="center"><img src="img/sliders/detail__cellular_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.9</sub></td><td align="center"><img src="img/sliders/detail__cellular_amount__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
 </tr></table>
 
-### cirrus fiber freq
+### Cirrus fiber scale
 
 `detail.cirrus_fiber_freq` &mdash; range **2 to 24**, default **6**, tier `post`, log scale.
 

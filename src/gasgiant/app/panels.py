@@ -36,6 +36,8 @@ from gasgiant.params.model import (
     CAST_LEVER_FIELDS,
     FieldMeta,
     PlanetParams,
+    derived_label,
+    field_label,
     hero_latitude_cap,
 )
 
@@ -295,8 +297,12 @@ def _leaf_visible(name: str, info: FieldInfo, doc: dict[str, Any], state: PanelS
         if name == "cast" and doc.get(name):
             return True
         return _advanced_visible(info, state)
-    label = name.replace("_", " ")
-    haystack = f"{name} {label} {info.description or ''}".lower()
+    # BOTH caption forms, never just the shown one: the spaced field name is
+    # the only thing that matches a search for "vort psi", and an authored
+    # label that REPLACED it would silently un-find every relabelled field.
+    haystack = (
+        f"{name} {derived_label(name)} {field_label(name, info)} {info.description or ''}"
+    ).lower()
     return query in haystack
 
 
@@ -702,7 +708,7 @@ def _draw_leaf(
         return False, False
 
     value = doc[name]
-    label = name.replace("_", " ")
+    label = field_label(name, info)
     meta = FieldMeta.of(info)
     lo, hi = _bounds(info)
     changed = False
@@ -1035,7 +1041,7 @@ def _draw_cast_field(
     to 0,0), and lock-for-randomize is meaningless (cast carries no ``rand``).
     The pfield description tooltip is kept. Returns ``(changed, committed)``."""
     value = row[name]
-    label = name.replace("_", " ")
+    label = field_label(name, info)
     meta = FieldMeta.of(info)
     lo, hi = _bounds(info)
     ann = info.annotation

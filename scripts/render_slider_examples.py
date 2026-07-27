@@ -42,7 +42,7 @@ import annotated_types
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from gasgiant.params.model import PlanetParams, Tier
+from gasgiant.params.model import PlanetParams, Tier, field_label
 from gasgiant.params.presets import load_factory_preset
 
 
@@ -221,7 +221,7 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
             # StrEnum dropdowns (B3-6: e.g. solver.vort_inject_mask) get a
             # text-only entry -- values + default + description, no images.
             out.append(Slider(
-                path=path, group=group or "Global", label=name.replace("_", " "),
+                path=path, group=group or "Global", label=field_label(name, info),
                 lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
                 tier=str(extra.get("tier", "")),
                 description=info.description or "",
@@ -237,7 +237,7 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
             if lo is None or hi is None:
                 continue
             out.append(Slider(
-                path=path, group=group or "Global", label=name.replace("_", " "),
+                path=path, group=group or "Global", label=field_label(name, info),
                 lo=float(lo), hi=float(hi), default=0.0,
                 is_int=(kind == "optional_int"), log=bool(extra.get("log")),
                 tier=str(extra.get("tier", "")),
@@ -249,7 +249,7 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
             # Optional string path (mask.file): text-entry + Browse button in the
             # GUI. Text-only entry, no images (a path can't anchor a lo/hi row).
             out.append(Slider(
-                path=path, group=group or "Global", label=name.replace("_", " "),
+                path=path, group=group or "Global", label=field_label(name, info),
                 lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
                 tier=str(extra.get("tier", "")),
                 description=info.description or "",
@@ -260,7 +260,7 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
         if kind == "model_list":
             # List-of-model editor (storms.cast): text-only entry, no images.
             out.append(Slider(
-                path=path, group=group or "Global", label=name.replace("_", " "),
+                path=path, group=group or "Global", label=field_label(name, info),
                 lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
                 tier=str(extra.get("tier", "")),
                 description=info.description or "",
@@ -271,7 +271,7 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
         if kind == "bool":
             # Boolean toggle (GUI checkbox): text-only entry, no images.
             out.append(Slider(
-                path=path, group=group or "Global", label=name.replace("_", " "),
+                path=path, group=group or "Global", label=field_label(name, info),
                 lo=0.0, hi=0.0, default=0.0, is_int=False, log=False,
                 tier=str(extra.get("tier", "")),
                 description=info.description or "",
@@ -289,7 +289,7 @@ def _walk(model: type[BaseModel], doc: dict[str, Any], prefix: str,
         out.append(Slider(
             path=path,
             group=group or "Global",
-            label=name.replace("_", " "),
+            label=field_label(name, info),
             lo=float(lo), hi=float(hi), default=float(value),
             is_int=(kind == "int"),
             log=bool(extra.get("log")),
