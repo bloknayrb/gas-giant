@@ -322,6 +322,16 @@ def test_no_panel_tooltip_bypasses_the_name_prefix():
 
     panels = _panels()
     source = pathlib.Path(panels.__file__).read_text(encoding="utf-8")
+    def mentions_description(node: ast.AST) -> bool:
+        # Any `.description` ANYWHERE in the argument, not just a bare
+        # `info.description`. Matching only the bare attribute let
+        # `info.description or ""` through -- verified, in an isolated worktree,
+        # to leave the whole tier green.
+        return any(
+            isinstance(sub, ast.Attribute) and sub.attr == "description"
+            for sub in ast.walk(node)
+        )
+
     offenders = [
         f"line {node.lineno}"
         for node in ast.walk(ast.parse(source))
@@ -329,10 +339,124 @@ def test_no_panel_tooltip_bypasses_the_name_prefix():
         and isinstance(node.func, ast.Name)
         and node.func.id == "item_tooltip"
         and node.args
-        and isinstance(node.args[0], ast.Attribute)
-        and node.args[0].attr == "description"
+        and mentions_description(node.args[0])
     ]
     assert not offenders, (
         f"panels.py passes a raw description to item_tooltip at {offenders}; "
         "use _leaf_tip(name, info, meta) so a relabelled field still names itself"
     )
+
+
+# -- the LATENT half of the caption contract ----------------------------------
+#
+# No storms.cast.* leaf and neither _MODAL_ONLY_PATHS member carries an authored
+# caption today, so on those three draw paths _leaf_tip degenerates to the bare
+# description and meta.caption(name) equals derived_label(name). Every wiring
+# mistake there is therefore behaviourally INVISIBLE -- measured in an isolated
+# worktree, reverting all three sites at once leaves the full 1122-test tier
+# green. The AST guard above was the first attempt at covering that, and it is
+# too narrow: it rejects a bare `info.description` and sails past
+# `info.description or ""`.
+#
+# So these tests INJECT a caption, which is the only way to make the paths
+# distinguishable, and then drive them for real.
+
+
+@pytest.fixture
+def imgui_frame():
+    imgui = pytest.importorskip("imgui_bundle.imgui")
+    ctx = imgui.create_context()
+    io = imgui.get_io()
+    io.display_size = imgui.ImVec2(900.0, 700.0)
+    io.delta_time = 1.0 / 60.0
+    io.set_ini_filename(None)
+    io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+    yield imgui
+    imgui.destroy_context(ctx)
+
+
+def _labelled_info(model, field: str, caption: str, monkeypatch):
+    """Give ``model.field`` an authored caption for the duration of one test."""
+    info = model.model_fields[field]
+    extra = dict(info.json_schema_extra or {})
+    extra["label"] = caption
+    monkeypatch.setattr(info, "json_schema_extra", extra, raising=False)
+    return info
+
+
+def _spy_tooltips(panels, monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(panels, "item_tooltip", lambda text, **k: seen.append(text or ""))
+    return seen
+
+
+def _spy_captions(imgui, monkeypatch):
+    seen: list[str] = []
+    for widget in ("slider_float", "slider_int", "combo", "checkbox",
+                   "input_int", "input_float", "drag_float", "text_disabled"):
+        real = getattr(imgui, widget, None)
+        if real is None:
+            continue
+
+        def wrapper(label, *a, _real=real, **k):
+            seen.append(label)
+            return _real(label, *a, **k)
+
+        monkeypatch.setattr(imgui, widget, wrapper)
+    return seen
+
+
+def test_a_labelled_cast_lever_shows_its_caption_and_its_name(imgui_frame, monkeypatch):
+    """``_draw_cast_field`` must route its caption through the authored label
+    and its tooltip through ``_leaf_tip``.
+
+    Kills two mutants the rest of the suite cannot see: swapping
+    ``meta.caption(name)`` for ``derived_label(name)``, and swapping
+    ``_leaf_tip(name, info, meta)`` for a raw description.
+    """
+    panels = _panels()
+    imgui = imgui_frame
+    info = _labelled_info(StormOverride, "radius", "Storm size", monkeypatch)
+    tips = _spy_tooltips(panels, monkeypatch)
+    captions = _spy_captions(imgui, monkeypatch)
+
+    imgui.new_frame()
+    imgui.begin("host", None, 0)
+    panels._draw_cast_field("radius", info, {"radius": 0.03}, panels.PanelState())
+    imgui.end()
+    imgui.end_frame()
+
+    assert any("Storm size" in c for c in captions), (
+        f"cast row drew {captions!r}, not the authored caption"
+    )
+    expected = panels._leaf_tip("radius", info, FieldMeta.of(info))
+    assert expected.startswith("radius\n\n"), "sanity: _leaf_tip prefixes the name"
+    assert expected in tips, (
+        f"cast row tooltip {tips!r} is not _leaf_tip's output, so a validator error "
+        "about 'radius' would reference a string nowhere on screen"
+    )
+
+
+def test_a_labelled_modal_only_field_still_names_itself(imgui_frame, monkeypatch):
+    """The ``_MODAL_ONLY_PATHS`` branch of ``_draw_leaf`` returns early, and its
+    tooltip is the only place that field's name can appear once a caption
+    displaces it."""
+    panels = _panels()
+    imgui = imgui_frame
+    from gasgiant.params.model import ExportParams
+
+    info = _labelled_info(ExportParams, "width", "Map width", monkeypatch)
+    tips = _spy_tooltips(panels, monkeypatch)
+
+    imgui.new_frame()
+    imgui.begin("host", None, 0)
+    panels._draw_leaf("width", info, {"width": 2048}, {}, panels.PanelState(), "export.width")
+    imgui.end()
+    imgui.end_frame()
+
+    # Exact-match, not a substring: export.width's own DESCRIPTION contains the
+    # word "width", so `any("width" in t)` passes on the raw description too and
+    # silently fails to discriminate.
+    expected = panels._leaf_tip("width", info, FieldMeta.of(info))
+    assert expected.startswith("width\n\n"), "sanity: _leaf_tip prefixes the name"
+    assert expected in tips, f"modal-only tooltip {tips!r} is not _leaf_tip's output"
