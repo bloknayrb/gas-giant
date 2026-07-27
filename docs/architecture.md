@@ -308,12 +308,14 @@ callers. Two asymmetries are deliberate and load-bearing:
   operand substitutions, and its two cross-hero sites (`heroQ`, the serene-moat
   calm floor) became a genuinely new formulation — a summed mask scaled once is
   now a per-term sum — which is bit-exact only because a single-hero sum has one
-  term. **Six** of the eight factory presets ship `hero_count=1`, `cast=[]`, so
-  they do not re-bake. Two ship `hero_count=0` — `saturn_pale` and `cobalt_gale` —
+  term. **Six** of the nine factory presets ship `hero_count=1`, `cast=[]`, so
+  they do not re-bake. Three ship `hero_count=0` — `saturn_pale`, `cobalt_gale`
+  and `green_giant` —
   and they are safe for a *different* reason, worth stating because the one-term
   argument does not cover them: a zero-hero sum has ZERO terms and both
-  formulations yield 0. (`cobalt_gale` additionally ships `hero_emergence=0.0`, so
-  HERO_EMERGENCE never compiles for it at all.) A preset with `hero_count >= 2`,
+  formulations yield 0. (`cobalt_gale` and `green_giant` additionally ship
+  `hero_emergence=0.0`, so HERO_EMERGENCE never compiles for them at all.)
+  A preset with `hero_count >= 2`,
   or a populated `cast`, would genuinely re-bake.
 
   This sentence previously read "all six factory presets ship `hero_count=1`",

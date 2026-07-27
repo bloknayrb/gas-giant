@@ -71,3 +71,44 @@ def test_localized_mask_churns_fewer_pixels_than_global(gpu):
     assert shear_churn < global_churn, (
         f"shear must localize: churned {shear_churn:.3f} vs global {global_churn:.3f}"
     )
+
+
+def test_belts_mask_localizes_and_is_wider_than_shear(gpu):
+    """BELTS must localize relative to GLOBAL -- and must be materially WIDER
+    than SHEAR.
+
+    Both halves matter, and the second is the one worth pinning. Until
+    `green_giant` shipped, BELTS was exercised ONLY by the inject=0 no-op test
+    above, i.e. only where it is guaranteed inert; the localization assertion was
+    written for SHEAR alone. A preset now rests on this branch.
+
+    The ordering is not a curiosity, it is the sizing rule for `vort_inject`. A
+    mask is a MULTIPLIER, and the two cover very different fractions of the map:
+    measured on a 16-band layout, belt_mask means 0.475 with 47.6% of latitudes
+    above 0.5, against shear_norm's 0.110 and 3.9%. So carrying a shear-calibrated
+    amplitude across to BELTS applies several times the integrated forcing, which
+    is the documented way to dissolve the banding. Pinning belts > shear here means
+    a future change that quietly narrowed belt_mask -- making the amplitude advice
+    in docs/formations.md and build_green_giant_preset.py wrong -- fails loudly
+    instead of silently re-tuning a shipped preset.
+    """
+    baseline = _render(_params(0.0, InjectMask.GLOBAL), gpu)
+    glob = _render(_params(0.8, InjectMask.GLOBAL), gpu)
+    belts = _render(_params(0.8, InjectMask.BELTS), gpu)
+    shear = _render(_params(0.8, InjectMask.SHEAR), gpu)
+
+    global_churn = _changed_fraction(baseline, glob)
+    belts_churn = _changed_fraction(baseline, belts)
+    shear_churn = _changed_fraction(baseline, shear)
+
+    assert global_churn > 0.1, f"global injection should churn the map (frac={global_churn})"
+    assert belts_churn > 0.0, (
+        "BELTS injection changed nothing -- the mask is inert, not localized"
+    )
+    assert belts_churn < global_churn, (
+        f"belts must localize: churned {belts_churn:.3f} vs global {global_churn:.3f}"
+    )
+    assert belts_churn > shear_churn, (
+        f"belts must be WIDER than shear (the vort_inject sizing rule depends on "
+        f"it): belts {belts_churn:.3f} vs shear {shear_churn:.3f}"
+    )

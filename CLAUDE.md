@@ -37,8 +37,16 @@ not a storm: `hero_count` 0 plus a ±13° equatorial zone. The only preset with 
 geometry — warm/jupiter_like/jupiter_vorticity/neptune all carry the identical 12-band
 JOVIAN skeleton, so a band-template change touches four presets at once; cobalt_gale's is a
 9-band authored one. Band identity is `values < median` and must strictly alternate, so a
-band CENTRED on the equator needs `count ≡ 1 (mod 4)`). The last two are the
-non-solar-system ones. The GUI (post PR #13) has
+band CENTRED on the equator needs `count ≡ 1 (mod 4)`), green_giant (an enriched
+sulfur-chromophore giant — olive/chartreuse, `sim.resolution` 4096 and pinned in
+`SIM_RES_OVERRIDES`; the ONLY preset using `vort_inject_mask = belts`, and note a mask is
+a MULTIPLIER on `vort_inject`: belt_mask covers ~48% of latitudes against shear_norm's
+~4%, so belts SPREADS churn relative to shear and the amplitude must be retuned down with
+it. Seeded band path, and on that path `count` must be EVEN — at an odd count with belts
+in the majority the median IS the top belt value, so `values < median` silently
+misclassifies one belt as a zone; the model's alternation validator only runs on the
+TEMPLATE path). saturn_pale, cobalt_gale and green_giant are the three `hero_count=0`
+presets; ember_dwarf and cobalt_gale are the non-solar-system ones. The GUI (post PR #13) has
 searchable auto-generated panels, per-slider help, undo/redo, and playback controls.
 
 ## Testing policy

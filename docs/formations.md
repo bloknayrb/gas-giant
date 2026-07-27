@@ -56,6 +56,41 @@ problem, not a jet one; and the high `polar_decay` that makes the jet dominant
 is the same thing that leaves the caps unforced, so such a preset needs its
 poleward palette rows clamped (`build_cobalt_gale_preset.py`, `POLAR`).
 
+### Belt-confined churn (smooth/rough band alternation)
+Real giants do not churn uniformly: belts are the cyclonic, convecting lanes and
+zones are the quiescent subsiding ones, so the two halves of the banding differ in
+TEXTURE, not only in color. *Implementation:* `solver.vort_inject_mask = belts`
+scales the per-step eddy injection by the `belt_mask` channel of the dynamics
+latitude profile (`omega_force.comp`), so filaments roll up inside the dark lanes
+while the zones stay laminar in vorticity and carry only render-synthesized
+`detail.zone_texture`. Shipped as `green_giant`, the first factory preset to use
+it — its whole composition is that alternation rather than a hero or a jet.
+
+Two non-obvious consequences, both measured, and both traps if the mask is read as
+a *confining* lever by analogy with `shear`:
+
+- **A mask is a MULTIPLIER, and `belts` is the WIDE one.** On a representative
+  16-band layout, `belt_mask` means 0.475 with 47.6% of latitudes above 0.5,
+  against `shear_norm`'s 0.110 and 3.9%. So `belts` spreads churn over ~12× the
+  area `shear` does and sits much nearer `global` — which the project record says
+  dissolves the planet at warm's amplitude. `vort_inject` must come DOWN with the
+  mask (`green_giant` ships 0.30 against warm's 1.8), and mean-mask matching is
+  where to start, not where to stop: the same integrated forcing spread over 12×
+  the area still reads much busier.
+- **The mask samples an UNWARPED latitude profile** while the visible band edges
+  ride `bands.warp_amount`. Left at warm's 0.04 (~2.3°) the churn would stop on
+  razor-straight latitude lines while the bands it fills meander across them — a
+  candidate for the "banding reads as imposed" percept. `green_giant` keeps the
+  meander small (0.01) to hold the two aligned.
+
+Also note the seeded vortex populations land on OPPOSITE halves of this
+alternation, which is what makes it read: `storms.oval_density` seeds bright
+anticyclonic ovals in ZONES only, `barge_density` seeds dark cigars in BELTS, and
+`small_density` speckle is signed by band class (`sim/vortices.py`). A composition
+that wants pale storms in the churning lanes is asking for something the seeder
+does not do — only an explicit `storms.cast` entry places a vortex at an arbitrary
+latitude.
+
 ### Band-boundary meander
 Real band edges are not parallel circles — they wander at planetary
 wavenumbers 5–20. Straight band edges are the single biggest "procedural

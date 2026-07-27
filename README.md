@@ -44,7 +44,7 @@ uv run gasgiant-studio
 
 # Headless: render a map set (factory presets: gas_giant_warm [default],
 # jupiter_like, jupiter_vorticity, saturn_pale, ice_giant, neptune,
-# ember_dwarf, cobalt_gale)
+# ember_dwarf, cobalt_gale, green_giant)
 uv run gasgiant export --preset jupiter_like --res 4096 --out out/jove
 uv run gasgiant validate out/jove        # seam/pole invariants
 
@@ -61,7 +61,7 @@ uv run gasgiant export --preset jupiter_vorticity --frames 120 \
 
 ## Presets
 
-Eight factory presets ship in `src/gasgiant/presets/`. Each image below is that
+Nine factory presets ship in `src/gasgiant/presets/`. Each image below is that
 preset developed for 1,000 steps, exported as the raw equirectangular color map
 — the same texture that wraps onto the sphere. Parameter details and the
 manifest contract: `docs/presets.md`.
@@ -134,6 +134,31 @@ which sets the rest, and makes it the mirror of `ember_dwarf`: low Coriolis, a
 large deformation radius, few very wide bands.
 
 ![cobalt_gale developed for 1,000 steps](docs/img/presets/cobalt_gale.png)
+
+**`green_giant`** — an enriched, sulfur-rich giant, and the one preset here that
+is still a Jupiter-class planet: the separation is carried by chemistry rather
+than by moving the object somewhere exotic. H₂S outstrips NH₃ in the visible
+atmosphere (real — Uranus's deck *is* H₂S), UV photolysis polymerises it into
+yellow S₈/polysulfide chromophores, and residual methane eats the red end, so
+yellow pigment under a red-absorbing atmosphere reads olive to chartreuse. The
+same enrichment drives the weather: a higher mean molecular weight means a
+smaller scale height and a smaller deformation radius, so the field is finer and
+busier than Jupiter's at the *same* rotation rate — the premise moves
+`deformation_radius` (0.13) and deliberately leaves `coriolis_f0` at Jupiter's
+3.0. Its composition is a fifth kind: not a hero, not a jet, but an
+**alternation** — glassy chartreuse zones studded with pale cream ovals against
+churned olive belts streaked with dark cigars. It is the first factory preset to
+use `solver.vort_inject_mask = belts`, which confines eddy churn to the cyclonic
+lanes and leaves the zones laminar.
+
+![green_giant developed for 1,000 steps](docs/img/presets/green_giant.png)
+
+> `green_giant`'s image is rendered at its shipped `sim.resolution` 4096, for a
+> different reason than `ember_dwarf`'s: the ratio alone (16.6% → 21.6% of the
+> disc above the zone knee, ~1.30×) would not have justified the pin. The render
+> does. Its subject is a seeded vortex population whose members must be
+> individually resolved to read as members, so at 1024 the pale zone ovals never
+> separate and the planet is a marbled ball rather than banded.
 
 > Generated with `scripts/render_readme_examples.py` (a reduced sim grid keeps
 > the set tractable under software GL; the shipped presets develop at

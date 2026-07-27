@@ -41,6 +41,7 @@ PRESETS = [
     "neptune",
     "ember_dwarf",
     "cobalt_gale",
+    "green_giant",
 ]
 
 # Presets whose committed image must NOT use the reduced default sim grid.
@@ -58,7 +59,15 @@ PRESETS = [
 # same way (fraction of the disc above LUT index 0.80, detail on), 1024 -> 4096:
 # cobalt_gale 7.8% -> 8.5% (~1.09x) against ember_dwarf's 13.0% -> 20.2% (~1.55x).
 # Shipping 4096 is therefore NOT on its own a reason to appear here.
-SIM_RES_OVERRIDES = {"ember_dwarf": 4096}
+# green_giant is pinned for a DIFFERENT reason than ember_dwarf, and its ratio
+# alone would not have justified it: 16.6% -> 21.6% (~1.30x) sits between the two
+# precedents above. The render settles it. At 1024 the preset is a chaotic marbled
+# ball; at 4096 the lanes go crisp and zonal and the pale zone ovals become
+# discrete and countable -- and those countable ovals are half its stated
+# composition, so a 1024 asset would misrepresent it. Its subject is a seeded
+# VORTEX POPULATION whose members must be individually resolved to read as members,
+# which is the mirror of cobalt_gale's verbatim band template.
+SIM_RES_OVERRIDES = {"ember_dwarf": 4096, "green_giant": 4096}
 
 
 def _to_srgb8_png(src_png16: Path, dst_png8: Path, width: int) -> None:
