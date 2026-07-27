@@ -1569,21 +1569,19 @@ class StudioApp:
         # loads the base, applies the overlay, and commits undoably.
         if self._recipe_cache:
             imgui.set_next_item_width(160.0)
-            opened = imgui.begin_combo("##scenario", "Scenarios...")
-            # Latch the combo's own hover HERE, while it is still the last-drawn
-            # item; after end_combo() this reads an item from INSIDE the popup.
-            combo_hovered = imgui.is_item_hovered()
-            if opened:
+            if imgui.begin_combo("##scenario", "Scenarios..."):
                 for stem, label, desc in self._recipe_cache:
                     if imgui.selectable(label, False)[0]:
                         self._load_recipe_entry(stem)
                     item_tooltip(desc)
                 imgui.end_combo()
-            if combo_hovered:
-                tooltip(
-                    "apply an epoch recipe: a documented historical atmosphere "
-                    "state overlaid on its base preset (undoable)"
-                )
+            # Reads the combo itself, not a popup row: End() restores
+            # ParentLastItemDataBackup. Measured hovering the closed combo --
+            # before begin_combo and after end_combo both report True.
+            item_tooltip(
+                "apply an epoch recipe: a documented historical atmosphere "
+                "state overlaid on its base preset (undoable)"
+            )
 
         # B1-8: contextual overwrite/delete row, shown only while a USER
         # preset is active (factory presets are package data; a FILE identity
@@ -1837,9 +1835,13 @@ class StudioApp:
         imgui.begin_disabled(not ffmpeg)
         _, self._seq_video = imgui.checkbox("Encode mp4 (ffmpeg)", self._seq_video and ffmpeg)
         imgui.end_disabled()
+        # when_disabled: the else-branch exists only for the greyed-out state,
+        # so without it the one message telling the user WHY the checkbox is
+        # dead could never be shown.
         item_tooltip(
             "encode the color frames into sequence.mp4 via ffmpeg" if ffmpeg
-            else "ffmpeg not found on PATH — install ffmpeg to enable mp4 encoding"
+            else "ffmpeg not found on PATH — install ffmpeg to enable mp4 encoding",
+            when_disabled=not ffmpeg,
         )
         if self._seq_video and ffmpeg:
             imgui.same_line()

@@ -79,6 +79,7 @@ ignore = ["E702", "E701"]
 "imgui_bundle.imgui.set_item_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
 "imgui_bundle.imgui.begin_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
 "imgui_bundle.imgui.begin_item_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
+"imgui_bundle.imgui.internal.begin_tooltip_ex".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
 
 [tool.ruff.lint.per-file-ignores]
 # The one module allowed to open a tooltip window -- it is where the wrap lives.

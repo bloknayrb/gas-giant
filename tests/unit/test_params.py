@@ -68,7 +68,15 @@ def test_every_pfield_has_a_description():
     is a pfield if its json_schema_extra carries 'tier' -- so non-pfield
     leaves (GradientStop.pos/.color, PaletteRow.latitude, BandTemplate's
     edges_deg/values/heights, all declared with plain Field()) are excluded
-    without a hand-maintained skip list."""
+    without a hand-maintained skip list.
+
+    Descends get_args too: storms.cast is list[StormOverride], which fails an
+    issubclass() test, so a bare-annotation walk silently skipped all 22
+    cast-lever pfields -- every one of which panels.py surfaces as a tooltip
+    via _draw_cast_field. They all have descriptions today; this keeps a new
+    one from shipping without."""
+    import typing
+
     from pydantic import BaseModel
 
     def walk(model: type[BaseModel], prefix: str) -> None:
@@ -78,8 +86,9 @@ def test_every_pfield_has_a_description():
             if isinstance(extra, dict) and "tier" in extra:
                 assert info.description, f"pfield {path} has no description"
             ann = info.annotation
-            if isinstance(ann, type) and issubclass(ann, BaseModel):
-                walk(ann, f"{path}.")
+            for member in (ann, *typing.get_args(ann)):
+                if isinstance(member, type) and issubclass(member, BaseModel):
+                    walk(member, f"{path}.")
 
     walk(PlanetParams, "")
 

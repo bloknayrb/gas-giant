@@ -8,6 +8,8 @@ silently truncating on the other axis.
 
 from __future__ import annotations
 
+import typing
+
 import pytest
 
 from gasgiant.params.model import PlanetParams, StormsParams
@@ -20,6 +22,33 @@ imgui_internal = pytest.importorskip("imgui_bundle.imgui.internal")
 # The real worst case in the corpus, not a synthetic string: if this field is
 # ever shortened the test still holds, it just stops being the tightest probe.
 LONGEST = StormsParams.model_fields["hero_emergence"].description or ""
+
+
+def _all_descriptions():
+    """``(dotted_path, description)`` for every pfield leaf.
+
+    Descends ``get_args`` as well as bare annotations: ``storms.cast`` is
+    ``list[StormOverride]``, which fails an ``issubclass(ann, BaseModel)``
+    test, so a naive walk silently skips all 22 cast-lever descriptions.
+    """
+    from pydantic import BaseModel
+
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def walk(model, prefix=""):
+        for name, info in model.model_fields.items():
+            for member in (info.annotation, *typing.get_args(info.annotation)):
+                if isinstance(member, type) and issubclass(member, BaseModel):
+                    walk(member, f"{prefix}{name}.")
+            if "tier" in (info.json_schema_extra or {}) and info.description:
+                key = (model.__name__, name)
+                if key not in seen:
+                    seen.add(key)
+                    out.append((f"{prefix}{name}", info.description))
+
+    walk(PlanetParams)
+    return out
 
 
 @pytest.fixture
@@ -135,17 +164,122 @@ def test_text_too_long_for_any_wrap_is_trimmed_not_hidden(imgui_ctx):
     assert fits <= budget, "trimmed text still overflows the height budget"
 
 
-def test_wrap_width_terminates_on_a_degenerate_viewport(imgui_ctx):
-    """A minimized window reports a ~0-height viewport. An unbounded
-    widen-until-it-fits loop never exits there and freezes the GUI inside a
-    frame -- no exception, no timeout. The cap makes termination structural.
+class _TooManyMeasurements(RuntimeError):
+    pass
+
+
+def test_widen_loop_cannot_spin_forever(imgui_ctx, monkeypatch):
+    """A minimized window reports a ~0-height viewport, where an unbounded
+    widen-until-it-fits loop never exits and freezes the GUI inside a frame.
+
+    Budgets the MEASUREMENT rather than asserting on the result: there is no
+    pytest-timeout in this repo, so a non-terminating loop would hang the job
+    rather than fail it -- a red test is worth far more than a stalled runner.
     """
     io = imgui.get_io()
     io.display_size = imgui.ImVec2(600.0, 12.0)
+    real, calls = imgui.calc_text_size, {"n": 0}
+
+    def budgeted(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] > 64:
+            raise _TooManyMeasurements("widen loop did not terminate")
+        return real(*args, **kwargs)
+
     imgui.new_frame()
-    width = tooltips.wrap_width(LONGEST)
+    monkeypatch.setattr(tooltips.imgui, "calc_text_size", budgeted)
+    try:
+        width = tooltips.wrap_width(LONGEST)
+    finally:
+        monkeypatch.undo()
+        imgui.end_frame()
+    assert width > 0.0, "a negative wrap disables wrapping entirely"
+
+
+@pytest.mark.parametrize("size", [(400.0, 300.0), (320.0, 240.0), (200.0, 150.0)])
+def test_the_guarantee_holds_down_to_the_smallest_usable_window(imgui_ctx, size):
+    """Nothing hidden, on either axis, at every viewport a person could
+    plausibly shrink the studio to. 200x150 is the measured floor for a clean
+    (0, 0); below that the window is smaller than the text it must show and no
+    layout can win (see the degenerate test)."""
+    win = _draw(LONGEST, size=size)
+    assert win is not None
+    assert win.scroll_max.x == 0.0, f"{win.scroll_max.x:.0f}px hidden horizontally"
+    assert win.scroll_max.y == 0.0, f"{win.scroll_max.y:.0f}px hidden vertically"
+
+
+@pytest.mark.parametrize("size", [(16.0, 600.0), (600.0, 12.0)])
+def test_degenerate_viewports_degrade_gracefully(imgui_ctx, size):
+    """Below any usable size the text cannot fit and some overflow is
+    unavoidable -- the point is that it stays BOUNDED.
+
+    Unclamped, the arithmetic goes negative here, and imgui reads a negative
+    wrap as "do not wrap at all": measured 9128 px of a single unwrapped line
+    behind an unreachable scrollbar, i.e. the original bug reinstated by the
+    fix's own edge case, with ``_fit`` measuring at the same negative value and
+    reporting a fit. The positive clamps hold it to tens of pixels.
+    """
+    win = _draw(LONGEST, size=size)
+    assert win is not None
+    assert win.scroll_max.x < 200.0, f"{win.scroll_max.x:.0f}px -- wrapping is disabled"
+
+
+@pytest.mark.parametrize("size", [(1700.0, 980.0), (800.0, 600.0), (520.0, 400.0)])
+def test_overlong_text_is_trimmed_by_the_drawn_tooltip(imgui_ctx, size):
+    """The trim must be reached THROUGH ``tooltip()``, not only by calling
+    ``_fit`` directly.
+
+    Mutation-checked: dropping the ``_fit`` call from the draw path left the
+    rest of this file green while hiding 636 px at 800x600, because no other
+    test drives the render path with text long enough to need trimming.
+    """
+    win = _draw(LONGEST * 4, size=size)
+    assert win is not None
+    assert win.scroll_max.y == 0.0, f"{win.scroll_max.y:.0f}px of text hidden vertically"
+    assert win.scroll_max.x == 0.0, f"{win.scroll_max.x:.0f}px of text hidden horizontally"
+
+
+@pytest.mark.parametrize("size", [(1700.0, 980.0), (800.0, 600.0), (520.0, 400.0)])
+def test_nothing_is_dropped_from_a_description_that_fits(imgui_ctx, size):
+    """A description that CAN be shown whole must be shown whole.
+
+    ``scroll_max == 0`` is trivially satisfied by rendering LESS text, so on
+    its own it passes a draw path that truncates -- and it also leaves the
+    widen loop's purpose unpinned (deleting the loop keeps every other test
+    green, because ``_fit`` then quietly absorbs the overflow as a trim).
+    Derives the expectation from the DRAWN window, not from ``_layout``, so a
+    mis-sized layout cannot validate itself.
+    """
+    win = _draw(LONGEST, size=size)
+    assert win is not None
+    imgui.new_frame()
+    pad = imgui.get_style().window_padding
+    used_wrap = win.size.x - 2.0 * pad.x
+    needed = imgui.calc_text_size(LONGEST, wrap_width=used_wrap).y
     imgui.end_frame()
-    assert width > 0.0
+    assert win.size.y >= needed + 2.0 * pad.y - 2.0, (
+        f"window is {win.size.y:.0f}px but the whole text needs "
+        f"{needed + 2.0 * pad.y:.0f}px at wrap {used_wrap:.0f} -- text was dropped"
+    )
+
+
+def test_no_shipped_description_ever_needs_trimming(imgui_ctx):
+    """``_fit`` is a last resort for degenerate viewports, NOT a licence to
+    ship descriptions too long to display. If a real pfield ever needs it that
+    is an authoring bug, and it should fail here rather than silently lose its
+    tail in the GUI (where the warning goes to a logger the app pins at INFO).
+
+    Green at 0/204 today, so it lands as a pure ratchet.
+    """
+    imgui.get_io().display_size = imgui.ImVec2(640.0, 360.0)
+    imgui.new_frame()
+    over = [
+        name
+        for name, desc in _all_descriptions()
+        if tooltips._fit(desc, *tooltips._layout(desc)) != desc
+    ]
+    imgui.end_frame()
+    assert not over, f"descriptions too long to display at 640x360: {over}"
 
 
 def test_wrap_width_is_safe_before_the_first_frame():

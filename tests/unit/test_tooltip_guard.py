@@ -7,10 +7,11 @@ architectural guard that disappears on a contributor's box is exactly the
 silent gap it exists to close.
 
 Belt-and-braces with ruff's ``TID251`` ban (``pyproject.toml``), which is the
-primary mechanism -- it scans subpackages this test's top-level glob misses and
-fires in-editor. The two have complementary blind spots: ruff cannot resolve an
-aliased module (``im = imgui; im.set_tooltip(...)``), and this scan cannot see
-``getattr(imgui, "set_tooltip")``.
+primary mechanism -- it fires in-editor and on every ``ruff check``. The two
+are genuinely complementary, though not in the obvious way: ruff DOES resolve
+an import alias (``from imgui_bundle import imgui as im``), and only a runtime
+rebinding (``im = imgui`` inside a function) evades it, which this name-based
+scan still catches. Neither sees ``getattr(imgui, "set_tooltip")``.
 """
 
 from __future__ import annotations
