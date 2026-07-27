@@ -28,6 +28,7 @@ from enum import StrEnum
 from typing import Any, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.fields import FieldInfo
 
 MAX_BANDS = 40
 
@@ -2221,72 +2222,124 @@ def field_meta(model: type[BaseModel], field_name: str) -> FieldMeta:
 
 
 @dataclass(frozen=True)
-class PfieldLeaf:
-    """One tunable in the tree, addressed by its dotted path."""
+class ParamLeaf:
+    """One leaf of the params tree, addressed by its dotted path.
 
-    path: str          # e.g. "storms.cast.radius" -- unique across the tree
+    ``path`` is unique across a walk that started at the root, which is what
+    ``iter_leaves``/``iter_pfields`` guarantee by construction (they own their
+    own recursion state -- see ``_walk_leaves``).
+    """
+
+    path: str          # e.g. "storms.cast.radius"
     name: str          # the leaf field name alone
     model: type[BaseModel]
-    info: Any          # pydantic FieldInfo
+    info: FieldInfo
 
     @property
     def meta(self) -> FieldMeta:
+        """The typed ``pfield`` metadata. All-default for a non-pfield leaf."""
         return FieldMeta.of(self.info)
 
     @property
     def description(self) -> str:
         return self.info.description or ""
 
+    @property
+    def caption(self) -> str:
+        """The widget caption -- authored ``label`` if any, else derived.
 
-def iter_pfields(
-    model: type[BaseModel] | None = None, prefix: str = "", _depth: int = 0
-) -> Iterator[PfieldLeaf]:
-    """Walk every ``pfield`` leaf under ``model`` (default: the whole tree).
+        Lives here because this is the only type holding BOTH the metadata and
+        the name it belongs to; ``FieldMeta.caption(name)`` has to be trusted to
+        be passed the matching name.
+        """
+        return self.meta.caption(self.name)
 
-    Lives in the params layer rather than in a test or in ``app.panels`` because
-    four callers need it and only one of them may import a GUI: ``app.panels``
-    draws from it, ``scripts/render_slider_examples.py`` generates docs from it
-    headlessly, and the params guard tests walk it. Hand-rolled copies had
-    already drifted apart -- see the two subtleties below, each of which was
-    fixed in some copies and not others, and each of which fails SILENTLY as
-    missing coverage rather than as a red test.
 
-    A leaf counts as a pfield iff its ``json_schema_extra`` carries ``"tier"``.
-    That is deliberately structural: ``GradientStop``, ``PaletteRow`` and
-    ``BandTemplate`` declare their leaves with a plain ``Field()`` and so drop
-    out for free, whereas excluding them BY NAME would turn a future ``pfield``
-    added there into exactly the silent gap this guards against.
+def _walk_leaves(model: type[BaseModel], prefix: str, depth: int) -> Iterator[ParamLeaf]:
+    """Recursion for ``iter_leaves``; private so the path invariant below is a
+    property of the type rather than of how a caller passed ``prefix``."""
+    if depth > 6:  # structural stop; the real tree is 3 deep
+        return
+    for name, info in model.model_fields.items():
+        path = f"{prefix}{name}"
+        nested = False
+        for member in (info.annotation, *get_args(info.annotation)):
+            if isinstance(member, type) and issubclass(member, BaseModel):
+                nested = True
+                yield from _walk_leaves(member, f"{path}.", depth + 1)
+        extra = info.json_schema_extra
+        is_pfield = isinstance(extra, dict) and "tier" in extra
+        # A field that NESTS can still be a tunable in its own right: storms.cast
+        # (list[StormOverride]) and bands.template (BandTemplate | None) both
+        # carry pfield metadata, as do the three gradient-stop lists. Yielding
+        # only non-nesting fields drops exactly those 5 -- which is how two
+        # earlier hand-written wave tables lost storms.cast, the field driving
+        # the entire cast editor.
+        if not nested or is_pfield:
+            yield ParamLeaf(path=path, name=name, model=model, info=info)
 
-    Two subtleties, both load-bearing:
+
+def iter_leaves(model: type[BaseModel] | None = None) -> Iterator[ParamLeaf]:
+    """Every non-model leaf under ``model`` (default: the whole tree), whether
+    or not it is a ``pfield``.
+
+    The unfiltered form exists because the one guard that asserts the COMPLEMENT
+    -- that every tunable leaf declares a ``tier`` -- cannot be built on
+    ``iter_pfields``, which filters on exactly that. Without it a leaf declared
+    with a plain ``Field()`` is invisible to every guard in the repo while
+    ``panels`` still draws it, badge-less and tooltip-less.
+
+    Two traversal subtleties, both load-bearing and both previously fixed in
+    some hand-rolled copies and not others:
 
     * ``get_args`` is walked alongside the bare annotation, because
       ``storms.cast`` is ``list[StormOverride]`` -- which fails ``issubclass``,
       so an annotation-only walk misses all 22 cast levers.
     * Yields by dotted PATH, not by ``(model, name)``. ``poles.north`` and
       ``poles.south`` are two instances of one ``PoleParams`` declaration, so a
-      ``(model, name)`` key silently collapses 5 real leaves. Callers that want
+      ``(model, name)`` key silently collapses 5 real leaves. Callers wanting
       one entry per DECLARATION should dedupe on ``(leaf.model, leaf.name)``
       themselves, where the intent is visible.
+
+    Both are pinned by ``tests/unit/test_params.py`` -- they degrade into
+    quietly walking FEWER leaves, which no consumer can detect on its own.
     """
-    if model is None:
-        model = PlanetParams
-    if _depth > 6:  # structural stop; the real tree is 3 deep
-        return
-    for name, info in model.model_fields.items():
-        path = f"{prefix}{name}"
-        for member in (info.annotation, *get_args(info.annotation)):
-            if isinstance(member, type) and issubclass(member, BaseModel):
-                yield from iter_pfields(member, f"{path}.", _depth + 1)
-        extra = info.json_schema_extra
+    return _walk_leaves(model if model is not None else PlanetParams, "", 0)
+
+
+def iter_pfields(model: type[BaseModel] | None = None) -> Iterator[ParamLeaf]:
+    """Every ``pfield`` leaf under ``model`` (default: the whole tree).
+
+    Lives in the params layer, rather than in a test or in ``app.panels``, so
+    that every layer can reach it -- the doc generator
+    (``scripts/render_slider_examples.py``) runs headless and must never import
+    a GUI. Today the callers are the params and caption guard tests; ``panels``
+    and the doc generator still carry their own draw-order recursions, which
+    yield sections as well as leaves and so are not drop-in replaceable.
+    Folding them in is worth doing and is NOT done here.
+
+    A leaf counts as a ``pfield`` iff its ``json_schema_extra`` carries
+    ``"tier"``. That is deliberately structural: ``GradientStop``,
+    ``PaletteRow`` and ``BandTemplate`` declare their leaves with a plain
+    ``Field()`` and so drop out for free, whereas excluding them BY NAME would
+    turn a future ``pfield`` added there into exactly the silent gap this
+    guards against.
+    """
+    for leaf in iter_leaves(model):
+        extra = leaf.info.json_schema_extra
         if isinstance(extra, dict) and "tier" in extra:
-            yield PfieldLeaf(path=path, name=name, model=model, info=info)
+            yield leaf
+
+
+#: Back-compat alias; ``ParamLeaf`` covers non-pfield leaves too.
+PfieldLeaf = ParamLeaf
 
 
 def derived_label(name: str) -> str:
     """The pre-label caption: shown when no ``label`` is authored, and ALWAYS
     kept in the search haystack so a relabelled field stays findable by the
     name it used to display. Do not assume the unconditional call in
-    ``panels._leaf_visible`` is redundant -- dropping it un-finds 21 of the 22
+    ``panels._haystack`` is redundant -- dropping it un-finds 21 of the 22
     relabelled fields."""
     return name.replace("_", " ")
 

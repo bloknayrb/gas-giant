@@ -26,11 +26,15 @@ _PYPROJECT = pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"
 def _banned_names() -> set[str]:
     """The banned callables, read from ruff's own ``TID251`` table.
 
-    Derived rather than restated: a hardcoded copy drifts the moment a sixth
-    entry point is added to ``pyproject.toml``, and it drifts SILENTLY -- this
-    guard exists to catch what ruff cannot see, so a stale list defeats its
-    whole purpose with nothing red to say so. ``tomllib`` is stdlib on 3.13, so
-    reading it keeps this module dependency-free.
+    Derived so a SIXTH entry added to ``pyproject.toml`` flows in for free.
+    Removals are covered the other way, by ``REQUIRED`` below -- derivation
+    alone would let a ruff-table deletion disarm both mechanisms at once.
+    ``tomllib`` is stdlib on 3.13, so reading it keeps this module
+    dependency-free.
+
+    A ``KeyError`` here is deliberate: if the table is renamed or removed the
+    module fails loudly at import rather than yielding an empty set and a scan
+    that passes by checking nothing.
 
     Opening a tooltip window without pushing the wrap is the regression here,
     so the table bans the ``begin_*`` forms alongside ``set_tooltip`` -- a
@@ -44,10 +48,28 @@ def _banned_names() -> set[str]:
 BANNED = _banned_names()
 
 
-def test_the_banned_list_is_populated():
-    """Without this, a renamed or deleted ruff table would empty ``BANNED`` and
-    turn the scan below into a test that passes by checking nothing."""
-    assert {"set_tooltip", "begin_tooltip"} <= BANNED, BANNED
+#: The tooltip openers this module exists to keep out of the app layer, pinned
+#: independently of the ruff table.
+#:
+#: Deriving BANNED without this pin QUIETLY UNDID the belt-and-braces: with both
+#: mechanisms reading one list, deleting a line from ruff's table disarms them
+#: TOGETHER. Verified end to end -- drop the ``begin_item_tooltip`` entry from
+#: pyproject and a raw ``imgui.begin_item_tooltip()`` in panels.py passes ruff,
+#: passes this scan, and passes the whole fast tier. Before the derivation the
+#: hardcoded set kept the AST scan red in exactly that case, which is what
+#: "complementary" meant. Derivation still earns its place -- a NEW entry flows
+#: in automatically -- but a removal must not go unnoticed.
+REQUIRED = {
+    "set_tooltip",
+    "set_item_tooltip",
+    "begin_tooltip",
+    "begin_item_tooltip",
+    "begin_tooltip_ex",
+}
+
+
+def test_the_ruff_table_still_bans_every_known_opener():
+    assert REQUIRED <= BANNED, f"ruff's banned-api table lost {sorted(REQUIRED - BANNED)}"
 
 
 def _called_name(node: ast.Call) -> str | None:
@@ -73,6 +95,6 @@ def test_no_raw_tooltip_calls_survive_in_the_app_layer():
         offenders += [
             f"{path.name}:{node.lineno} {_called_name(node)}"
             for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and _called_name(node) in BANNED
+            if isinstance(node, ast.Call) and _called_name(node) in (BANNED | REQUIRED)
         ]
     assert not offenders, f"use tooltips.item_tooltip/tooltip instead: {offenders}"

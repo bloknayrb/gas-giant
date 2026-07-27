@@ -245,7 +245,7 @@ def test_no_shipped_description_ever_needs_trimming(imgui_ctx):
     is an authoring bug, and it should fail here rather than silently lose its
     tail in the GUI (where the warning goes to a logger the app pins at INFO).
 
-    Green at 0/204 today, so it lands as a pure ratchet.
+    Green at 0/226 today, so it lands as a pure ratchet.
     """
     imgui.get_io().display_size = imgui.ImVec2(640.0, 360.0)
     imgui.new_frame()

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from gasgiant.params.model import (
     BandsParams,
+    BandTemplate,
+    GradientStop,
+    PaletteRow,
     PlanetParams,
+    PoleParams,
+    StormOverride,
     Tier,
     field_meta,
+    iter_leaves,
     iter_pfields,
 )
 
@@ -43,23 +49,56 @@ def test_bounds_enforced():
         BandsParams(count=999)
 
 
+#: Models that are DATA RECORDS, not param sections -- a gradient stop, a
+#: palette row, an authored band template. Their leaves are values a preset
+#: carries, not knobs the GUI draws, so they legitimately declare no tier.
+#: Excluded by MODEL rather than by field name: the previous name-based skip
+#: ("pos", "color") would also have silenced a real ``pos`` added anywhere else
+#: in the tree, and it was only small because the walk it guarded never reached
+#: PaletteRow or BandTemplate in the first place.
+_DATA_RECORD_MODELS = (GradientStop, PaletteRow, BandTemplate)
+
+
 def test_every_tunable_field_declares_a_tier():
-    from pydantic import BaseModel
+    """The one guard asserting the COMPLEMENT: that a leaf which SHOULD be a
+    pfield actually is one.
 
-    def walk(model: type[BaseModel], prefix: str) -> None:
-        for name, info in model.model_fields.items():
-            ann = info.annotation
-            if isinstance(ann, type) and issubclass(ann, BaseModel):
-                walk(ann, f"{prefix}{name}.")
-                continue
-            extra = info.json_schema_extra
-            if name in ("pos", "color"):  # GradientStop components
-                continue
-            assert isinstance(extra, dict) and extra.get("tier") in {t.value for t in Tier}, (
-                f"field {prefix}{name} missing tier metadata"
+    It cannot be built on ``iter_pfields``, which filters on ``tier`` and so is
+    definitionally blind to a leaf missing it. Before this used ``iter_leaves``
+    it hand-rolled an annotation-only walk that reached 204 of 236 leaves --
+    every ``storms.cast.*`` lever among the missing -- so a ``StormOverride``
+    field declared with a plain ``Field()`` was invisible to every guard in the
+    repo while ``panels._draw_flat_model_fields`` drew it anyway, with no tier
+    badge and an empty tooltip."""
+    tiers = {t.value for t in Tier}
+    for leaf in iter_leaves():
+        if leaf.model in _DATA_RECORD_MODELS:
+            continue
+        extra = leaf.info.json_schema_extra
+        assert isinstance(extra, dict) and extra.get("tier") in tiers, (
+            f"field {leaf.path} missing tier metadata"
+        )
+
+
+def test_the_tier_guard_still_reaches_the_awkward_corners():
+    """Pins the reach of the walk above, so a traversal regression shows up as
+    a red test rather than as quietly checking fewer fields."""
+    paths = {leaf.path for leaf in iter_leaves() if leaf.model not in _DATA_RECORD_MODELS}
+    assert "storms.cast.radius" in paths, "list[StormOverride] not descended"
+    assert "poles.south.strength" in paths, "the second PoleParams instance was collapsed"
+    assert "solver.baroclinic.gain" in paths, "doubly-nested section not reached"
+
+
+def test_data_record_models_really_declare_no_tier():
+    """Keeps the exclusion honest: if one of these gains a pfield, the skip
+    above would silently stop checking it."""
+    for leaf in iter_leaves():
+        if leaf.model in _DATA_RECORD_MODELS:
+            extra = leaf.info.json_schema_extra
+            assert not (isinstance(extra, dict) and "tier" in extra), (
+                f"{leaf.path} is now a pfield; drop {leaf.model.__name__} from "
+                "_DATA_RECORD_MODELS so the tier guard covers it"
             )
-
-    walk(PlanetParams, "")
 
 
 def test_field_meta_helper():
@@ -158,3 +197,51 @@ def test_adv_does_not_perturb_field_meta_or_serialization():
     dumped = json.loads(p.to_json())
     assert "adv" not in dumped["bands"], "adv is schema metadata, not a param value"
     assert PlanetParams.from_json(p.to_json()) == p
+
+
+# -- the traversal invariants iter_pfields' docstring calls load-bearing --------
+#
+# Both were measured revertible with the ENTIRE fast tier green: dropping the
+# get_args descent takes 226 pfield leaves to 204, and deduping on
+# (model, name) takes it to 221. Every consumer degrades identically and
+# silently -- it simply checks fewer leaves -- so the walk needs its own
+# assertions rather than relying on a downstream test to notice.
+
+
+def test_the_walk_descends_into_a_list_of_models():
+    """storms.cast is list[StormOverride], which fails issubclass(ann, BaseModel).
+    An annotation-only walk misses all 22 cast levers -- the exact bug that left
+    the Basic/Advanced curation guards blind to them."""
+    paths = {leaf.path for leaf in iter_pfields()}
+    assert {f"storms.cast.{n}" for n in StormOverride.model_fields} <= paths
+
+
+def test_the_walk_keeps_both_instances_of_a_reused_submodel():
+    """poles.north and poles.south are two PoleParams instances. Keying on
+    (model, name) rather than on the dotted path silently collapses 5 leaves --
+    and is why 226 leaves carry only 221 distinct descriptions."""
+    paths = {leaf.path for leaf in iter_pfields()}
+    for pole in ("north", "south"):
+        assert {f"poles.{pole}.{n}" for n in PoleParams.model_fields} <= paths
+
+
+def test_a_nesting_field_that_is_itself_a_tunable_is_still_a_leaf():
+    """storms.cast and bands.template both nest AND carry pfield metadata.
+    Yielding only non-nesting fields drops them -- which is how two hand-written
+    wave tables lost storms.cast, the field driving the whole cast editor."""
+    paths = {leaf.path for leaf in iter_pfields()}
+    assert {"storms.cast", "bands.template"} <= paths
+
+
+def test_pfields_are_the_tier_carrying_subset_of_leaves():
+    """Ties the two walks together, so they cannot drift apart the way the
+    hand-rolled copies did."""
+    leaves = list(iter_leaves())
+    pfields = {leaf.path for leaf in iter_pfields()}
+    expected = {
+        leaf.path for leaf in leaves
+        if isinstance(leaf.info.json_schema_extra, dict)
+        and "tier" in leaf.info.json_schema_extra
+    }
+    assert pfields == expected
+    assert pfields < {leaf.path for leaf in leaves}, "sanity: some leaves are not pfields"

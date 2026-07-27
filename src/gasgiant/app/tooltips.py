@@ -158,7 +158,10 @@ def _fit(text: str, width: float, budget: float) -> str:
         # line that premise fails and the bare "..." still overflows. Inside the
         # guard because truncation is a per-frame condition -- outside it, both
         # this warning AND its calc_text_size re-fired ~60x/s for as long as the
-        # pointer rested, which is the spam _TRIMMED exists to prevent.
+        # pointer rested. _TRIMMED is content-keyed and lives for the process,
+        # so the check now runs at most once per distinct text EVER, not once
+        # per hover; that is intended, since the condition depends on the
+        # viewport and a later resize will not re-report it.
         if imgui.calc_text_size(out, wrap_width=width).y > budget:
             log.warning("tooltip cannot fit any prefix at wrap %.0f / budget %.0f", width, budget)
     return out

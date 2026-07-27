@@ -184,7 +184,7 @@ def test_relabelled_fields_show_their_name_in_the_tooltip():
 
 def test_unlabelled_fields_get_a_bare_description_tooltip():
     """No prefix where the caption already IS the name -- that would be noise
-    on 177 of 199 fields."""
+    on 199 of the 221 declarations this walk returns."""
     panels = _panels()
     for _path, name, info in _leaves():
         if not FieldMeta.of(info).label:
