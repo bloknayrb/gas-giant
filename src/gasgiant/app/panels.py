@@ -31,6 +31,7 @@ from imgui_bundle import imgui
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
+from gasgiant.app.tooltips import item_tooltip
 from gasgiant.params.model import (
     CAST_LEVER_FIELDS,
     FieldMeta,
@@ -456,8 +457,7 @@ def _draw_emission_aurora_note(emission_doc: dict[str, Any]) -> None:
 
 def _draw_help_marker(text: str) -> None:
     imgui.text_disabled("(?)")
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
+    item_tooltip(text)
 
 
 def _section_header(label: str, flags: int, searching: bool) -> bool:
@@ -675,8 +675,7 @@ def _draw_tier_badge(tier: Any) -> None:
         return
     glyph, color, full = spec
     imgui.text_colored(imgui.ImVec4(*color), glyph)
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(full)
+    item_tooltip(full)
 
 
 def _default_value(name: str, baseline: dict[str, Any]) -> Any:
@@ -724,8 +723,8 @@ def _draw_leaf(
         # Early return also skips the right-click Reset (a second editor in
         # disguise) -- the tooltip still explains the field.
         imgui.text_disabled(f"{label}: {value} — set in the Export... dialog")
-        if info.description and imgui.is_item_hovered():
-            imgui.set_tooltip(info.description)
+        # Must stay above the early return: item_tooltip reads the last-drawn item.
+        item_tooltip(info.description)
         imgui.pop_id()
         return False, False
 
@@ -785,8 +784,7 @@ def _draw_leaf(
     if kind in _SINGLE_ITEM_KINDS:
         committed = imgui.is_item_deactivated_after_edit()
 
-    if info.description and imgui.is_item_hovered():
-        imgui.set_tooltip(info.description)
+    item_tooltip(info.description)
 
     # Right-click affordances, tied to the leaf's last-drawn item.
     #
@@ -872,10 +870,7 @@ def _draw_optional_float(
     if clicked and want_pin != pinned:
         doc[name] = min(max(0.0, flo), fhi) if want_pin else None
         changed = committed = True
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(
-            "pinned: the slider value is used verbatim; unpinned: seeded auto placement"
-        )
+    item_tooltip("pinned: the slider value is used verbatim; unpinned: seeded auto placement")
     imgui.same_line()
     if doc[name] is not None:
         c, v = imgui.slider_float(label, float(doc[name]), flo, fhi)
@@ -920,10 +915,7 @@ def _draw_optional_int(
     if clicked and want_pin != pinned:
         doc[name] = ilo if want_pin else None
         changed = committed = True
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(
-            "pinned: the slider value is used verbatim; unpinned: automatic selection"
-        )
+    item_tooltip("pinned: the slider value is used verbatim; unpinned: automatic selection")
     imgui.same_line()
     if doc[name] is not None:
         c, v = imgui.slider_int(label, int(doc[name]), ilo, ihi)
@@ -956,9 +948,7 @@ def _draw_optional_enum(
     if clicked and want != overridden:
         doc[name] = options[0] if want else None
         changed = committed = True
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("overridden: this storm's value is used; off: inherit "
-                          "the global/kind default")
+    item_tooltip("overridden: this storm's value is used; off: inherit the global/kind default")
     imgui.same_line()
     if doc[name] is not None:
         current = options.index(doc[name]) if doc[name] in options else 0
@@ -994,13 +984,12 @@ def _draw_palette_rows(label: str, rows: list[dict[str, Any]]) -> tuple[bool, bo
             row["latitude"] = lat
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
-        if imgui.is_item_hovered():
-            # B2-3: the composite editors' sub-widgets have no pfield
-            # description to inherit, so they carry their own tooltips.
-            imgui.set_tooltip(
-                "Anchor latitude of this gradient row, degrees (north positive); "
-                "rows blend into each other across latitude"
-            )
+        # B2-3: the composite editors' sub-widgets have no pfield description
+        # to inherit, so they carry their own tooltips.
+        item_tooltip(
+            "Anchor latitude of this gradient row, degrees (north positive); "
+            "rows blend into each other across latitude"
+        )
         if len(rows) > 1:
             imgui.same_line()
             if imgui.small_button("remove row"):
@@ -1081,8 +1070,7 @@ def _draw_cast_field(
         imgui.text_disabled(f"{label}: {value!r}")
     if kind in _SINGLE_ITEM_KINDS:
         committed = imgui.is_item_deactivated_after_edit()
-    if info.description and imgui.is_item_hovered():
-        imgui.set_tooltip(info.description)
+    item_tooltip(info.description)
     imgui.pop_id()
     return changed, committed
 
@@ -1207,8 +1195,7 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
             stop["color"] = tuple(rgb)
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Color of this gradient stop (sRGB)")
+        item_tooltip("Color of this gradient stop (sRGB)")
         imgui.same_line()
         imgui.set_next_item_width(120.0)
         c, pos = imgui.slider_float("##p", float(stop["pos"]), 0.0, 1.0)
@@ -1216,12 +1203,11 @@ def _draw_stops(label: str, stops: list[dict[str, Any]]) -> tuple[bool, bool]:
             stop["pos"] = pos
             changed = True
         committed |= imgui.is_item_deactivated_after_edit()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "Position of this stop along the gradient: 0 = darkest belt "
-                "end, 1 = brightest zone end (for storm_tints: 0 = festoon "
-                "blue-gray end, 1 = reddest storm end)"
-            )
+        item_tooltip(
+            "Position of this stop along the gradient: 0 = darkest belt "
+            "end, 1 = brightest zone end (for storm_tints: 0 = festoon "
+            "blue-gray end, 1 = reddest storm end)"
+        )
         if len(stops) > 1:
             imgui.same_line()
             if imgui.small_button("x"):

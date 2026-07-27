@@ -62,14 +62,27 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "TID251"]
 # E702/E701 (compound statements via `;` or inline `:`) are the codebase's
 # deliberate dense numerical style (e.g. `a = np.zeros(...); a[1:] = ...`),
 # pervasive in the shallow-water reference -- enforcing them would mean rewriting
 # hundreds of intentional lines for no correctness gain.
 ignore = ["E702", "E701"]
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Tooltips must go through gasgiant.app.tooltips, which is the only place the
+# text wrap is pushed. A raw imgui tooltip call is an UNWRAPPED tooltip, and the
+# descriptions it renders reach 1303 characters. The begin_* forms are banned
+# too: a bare begin_tooltip() that forgets push_text_wrap_pos is exactly the
+# regression this guards, and banning only set_tooltip would be blind to it.
+"imgui_bundle.imgui.set_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
+"imgui_bundle.imgui.set_item_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
+"imgui_bundle.imgui.begin_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
+"imgui_bundle.imgui.begin_item_tooltip".msg = "use gasgiant.app.tooltips.item_tooltip/tooltip"
+
 [tool.ruff.lint.per-file-ignores]
+# The one module allowed to open a tooltip window -- it is where the wrap lives.
+"src/gasgiant/app/tooltips.py" = ["TID251"]
 # Tests and one-off experiment/audit scripts favour dense inline numerical
 # expressions and verbose f-string diagnostics; the 100-col limit is enforced on
 # shipped `src/` but relaxed here (low-value churn, not shipped code).

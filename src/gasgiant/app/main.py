@@ -31,6 +31,7 @@ from pydantic import ValidationError
 from gasgiant.app.panels import _TIER_GLYPHS, PanelState, draw_params_panel
 from gasgiant.app.sphere_preview import SpherePreview
 from gasgiant.app.thumbnails import ThumbnailManager
+from gasgiant.app.tooltips import item_tooltip, tooltip
 from gasgiant.app.viewport import (
     EquirectViewport,
     drag_is_noop,
@@ -1512,8 +1513,7 @@ class StudioApp:
         imgui.same_line()
         if imgui.button("Load...") and self._dialog is None:
             self._dialog = (DialogKind.LOAD, pfd.open_file("Load preset", "", ["JSON", "*.json"]))
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("load a preset .json for this session (not added to the dropdown)")
+        item_tooltip("load a preset .json for this session (not added to the dropdown)")
         imgui.same_line()
         if imgui.button("Import...") and self._dialog is None:
             # B4-5: pick a preset .json from anywhere; it is validated and
@@ -1522,11 +1522,10 @@ class StudioApp:
                 DialogKind.IMPORT,
                 pfd.open_file("Import preset", "", ["JSON", "*.json"]),
             )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "copy a preset .json into your user presets (~/.gasgiant/presets) "
-                "and load it"
-            )
+        item_tooltip(
+            "copy a preset .json into your user presets (~/.gasgiant/presets) "
+            "and load it"
+        )
         imgui.same_line()
         if imgui.button("Save..."):
             self._open_save_dialog()
@@ -1540,16 +1539,14 @@ class StudioApp:
         # kinematic mode).
         if imgui.button("Save state...") and self._dialog is None:
             self._open_save_state_dialog()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("save the current dev run as a resumable checkpoint (.npz)")
+        item_tooltip("save the current dev run as a resumable checkpoint (.npz)")
         imgui.same_line()
         if imgui.button("Load state...") and self._dialog is None:
             self._dialog = (
                 DialogKind.LOAD_STATE,
                 pfd.open_file("Load state", "", ["Checkpoint", "*.npz"]),
             )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("resume a saved checkpoint (.npz); replaces the current run")
+        item_tooltip("resume a saved checkpoint (.npz); replaces the current run")
 
         # T13: fit the latitude palette rows from a reference photo. The fitted
         # colors are baked into appearance.palette_rows (POST tier, undoable);
@@ -1562,26 +1559,28 @@ class StudioApp:
                     ["Images", "*.png *.jpg *.jpeg *.tif *.tiff", "All files", "*"],
                 ),
             )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "fit the per-latitude palette rows from a cylindrical true-color "
-                "reference photo (values are baked in; undoable)"
-            )
+        item_tooltip(
+            "fit the per-latitude palette rows from a cylindrical true-color "
+            "reference photo (values are baked in; undoable)"
+        )
 
         # T15: epoch recipes ("Scenarios") -- documented historical atmosphere
         # states expressed as small overlays on a base preset. Selecting one
         # loads the base, applies the overlay, and commits undoably.
         if self._recipe_cache:
             imgui.set_next_item_width(160.0)
-            if imgui.begin_combo("##scenario", "Scenarios..."):
+            opened = imgui.begin_combo("##scenario", "Scenarios...")
+            # Latch the combo's own hover HERE, while it is still the last-drawn
+            # item; after end_combo() this reads an item from INSIDE the popup.
+            combo_hovered = imgui.is_item_hovered()
+            if opened:
                 for stem, label, desc in self._recipe_cache:
                     if imgui.selectable(label, False)[0]:
                         self._load_recipe_entry(stem)
-                    if desc and imgui.is_item_hovered():
-                        imgui.set_tooltip(desc)
+                    item_tooltip(desc)
                 imgui.end_combo()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
+            if combo_hovered:
+                tooltip(
                     "apply an epoch recipe: a documented historical atmosphere "
                     "state overlaid on its base preset (undoable)"
                 )
@@ -1594,13 +1593,11 @@ class StudioApp:
             name, _path = user_entry
             if imgui.button(f"Save '{name}'"):
                 self._request_overwrite_active()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(f"overwrite user/{name} with the current settings (Ctrl+S)")
+            item_tooltip(f"overwrite user/{name} with the current settings (Ctrl+S)")
             imgui.same_line()
             if imgui.button("Delete##preset_row"):
                 self._request_delete_active()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(f"delete user/{name} from disk (asks first)")
+            item_tooltip(f"delete user/{name} from disk (asks first)")
 
         self._draw_seed_header_control()
 
@@ -1822,9 +1819,10 @@ class StudioApp:
         changed, value = imgui.input_int("Frames", self._seq_frames)
         if changed:
             self._seq_frames = max(1, min(9999, value))
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("1 = single map set; >1 exports an animated sequence "
-                              "into frames/ (frame 0 = the map set)")
+        item_tooltip(
+            "1 = single map set; >1 exports an animated sequence into frames/ "
+            "(frame 0 = the map set)"
+        )
         if self._seq_frames <= 1:
             imgui.text_disabled("single map set (no animation)")
             return
@@ -1832,21 +1830,17 @@ class StudioApp:
         schanged, sval = imgui.input_int("Steps per frame", self._seq_steps_per_frame)
         if schanged:
             self._seq_steps_per_frame = max(1, min(100000, sval))
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("sim steps advanced between frames (more = larger motion)")
+        item_tooltip("sim steps advanced between frames (more = larger motion)")
         _, self._seq_all_maps = imgui.checkbox("All maps per frame", self._seq_all_maps)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("also write height (and emission, when enabled) per frame, "
-                              "not just color")
+        item_tooltip("also write height (and emission, when enabled) per frame, not just color")
         ffmpeg = ffmpeg_available()
         imgui.begin_disabled(not ffmpeg)
         _, self._seq_video = imgui.checkbox("Encode mp4 (ffmpeg)", self._seq_video and ffmpeg)
         imgui.end_disabled()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "encode the color frames into sequence.mp4 via ffmpeg" if ffmpeg
-                else "ffmpeg not found on PATH — install ffmpeg to enable mp4 encoding"
-            )
+        item_tooltip(
+            "encode the color frames into sequence.mp4 via ffmpeg" if ffmpeg
+            else "ffmpeg not found on PATH — install ffmpeg to enable mp4 encoding"
+        )
         if self._seq_video and ffmpeg:
             imgui.same_line()
             imgui.set_next_item_width(90.0)
@@ -1864,9 +1858,10 @@ class StudioApp:
         _, self._restart_dev_after_export = imgui.checkbox(
             "Restart dev run after export", self._restart_dev_after_export
         )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("rebuild the live development run from the current settings "
-                              "once the export finishes, so the preview returns to normal")
+        item_tooltip(
+            "rebuild the live development run from the current settings once the "
+            "export finishes, so the preview returns to normal"
+        )
 
     def _start_export(self, out: Path) -> None:
         """Kick off the tiled export job into ``out`` (folder already picked
@@ -1924,11 +1919,10 @@ class StudioApp:
             self.toasts.error(f"could not open {self._last_export_dir}")
         imgui.same_line()
         imgui.text_disabled(f"last export: {self._last_export_dir}")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                f"{self._last_export_dir}\nImport mapset.json in Blender "
-                "(File > Import > Gas Giant Map Set)"
-            )
+        item_tooltip(
+            f"{self._last_export_dir}\nImport mapset.json in Blender "
+            "(File > Import > Gas Giant Map Set)"
+        )
 
     def _draw_pending_hint(self) -> None:
         """While a heavy (velocity/restart) edit waits for release, tell the user
@@ -2070,7 +2064,9 @@ class StudioApp:
             # Subtle hint when hovering the planet with the tool off (cheap:
             # no adopt-seeded, that's deferred).
             if inside and imgui.is_window_hovered():
-                imgui.set_tooltip("add a cast storm here to direct the seeded storms")
+                # Not item_tooltip: the trigger is a manual rect hit-test on
+                # the planet, not the last-drawn widget.
+                tooltip("add a cast storm here to direct the seeded storms")
             return
 
         if self._export is not None:
