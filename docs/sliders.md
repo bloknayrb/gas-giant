@@ -434,7 +434,7 @@ Pushes the band widths toward extremes, mixing very broad bands with thin ones. 
 
 `jets.equatorial_speed` &mdash; range **-3 to 4**, default **1.6**, tier `velocity`.
 
-Equatorial superrotation jet peak speed (negative = retrograde, flowing against the planet's rotation)
+Peak speed of the equatorial jet. Higher = a faster, more sheared equator; negative = retrograde, flowing against the planet's rotation (the superrotation jet)
 
 <table><tr>
 <td align="center"><img src="img/sliders/jets__equatorial_speed__lo.jpg" width="320"><br><sub>low &middot; -3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><img src="img/sliders/jets__equatorial_speed__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
@@ -444,7 +444,7 @@ Equatorial superrotation jet peak speed (negative = retrograde, flowing against 
 
 `jets.equatorial_width` &mdash; range **0.03 to 0.4**, default **0.12**, tier `velocity`.
 
-Equatorial jet half-width, radians of latitude (1 rad = 57.3 deg; default 0.12 rad is about 7 deg)
+How far the equatorial jet spreads in latitude. Higher = a broader, gentler equator (jet half-width, in radians of latitude; 1 rad = 57.3 deg, and the default 0.12 rad is about 7 deg)
 
 <table><tr>
 <td align="center"><img src="img/sliders/jets__equatorial_width__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/jets__equatorial_width__hi.jpg" width="320"><br><sub>high &middot; 0.4</sub></td>
@@ -484,7 +484,7 @@ Equatorward-flank jet center offset, in units of the hero CORE RADIUS (jet cente
 
 `jets.hero_bracket_north_width` &mdash; range **0.1 to 2**, default **0.8**, tier `restart`.
 
-Equatorward-flank jet gaussian half-width, in units of the hero core radius
+How wide the equatorward-flank jet spreads. Measured in units of the hero core radius, so it tracks storm size (gaussian half-width)
 
 <table><tr>
 <td align="center"><sub>low &middot; 0.1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.8</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
@@ -504,7 +504,7 @@ Carve-and-impose hero jet override: poleward-flank jet strength (positive = east
 
 `jets.hero_bracket_south_offset` &mdash; range **-4 to 0**, default **-1**, tier `restart`.
 
-Poleward-flank jet center offset, in units of the hero core radius (jet center latitude = hero_latitude + this * hero_radius)
+How far the poleward-flank jet sits from the storm center. Measured in units of the hero CORE RADIUS, so the bracket keeps straddling the storm as it is resized (jet center latitude = hero_latitude + this * hero_radius)
 
 <table><tr>
 <td align="center"><sub>low &middot; -4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; -1</sub></td><td align="center"><sub>high &middot; 0<br>(not rendered)</sub></td>
@@ -514,7 +514,7 @@ Poleward-flank jet center offset, in units of the hero core radius (jet center l
 
 `jets.hero_bracket_south_width` &mdash; range **0.1 to 2**, default **0.8**, tier `restart`.
 
-Poleward-flank jet gaussian half-width, in units of the hero core radius
+How wide the poleward-flank jet spreads. Measured in units of the hero core radius, so it tracks storm size (gaussian half-width)
 
 <table><tr>
 <td align="center"><sub>low &middot; 0.1<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.8</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>
@@ -564,7 +564,7 @@ Half-width of the local zonal jet, radians of latitude (1 rad = 57.3 deg; defaul
 
 `jets.polar_decay` &mdash; range **0 to 1**, default **0.5**, tier `velocity`.
 
-How strongly jet amplitudes decay toward the poles
+How much the jets weaken toward the poles. Higher = a calm, flat polar cap with the motion confined to low latitudes; 0 = jets just as strong at the pole
 
 <table><tr>
 <td align="center"><img src="img/sliders/jets__polar_decay__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.5</sub></td><td align="center"><img src="img/sliders/jets__polar_decay__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -574,7 +574,7 @@ How strongly jet amplitudes decay toward the poles
 
 `jets.strength` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Global zonal jet speed multiplier
+Overall speed of every east-west jet. Higher = more shear, so the bands stretch and smear faster; 0 = still air (global zonal jet speed multiplier)
 
 <table><tr>
 <td align="center"><img src="img/sliders/jets__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/jets__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1355,7 +1355,7 @@ Chromophore aging: ties color saturation to the dynamical freshness tracer (T2).
 
 `appearance.chroma_scale` &mdash; range **0 to 2**, default **1**, tier `post`.
 
-Oklab chroma multiplier on the final color (1 = off) — perceptual saturation, recommended over 'saturation' (an sRGB luma mix). No rand: adding a draw would reshuffle every later randomize draw
+How saturated the final color reads. Higher = richer color, lower = toward gray; 1 = off. Recommended over 'saturation', which is an sRGB luma mix (Oklab chroma multiplier — perceptual saturation). No rand: adding a draw would reshuffle every later randomize draw
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__chroma_scale__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/appearance__chroma_scale__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1365,7 +1365,7 @@ Oklab chroma multiplier on the final color (1 = off) — perceptual saturation, 
 
 `appearance.chroma_variance` &mdash; range **0 to 0.5**, default **0**, tier `post`.
 
-Longitudinal within-band chroma drift: bands hold pockets of more/less saturated material varying slowly with longitude (the reference's saturated-pocket texture)
+Slow saturation drift along each band, so it holds pockets of richer and duller material. Higher = more obvious pockets; 0 = off (longitudinal within-band chroma drift, varying slowly with longitude — the reference's saturated-pocket texture)
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__chroma_variance__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.35</sub></td><td align="center"><img src="img/sliders/appearance__chroma_variance__hi.jpg" width="320"><br><sub>high &middot; 0.5</sub></td>
@@ -1375,7 +1375,7 @@ Longitudinal within-band chroma drift: bands hold pockets of more/less saturated
 
 `appearance.contrast` &mdash; range **0.2 to 2**, default **1**, tier `post`.
 
-Color contrast multiplier about mid-gray
+Overall image contrast. Higher = punchier darks and brights; 1.0 = off (color contrast multiplier about mid-gray)
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__contrast__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.8</sub></td><td align="center"><img src="img/sliders/appearance__contrast__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1395,7 +1395,7 @@ Two-material tint for synthesized detail: bright detail excursions shade toward 
 
 `appearance.gamma` &mdash; range **0.4 to 2.5**, default **1**, tier `post`.
 
-Final tone-curve gamma on the color map
+Final brightness curve on the color map. Lower = brighter midtones, higher = darker; 1.0 = off (tone-curve gamma)
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__gamma__lo.jpg" width="320"><br><sub>low &middot; 0.4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/appearance__gamma__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
@@ -1405,7 +1405,7 @@ Final tone-curve gamma on the color map
 
 `appearance.haze_amount` &mdash; range **0 to 1**, default **0**, tier `post`.
 
-Global haze: the Jupiter (0) to Saturn (~0.6) axis
+Milky overhead haze washing the whole planet. Higher = softer and creamier, the Saturn end (~0.6); 0 = off, the crisp Jupiter look (the global haze axis)
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__haze_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.05</sub></td><td align="center"><img src="img/sliders/appearance__haze_amount__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -1415,7 +1415,7 @@ Global haze: the Jupiter (0) to Saturn (~0.6) axis
 
 `appearance.hue_variance` &mdash; range **0 to 0.35**, default **0**, tier `post`.
 
-Iso-luminance Oklab hue drift (radians of max rotation; 1 rad = 57.3 deg): differently-hued material at the same lightness, which a luminance-keyed palette gradient cannot express -- the hue-diversity lever the realism metrics name
+Lets neighboring material differ in hue at the same brightness. Higher = a more varied, less monotone planet; 0 = off (iso-luminance Oklab hue drift, in radians of max rotation; 1 rad = 57.3 deg). Differently-hued material at the same lightness, which a luminance-keyed palette gradient cannot express -- the hue-diversity lever the realism metrics name
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__hue_variance__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.3</sub></td><td align="center"><img src="img/sliders/appearance__hue_variance__hi.jpg" width="320"><br><sub>high &middot; 0.35</sub></td>
@@ -1435,7 +1435,7 @@ Deepens the polar cap canvas toward a dark blue-teal floor so the folded-filamen
 
 `appearance.polar_tint_start_lat` &mdash; range **30 to 80**, default **55**, tier `post`.
 
-Latitude (deg) where the polar tint begins
+Latitude where the polar tint starts to come in, in degrees. Higher = a smaller, tighter cap
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__polar_tint_start_lat__lo.jpg" width="320"><br><sub>low &middot; 30</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 56</sub></td><td align="center"><img src="img/sliders/appearance__polar_tint_start_lat__hi.jpg" width="320"><br><sub>high &middot; 80</sub></td>
@@ -1445,7 +1445,7 @@ Latitude (deg) where the polar tint begins
 
 `appearance.polar_tint_strength` &mdash; range **0 to 1**, default **0**, tier `post`.
 
-Polar tint blend strength (0 = off, the pre-v1.1 look)
+How strongly the polar cap tint is blended in. Higher = a bluer, more distinct cap; 0 = off, the pre-v1.1 look
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__polar_tint_strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.68</sub></td><td align="center"><img src="img/sliders/appearance__polar_tint_strength__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -1455,7 +1455,7 @@ Polar tint blend strength (0 = off, the pre-v1.1 look)
 
 `appearance.saturation` &mdash; range **0 to 2**, default **1**, tier `post`.
 
-sRGB saturation multiplier (luma-preserving mix toward gray); prefer chroma_scale for perceptual (Oklab) saturation
+Color intensity of the final image. Higher = more vivid, lower = toward gray; 1.0 = off. Prefer chroma_scale, which is perceptual (sRGB saturation multiplier, a luma-preserving mix toward gray; chroma_scale is the Oklab equivalent)
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__saturation__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/appearance__saturation__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>

@@ -346,20 +346,6 @@ def test_every_reported_rule_is_documented():
 # -- the baseline --------------------------------------------------------------
 
 KNOWN_VIOLATIONS: set[tuple[str, str]] = {
-    ('appearance.chroma_scale', 'E'),
-    ('appearance.chroma_variance', 'G'),
-    ('appearance.contrast', 'A'),
-    ('appearance.gamma', 'A'),
-    ('appearance.haze_amount', 'D'),
-    ('appearance.haze_amount', 'G'),
-    ('appearance.haze_color', 'A'),
-    ('appearance.hue_variance', 'E'),
-    ('appearance.hue_variance', 'G'),
-    ('appearance.palette_rows', 'A'),
-    ('appearance.polar_tint_start_lat', 'A'),
-    ('appearance.polar_tint_strength', 'A'),
-    ('appearance.saturation', 'E'),
-    ('appearance.storm_tints', 'A'),
     ('detail.belt_texture', 'G'),
     ('detail.belt_texture_fine', 'G'),
     ('detail.cellular_amount', 'A'),
@@ -376,13 +362,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('detail.polar_stipple', 'G'),
     ('detail.striation_amount', 'A'),
     ('detail.striation_frequency', 'A'),
-    ('jets.equatorial_speed', 'A'),
-    ('jets.equatorial_width', 'A'),
-    ('jets.hero_bracket_north_width', 'A'),
-    ('jets.hero_bracket_south_offset', 'A'),
-    ('jets.hero_bracket_south_width', 'A'),
-    ('jets.polar_decay', 'A'),
-    ('jets.strength', 'A'),
     ('storms.accent_count', 'D'),
     ('storms.barge_density', 'A'),
     ('storms.cast', 'D'),
@@ -418,8 +397,8 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
 #: prefix of anything -- the single most consequential measurement behind the
 #: rubric, since rules D and E would otherwise mean different things on
 #: different fields for ten waves.
-REMAINING_BY_RULE = {"A": 34, "B": 2, "C": 1, "D": 3, "E": 8, "G": 11}
-REMAINING_FIELDS = 50
+REMAINING_BY_RULE = {"A": 20, "B": 2, "C": 1, "D": 2, "E": 5, "G": 8}
+REMAINING_FIELDS = 31
 
 
 def test_the_remaining_debt_is_pinned():

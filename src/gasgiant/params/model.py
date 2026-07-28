@@ -455,21 +455,28 @@ class SimParams(_Params):
 class JetsParams(_Params):
     strength: float = pfield(
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.6, 1.6), ui="Jets",
-        description="Global zonal jet speed multiplier",
+        description="Overall speed of every east-west jet. Higher = more "
+                    "shear, so the bands stretch and smear faster; 0 = still "
+                    "air (global zonal jet speed multiplier)",
     )
     equatorial_speed: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=-3.0, hi=4.0, rand=(0.5, 2.5), ui="Jets",
-        description="Equatorial superrotation jet peak speed (negative ="
-                    " retrograde, flowing against the planet's rotation)",
+        description="Peak speed of the equatorial jet. Higher = a faster, more "
+                    "sheared equator; negative = retrograde, flowing against "
+                    "the planet's rotation (the superrotation jet)",
     )
     equatorial_width: float = pfield(
         0.12, tier=Tier.VELOCITY, lo=0.03, hi=0.4, rand=(0.07, 0.25), ui="Jets",
-        description="Equatorial jet half-width, radians of latitude"
-                    " (1 rad = 57.3 deg; default 0.12 rad is about 7 deg)",
+        description="How far the equatorial jet spreads in latitude. Higher = "
+                    "a broader, gentler equator (jet half-width, in radians of "
+                    "latitude; 1 rad = 57.3 deg, and the default 0.12 rad is "
+                    "about 7 deg)",
     )
     polar_decay: float = pfield(
         0.5, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Jets",
-        description="How strongly jet amplitudes decay toward the poles",
+        description="How much the jets weaken toward the poles. Higher = a "
+                    "calm, flat polar cap with the motion confined to low "
+                    "latitudes; 0 = jets just as strong at the pole",
     )
     local_jet_speed: float = pfield(
         0.0, tier=Tier.RESTART, lo=-3.0, hi=3.0, adv=True, ui="Jets",
@@ -523,8 +530,10 @@ class JetsParams(_Params):
     )
     hero_bracket_south_offset: float = pfield(
         -1.0, tier=Tier.RESTART, lo=-4.0, hi=0.0, adv=True, ui="Hero Bracket",
-        description="Poleward-flank jet center offset, in units of the hero core radius "
-                    "(jet center latitude = hero_latitude + this * hero_radius)",
+        description="How far the poleward-flank jet sits from the storm "
+                    "center. Measured in units of the hero CORE RADIUS, so the "
+                    "bracket keeps straddling the storm as it is resized (jet "
+                    "center latitude = hero_latitude + this * hero_radius)",
     )
     hero_bracket_window: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=4.0, adv=True, ui="Hero Bracket",
@@ -539,13 +548,15 @@ class JetsParams(_Params):
     )
     hero_bracket_north_width: float = pfield(
         0.8, tier=Tier.RESTART, lo=0.1, hi=2.0, adv=True, ui="Hero Bracket",
-        description="Equatorward-flank jet gaussian half-width, in units of the hero core "
-                    "radius",
+        description="How wide the equatorward-flank jet spreads. Measured in "
+                    "units of the hero core radius, so it tracks storm size "
+                    "(gaussian half-width)",
     )
     hero_bracket_south_width: float = pfield(
         0.8, tier=Tier.RESTART, lo=0.1, hi=2.0, adv=True, ui="Hero Bracket",
-        description="Poleward-flank jet gaussian half-width, in units of the hero core "
-                    "radius",
+        description="How wide the poleward-flank jet spreads. Measured in "
+                    "units of the hero core radius, so it tracks storm size "
+                    "(gaussian half-width)",
     )
 
 
@@ -1848,13 +1859,17 @@ class PolesParams(_Params):
 class AppearanceParams(_Params):
     palette_rows: list[PaletteRow] = pfield(
         factory=default_palette_rows, tier=Tier.POST, ui="Appearance",
-        description="Latitude-anchored color gradients indexed by the color tracer "
-                    "(belt dark -> zone bright), blended across signed latitude",
+        description="The planet's color gradients, one per latitude anchor. "
+                    "Each row runs belt dark -> zone bright and is indexed by "
+                    "the color tracer. Rows blend across SIGNED latitude, so a "
+                    "row placed in one hemisphere must be mirrored to act in "
+                    "the other",
     )
     storm_tints: list[GradientStop] = pfield(
         factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_STORM_TINTS],
         tier=Tier.POST, adv=True, ui="Appearance",
-        description="Secondary tint axis for storms/festoons/hot spots",
+        description="Colors for storms, festoons and hot spots. A secondary "
+                    "tint axis, separate from the band palette rows",
     )
     band_tint_stops: list[GradientStop] = pfield(
         factory=lambda: [s.model_copy(deep=True) for s in DEFAULT_BAND_TINT],
@@ -1874,43 +1889,57 @@ class AppearanceParams(_Params):
     )
     haze_amount: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.7), ui="Appearance",
-        description="Global haze: the Jupiter (0) to Saturn (~0.6) axis",
+        description="Milky overhead haze washing the whole planet. Higher = "
+                    "softer and creamier, the Saturn end (~0.6); 0 = off, the "
+                    "crisp Jupiter look (the global haze axis)",
     )
     haze_color: tuple[float, float, float] = pfield(
         (0.85, 0.78, 0.62), tier=Tier.POST, ui="Appearance",
-        description="Tint of the global haze blend (see haze_amount)",
+        description="Color of the global haze. Only visible once haze_amount "
+                    "is above 0 (see haze_amount)",
     )
     contrast: float = pfield(
         1.0, tier=Tier.POST, lo=0.2, hi=2.0, rand=(0.8, 1.2), ui="Appearance",
-        description="Color contrast multiplier about mid-gray",
+        description="Overall image contrast. Higher = punchier darks and "
+                    "brights; 1.0 = off (color contrast multiplier about "
+                    "mid-gray)",
     )
     saturation: float = pfield(
         1.0, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.7, 1.2), ui="Appearance",
-        description="sRGB saturation multiplier (luma-preserving mix toward gray); "
-                    "prefer chroma_scale for perceptual (Oklab) saturation",
+        description="Color intensity of the final image. Higher = more vivid, "
+                    "lower = toward gray; 1.0 = off. Prefer chroma_scale, "
+                    "which is perceptual (sRGB saturation multiplier, a "
+                    "luma-preserving mix toward gray; chroma_scale is the "
+                    "Oklab equivalent)",
     )
     gamma: float = pfield(
         1.0, tier=Tier.POST, lo=0.4, hi=2.5, ui="Appearance",
-        description="Final tone-curve gamma on the color map",
+        description="Final brightness curve on the color map. Lower = brighter "
+                    "midtones, higher = darker; 1.0 = off (tone-curve gamma)",
     )
     chroma_scale: float = pfield(
         1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Appearance",
-        description="Oklab chroma multiplier on the final color (1 = off) — "
-                    "perceptual saturation, recommended over 'saturation' "
-                    "(an sRGB luma mix). No rand: adding a draw would "
-                    "reshuffle every later randomize draw",
+        description="How saturated the final color reads. Higher = richer "
+                    "color, lower = toward gray; 1 = off. Recommended over "
+                    "'saturation', which is an sRGB luma mix (Oklab chroma "
+                    "multiplier — perceptual saturation). No rand: adding a "
+                    "draw would reshuffle every later randomize draw",
     )
     chroma_variance: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=0.5, adv=True, ui="Appearance",
-        description="Longitudinal within-band chroma drift: bands hold pockets "
-                    "of more/less saturated material varying slowly with "
-                    "longitude (the reference's saturated-pocket texture)",
+        description="Slow saturation drift along each band, so it holds "
+                    "pockets of richer and duller material. Higher = more "
+                    "obvious pockets; 0 = off (longitudinal within-band chroma "
+                    "drift, varying slowly with longitude — the reference's "
+                    "saturated-pocket texture)",
     )
     hue_variance: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=0.35, adv=True, ui="Appearance",
-        description="Iso-luminance Oklab hue drift (radians of max rotation; "
-                    "1 rad = 57.3 deg): "
-                    "differently-hued material at the same lightness, which a "
+        description="Lets neighboring material differ in hue at the same "
+                    "brightness. Higher = a more varied, less monotone "
+                    "planet; 0 = off (iso-luminance Oklab hue drift, in "
+                    "radians of max rotation; 1 rad = 57.3 deg). "
+                    "Differently-hued material at the same lightness, which a "
                     "luminance-keyed palette gradient cannot express -- the "
                     "hue-diversity lever the realism metrics name",
     )
@@ -1943,11 +1972,13 @@ class AppearanceParams(_Params):
     )
     polar_tint_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.2, 0.7), adv=True, ui="Appearance",
-        description="Polar tint blend strength (0 = off, the pre-v1.1 look)",
+        description="How strongly the polar cap tint is blended in. Higher = a "
+                    "bluer, more distinct cap; 0 = off, the pre-v1.1 look",
     )
     polar_tint_start_lat: float = pfield(
         55.0, tier=Tier.POST, lo=30.0, hi=80.0, adv=True, ui="Appearance",
-        description="Latitude (deg) where the polar tint begins",
+        description="Latitude where the polar tint starts to come in, in "
+                    "degrees. Higher = a smaller, tighter cap",
     )
     polar_canvas_value: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, rand=(0.0, 0.5), adv=True, ui="Appearance",
