@@ -720,7 +720,7 @@ Accent oval brightness (T0); negative = dark oval. Applied verbatim — accents 
 
 `storms.accent_count` &mdash; range **0 to 2**, default **0**, tier `restart`.
 
-Accent ovals: KIND_OVAL storms with EXPLICIT color (the Oval BA 'second red spot' unlock — a red oval beside the white population). Seeded on their own substream after the population cap, so the base storm field is untouched; count=2 places a pair at offset longitudes with identical appearance. 0 = off (byte-identical)
+Places accent ovals — KIND_OVAL storms with an EXPLICIT color, the Oval BA 'second red spot' unlock (a red oval beside the white population). Seeded on their own substream after the population cap, so the base storm field is untouched; count=2 places a pair at offset longitudes with identical appearance. 0 = off (byte-identical)
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/storms__accent_count__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -766,7 +766,7 @@ Accent oval tint (T3): positive = warm/red end of the storm_tints gradient (Oval
 
 `storms.barge_density` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
-Brown-barge cyclone population multiplier (belts)
+How many brown barges populate the belts. Higher = more of these dark elongated cyclones; 0 = none (brown-barge cyclone population multiplier)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__barge_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2.989</sub></td><td align="center"><img src="img/sliders/storms__barge_density__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -776,7 +776,7 @@ Brown-barge cyclone population multiplier (belts)
 
 `storms.cast` &mdash; list editor, default **empty list**, tier `restart`.
 
-Cast list: storms placed by hand (kind + rendered position + size + optional color). Each entry is stamped verbatim after the seeded populations, exempt from the population cap and runtime mergers, so a director's storm survives the whole run where it was placed. Empty (the default) = no cast, byte-identical to the seeded-only field. Capped at 16 entries
+Cast list — storms placed by hand: kind, rendered position, size, and optional color. Each entry is stamped verbatim after the seeded populations, exempt from the population cap and runtime mergers, so a director's storm survives the whole run where it was placed. Empty (the default) = no cast, byte-identical to the seeded-only field. Capped at 16 entries
 
 _List of hand-placed sub-records edited in a dedicated GUI panel &mdash; documented as text; no rendered example._
 
@@ -834,7 +834,7 @@ Bright companion clouds pinned beside each hero storm (Neptune GDS companion / S
 
 `storms.hero_count` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
-Giant anticyclones of Great Red Spot (GRS) class — the planet-dominating bright/red oval storms (co-rotates with the local ambient shear vorticity of the zone it sits in, which is what lets it persist against differential shear instead of getting torn apart)
+How many Great Red Spot (GRS) class storms to place. These are the giant, planet-dominating bright/red oval anticyclones; 0 = none (each co-rotates with the local ambient shear vorticity of the zone it sits in, which is what lets it persist against differential shear instead of getting torn apart)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -890,7 +890,7 @@ Turbulent interior churn inside hero storms: a flow-scale fbm breaks up the smoo
 
 `storms.hero_radius` &mdash; range **0.03 to 0.25**, default **0.1**, tier `restart`.
 
-Hero vortex core radius, radians of arc (1 rad = 57.3 deg; default 0.10 rad is about 5.7 deg — GRS-scale)
+How big the hero storm's core is. Higher = a larger spot, and the hero jet bracket scales with it (hero vortex core radius, in radians of arc; 1 rad = 57.3 deg, and the default 0.10 rad is about 5.7 deg — GRS-scale)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_radius__lo.jpg" width="320"><br><sub>low &middot; 0.03</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.15</sub></td><td align="center"><img src="img/sliders/storms__hero_radius__hi.jpg" width="320"><br><sub>high &middot; 0.25</sub></td>
@@ -930,7 +930,7 @@ Low-order deformation of the hero's outline away from a perfect ellipse: equator
 
 `storms.hero_shape_seed` &mdash; range **0 to 99999**, default **0**, tier `restart`.
 
-Re-rolls the hero's seeded shape lobes on their own substream of the master seed — changing it never perturbs any other seeded draw
+Re-rolls the hero's seeded shape lobes. Change it to try a different silhouette; it runs on its own substream of the master seed, so changing it never perturbs any other seeded draw
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 99999<br>(not rendered)</sub></td>
@@ -950,7 +950,7 @@ Solid-body hero rotation (vorticity mode): blends the hero's vorticity from the 
 
 `storms.hero_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
-GRS-class hero storm vorticity amplitude
+How strongly the hero storm spins. Higher = a tighter, faster-whirling spot; 0 = a still stamp (GRS-class hero storm vorticity amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -960,7 +960,7 @@ GRS-class hero storm vorticity amplitude
 
 `storms.hero_taper` &mdash; range **0 to 1.5**, default **0**, tier `restart`.
 
-Upstream-end wedge taper: the reference GRS's boundary converges toward a point on the side the flow arrives from (measured 20-40% of local radius), while the wake end stays blunt. Deterministic (no seed), follows hero_wake_dir, deepest at ~35 deg off the upstream tip in the aspect-squashed frame (physically closer to the tip on an elongated hero — ~14 deg at aspect 2.9); the tip, the flanks and the whole downstream half are untouched. Inert wherever a hero's EFFECTIVE emergence is 0 (the global, or that storm's own override)
+Upstream-end wedge taper: the reference GRS's boundary converges toward a point on the side the flow arrives from (measured 20-40% of local radius), while the wake end stays blunt. Higher = a sharper wedge; 0 = off. Deterministic (no seed), follows hero_wake_dir, deepest at ~35 deg off the upstream tip in the aspect-squashed frame (physically closer to the tip on an elongated hero — ~14 deg at aspect 2.9); the tip, the flanks and the whole downstream half are untouched. Inert wherever a hero's EFFECTIVE emergence is 0 (the global, or that storm's own override)
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 1.5<br>(not rendered)</sub></td>
@@ -1008,7 +1008,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 `storms.merge_debris` &mdash; range **0 to 2**, default **1**, tier `restart`.
 
-Brightness of the transient turbulent collar a fresh merger leaves behind (inert while merge_rate is 0)
+How bright the transient turbulent collar is that a fresh merger leaves behind. Higher = a more visible scar; inert while merge_rate is 0
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__merge_debris__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__merge_debris__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1028,7 +1028,7 @@ Anticyclone merger aggressiveness: converging same-sign ovals coalesce when thei
 
 `storms.outbreak_count` &mdash; range **0 to 3**, default **0**, tier `restart`.
 
-Convective outbreaks (Great-White-Spot events) during the development run
+How many convective outbreaks erupt during the development run. Higher = more; 0 = off (Great-White-Spot events)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__outbreak_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__outbreak_count__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1072,7 +1072,7 @@ _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps 
 
 `storms.outbreak_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
-Convective outbreak vorticity amplitude
+How violently each outbreak erupts. Higher = a bigger, brighter plume; 0 = a color-only mark (convective outbreak vorticity amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__outbreak_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__outbreak_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1082,7 +1082,7 @@ Convective outbreak vorticity amplitude
 
 `storms.oval_density` &mdash; range **0 to 4**, default **1**, tier `restart`.
 
-White-oval anticyclone population multiplier
+How many white ovals populate the zones. Higher = a more crowded field of these bright anticyclones; 0 = none (white-oval population multiplier)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__oval_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
@@ -1102,7 +1102,7 @@ Solid-body rotation for LARGE white ovals (vorticity mode): the same anti-whirlp
 
 `storms.pearls_count` &mdash; range **0 to 14**, default **7**, tier `restart`.
 
-String-of-pearls ovals on one seeded latitude (0 = off)
+How many string-of-pearls ovals sit on one seeded latitude. Higher = a longer chain; 0 = off
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__pearls_count__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td>
@@ -1132,7 +1132,7 @@ Small-storm field: sub-oval white spots and dark spots scattered in loose latitu
 
 `storms.stamp_contrast` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
-Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)
+How strongly the small storms stamp into the tracer. Higher = crisper ovals, barges and pearls against the band; 1 = the v1 look (tracer-stamp contrast)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__stamp_contrast__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/storms__stamp_contrast__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1150,7 +1150,7 @@ _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps 
 
 `storms.wake_turbulence` &mdash; range **0 to 5**, default **1.8**, tier `restart`.
 
-Turbulence boost in the wake wedge downstream of hero storms
+Extra churn in the wake wedge downstream of the hero storm. Higher = a rougher, more disturbed trail; 1.0 = no boost (turbulence boost)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__wake_turbulence__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/storms__wake_turbulence__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>

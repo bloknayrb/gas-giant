@@ -19,10 +19,18 @@ turned out to need a correction:
 So the rule here is: a number the audit depends on is either derived from the
 model or asserted as a pinned set. It is never left in a docstring.
 
-``KNOWN_VIOLATIONS`` is the baseline of copy that does not yet satisfy the
-rubric. Each wave of the audit deletes entries from it. Set EQUALITY is
-deliberate -- a plain subset check cannot tell "wave 5 fixed this" from "wave 5
-never touched this", and the audit's main risk is a wave silently under-scoping.
+``KNOWN_VIOLATIONS`` was the baseline of copy that did not yet satisfy the
+rubric; each wave of the audit deleted entries from it, and it is now EMPTY.
+Set EQUALITY is deliberate -- a plain subset check cannot tell "wave 5 fixed
+this" from "wave 5 never touched this", and the audit's main risk was a wave
+silently under-scoping. Empty, the same assertion becomes the standing gate: a
+new pfield whose description misses any rule fails here.
+
+What this file CANNOT check is whether a rewrite kept the words that carry the
+design. That is ``test_description_findability.py``, and it is the one that
+actually caught things during the audit -- a rubric-clean rewrite dropped
+"0.32", another dropped the word "turbulence" from four fields in the
+Turbulence section. Shape and substance need separate guards.
 
 Run this module as a script to regenerate the ``KNOWN_VIOLATIONS`` literal.
 """
@@ -118,8 +126,9 @@ def split_headline(text: str) -> tuple[str, bool]:
 
     ``is_proper_prefix`` is False when no delimiter exists, i.e. the whole
     description IS the headline. That is a rubric violation (rule A), not an
-    error, and it is by far the largest class in the baseline -- see
-    ``REMAINING_BY_RULE`` for the count.
+    error -- it was the largest class in the audit's opening baseline by a wide
+    margin (see ``REMAINING_BY_RULE``), which is why this function returns the
+    flag rather than raising on it.
     """
     depth = 0
     for i, ch in enumerate(text):
@@ -345,44 +354,23 @@ def test_every_reported_rule_is_documented():
 
 # -- the baseline --------------------------------------------------------------
 
-KNOWN_VIOLATIONS: set[tuple[str, str]] = {
-    ('storms.accent_count', 'D'),
-    ('storms.barge_density', 'A'),
-    ('storms.cast', 'D'),
-    ('storms.cast.aspect', 'B'),
-    ('storms.cast.companion_aspect', 'B'),
-    ('storms.cast.strength_scale', 'E'),
-    ('storms.hero_count', 'A'),
-    ('storms.hero_count', 'C'),
-    ('storms.hero_radius', 'A'),
-    ('storms.hero_shape_seed', 'A'),
-    ('storms.hero_strength', 'A'),
-    ('storms.hero_strength', 'E'),
-    ('storms.hero_taper', 'G'),
-    ('storms.merge_debris', 'A'),
-    ('storms.outbreak_count', 'A'),
-    ('storms.outbreak_count', 'G'),
-    ('storms.outbreak_strength', 'A'),
-    ('storms.outbreak_strength', 'E'),
-    ('storms.oval_density', 'A'),
-    ('storms.pearls_count', 'A'),
-    ('storms.stamp_contrast', 'A'),
-    ('storms.wake_turbulence', 'A'),
-}
+KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 
-#: The debt still outstanding, per rule. UPDATE THIS EVERY WAVE -- it is the one
-#: line in a wave's diff that states what the wave actually bought, as a number
-#: rather than as a 100-element set difference.
+#: The debt still outstanding, per rule. EMPTY -- the audit cleared the corpus,
+#: so this and ``KNOWN_VIOLATIONS`` are now a plain "every description satisfies
+#: every rule" gate, and a NEW pfield whose copy misses will fail both.
 #:
-#: At Wave 0 it was ``{"A": 82, "B": 2, "C": 1, "D": 5, "E": 21, "G": 22}``
-#: over 111 fields. Rule A dominated at 82 of 226: for better than a third of
-#: the corpus the description was ONE sentence, so "the headline" was not a
-#: prefix of anything -- the single most consequential measurement behind the
-#: rubric, since rules D and E would otherwise mean different things on
+#: Kept as a named constant rather than folded into the assertion because it was
+#: the audit's progress meter and is the natural place to record where it
+#: started: ``{"A": 82, "B": 2, "C": 1, "D": 5, "E": 21, "G": 22}`` over 111 of
+#: 226 fields. Rule A dominated at 82 -- for better than a third of the corpus
+#: the description was ONE sentence, so "the headline" was not a prefix of
+#: anything. That was the single most consequential measurement behind the
+#: rubric: without it rules D and E would have meant different things on
 #: different fields for ten waves.
-REMAINING_BY_RULE = {"A": 12, "B": 2, "C": 1, "D": 2, "E": 3, "G": 2}
-REMAINING_FIELDS = 18
+REMAINING_BY_RULE: dict[str, int] = {}
+REMAINING_FIELDS = 0
 
 
 def test_the_remaining_debt_is_pinned():
@@ -492,7 +480,14 @@ def test_wave_sizes_are_pinned():
 
 
 if __name__ == "__main__":  # regenerate the KNOWN_VIOLATIONS literal
-    print("KNOWN_VIOLATIONS: set[tuple[str, str]] = {")
-    for pair in sorted(measure()):
-        print(f"    {pair!r},")
-    print("}")
+    pairs = sorted(measure())
+    if not pairs:
+        # ``{}`` is an empty DICT, not an empty set -- and a dict baseline
+        # compares unequal to every set, so the emitted file would fail on the
+        # one outcome the audit is aiming for.
+        print("KNOWN_VIOLATIONS: set[tuple[str, str]] = set()")
+    else:
+        print("KNOWN_VIOLATIONS: set[tuple[str, str]] = {")
+        for pair in pairs:
+            print(f"    {pair!r},")
+        print("}")

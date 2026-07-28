@@ -715,10 +715,11 @@ class StormOverride(_Params):
     )
     strength_scale: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, ui="Cast",
-        description="Multiplier on the per-kind base vorticity law: hero "
-                    "0.045*hero_strength, oval 0.012*(radius/0.03), barge "
-                    "-0.006, pearl 0.008. 1.0 = the kind's default strength; "
-                    "0 = a color-only stamp with no circulation",
+        description="How strongly this storm spins, next to others of its "
+                    "kind. 1.0 = the kind's default strength; 0 = a "
+                    "color-only stamp with no circulation (multiplier on the "
+                    "per-kind base vorticity law: hero 0.045*hero_strength, "
+                    "oval 0.012*(radius/0.03), barge -0.006, pearl 0.008)",
     )
     tint: float | None = pfield(
         None, tier=Tier.RESTART, lo=-1.0, hi=1.0, ui="Cast",
@@ -736,8 +737,9 @@ class StormOverride(_Params):
     )
     aspect: float = pfield(
         1.0, tier=Tier.RESTART, lo=1.0, hi=3.0, ui="Cast",
-        description="lon:lat elongation of the stamp (1.0 = round). Stretches "
-                    "the iso-contours along longitude, like hero_aspect",
+        description="Elongation of the stamp, lon:lat. 1.0 = round; higher = "
+                    "stretched along longitude, like hero_aspect (stretches "
+                    "the iso-contours)",
     )
     # -- hero-only per-storm levers (inert on oval/barge/pearl kinds) ------
     wake_dir: WakeDir | None = pfield(
@@ -755,8 +757,8 @@ class StormOverride(_Params):
     )
     companion_aspect: float | None = pfield(
         None, tier=Tier.RESTART, lo=1.0, hi=5.0, adv=True, ui="Companions",
-        description="lon:lat elongation of this hero's companion pearls. None "
-                    "inherits the global storms.companion_aspect",
+        description="Elongation of this hero's companion pearls, lon:lat. "
+                    "None inherits the global storms.companion_aspect",
     )
     companion_brightness: float | None = pfield(
         None, tier=Tier.RESTART, lo=0.0, hi=0.8, adv=True, ui="Companions",
@@ -903,20 +905,26 @@ class StormsParams(_Params):
     # -- Hero -----------------------------------------------------------
     hero_count: int = pfield(
         1, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), ui="Hero",
-        description="Giant anticyclones of Great Red Spot (GRS) class — the"
-                    " planet-dominating bright/red oval storms (co-rotates with"
+        description="How many Great Red Spot (GRS) class storms to place. "
+                    "These are the giant, planet-dominating bright/red oval "
+                    "anticyclones; 0 = none (each co-rotates with"
                     " the local ambient shear vorticity of the zone it sits in,"
                     " which is what lets it persist against differential shear"
                     " instead of getting torn apart)",
     )
     hero_radius: float = pfield(
         0.10, tier=Tier.RESTART, lo=0.03, hi=0.25, rand=(0.06, 0.16), ui="Hero",
-        description="Hero vortex core radius, radians of arc (1 rad = 57.3"
-                    " deg; default 0.10 rad is about 5.7 deg — GRS-scale)",
+        description="How big the hero storm's core is. Higher = a larger "
+                    "spot, and the hero jet bracket scales with it (hero "
+                    "vortex core radius, in radians of arc; 1 rad = 57.3"
+                    " deg, and the default 0.10 rad is about 5.7 deg — "
+                    "GRS-scale)",
     )
     hero_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Hero",
-        description="GRS-class hero storm vorticity amplitude",
+        description="How strongly the hero storm spins. Higher = a tighter, "
+                    "faster-whirling spot; 0 = a still stamp (GRS-class hero "
+                    "storm vorticity amplitude)",
     )
     hero_latitude: float | None = pfield(
         None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Hero",
@@ -1047,7 +1055,9 @@ class StormsParams(_Params):
     )
     wake_turbulence: float = pfield(
         1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), adv=True, ui="Hero",
-        description="Turbulence boost in the wake wedge downstream of hero storms",
+        description="Extra churn in the wake wedge downstream of the hero "
+                    "storm. Higher = a rougher, more disturbed trail; 1.0 = "
+                    "no boost (turbulence boost)",
     )
     hero_tint: float = pfield(
         0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Hero",
@@ -1110,8 +1120,9 @@ class StormsParams(_Params):
     )
     hero_shape_seed: int = pfield(
         0, tier=Tier.RESTART, lo=0, hi=99999, adv=True, ui="Hero",
-        description="Re-rolls the hero's seeded shape lobes on their own "
-                    "substream of the master seed — changing it never "
+        description="Re-rolls the hero's seeded shape lobes. Change it to try "
+                    "a different silhouette; it runs on its own substream of "
+                    "the master seed, so changing it never "
                     "perturbs any other seeded draw",
     )
     hero_taper: float = pfield(
@@ -1119,7 +1130,8 @@ class StormsParams(_Params):
         description="Upstream-end wedge taper: the reference GRS's boundary "
                     "converges toward a point on the side the flow arrives "
                     "from (measured 20-40% of local radius), while the wake "
-                    "end stays blunt. Deterministic (no seed), follows "
+                    "end stays blunt. Higher = a sharper wedge; 0 = off. "
+                    "Deterministic (no seed), follows "
                     "hero_wake_dir, deepest at ~35 deg off the upstream tip "
                     "in the aspect-squashed frame (physically closer to the "
                     "tip on an elongated hero — ~14 deg at aspect 2.9); "
@@ -1146,7 +1158,9 @@ class StormsParams(_Params):
     # -- Ovals ------------------------------------------------------------
     oval_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=4.0, rand=(0.4, 1.8), ui="Ovals",
-        description="White-oval anticyclone population multiplier",
+        description="How many white ovals populate the zones. Higher = a more "
+                    "crowded field of these bright anticyclones; 0 = none "
+                    "(white-oval population multiplier)",
     )
     oval_solid_core: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Ovals",
@@ -1167,9 +1181,10 @@ class StormsParams(_Params):
     # A01): a shared scalar group — count 0-2, one latitude, one appearance.
     accent_count: int = pfield(
         0, tier=Tier.RESTART, lo=0, hi=2, adv=True, ui="Accents",
-        description="Accent ovals: KIND_OVAL storms with EXPLICIT color (the "
-                    "Oval BA 'second red spot' unlock — a red oval beside the "
-                    "white population). Seeded on their own substream after the "
+        description="Places accent ovals — KIND_OVAL storms with an EXPLICIT "
+                    "color, the Oval BA 'second red spot' unlock (a red oval "
+                    "beside the white population). Seeded on their own "
+                    "substream after the "
                     "population cap, so the base storm field is untouched; "
                     "count=2 places a pair at offset longitudes with identical "
                     "appearance. 0 = off (byte-identical)",
@@ -1222,23 +1237,30 @@ class StormsParams(_Params):
     # -- Barges -------------------------------------------------------------
     barge_density: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.3, 1.5), ui="Barges",
-        description="Brown-barge cyclone population multiplier (belts)",
+        description="How many brown barges populate the belts. Higher = more "
+                    "of these dark elongated cyclones; 0 = none (brown-barge "
+                    "cyclone population multiplier)",
     )
 
     # -- Pearls -------------------------------------------------------------
     pearls_count: int = pfield(
         7, tier=Tier.RESTART, lo=0, hi=14, rand=(0, 9), ui="Pearls",
-        description="String-of-pearls ovals on one seeded latitude (0 = off)",
+        description="How many string-of-pearls ovals sit on one seeded "
+                    "latitude. Higher = a longer chain; 0 = off",
     )
 
     # -- Outbreaks ------------------------------------------------------
     outbreak_count: int = pfield(
         0, tier=Tier.RESTART, lo=0, hi=3, rand=(0, 2), adv=True, ui="Outbreaks",
-        description="Convective outbreaks (Great-White-Spot events) during the development run",
+        description="How many convective outbreaks erupt during the "
+                    "development run. Higher = more; 0 = off "
+                    "(Great-White-Spot events)",
     )
     outbreak_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, adv=True, ui="Outbreaks",
-        description="Convective outbreak vorticity amplitude",
+        description="How violently each outbreak erupts. Higher = a bigger, "
+                    "brighter plume; 0 = a color-only mark (convective "
+                    "outbreak vorticity amplitude)",
     )
     outbreak_latitude: float | None = pfield(
         None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Outbreaks",
@@ -1288,7 +1310,9 @@ class StormsParams(_Params):
     )
     stamp_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.8, 1.3), adv=True, ui="Small storms",
-        description="Tracer-stamp contrast of ovals/barges/pearls/small storms (1 = v1)",
+        description="How strongly the small storms stamp into the tracer. "
+                    "Higher = crisper ovals, barges and pearls against the "
+                    "band; 1 = the v1 look (tracer-stamp contrast)",
     )
     stamp_tint_contrast: float | None = pfield(
         None, tier=Tier.RESTART, lo=0.0, hi=3.0, adv=True, ui="Small storms",
@@ -1310,15 +1334,17 @@ class StormsParams(_Params):
     )
     merge_debris: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, adv=True, ui="Mergers",
-        description="Brightness of the transient turbulent collar a fresh "
-                    "merger leaves behind (inert while merge_rate is 0)",
+        description="How bright the transient turbulent collar is that a "
+                    "fresh merger "
+                    "leaves behind. Higher = a more visible scar; inert while "
+                    "merge_rate is 0",
     )
 
     # -- Cast (art-directed storms) ----------------------------------------
     cast: list[StormOverride] = pfield(
         factory=list, tier=Tier.RESTART, adv=True, ui="Cast",
-        description="Cast list: storms placed by hand (kind + rendered "
-                    "position + size + optional color). Each entry is stamped "
+        description="Cast list — storms placed by hand: kind, rendered "
+                    "position, size, and optional color. Each entry is stamped "
                     "verbatim after the seeded populations, exempt from the "
                     "population cap and runtime mergers, so a director's storm "
                     "survives the whole run where it was placed. Empty (the "
