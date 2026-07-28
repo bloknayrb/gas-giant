@@ -156,9 +156,6 @@ def _defaults_baseline() -> dict[str, Any]:
     return _DEFAULTS_BASELINE
 
 
-# One-line blurbs for the header (?) markers, keyed by the top-level
-# PlanetParams field name. Not exhaustive of every nested section -- only the
-# direct top-level sections, per the Phase 3 spec.
 #: One line per top-level params section, shown behind the (?) beside its
 #: header. This is the first text an artist reads while scanning for the right
 #: panel, so it says what the section CHANGES, not what it is implemented with.
@@ -177,7 +174,8 @@ _SECTION_BLURBS: dict[str, str] = {
     "storms": "Discrete storms, including the hero (Great-Red-Spot-style) vortex.",
     "waves": "Rippling wave trains along the band edges: festoons, their hot "
     "spots, and the Saturn ribbon.",
-    "poles": "What sits over each pole, and how the cap is colored.",
+    "poles": "What sits over each pole: a cyclone cluster, a polygonal "
+    "jet, or nothing. Cap COLOR lives in Appearance.",
     "appearance": "The final grade -- palette, contrast, saturation and tone.",
     "detail": "Fine texture synthesized over the planet at render time, folded "
     "along the flow.",

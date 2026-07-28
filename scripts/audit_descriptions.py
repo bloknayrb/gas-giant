@@ -1,7 +1,7 @@
-"""Token-diff a wave of the description copy audit against its base revision.
+"""Token-diff the artist-facing descriptions against a base revision.
 
-The audit rewrites 226 artist-facing descriptions in ten waves. Its dominant
-risk is not a bad sentence -- it is a rewrite that quietly drops a word the
+The copy audit went over all 226 of them and rewrote 107. Its dominant risk
+was never a bad sentence -- it is a rewrite that quietly drops a word the
 design depends on. That has already happened twice during PLANNING alone: a
 draft rewrite of ``storms.hero_emergence`` lost "partial", the one word
 separating the shipped shield from a design this project's record marks
@@ -12,11 +12,11 @@ the SHAPE of a headline, and both rewrites were shapely. So this script diffs
 the TOKENS instead, and reports every word a wave removed.
 
 It is a review aid, not a gate -- it prints, and only exits non-zero when asked
-to. Run it per wave, read the dropped tokens, and confirm each one is either
-connective tissue or a deliberate, stated removal::
+to. Read the dropped tokens and confirm each one is either connective tissue or
+a deliberate, stated removal::
 
     uv run python scripts/audit_descriptions.py --base master
-    uv run python scripts/audit_descriptions.py --base master --wave 1
+    uv run python scripts/audit_descriptions.py --base master --section storms.
     uv run python scripts/audit_descriptions.py --base HEAD~1 --fail-on-drop
 
 The base revision is read through ``git show``, and the OLD model is parsed
@@ -62,22 +62,28 @@ def _tokens(text: str) -> set[str]:
     ``3.6``, ``solid-body``, ``vort_psi_drag``) -- those are exactly the
     load-bearing tokens, and splitting them would hide their loss.
     """
-    return {t for t in (m.group().strip(".-").lower() for m in _TOKEN.finditer(text))
+    return {t for t in (m.group().strip(".-~+").lower() for m in _TOKEN.finditer(text))
             if t and t not in _STOPWORDS}
 
 
-def _lost(old_text: str, new_text: str) -> list[str]:
-    """Tokens the rewrite made UNREACHABLE, by the real search's rules.
+def _lost(old_text: str, new_text: str, field_name: str = "") -> list[str]:
+    """Tokens the rewrite made UNREACHABLE, judged the way search actually works.
 
-    ``panels._haystack`` does a plain lowercased substring test, so a token is
-    only lost if it is absent from the new text as a SUBSTRING -- not merely
-    absent from the new token set. Set subtraction alone reports every
-    inflection as a casualty ("festoon" -> "festoons", "billow" -> "billows",
-    "band" -> "bands"), and on the pilot wave that was 6 of 40 reported drops:
-    enough noise to train the reader to skim, which is the one thing this
+    ``panels._haystack`` is ``name + derived_label + field_label + description``,
+    lowercased, matched by plain substring. So a token is only lost if it is
+    absent from ALL of that -- not merely absent from the new description's
+    token set. Two corrections that came out of real noise on this audit:
+
+    * Set subtraction alone reports every inflection as a casualty. On the pilot
+      wave it called 15 tokens lost where the substring rule suppresses 4 of
+      them -- "per", "step", "festoon" -> "festoons", "billow" -> "billows".
+    * Ignoring the field name reported ``kh`` lost from ``kh_wavenumber``, where
+      search plainly still reaches it.
+
+    Noise at that rate trains the reader to skim, which is the one thing this
     script must not do.
     """
-    haystack = new_text.lower()
+    haystack = f"{field_name} {field_name.replace('_', ' ')} {new_text}".lower()
     return sorted(t for t in _tokens(old_text) - _tokens(new_text) if t not in haystack)
 
 
@@ -131,9 +137,9 @@ def _current_descriptions() -> dict[tuple[str, str], tuple[str, str]]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", default="master", help="revision to diff against (default: master)")
-    ap.add_argument("--wave", type=int, help="restrict to one wave of the audit's table")
+    ap.add_argument("--section", help="restrict to one dotted-path prefix, e.g. 'storms.'")
     ap.add_argument("--fail-on-drop", action="store_true",
-                    help="exit 1 if any wave dropped a token (for a scripted gate)")
+                    help="exit 1 if any description dropped a token (for a scripted gate)")
     args = ap.parse_args(argv)
 
     repo = Path(__file__).resolve().parents[1]
@@ -144,26 +150,16 @@ def main(argv: list[str] | None = None) -> int:
     old = _descriptions_at(args.base)
     new = _current_descriptions()
 
-    scope: set[str] | None = None
-    if args.wave is not None:
-        sys.path.insert(0, str(repo / "tests" / "unit"))
-        from test_description_rubric import WAVES  # noqa: PLC0415 -- optional, test-only
-
-        if args.wave not in WAVES:
-            print(f"error: no wave {args.wave} (have {sorted(WAVES)})", file=sys.stderr)
-            return 2
-        scope = WAVES[args.wave]
-
     dropped_any = False
     changed = 0
     for key, (path, new_text) in sorted(new.items(), key=lambda kv: kv[1][0]):
-        if scope is not None and path not in scope:
+        if args.section and not path.startswith(args.section):
             continue
         old_text = old.get(key)
         if old_text is None or old_text == new_text:
             continue
         changed += 1
-        lost = _lost(old_text, new_text)
+        lost = _lost(old_text, new_text, key[1])
         gained = sorted(_tokens(new_text) - _tokens(old_text))
         delta = len(new_text) - len(old_text)
         print(f"\n{path}  ({len(old_text)} -> {len(new_text)} chars, {delta:+d})")
@@ -175,8 +171,19 @@ def main(argv: list[str] | None = None) -> int:
         if not lost and not gained:
             print("  reordered only")
 
-    label = f"wave {args.wave}" if args.wave is not None else "all fields"
-    print(f"\n{changed} description(s) changed vs {args.base} ({label})")
+    # Fields that EXISTED at the base and are gone now. Iterating `new` alone
+    # skips them silently, so a renamed field (or a renamed owning class) took
+    # every token it carried with it while --fail-on-drop still exited 0 --
+    # a vacuous pass in the audit's primary drift mitigation.
+    removed = sorted(k for k in old if k not in new)
+    if removed:
+        dropped_any = True
+        print("\nGONE since the base (renamed, moved class, or deleted):")
+        for cls, field in removed:
+            print(f"  {cls}.{field}  -- every token in its description is unreachable")
+
+    scope = f"section {args.section!r}" if args.section else "all fields"
+    print(f"\n{changed} description(s) changed vs {args.base} ({scope})")
     if not dropped_any:
         print("no tokens dropped")
         return 0

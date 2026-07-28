@@ -367,9 +367,10 @@ class BandsParams(_Params):
     contrast_envelope: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), adv=True, ui="Bands",
         description="Fades the banding out toward the poles, into mottled "
-                    "texture. Higher = the bands dissolve further from the "
-                    "pole; 0 = off, bands stay crisp all the way up (contrast "
-                    "collapse poleward of ~45 deg — the real latitude-contrast "
+                    "texture. Higher = a more complete fade; 0 = off, bands "
+                    "stay crisp all the way up. The latitude window is fixed, "
+                    "so this sets how far the fade goes, not how far down it "
+                    "reaches (contrast collapse poleward of ~45 deg — the real latitude-contrast "
                     "profile)",
     )
     lane_density: float = pfield(
@@ -396,9 +397,10 @@ class BandsParams(_Params):
     detail_freq: float = pfield(
         12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, adv=True, ui="Bands",
         label="Band detail scale",
-        description="Size of that fine color mottling. Higher = finer grain; "
-                    "lower = broader blotches (small-scale noise spatial "
-                    "frequency)",
+        description="Size of the fine color mottling inside each band (the "
+                    "amount of it is bands.detail_amount). Higher = finer "
+                    "grain; lower = broader blotches (small-scale noise "
+                    "spatial frequency)",
     )
     template: BandTemplate | None = pfield(
         None, tier=Tier.RESTART, adv=True, ui="Bands",
@@ -456,8 +458,9 @@ class JetsParams(_Params):
     strength: float = pfield(
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.6, 1.6), ui="Jets",
         description="Overall speed of every east-west jet. Higher = more "
-                    "shear, so the bands stretch and smear faster; 0 = still "
-                    "air (global zonal jet speed multiplier)",
+                    "shear, so the bands stretch and smear faster; 0 = no "
+                    "east-west jets, though storms and churn still move the "
+                    "clouds (global zonal jet speed multiplier)",
     )
     equatorial_speed: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=-3.0, hi=4.0, rand=(0.5, 2.5), ui="Jets",
@@ -476,7 +479,8 @@ class JetsParams(_Params):
         0.5, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.3, 0.8), ui="Jets",
         description="How much the jets weaken toward the poles. Higher = a "
                     "calm, flat polar cap with the motion confined to low "
-                    "latitudes; 0 = jets just as strong at the pole",
+                    "latitudes; 0 = no EXTRA weakening, though a separate "
+                    "polar fade always applies near the pole",
     )
     local_jet_speed: float = pfield(
         0.0, tier=Tier.RESTART, lo=-3.0, hi=3.0, adv=True, ui="Jets",
@@ -572,7 +576,8 @@ class TurbulenceParams(_Params):
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.5), adv=True, ui="Turbulence",
         description="Extra churn where neighboring jets meet. Higher = "
                     "band edges churn while band interiors stay calm; 0 = "
-                    "turbulence spread evenly, ignoring jet shear",
+                    "churn that ignores jet shear entirely (belt_boost still "
+                    "applies, so it is not perfectly even)",
     )
     belt_boost: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=1.0, hi=4.0, rand=(1.2, 2.5), ui="Turbulence",
@@ -593,9 +598,9 @@ class TurbulenceParams(_Params):
     evolution_rate: float = pfield(
         0.012, tier=Tier.VELOCITY, lo=0.0, hi=0.1, adv=True, ui="Turbulence",
         description="How fast the churn pattern reshuffles as the sim runs. "
-                    "Higher = the pattern never settles; 0 = a frozen pattern "
-                    "the flow only carries around (per-step rate at which the "
-                    "turbulence decorrelates)",
+                    "Higher = the pattern never settles; 0 = a pattern frozen "
+                    "in place, which the clouds then drift through (per-step "
+                    "rate at which the turbulence decorrelates)",
     )
     relax_tau: float = pfield(
         350.0, tier=Tier.RESTART, lo=50.0, hi=2000.0, log=True, adv=True, ui="Turbulence",
@@ -923,7 +928,8 @@ class StormsParams(_Params):
     hero_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Hero",
         description="How strongly the hero storm spins. Higher = a tighter, "
-                    "faster-whirling spot; 0 = a still stamp (GRS-class hero "
+                    "faster-whirling spot; the 0.2 floor is the weakest "
+                    "circulation that still reads as a vortex (GRS-class hero "
                     "storm vorticity amplitude)",
     )
     hero_latitude: float | None = pfield(
@@ -1056,8 +1062,9 @@ class StormsParams(_Params):
     wake_turbulence: float = pfield(
         1.8, tier=Tier.RESTART, lo=0.0, hi=5.0, rand=(1.0, 3.0), adv=True, ui="Hero",
         description="Extra churn in the wake wedge downstream of the hero "
-                    "storm. Higher = a rougher, more disturbed trail; 1.0 = "
-                    "no boost (turbulence boost)",
+                    "storm. Higher = a rougher, more disturbed trail; 0 = no "
+                    "boost at all (turbulence boost; the default 1.8 is "
+                    "already a strong one)",
     )
     hero_tint: float = pfield(
         0.9, tier=Tier.RESTART, lo=-1.0, hi=1.0, adv=True, ui="Hero",
@@ -1259,8 +1266,9 @@ class StormsParams(_Params):
     outbreak_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, adv=True, ui="Outbreaks",
         description="How violently each outbreak erupts. Higher = a bigger, "
-                    "brighter plume; 0 = a color-only mark (convective "
-                    "outbreak vorticity amplitude)",
+                    "brighter plume; the floor is 0.2, so an outbreak always "
+                    "carries some circulation (convective outbreak vorticity "
+                    "amplitude)",
     )
     outbreak_latitude: float | None = pfield(
         None, tier=Tier.RESTART, lo=-55.0, hi=55.0, adv=True, ui="Outbreaks",
@@ -1784,10 +1792,13 @@ class SolverParams(_Params):
         description="Where the injected churn is allowed to land. global = "
                     "everywhere; belts = the cyclonic dark bands only, leaving "
                     "the anticyclonic zones smooth; shear = the jet-shear "
-                    "flanks only, so filaments form where shear is high. A "
-                    "multiplier on vort_inject, so a mask that covers more "
-                    "latitudes spreads the same churn thinner (spatial "
-                    "localization of eddy injection). Vorticity mode.")
+                    "flanks only, so filaments form where shear is high. The "
+                    "mask multiplies vort_inject per pixel and is NOT "
+                    "normalized by how much it covers, so a wider mask puts "
+                    "more total churn in at the same amplitude — belts covers "
+                    "~48% of latitudes against shear's ~4%, so retune "
+                    "vort_inject DOWN when you widen it (spatial localization "
+                    "of eddy injection). Vorticity mode.")
     vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
         label="Swirl brake (all scales)",
         description="Global brake on swirling: tames runaway planet-scale swirl "
@@ -1964,8 +1975,9 @@ class AppearanceParams(_Params):
     )
     gamma: float = pfield(
         1.0, tier=Tier.POST, lo=0.4, hi=2.5, ui="Appearance",
-        description="Final brightness curve on the color map. Lower = brighter "
-                    "midtones, higher = darker; 1.0 = off (tone-curve gamma)",
+        description="Final brightness curve on the color map. Higher = "
+                    "brighter midtones, lower = darker; 1.0 = off (tone-curve "
+                    "gamma, applied as pow(color, 1/gamma))",
     )
     chroma_scale: float = pfield(
         1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Appearance",
@@ -2146,8 +2158,10 @@ class MaskParams(_Params):
     file: str | None = pfield(
         None, tier=Tier.POST, adv=True, ui="Mask",
         description="Path to a grayscale PNG that paints WHERE the three Mask "
-                    "targets act — white = full effect, black = none. Must be "
-                    "a 2:1 equirect image. Use forward slashes. None = no mask "
+                    "targets act — white = full effect, black = none. Use a "
+                    "2:1 equirect image: the aspect is not checked, and a "
+                    "different one silently stretches. Use forward slashes. "
+                    "None = no mask "
                     "(all Mask targets inert). The path is resolved relative to "
                     "a loaded preset's folder and re-saved next to a preset you "
                     "save, so a preset stays portable; a missing file at load "
@@ -2262,8 +2276,10 @@ class ProjectionKind(StrEnum):
 class ExportParams(_Params):
     width: int = pfield(
         2048, tier=Tier.POST, lo=512, hi=16384, ui="Export",
-        description="Map width in pixels. Height is always half the width, "
-                    "the standard 2:1 equirect ratio",
+        description="Map width in pixels. On the default equirect projection "
+                    "the height is half the width, the standard 2:1 ratio; on "
+                    "the cube projection each of the six faces is width/4 "
+                    "square instead",
     )
     projection: ProjectionKind = pfield(
         ProjectionKind.EQUIRECT, tier=Tier.POST, ui="Export",

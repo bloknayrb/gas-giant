@@ -7,19 +7,40 @@ threw away the one word carrying the design. This module pins the words.
 Two separate hazards, hence two halves:
 
 * **Findability.** A description is the search haystack, and search bypasses the
-  Basic/Advanced gate -- so for the 141 Advanced-only levers it is very often the
+  Basic/Advanced gate -- so for the 155 ``adv=True`` levers it is very often the
   ONLY way an artist reaches the field at all. Deleting a term to make a
-  sentence read better silently un-finds its lever. Rule 11 of the rubric
-  explicitly permits demoting engineering provenance to a ``#`` comment, which
-  removes text from the haystack; these terms are the ones it may not touch.
+  sentence read better silently un-finds its lever.
 * **Load-bearing tokens.** A handful of descriptions carry a qualifier that
   separates the SHIPPED design from one this project's own record marks
   falsified. Losing it turns the tooltip into confident misinformation, which is
   worse than the jargon the audit is removing.
 
-Every assertion lowercases both sides, exactly as ``panels._haystack`` does. An
-earlier draft compared against the raw description and would have been red on
-day one for four of the six search terms.
+Note what this module does NOT claim to have caught. The audit's other two
+drift catches -- four Turbulence fields losing the word "turbulence", and a
+handful of fields losing a term still reachable through their own name -- came
+from ``scripts/audit_descriptions.py``, which diffs tokens against a base
+revision. This module can only pin what someone thought to list here; the
+script sees everything that changed. They are complementary, and the script is
+the one that finds the unknown unknowns.
+
+The two halves need DIFFERENT predicates, which an earlier draft got wrong by
+using one for both:
+
+* Findability asks "can the user still reach this field?", so it must go
+  through the real search -- ``panels._leaf_visible``, the same predicate the
+  leaf draw and the section pre-pass gate on. Its haystack is
+  ``name + derived_label + field_label + description``, so a term surviving in
+  the FIELD NAME still counts. Checking the description alone both overstates
+  the requirement and, more importantly, never touches the search path: a
+  regression in ``_haystack`` would un-find every lever while the test stayed
+  green.
+* Load-bearing tokens ask "does the copy still make the claim?", which is
+  specifically about the description. A token that survives only because it
+  happens to appear in the field name has NOT kept the claim.
+
+So the first half imports panels (hence ``importorskip``) and the second stays
+dependency-free, following ``test_field_labels.py``'s local-import pattern so
+the GUI-free assertions still run without the GUI extra.
 """
 
 from __future__ import annotations
@@ -28,11 +49,22 @@ import pytest
 
 from gasgiant.params.model import iter_pfields
 
-_DESCRIPTIONS = {leaf.path: leaf.description for leaf in iter_pfields()}
+_LEAVES = {leaf.path: leaf for leaf in iter_pfields()}
+_DESCRIPTIONS = {path: leaf.description for path, leaf in _LEAVES.items()}
 
 
-def _haystack(path: str) -> str:
-    """The description as the GUI search actually sees it: lowercased."""
+def _findable_by(path: str, term: str) -> bool:
+    """Whether the GUI's search actually reaches ``path`` when the user types
+    ``term`` -- the real predicate, not a re-rolled mirror of it."""
+    panels = pytest.importorskip("gasgiant.app.panels")
+    leaf = _LEAVES[path]
+    return panels._leaf_visible(
+        leaf.name, leaf.info, {}, panels.PanelState(search=term, show_advanced=False)
+    )
+
+
+def _copy_of(path: str) -> str:
+    """The description alone, lowercased -- what the LOAD_BEARING half judges."""
     return _DESCRIPTIONS[path].lower()
 
 
@@ -52,11 +84,26 @@ SEARCHABLE_BY_PHYSICS = [
 
 @pytest.mark.parametrize(("term", "path"), SEARCHABLE_BY_PHYSICS)
 def test_the_physics_term_still_reaches_its_lever(term, path):
-    assert term in _haystack(path), (
+    assert _findable_by(path, term), (
         f"{path} is no longer findable by {term!r}. Search is the only route to an "
         f"Advanced-only lever; move the term into the trailing parenthetical rather "
         f"than deleting it."
     )
+
+
+def test_search_really_bypasses_the_advanced_gate():
+    """The premise the whole module rests on. Every field above is adv=True, so
+    if a search match did NOT override the Basic/Advanced gate, the assertions
+    would be passing for the wrong reason -- and would keep passing after the
+    term was deleted, since ``show_advanced=False`` would hide the field
+    either way."""
+    advanced = [p for _t, p in SEARCHABLE_BY_PHYSICS if _LEAVES[p].meta.adv]
+    assert advanced, "sanity: these are meant to be Advanced-only levers"
+    for path in advanced:
+        assert not _findable_by(path, "zzz-no-such-term"), (
+            f"{path}: a non-matching search still shows the field, so the "
+            f"findability assertions prove nothing"
+        )
 
 
 #: ``(path, token, why it is load-bearing)``. Deliberately spelled out one by
@@ -79,8 +126,9 @@ LOAD_BEARING = [
     (
         "storms.hero_emergence",
         "juno",
-        "reference-source provenance. Rule 11 actively invites deleting this as "
-        "engineering trivia; this project's calibration discipline says otherwise.",
+        "reference-source provenance. A tightening pass reads this as engineering "
+        "trivia and deletes it; this project's calibration discipline says the "
+        "opposite -- which reference a lever was tuned against is the claim.",
     ),
     (
         "storms.companion_brightness",
@@ -103,15 +151,26 @@ LOAD_BEARING = [
     f"{p.rsplit('.', 1)[-1]}-{t.replace(' ', '_')}" for p, t, _ in LOAD_BEARING
 ])
 def test_a_load_bearing_token_survives_the_rewrite(path, token, why):
-    assert token in _haystack(path), f"{path} lost {token!r}: {why}"
+    assert token in _copy_of(path), f"{path} lost {token!r}: {why}"
 
 
-def test_hero_emergence_keeps_its_mechanism_numbering():
-    """The mode-scoping sentence scopes mechanisms BY NUMBER ("(1)(3) need
-    solver.type=vorticity"). So "preserve the mechanism scoping" is satisfiable
-    while renumbering the list -- which silently re-scopes two of them to the
-    wrong solver mode. Pin the numbering itself, not just the sentence."""
+def test_hero_emergence_keeps_its_mechanism_scoping():
+    """The mode-scoping sentence scopes mechanisms BY NUMBER, so "preserve the
+    scoping" is satisfiable while renumbering the list -- which silently
+    re-scopes two mechanisms to the wrong solver mode.
+
+    The pairing is what has to be pinned, NOT the numbers individually. An
+    earlier version asserted only that (1)..(5) each appeared somewhere and
+    that "solver.type=vorticity" appeared; mutating the sentence to "(2)(4)"
+    left it green while falsely declaring mechanisms (2) and (4)
+    vorticity-only and (1) and (3) mode-agnostic, because (1) and (3) still
+    occur as list markers further up.
+    """
     text = _DESCRIPTIONS["storms.hero_emergence"]
+    assert "levers (1)(3) need solver.type=vorticity" in text, (
+        "the mode-scoping sentence changed. Mechanisms (1) and (3) are the "
+        "omega-path ones; re-scoping or renumbering them makes the tooltip "
+        "claim the wrong solver mode."
+    )
     for n in range(1, 6):
         assert f"({n})" in text, f"mechanism ({n}) lost its number"
-    assert "solver.type=vorticity" in text, "the mode-scoping sentence is gone"

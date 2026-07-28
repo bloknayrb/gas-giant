@@ -31,8 +31,6 @@ design. That is ``test_description_findability.py``, and it is the one that
 actually caught things during the audit -- a rubric-clean rewrite dropped
 "0.32", another dropped the word "turbulence" from four fields in the
 Turbulence section. Shape and substance need separate guards.
-
-Run this module as a script to regenerate the ``KNOWN_VIOLATIONS`` literal.
 """
 
 from __future__ import annotations
@@ -90,17 +88,25 @@ def test_the_duplicate_strings_are_exactly_the_pole_pair():
 
 
 def test_storms_and_cast_share_no_description():
-    """The plan asserted 5 identical strings across ``StormsParams`` and
-    ``StormOverride`` and built a cross-wave sequencing constraint on it. They
-    share 3 field NAMES and zero descriptions, so no such constraint exists --
-    waves 9 and 10 are independent."""
+    """A section leaf and its per-storm override are DIFFERENT controls: the
+    global sets the population default, the cast row overrides one storm. They
+    share three field names, and copy that reads identically for both hides
+    that distinction from the artist -- which is the whole reason the cast
+    editor is confusing to newcomers.
+
+    Deliberately not pinned to a fixed set of shared names: a fourth shared
+    name is a legitimate model change, and it should not break a COPY test.
+    """
     shared = set(StormsParams.model_fields) & set(StormOverride.model_fields)
-    assert shared == {"companion_aspect", "companion_brightness", "rim_contrast"}
+    assert shared, "sanity: the two models still share field names"
     for name in sorted(shared):
         assert (
             StormsParams.model_fields[name].description
             != StormOverride.model_fields[name].description
-        ), f"{name}: section leaf and cast row now share a string; waves 9/10 must be one commit"
+        ), (
+            f"{name}: the global default and the per-storm override now read "
+            f"identically, so nothing tells the artist which one they are editing"
+        )
 
 
 # -- S1: the headline ----------------------------------------------------------
@@ -120,14 +126,15 @@ def split_headline(text: str) -> tuple[str, bool]:
     which mis-fired on the ``lon:lat`` idiom and reduced two descriptions to the
     single word "lon".
 
-    Paren-depth matters because rule 8 puts the physics in a trailing
-    parenthetical, which is full of sentence punctuation that is not a headline
-    boundary. Unbalanced parens degrade to "no split" rather than raising.
+    Paren-depth matters because the rubric puts the physics in a trailing
+    parenthetical (model.py rule 4), which is full of sentence punctuation that
+    is not a headline boundary. Unbalanced parens degrade to "no split" rather
+    than raising.
 
     ``is_proper_prefix`` is False when no delimiter exists, i.e. the whole
     description IS the headline. That is a rubric violation (rule A), not an
     error -- it was the largest class in the audit's opening baseline by a wide
-    margin (see ``REMAINING_BY_RULE``), which is why this function returns the
+    margin (see ``KNOWN_VIOLATIONS``), which is why this function returns the
     flag rather than raising on it.
     """
     depth = 0
@@ -174,14 +181,15 @@ _IDENTIFIER = re.compile(r"[a-z]+_[a-z_]+")
 def scrub(text: str) -> str:
     """Remove the spans rule E must not judge.
 
-    Parentheticals go because rule 8 REQUIRES the physics to live in one -- a
-    matcher that did not strip them would flag the four fields already doing
-    exactly what the rubric asks. snake_case identifiers go because rule 7
-    requires cross-references to stay literal (``prefer vort_psi_drag``); the
-    pattern is deliberately narrow, matching 7 genuine identifiers corpus-wide
-    and zero prose. Stripping every ``model_fields`` key instead -- the earlier
-    proposal -- would delete ordinary words like ``color`` (36 descriptions) and
-    ``latitude`` (28), and would blind the matcher to its own targets.
+    Parentheticals go because the rubric REQUIRES the physics to live in one
+    (model.py rule 4) -- a matcher that did not strip them would flag the four
+    fields already doing exactly what the rubric asks. snake_case identifiers go
+    because cross-references must stay literal so search finds them (rule 4
+    again): ``prefer vort_psi_drag`` is not jargon. The pattern is deliberately
+    narrow -- it matches 13 identifiers across every headline in the corpus and
+    no prose. Stripping every ``model_fields`` key instead, the earlier
+    proposal, would delete ordinary words like ``latitude`` (31 descriptions)
+    and ``color`` (25), and would blind the matcher to its own targets.
     """
     prev = None
     while prev != text:  # nested parens, innermost-out
@@ -209,8 +217,8 @@ BLOCKLIST = (
 
 #: Excluded from the blocklist, each because another pinned rule requires it.
 _EXCLUDED_FROM_BLOCKLIST = {
-    # rule 6 mandates "radians of ... (1 rad = 57.3 deg)", and
-    # test_control_literacy pins the gloss. Banning it punishes compliance.
+    # the rubric mandates "radians of ... (1 rad = 57.3 deg)" (model.py rule 4)
+    # and test_control_literacy pins the gloss. Banning it punishes compliance.
     "radians",
     # the name of the panel section the field sits under, and a model field
     # name besides -- an artist reads it as a heading, not as jargon.
@@ -260,7 +268,7 @@ def blocklist_hits(path: str, headline: str) -> list[str]:
     ]
 
 
-def test_scrub_protects_rule_8_and_rule_7():
+def test_scrub_protects_the_trailing_parenthetical_and_cross_refs():
     assert blocklist_hits("x", "Global brake on swirling (Rayleigh drag)") == []
     assert blocklist_hits("x", "Prefer vort_psi_drag instead") == []
     assert blocklist_hits("x", "Broadband eddy-vorticity injection") == ["vorticity", "eddy"]
@@ -275,7 +283,10 @@ def test_word_boundaries_do_not_catch_prose():
 
 # -- rule G: what does zero do? ------------------------------------------------
 
-_ZERO_GLOSS = re.compile(r"\b0(\.0)? *=")
+#: The literal "0 = ..." gloss. The lookbehind matters: a bare ``\b0`` also
+#: matches inside a decimal, so ``"1.0 = round"`` would have satisfied rule G
+#: without the field ever saying what ZERO does.
+_ZERO_GLOSS = re.compile(r"(?<![0-9.])0(\.0)? *=")
 
 #: Fields whose default is 0 but for which 0 is a VALUE, not a disabled state:
 #: two RNG seeds and the two cast coordinates (equator / prime meridian).
@@ -354,30 +365,18 @@ def test_every_reported_rule_is_documented():
 
 # -- the baseline --------------------------------------------------------------
 
-KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
-
-
-#: The debt still outstanding, per rule. EMPTY -- the audit cleared the corpus,
-#: so this and ``KNOWN_VIOLATIONS`` are now a plain "every description satisfies
-#: every rule" gate, and a NEW pfield whose copy misses will fail both.
+#: EMPTY, and it must STAY empty. The audit cleared the corpus, so this is no
+#: longer a shrinking baseline but a plain "every description satisfies every
+#: rule" gate. When it fails, fix the COPY -- re-growing this set to make the
+#: test green puts the debt back and silences the gate for every field listed.
 #:
-#: Kept as a named constant rather than folded into the assertion because it was
-#: the audit's progress meter and is the natural place to record where it
-#: started: ``{"A": 82, "B": 2, "C": 1, "D": 5, "E": 21, "G": 22}`` over 111 of
-#: 226 fields. Rule A dominated at 82 -- for better than a third of the corpus
-#: the description was ONE sentence, so "the headline" was not a prefix of
-#: anything. That was the single most consequential measurement behind the
-#: rubric: without it rules D and E would have meant different things on
-#: different fields for ten waves.
-REMAINING_BY_RULE: dict[str, int] = {}
-REMAINING_FIELDS = 0
-
-
-def test_the_remaining_debt_is_pinned():
-    from collections import Counter
-
-    assert dict(Counter(rule for _, rule in measure())) == REMAINING_BY_RULE
-    assert len({path for path, _ in measure()}) == REMAINING_FIELDS
+#: For scale, the audit opened at 133 pairs over 111 of 226 fields:
+#: ``{"A": 82, "B": 2, "C": 1, "D": 5, "E": 21, "G": 22}``. Rule A dominated --
+#: for better than a third of the corpus the description was ONE sentence, so
+#: "the headline" was not a prefix of anything. That was the single most
+#: consequential measurement behind the rubric: without it, rules D and E would
+#: have meant different things on different fields for ten waves.
+KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 
 def test_known_violations_matches_the_corpus():
@@ -429,65 +428,14 @@ def test_b2_pinned_fields_all_exist():
     assert paths >= B2_PINNED_FIELDS, f"stale B2 pins: {sorted(B2_PINNED_FIELDS - paths)}"
 
 
-# -- the wave table ------------------------------------------------------------
-
-
-def _wave(*prefixes: str, exclude: str = "", exact: tuple[str, ...] = ()) -> set[str]:
-    return {
-        leaf.path for leaf in CORPUS
-        if (leaf.path.startswith(prefixes) and not (exclude and leaf.path.startswith(exclude)))
-        or leaf.path in exact
-    }
-
-
-WAVES: dict[int, set[str]] = {
-    1: _wave("turbulence.", "waves."),                                    # pilot
-    2: _wave("export.", "physical.", "rings.", "sim.", "poles.", exact=("name", "seed")),
-    3: _wave("solver."),
-    4: _wave("emission.", "mask."),
-    5: _wave("bands."),
-    6: _wave("jets."),
-    7: _wave("appearance."),
-    8: _wave("detail."),
-    9: _wave("storms.cast."),
-    10: _wave("storms.", exclude="storms.cast."),
-}
-
-
-def test_the_wave_table_is_a_partition():
-    """Under-scoping is the failure ``KNOWN_VIOLATIONS`` structurally cannot
-    catch: a field left out of every wave simply stays listed and green
-    forever. Both of the plan's hand-written wave counts were wrong this way --
-    they dropped ``bands.template`` and ``storms.cast``, the latter being the
-    field that drives the whole cast editor."""
-    union: set[str] = set()
-    total = 0
-    for paths in WAVES.values():
-        union |= paths
-        total += len(paths)
-    assert total == len(union), "waves overlap"
-    assert union == {leaf.path for leaf in CORPUS}, (
-        f"unassigned: {sorted({leaf.path for leaf in CORPUS} - union)}"
+def test_long_exceptions_are_all_really_long():
+    """Keeps the last hand-maintained exception set honest, matching the guards
+    ``ZERO_GLOSS_EXEMPT`` and ``B2_PINNED_FIELDS`` already carry. An entry that
+    has since been trimmed under 600 is dead weight that would silently excuse
+    the field if it grew again."""
+    by_path = {leaf.path: leaf for leaf in CORPUS}
+    stale = sorted(
+        path for path in LONG_EXCEPTIONS
+        if path not in by_path or len(by_path[path].description) <= 600
     )
-
-
-def test_wave_sizes_are_pinned():
-    """Sizes are load-bearing: the audit's stated mitigation is small waves, and
-    the pilot's sign-off only generalises if later waves stay comparable."""
-    assert {k: len(v) for k, v in WAVES.items()} == {
-        1: 18, 2: 31, 3: 18, 4: 16, 5: 18, 6: 15, 7: 18, 8: 22, 9: 22, 10: 48
-    }
-
-
-if __name__ == "__main__":  # regenerate the KNOWN_VIOLATIONS literal
-    pairs = sorted(measure())
-    if not pairs:
-        # ``{}`` is an empty DICT, not an empty set -- and a dict baseline
-        # compares unequal to every set, so the emitted file would fail on the
-        # one outcome the audit is aiming for.
-        print("KNOWN_VIOLATIONS: set[tuple[str, str]] = set()")
-    else:
-        print("KNOWN_VIOLATIONS: set[tuple[str, str]] = {")
-        for pair in pairs:
-            print(f"    {pair!r},")
-        print("}")
+    assert not stale, f"no longer over 600 chars (or gone); drop from LONG_EXCEPTIONS: {stale}"

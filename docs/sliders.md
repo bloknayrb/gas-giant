@@ -90,7 +90,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
 
-Where the injected churn is allowed to land. global = everywhere; belts = the cyclonic dark bands only, leaving the anticyclonic zones smooth; shear = the jet-shear flanks only, so filaments form where shear is high. A multiplier on vort_inject, so a mask that covers more latitudes spreads the same churn thinner (spatial localization of eddy injection). Vorticity mode.
+Where the injected churn is allowed to land. global = everywhere; belts = the cyclonic dark bands only, leaving the anticyclonic zones smooth; shear = the jet-shear flanks only, so filaments form where shear is high. The mask multiplies vort_inject per pixel and is NOT normalized by how much it covers, so a wider mask puts more total churn in at the same amplitude — belts covers ~48% of latitudes against shear's ~4%, so retune vort_inject DOWN when you widen it (spatial localization of eddy injection). Vorticity mode.
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
@@ -263,7 +263,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `bands.detail_freq` &mdash; range **2 to 64**, default **12**, tier `restart`, log scale.
 
-Size of that fine color mottling. Higher = finer grain; lower = broader blotches (small-scale noise spatial frequency)
+Size of the fine color mottling inside each band (the amount of it is bands.detail_amount). Higher = finer grain; lower = broader blotches (small-scale noise spatial frequency)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__detail_freq__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><img src="img/sliders/bands__detail_freq__hi.jpg" width="320"><br><sub>high &middot; 64</sub></td>
@@ -293,7 +293,7 @@ Whole-belt fade (the SEB-fade epoch): blends the target band's stamped color tow
 
 `bands.contrast_envelope` &mdash; range **0 to 1**, default **0**, tier `restart`.
 
-Fades the banding out toward the poles, into mottled texture. Higher = the bands dissolve further from the pole; 0 = off, bands stay crisp all the way up (contrast collapse poleward of ~45 deg — the real latitude-contrast profile)
+Fades the banding out toward the poles, into mottled texture. Higher = a more complete fade; 0 = off, bands stay crisp all the way up. The latitude window is fixed, so this sets how far the fade goes, not how far down it reaches (contrast collapse poleward of ~45 deg — the real latitude-contrast profile)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__contrast_envelope__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.25</sub></td><td align="center"><img src="img/sliders/bands__contrast_envelope__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -564,7 +564,7 @@ Half-width of the local zonal jet, radians of latitude (1 rad = 57.3 deg; defaul
 
 `jets.polar_decay` &mdash; range **0 to 1**, default **0.5**, tier `velocity`.
 
-How much the jets weaken toward the poles. Higher = a calm, flat polar cap with the motion confined to low latitudes; 0 = jets just as strong at the pole
+How much the jets weaken toward the poles. Higher = a calm, flat polar cap with the motion confined to low latitudes; 0 = no EXTRA weakening, though a separate polar fade always applies near the pole
 
 <table><tr>
 <td align="center"><img src="img/sliders/jets__polar_decay__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.5</sub></td><td align="center"><img src="img/sliders/jets__polar_decay__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -574,7 +574,7 @@ How much the jets weaken toward the poles. Higher = a calm, flat polar cap with 
 
 `jets.strength` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Overall speed of every east-west jet. Higher = more shear, so the bands stretch and smear faster; 0 = still air (global zonal jet speed multiplier)
+Overall speed of every east-west jet. Higher = more shear, so the bands stretch and smear faster; 0 = no east-west jets, though storms and churn still move the clouds (global zonal jet speed multiplier)
 
 <table><tr>
 <td align="center"><img src="img/sliders/jets__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/jets__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -637,7 +637,7 @@ How far a band edge billows where fast and slow jets meet. Higher = deeper scall
 
 `turbulence.evolution_rate` &mdash; range **0 to 0.1**, default **0.012**, tier `velocity`.
 
-How fast the churn pattern reshuffles as the sim runs. Higher = the pattern never settles; 0 = a frozen pattern the flow only carries around (per-step rate at which the turbulence decorrelates)
+How fast the churn pattern reshuffles as the sim runs. Higher = the pattern never settles; 0 = a pattern frozen in place, which the clouds then drift through (per-step rate at which the turbulence decorrelates)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__evolution_rate__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><img src="img/sliders/turbulence__evolution_rate__hi.jpg" width="320"><br><sub>high &middot; 0.1</sub></td>
@@ -677,7 +677,7 @@ Size of the churn features. Higher = smaller, busier stirring; lower = broad, co
 
 `turbulence.shear_coupling` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Extra churn where neighboring jets meet. Higher = band edges churn while band interiors stay calm; 0 = turbulence spread evenly, ignoring jet shear
+Extra churn where neighboring jets meet. Higher = band edges churn while band interiors stay calm; 0 = churn that ignores jet shear entirely (belt_boost still applies, so it is not perfectly even)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__shear_coupling__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__shear_coupling__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -950,7 +950,7 @@ Solid-body hero rotation (vorticity mode): blends the hero's vorticity from the 
 
 `storms.hero_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
-How strongly the hero storm spins. Higher = a tighter, faster-whirling spot; 0 = a still stamp (GRS-class hero storm vorticity amplitude)
+How strongly the hero storm spins. Higher = a tighter, faster-whirling spot; the 0.2 floor is the weakest circulation that still reads as a vortex (GRS-class hero storm vorticity amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1072,7 +1072,7 @@ _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps 
 
 `storms.outbreak_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
-How violently each outbreak erupts. Higher = a bigger, brighter plume; 0 = a color-only mark (convective outbreak vorticity amplitude)
+How violently each outbreak erupts. Higher = a bigger, brighter plume; the floor is 0.2, so an outbreak always carries some circulation (convective outbreak vorticity amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__outbreak_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__outbreak_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1150,7 +1150,7 @@ _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps 
 
 `storms.wake_turbulence` &mdash; range **0 to 5**, default **1.8**, tier `restart`.
 
-Extra churn in the wake wedge downstream of the hero storm. Higher = a rougher, more disturbed trail; 1.0 = no boost (turbulence boost)
+Extra churn in the wake wedge downstream of the hero storm. Higher = a rougher, more disturbed trail; 0 = no boost at all (turbulence boost; the default 1.8 is already a strong one)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__wake_turbulence__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.8</sub></td><td align="center"><img src="img/sliders/storms__wake_turbulence__hi.jpg" width="320"><br><sub>high &middot; 5</sub></td>
@@ -1395,7 +1395,7 @@ Two-material tint for synthesized detail: bright detail excursions shade toward 
 
 `appearance.gamma` &mdash; range **0.4 to 2.5**, default **1**, tier `post`.
 
-Final brightness curve on the color map. Lower = brighter midtones, higher = darker; 1.0 = off (tone-curve gamma)
+Final brightness curve on the color map. Higher = brighter midtones, lower = darker; 1.0 = off (tone-curve gamma, applied as pow(color, 1/gamma))
 
 <table><tr>
 <td align="center"><img src="img/sliders/appearance__gamma__lo.jpg" width="320"><br><sub>low &middot; 0.4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/appearance__gamma__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
@@ -1721,7 +1721,7 @@ Modulate the night-side emission map (thermal/lightning glow + aurora) by the ma
 
 `mask.file` &mdash; file path, default **None**, tier `post`.
 
-Path to a grayscale PNG that paints WHERE the three Mask targets act — white = full effect, black = none. Must be a 2:1 equirect image. Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
+Path to a grayscale PNG that paints WHERE the three Mask targets act — white = full effect, black = none. Use a 2:1 equirect image: the aspect is not checked, and a different one silently stretches. Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
 
 _File-path field: the GUI shows a text entry + **Browse...** button (empty = None). Documented as text; no rendered example._
 
@@ -1914,7 +1914,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 `export.width` &mdash; range **512 to 16384**, default **2048**, tier `post`.
 
-Map width in pixels. Height is always half the width, the standard 2:1 equirect ratio
+Map width in pixels. On the default equirect projection the height is half the width, the standard 2:1 ratio; on the cube projection each of the six faces is width/4 square instead
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 

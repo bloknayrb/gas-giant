@@ -75,11 +75,21 @@ def test_the_scrape_actually_finds_the_operator_properties():
     assert {"radius", "mesh_segments", "build_rings", "axial_tilt"} <= set(names)
 
 
-@pytest.mark.parametrize("name", [n for n, _ in _properties() if n not in _NOT_USER_FACING])
-def test_every_user_facing_property_is_described(name):
-    """Three properties shipped with no description at all (limb_darkening,
-    limb_haze, axial_tilt): drawn in the import panel with an empty tooltip."""
-    desc = dict(_properties())[name]
+#: Parsed once. Re-deriving it per parametrized case re-parses importer.py
+#: for every property.
+_PROPERTIES = _properties()
+
+
+@pytest.mark.parametrize(
+    ("name", "desc"),
+    [(n, d) for n, d in _PROPERTIES if n not in _NOT_USER_FACING],
+    ids=[n for n, _ in _PROPERTIES if n not in _NOT_USER_FACING],
+)
+def test_every_user_facing_property_is_described(name, desc):
+    """FIVE properties shipped with no description at all -- limb_darkening,
+    limb_haze, axial_tilt, and both enums (mapping, atmosphere_mode, whose
+    ITEMS had tooltips while the property itself did not). All drawn in the
+    import panel with an empty tooltip."""
     assert desc, f"{name} is drawn in the import panel with no tooltip"
     assert len(desc) <= _MAX_DESCRIPTION, f"{name}: {len(desc)} chars is a paragraph"
     assert not desc.endswith("."), f"{name}: Blender convention is no trailing period"
@@ -103,12 +113,19 @@ def test_enum_items_carry_their_own_descriptions():
     is a dropdown entry with no tooltip. 'None' options legitimately have
     nothing to say, so only non-trivial options are required to speak."""
     empty: list[str] = []
+    checked: list[str] = []
     for node in ast.walk(_tree()):
         if not isinstance(node, ast.Tuple) or len(node.elts) != 3:
             continue
         if not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts):
             continue
         ident, label, desc = (e.value for e in node.elts)
-        if ident.isupper() and ident != "NONE" and not desc.strip():
+        if not ident.isupper():
+            continue
+        checked.append(ident)
+        if ident != "NONE" and not desc.strip():
             empty.append(f"{ident} ({label})")
+    # Without this the selector is a silent skip: lowercasing an option id
+    # drops it from the scan, tooltip or no tooltip, and the test still passes.
+    assert len(checked) >= 4, f"enum scrape found only {checked}"
     assert not empty, f"enum options with no tooltip: {empty}"
