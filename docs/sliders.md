@@ -950,7 +950,7 @@ Solid-body hero rotation (vorticity mode): blends the hero's vorticity from the 
 
 `storms.hero_strength` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
-How strongly the hero storm spins. Higher = a tighter, faster-whirling spot; the 0.2 floor is the weakest circulation that still reads as a vortex (GRS-class hero storm vorticity amplitude)
+How strongly the hero storm spins. Higher = a tighter, faster-whirling spot; the slider bottoms out at 0.2, so the hero always carries some circulation (GRS-class hero storm vorticity amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/storms__hero_strength__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/storms__hero_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>

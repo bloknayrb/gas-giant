@@ -928,8 +928,8 @@ class StormsParams(_Params):
     hero_strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, rand=(0.7, 1.6), ui="Hero",
         description="How strongly the hero storm spins. Higher = a tighter, "
-                    "faster-whirling spot; the 0.2 floor is the weakest "
-                    "circulation that still reads as a vortex (GRS-class hero "
+                    "faster-whirling spot; the slider bottoms out at 0.2, so "
+                    "the hero always carries some circulation (GRS-class hero "
                     "storm vorticity amplitude)",
     )
     hero_latitude: float | None = pfield(
