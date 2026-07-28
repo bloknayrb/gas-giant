@@ -36,6 +36,7 @@ Turbulence section. Shape and substance need separate guards.
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -111,7 +112,14 @@ def test_storms_and_cast_share_no_description():
 
 # -- S1: the headline ----------------------------------------------------------
 
-_ABBREVIATIONS = ("e.g", "i.e", "cf", "vs", "approx", "etc", "deg", "ca")
+#: Words after which a period does NOT end the sentence. Measured against the
+#: corpus: only ``deg.`` ever actually occurred, and in both places ("poleward
+#: of ~55 deg. Higher = ..." and "at 35-60 deg: granular ...") the punctuation
+#: IS the headline boundary -- so listing "deg" here was itself the defect, on
+#: top of the suffix match that let it swallow any word ending in those letters.
+#: "ca" went with it: nothing uses circa, and it silently captured "silica",
+#: "mica", "replica". The rest are kept as genuine sentence-internal forms.
+_ABBREVIATIONS = ("e.g", "i.e", "cf", "vs", "approx", "etc")
 
 
 def split_headline(text: str) -> tuple[str, bool]:
@@ -145,10 +153,25 @@ def split_headline(text: str) -> tuple[str, bool]:
             depth = max(0, depth - 1)
         elif ch in ".;:" and depth == 0 and (i + 1 == len(text) or text[i + 1].isspace()):
             head = text[:i]
-            if any(head.lower().endswith(a) for a in _ABBREVIATIONS):
+            if _ends_with_abbreviation(head):
                 continue  # "e.g. foo" is not a sentence boundary
             return head.strip(), True
     return text.strip(), False
+
+
+def _ends_with_abbreviation(head: str) -> bool:
+    """Whether ``head``'s LAST WORD is one of ``_ABBREVIATIONS``.
+
+    A bare ``head.lower().endswith(a)`` matched any word merely ending in those
+    letters, and the list contains ``ca`` and ``deg``. Measured consequence on
+    the live corpus: ``detail.polar_stipple`` and ``detail.mottle`` both end
+    their intended headline in "deg", so the splitter ran past the real
+    delimiter and rules C/D/E were applied to a span twice the right length.
+    ``silica.``/``mica.``/``replica.`` would do the same, and a single-sentence
+    description ending that way would trip rule A spuriously.
+    """
+    last = head.lower().rsplit(None, 1)[-1] if head.split() else head.lower()
+    return last in _ABBREVIATIONS
 
 
 @pytest.mark.parametrize(
@@ -166,6 +189,13 @@ def split_headline(text: str) -> tuple[str, bool]:
         ("Trailing stop.", "Trailing stop", True),
         ("Colon head: the rest", "Colon head", True),
         ("Applies to e.g. belts; then this", "Applies to e.g. belts", True),
+        # an ordinary word that merely ENDS in an abbreviation must still split:
+        # "ca" and "deg" are in the list, and a suffix test swallowed the real
+        # delimiter on two live fields (see _ends_with_abbreviation)
+        ("Bright silica. Higher = more", "Bright silica", True),
+        ("Speckle poleward of ~55 deg. Higher = more", "Speckle poleward of ~55 deg", True),
+        # ...while the genuine abbreviation still does not split
+        ("Measured approx. 3 radii across; then this", "Measured approx. 3 radii across", True),
     ],
 )
 def test_split_headline(text, expected, proper):
@@ -185,11 +215,15 @@ def scrub(text: str) -> str:
     (model.py rule 4) -- a matcher that did not strip them would flag the four
     fields already doing exactly what the rubric asks. snake_case identifiers go
     because cross-references must stay literal so search finds them (rule 4
-    again): ``prefer vort_psi_drag`` is not jargon. The pattern is deliberately
-    narrow -- it matches 13 identifiers across every headline in the corpus and
-    no prose. Stripping every ``model_fields`` key instead, the earlier
-    proposal, would delete ordinary words like ``latitude`` (31 descriptions)
-    and ``color`` (25), and would blind the matcher to its own targets.
+    again): ``prefer vort_psi_drag`` is not jargon.
+
+    The pattern is deliberately narrow. Stripping every ``model_fields`` key
+    instead -- the earlier proposal -- would delete ordinary English words that
+    happen to be field names and blind the matcher to its own targets; the
+    counts are measured in ``test_scrub_narrowness_is_measured`` rather than
+    asserted here, because this module's own rule (see the module docstring) is
+    that a number the audit depends on is derived or pinned, never left in
+    prose. The three that used to sit in this docstring had all rotted.
     """
     prev = None
     while prev != text:  # nested parens, innermost-out
@@ -281,6 +315,36 @@ def test_word_boundaries_do_not_catch_prose():
         assert blocklist_hits("x", benign) == [], benign
 
 
+def test_scrub_narrowness_is_measured():
+    """The claim that ``[a-z]+_[a-z_]+`` strips identifiers and NOT prose, held
+    as an assertion rather than as a number in a docstring.
+
+    ``scrub`` removing too much would blind rule E to its own targets; removing
+    too little would flag a compliant cross-reference. The bound is what
+    matters, not the exact count -- the counts that used to be written into
+    ``scrub``'s docstring (13 identifiers, latitude in 31, color in 25) were all
+    wrong at both HEAD and master, in the one module whose stated rule forbids
+    exactly that.
+    """
+    hits = [m for leaf in CORPUS
+            for m in _IDENTIFIER.findall(split_headline(leaf.description)[0])]
+    assert hits, "scrub strips nothing from any headline -- the pattern is dead"
+    # Every match must be a real identifier, not prose that happens to fit.
+    # Prefix-matching because the pattern carries no digits, so `coriolis_f0`
+    # can only ever match as `coriolis_f`.
+    names = {leaf.name for leaf in CORPUS}
+    #: snake_case names that are NOT pfields but are legitimately cited in copy.
+    #: Listed rather than pattern-matched so a new one is a visible decision.
+    NON_PFIELD_IDENTIFIERS = {"belt_mask"}
+    stray = {h for h in hits
+             if h not in NON_PFIELD_IDENTIFIERS
+             and not any(n == h or n.startswith(h) for n in names)}
+    assert not stray, f"scrub is deleting prose, not identifiers: {sorted(stray)}"
+    # and the bare English field names must NOT be strippable by it
+    for word in ("latitude", "color", "radius", "strength"):
+        assert not _IDENTIFIER.search(word), f"{word} would be stripped as an identifier"
+
+
 # -- rule G: what does zero do? ------------------------------------------------
 
 #: The literal "0 = ..." gloss. The lookbehind matters: a bare ``\b0`` also
@@ -357,6 +421,88 @@ def violations(leaf: ParamLeaf) -> list[str]:
 
 def measure() -> set[tuple[str, str]]:
     return {(leaf.path, rule) for leaf in CORPUS for rule in violations(leaf)}
+
+
+# -- the rule engine itself ----------------------------------------------------
+#
+# Everything above tests the HELPERS; everything below the corpus tests the
+# OUTCOME. `violations` sat between them untested, and because the corpus is now
+# clean no rule is ever observed firing through it. Measured: neutering C
+# (`> 200` -> `> 20000`), D (`< 15` -> `< 0`) and F (`> 600` -> `> 60000`)
+# together left the whole file green at 27 passed. Five of the seven rules could
+# be deleted outright with CI green, while the module docstring promises "a new
+# pfield whose description misses ANY rule fails here". A synthetic table is the
+# only way to observe a rule fire once the corpus stops violating it.
+
+
+class _FakeInfo:
+    def __init__(self, default):
+        self.default = default
+
+
+def _leaf(description: str, default: object = 1.0) -> ParamLeaf:
+    """A ParamLeaf carrying just what `violations` reads: path, description,
+    and info.default. Constructed positionally-agnostically so a field added to
+    ParamLeaf does not silently break the table."""
+    return SimpleNamespace(
+        path="synthetic.field", name="field", description=description,
+        info=_FakeInfo(default), model=None, caption="Field", meta=None,
+    )
+
+
+_LONG_TAIL = " and then some more prose to push it out past the limit"
+
+RULE_CASES = [
+    # (label, description, default, expected rules)
+    ("clean baseline",        "Storm size on the map. Higher = bigger; 0 = off.", 1.0, []),
+    ("A: no delimiter",       "A headline with no sentence delimiter anywhere",  1.0, ["A"]),
+    ("B: lowercase opener",   "lowercase opener here. Then a tail.",             1.0, ["B"]),
+    ("B: paren opener",       "(a parenthetical opener). Then a tail.",          1.0, ["B"]),
+    ("C: headline over 200",  "S" + "o long" * 45 + ". Tail.",                   1.0, ["C"]),
+    ("D: headline under 15",  "Storm. Tail here.",                               1.0, ["D"]),
+    ("E: blocklist term",     "Sets the vorticity of the flow. Tail here.",      1.0, ["E"]),
+    ("F: body over 600",      "Storm size on the map. Higher = bigger."
+                              + _LONG_TAIL * 12,                                 1.0, ["F"]),
+    ("G: zero default, no gloss",
+                              "Storm size on the map. Higher = bigger.",         0.0, ["G"]),
+    ("G satisfied",           "Storm size on the map. Higher = bigger; 0 = off.", 0.0, []),
+    # A decimal must not satisfy rule G -- `\b0` alone matches inside "1.0 ="
+    ("G: decimal is not a zero gloss",
+                              "Storm size on the map. 1.0 = round, higher = wider.", 0.0, ["G"]),
+    # rules compound rather than short-circuit
+    ("A+B+D together",        "tiny",                                            1.0, ["A", "B", "D"]),
+]
+
+
+@pytest.mark.parametrize(
+    ("label", "description", "default", "expected"),
+    RULE_CASES, ids=[c[0] for c in RULE_CASES],
+)
+def test_violations_fires_each_rule(label, description, default, expected):
+    assert violations(_leaf(description, default)) == expected
+
+
+@pytest.mark.parametrize(
+    ("length", "rule"),
+    [(14, "D"), (15, None), (200, None), (201, "C")],
+)
+def test_rule_c_and_d_boundaries(length, rule):
+    """Off-by-one on a threshold is the classic way a length rule stops meaning
+    what its docstring says, and it is invisible against a clean corpus."""
+    headline = "S" + "x" * (length - 1)
+    assert len(headline) == length
+    got = violations(_leaf(f"{headline}. Tail here."))
+    assert (rule in got) if rule else (got == [])
+
+
+def test_rule_f_boundary_and_exception_list():
+    body = "Storm size on the map. Higher = bigger."
+    at_limit = body + "x" * (600 - len(body))
+    assert violations(_leaf(at_limit)) == []
+    assert violations(_leaf(at_limit + "x")) == ["F"]
+    # LONG_EXCEPTIONS must actually exempt, or the list is decoration
+    over = SimpleNamespace(**{**vars(_leaf(at_limit + "x")), "path": next(iter(LONG_EXCEPTIONS))})
+    assert violations(over) == []
 
 
 def test_every_reported_rule_is_documented():

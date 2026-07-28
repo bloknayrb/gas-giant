@@ -175,7 +175,7 @@ _SECTION_BLURBS: dict[str, str] = {
     "waves": "Rippling wave trains along the band edges: festoons, their hot "
     "spots, and the Saturn ribbon.",
     "poles": "What sits over each pole: a cyclone cluster, a polygonal "
-    "jet, or nothing. Cap COLOR lives in Appearance.",
+    "jet, a single vortex, or nothing. Cap COLOR lives in Appearance.",
     "appearance": "The final grade -- palette, contrast, saturation and tone.",
     "detail": "Fine texture synthesized over the planet at render time, folded "
     "along the flow.",

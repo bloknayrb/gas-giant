@@ -45,6 +45,8 @@ the GUI-free assertions still run without the GUI extra.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from gasgiant.params.model import iter_pfields
@@ -92,14 +94,25 @@ def test_the_physics_term_still_reaches_its_lever(term, path):
 
 
 def test_search_really_bypasses_the_advanced_gate():
-    """The premise the whole module rests on. Every field above is adv=True, so
-    if a search match did NOT override the Basic/Advanced gate, the assertions
-    would be passing for the wrong reason -- and would keep passing after the
-    term was deleted, since ``show_advanced=False`` would hide the field
-    either way."""
-    advanced = [p for _t, p in SEARCHABLE_BY_PHYSICS if _LEAVES[p].meta.adv]
-    assert advanced, "sanity: these are meant to be Advanced-only levers"
-    for path in advanced:
+    """The premise the whole module rests on: a non-matching search must HIDE
+    the field. Otherwise the assertions above pass for the wrong reason, and
+    keep passing after the term is deleted.
+
+    FIVE of the six are ``adv=True``; ``storms.hero_radius`` is a Basic lever.
+    An earlier version of this docstring claimed all six were, and the guard
+    filtered on ``.meta.adv`` to match -- which silently excluded hero_radius,
+    i.e. the ``"grs"`` case, the single term the audit script singles out as
+    "what an artist actually types into search". The entry that most needed the
+    premise checked was the one entry the check skipped.
+
+    No filter now: with a non-empty query ``_leaf_visible`` decides purely on
+    the haystack match for Basic fields too, so the assertion is meaningful for
+    every entry regardless of tier.
+    """
+    assert any(_LEAVES[p].meta.adv for _t, p in SEARCHABLE_BY_PHYSICS), (
+        "sanity: these are meant to be mostly Advanced-only levers"
+    )
+    for _term, path in SEARCHABLE_BY_PHYSICS:
         assert not _findable_by(path, "zzz-no-such-term"), (
             f"{path}: a non-matching search still shows the field, so the "
             f"findability assertions prove nothing"
@@ -151,7 +164,58 @@ LOAD_BEARING = [
     f"{p.rsplit('.', 1)[-1]}-{t.replace(' ', '_')}" for p, t, _ in LOAD_BEARING
 ])
 def test_a_load_bearing_token_survives_the_rewrite(path, token, why):
-    assert token in _copy_of(path), f"{path} lost {token!r}: {why}"
+    # Word-boundary, not plain `in`. A bare substring test passes when the token
+    # is EXTENDED rather than kept: rewriting "0.32" to "0.325" satisfied it
+    # (because "0.32" is inside "0.325") while the sibling default pin in
+    # test_hero_frame_helpers stayed green too, since the DEFAULT was untouched.
+    # Both halves of the advertised coupling reported success over a description
+    # that now makes a byte-identity claim about a number that is not the
+    # default. Same hole for "3.6 hero radii" -> "3.65 hero radii".
+    assert re.search(rf"(?<![\w.]){re.escape(token)}(?![\w.])", _copy_of(path)), (
+        f"{path} lost {token!r} (or extended it into a different value): {why}"
+    )
+
+
+def test_the_load_bearing_check_rejects_an_extended_token():
+    """Pins the boundary itself. Without it this module's central assertion
+    silently accepts the one edit that changes a pinned constant's meaning."""
+    pattern = rf"(?<![\w.]){re.escape('0.32')}(?![\w.])"
+    assert re.search(pattern, "companion sits at 0.32 (byte-identical)")
+    assert not re.search(pattern, "companion sits at 0.325 (byte-identical)")
+    assert not re.search(pattern, "companion sits at 10.32 (byte-identical)")
+
+
+#: ``(path, regex the copy must keep matching)``. A lever that only does
+#: something in one solver mode, one projection, or one import path MUST say so:
+#: the rubric in ``params/model.py`` calls a dropped activation clause "a lever
+#: that silently does nothing", and it is the failure this project's own
+#: solver-mode notes warn about by name.
+#:
+#: Two independent review passes reached this gap from opposite directions --
+#: the rubric next door has no shape rule that can express it, and the token
+#: diff in ``scripts/audit_descriptions.py`` was suppressing the very words that
+#: carry it ("only", "not", "without") as connective tissue. Both are fixed, and
+#: this pins the outcome directly. Every entry holds today, so the set costs
+#: nothing until someone tightens one of these sentences.
+MODE_QUALIFIED = [
+    ("storms.hero_solid_core", r"vorticity mode"),
+    ("storms.hero_flow_aspect", r"[Vv]orticity mode"),
+    ("solver.baroclinic.enabled", r"solver type=vorticity"),
+    ("solver.vort_inject", r"[Vv]orticity mode"),
+    ("solver.vort_inject_mask", r"[Vv]orticity mode"),
+    ("solver.vort_psi_drag", r"[Ee]quirect only"),
+    ("solver.vort_eddy_drag", r"[Ee]quirect only"),
+]
+
+
+@pytest.mark.parametrize(("path", "pattern"), MODE_QUALIFIED,
+                         ids=[p for p, _ in MODE_QUALIFIED])
+def test_a_mode_scoped_lever_still_says_so(path, pattern):
+    assert re.search(pattern, _DESCRIPTIONS[path]), (
+        f"{path} lost its activation clause (expected /{pattern}/). Without it "
+        f"the tooltip describes a lever that does nothing in the artist's "
+        f"current mode -- move the clause, never delete it."
+    )
 
 
 def test_hero_emergence_keeps_its_mechanism_scoping():

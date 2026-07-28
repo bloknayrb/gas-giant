@@ -90,7 +90,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
 
-Where the injected churn is allowed to land. global = everywhere; belts = the cyclonic dark bands only, leaving the anticyclonic zones smooth; shear = the jet-shear flanks only, so filaments form where shear is high. The mask multiplies vort_inject per pixel and is NOT normalized by how much it covers, so a wider mask puts more total churn in at the same amplitude — belts covers ~48% of latitudes against shear's ~4%, so retune vort_inject DOWN when you widen it (spatial localization of eddy injection). Vorticity mode.
+Where the injected churn is allowed to land. global = everywhere; belts = the cyclonic dark bands only, leaving the anticyclonic zones smooth; shear = the jet-shear flanks only, so filaments form where shear is high. The mask multiplies vort_inject per pixel and is NOT normalized by how much it covers, so a wider mask puts more total churn in at the same amplitude — belts lets through several times what shear does, so retune vort_inject DOWN when you widen it (spatial localization of eddy injection). Vorticity mode.
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
@@ -132,7 +132,7 @@ Brake on everything that is not part of the east-west jets. It leaves the jets t
 
 `solver.baroclinic.enabled` &mdash; toggle (on/off), default **`False`**, tier `restart`.
 
-Adds physically-grounded mid-latitude storms, grown by a baroclinic instability model instead of seeded by hand. Off = plain v1.6; requires solver type=vorticity (injects the evolving baroclinic vorticity source into the solver). No rand: randomize() must never silently enable it.
+Adds physically-grounded mid-latitude storms, grown by a baroclinic instability model, in addition to the hand-seeded ones. Off = plain v1.6; requires solver type=vorticity (injects the evolving baroclinic vorticity source into the solver). No rand: randomize() must never silently enable it.
 
 _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
@@ -391,7 +391,7 @@ How far apart the pale zones and dark belts sit in brightness. Higher = a bolder
 
 `bands.variance_amount` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
 
-Slow color drift along the length of each band. Higher = a band that shifts hue as it wraps the planet; 0 = off (within-band longitudinal drift — real belts hold several hues at once, varying slowly with longitude)
+Slow color drift along the length of each band. Higher = a band that lightens and darkens as it wraps the planet; 0 = off. For a hue-only drift at constant brightness use hue_variance (within-band longitudinal drift along the palette, varying slowly with longitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__variance_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.18</sub></td><td align="center"><img src="img/sliders/bands__variance_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
@@ -411,7 +411,7 @@ How far the band boundaries wander north and south. Higher = wavier, less ruler-
 
 `bands.width_jitter` &mdash; range **0 to 1**, default **0.35**, tier `restart`.
 
-How much the band widths vary from one another. Higher = a less regular, more natural mix of wide and narrow bands; 0 = every band the same width (randomness of the band width distribution)
+How much the band widths vary from one another. Higher = a less regular, more natural mix of wide and narrow bands; 0 = every band the same size — equal-area, so the polar ones still read taller on a flat map (randomness of the band width distribution)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__width_jitter__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.4</sub></td><td align="center"><img src="img/sliders/bands__width_jitter__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -597,7 +597,7 @@ Extra churn inside the dark belts only. Higher = the belts look rougher than the
 
 `turbulence.belt_replenish` &mdash; range **0 to 0.08**, default **0**, tier `restart`.
 
-Extra fine detail-noise fed to the belts alone per step, on top of replenish_rate, so belt texture keeps regenerating instead of smearing flat. Higher = finer emergent filaments inside the belts; 0 = off
+Extra fine detail-noise fed to the belts alone per step, on top of replenish_rate, so belt texture keeps regenerating instead of smearing flat. Higher = more of it, so the belts read busier; 0 = off (belt_replenish_scale sets how fine it is)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__belt_replenish__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.07</sub></td><td align="center"><img src="img/sliders/turbulence__belt_replenish__hi.jpg" width="320"><br><sub>high &middot; 0.08</sub></td>
@@ -627,7 +627,7 @@ How many billows fit around the planet along a band edge. Higher = more, tighter
 
 `turbulence.kh_amplitude` &mdash; range **0 to 2**, default **0.35**, tier `velocity`.
 
-How far a band edge billows where fast and slow jets meet. Higher = deeper scallops along the boundary; 0 = a straight edge (Kelvin-Helmholtz wave amplitude along high-shear band boundaries)
+How far a band edge billows where fast and slow jets meet. Higher = deeper scallops along the boundary; 0 = no billows, though the edge still meanders (see warp_amount) — Kelvin-Helmholtz wave amplitude along high-shear band boundaries
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__kh_amplitude__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/turbulence__kh_amplitude__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1843,7 +1843,7 @@ _Shown on the **emission map** (night-side glow) with all three glows enabled; t
 
 `physical.height_midlevel` &mdash; range **0 to 1**, default **0.5**, tier `post`.
 
-Which height-map value counts as the mid cloud deck. Values above it read as raised cloud, values below as a gap (the Blender importer's reference level)
+Which height-map value counts as the mid cloud deck: above it reads as raised cloud, below as a gap. Only used when the Blender import turns Displacement on — the default bump path ignores it (the importer's reference level)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -1898,7 +1898,7 @@ _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
 `export.png_compression` &mdash; range **0 to 9**, default **2**, tier `post`.
 
-How hard the PNG files are squeezed on export. Lower = much faster writes, which matters at 16K; higher = smaller files (zlib deflate level)
+How hard the color PNG is squeezed on export. Lower = much faster writes, which matters at 16K; higher = a smaller file. Only the color map uses it; the 16-bit height PNGs are always written at the default level (zlib deflate level)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 

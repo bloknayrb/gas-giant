@@ -37,25 +37,53 @@ from pathlib import Path
 
 _MODEL = "src/gasgiant/params/model.py"
 
+
+class _CannotRun(RuntimeError):
+    """The audit could not be performed at all -- distinct from "it ran and
+    found a drop". Kept separate so ``main`` can reserve exit 1 exclusively for
+    findings and exit 2 for "do not read anything into this run"."""
+
 #: Words whose loss is never interesting: articles, prepositions, and the
 #: connective tissue a tightening pass exists to remove. Kept deliberately
 #: SMALL -- every word not listed here gets reported, because the failure mode
 #: is a filter that quietly swallows the one token that mattered.
 #: Kept as prose rather than a 60-element list literal, which is far harder to
 #: scan for "is X in here?" -- the only question ever asked of it.
+#:
+#: NEGATIONS AND SCOPE QUALIFIERS ARE DELIBERATELY ABSENT (see _ALWAYS_REPORT).
 _STOPWORD_TEXT = """
-a an the and or but of to in on at by for from with without into onto over under
+a an the and or but of to in on at by for from with into onto over under
 is are was were be been being it its this that these those as if then than so
-you your they them their there here when while during after before each every
-any all both no not only also more most less least very much many few
+you your they them their there here when while during after before
+also very much
 """
 
-_STOPWORDS = frozenset(_STOPWORD_TEXT.split())
+#: Never suppressed: dropping one of these INVERTS or UNSCOPES the claim rather
+#: than tightening it, so "connective tissue" is exactly the wrong reading.
+#: Measured before this list existed:
+#:     'Applies in vorticity mode only' -> '...mode'      LOST = []
+#:     'Renders without emission'       -> 'with...'      LOST = []
+#:     'The jet does not brighten...'   -> 'brightens'    LOST = ['does']
+#: That last one is worse than silence: the reader is shown a textbook piece of
+#: connective tissue and waves through a complete inversion. This codebase is
+#: dense with exactly these claims -- hero_solid_core is a kinematic NO-OP, the
+#: seat meter is diagnostic ONLY and NEVER moves the storm -- and the rubric in
+#: params/model.py demands they be carried VERBATIM. Cost of un-suppressing
+#: them, measured over all 107 rewritten fields: one advisory token.
+#: Same prose-not-a-list-literal shape as _STOPWORD_TEXT above: the only
+#: question ever asked of these is "is X in here?", which scans far better as a
+#: sentence. (A bare .split() on an inline literal also trips ruff SIM905.)
+_ALWAYS_REPORT_TEXT = "no not never without only all every each any both most least more less"
 
-#: One-char tokens count: the rubric's mandatory "0 = off" gloss hangs on a
-#: bare `0`, and a ``{2,}`` floor made its removal unreportable. Widening was
-#: measured free -- the DROPPED report over all 107 rewritten fields is
-#: byte-identical either way; only the (advisory) `added:` lines gain a "0".
+_ALWAYS_REPORT = frozenset(_ALWAYS_REPORT_TEXT.split())
+
+_STOPWORDS = frozenset(_STOPWORD_TEXT.split()) - _ALWAYS_REPORT
+
+#: One-char tokens count: the rubric's mandatory "0 = off" gloss hangs on a bare
+#: `0`, which a ``{2,}`` floor could never report. Widening alone did NOT
+#: deliver that -- the old whole-blob substring haystack still swallowed the `0`
+#: whenever any surviving number contained the digit ("10"). It takes the
+#: token-boundary matching in ``_lost`` as well; the two go together.
 _TOKEN = re.compile(r"[A-Za-z0-9_.~+-]+")
 
 
@@ -65,34 +93,57 @@ def _tokens(text: str) -> set[str]:
     Numbers and hyphenated/underscored forms are kept whole (``0.32``,
     ``3.6``, ``solid-body``, ``vort_psi_drag``) -- those are exactly the
     load-bearing tokens, and splitting them would hide their loss.
+
+    A LEADING SIGN IS PART OF THE NUMBER. Stripping ``-`` made ``-0.28`` and
+    ``0.28`` the same token, so flipping ``storms.hero_brightness``'s "barges
+    use -0.28" from darken to brighten was unreportable -- an inverted artist
+    instruction, invisible to the shape rubric too because the shape is
+    unchanged. A trailing hyphen is still decoration and goes.
     """
-    return {t for t in (m.group().strip(".-~+").lower() for m in _TOKEN.finditer(text))
-            if t and t not in _STOPWORDS}
+    out: set[str] = set()
+    for m in _TOKEN.finditer(text):
+        t = m.group().strip(".~+").rstrip("-")
+        if t.startswith("-") and not t[1:2].isdigit():
+            t = t.lstrip("-")          # a dash artefact, not a signed number
+        t = t.lower()
+        if t and t not in _STOPWORDS:
+            out.add(t)
+    return out
 
 
 def _lost(old_text: str, new_text: str, field_name: str = "", caption: str = "") -> list[str]:
     """Tokens the rewrite made UNREACHABLE, judged the way search actually works.
 
-    ``panels._haystack`` is ``name + derived_label + field_label + description``,
-    lowercased, matched by plain substring. So a token is only lost if it is
-    absent from ALL of that -- not merely absent from the new description's
-    token set. Two corrections that came out of real noise on this audit:
+    ``panels._haystack`` is ``name + derived_label + field_label + description``.
+    A token survives if it still reaches the artist through ANY of that -- not
+    merely if it is still in the new description's token set. Corrections that
+    came out of real noise on this audit:
 
     * Set subtraction alone reports every inflection as a casualty. On the pilot
-      wave it called 15 tokens lost where the substring rule suppresses 4 of
-      them -- "per", "step", "festoon" -> "festoons", "billow" -> "billows".
+      wave it called 15 tokens lost where this rule suppresses 6 -- "per",
+      "step", "festoon" -> "festoons", "billow" -> "billows", plus "kh" and
+      "depth", which survive in the field NAMES kh_wavenumber/hotspot_depth.
     * Ignoring the field name reported ``kh`` lost from ``kh_wavenumber``, where
       search plainly still reaches it. The authored ``label`` counts too, and
       omitting it would report "turbulence" lost from ``relax_tau`` (captioned
       "Turbulence leash") for the same bad reason.
 
+    Matching is at a TOKEN BOUNDARY, not against the joined blob. Substring-on-
+    the-blob suppressed anything that happened to appear inside an unrelated
+    word -- most sharply the bare ``0``, swallowed by any surviving "10". The
+    rule is: a token survives if some surviving token STARTS with it (the
+    inflection case) or equals one of its hyphen/underscore parts (``step``
+    surviving into ``per-step``). Known limit: ``3.6`` -> ``3.65`` still reads
+    as survival, because 3.6 does prefix 3.65. Changed NUMBERS are not what
+    this tool can see; dropped words are.
+
     Noise at that rate trains the reader to skim, which is the one thing this
     script must not do.
     """
-    haystack = (
-        f"{field_name} {field_name.replace('_', ' ')} {caption} {new_text}"
-    ).lower()
-    return sorted(t for t in _tokens(old_text) - _tokens(new_text) if t not in haystack)
+    hay = _tokens(f"{field_name} {field_name.replace('_', ' ')} {caption} {new_text}")
+    hay |= {part for h in hay for part in re.split(r"[-_]", h) if part}
+    return sorted(t for t in _tokens(old_text) - _tokens(new_text)
+                  if not any(h.startswith(t) for h in hay))
 
 
 def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
@@ -106,12 +157,35 @@ def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
     path an option here: reconstructing one would mean re-implementing the
     nesting walk against historical source. The declaring class is exact, needs
     no reconstruction, and both sides can produce it.
+
+    Gated on ``pfield(`` specifically, to match what the live side selects.
+    ``iter_pfields`` counts a leaf only if its ``json_schema_extra`` carries a
+    tier, which drops ``GradientStop``/``PaletteRow``/``BandTemplate`` (plain
+    ``Field()``). An ungated walk would pick those up the moment one gained a
+    ``description=``, and since they can never appear on the live side the GONE
+    block would then fire forever -- a permanently stuck red light on the
+    audit's primary drift mitigation.
     """
-    src = subprocess.run(
-        ["git", "show", f"{rev}:{_MODEL}"],
-        capture_output=True, text=True, check=True, encoding="utf-8",
-        cwd=Path(__file__).resolve().parents[1],  # not the caller's CWD
-    ).stdout
+    try:
+        src = subprocess.run(
+            ["git", "show", f"{rev}:{_MODEL}"],
+            capture_output=True, text=True, check=True, encoding="utf-8",
+            cwd=Path(__file__).resolve().parents[1],  # not the caller's CWD
+        ).stdout
+    except FileNotFoundError as exc:                       # git absent
+        raise _CannotRun("git is not on PATH; the base revision is read via `git show`") from exc
+    except subprocess.CalledProcessError as exc:
+        # check=True + capture_output means git's own message lands in
+        # exc.stderr and str(exc) drops it -- the one sentence that says what
+        # to do. Worse, the traceback exits 1, which is what --fail-on-drop
+        # returns for a real finding, so a scripted gate cannot tell "copy
+        # regressed" from "could not run".
+        raise _CannotRun(
+            f"cannot read {_MODEL} at {rev!r}\n"
+            f"  git: {(exc.stderr or '').strip()}\n"
+            f"  (a shallow PR checkout has no local 'master' -- try "
+            f"--base origin/master, or `git fetch origin master:master`)"
+        ) from exc
     out: dict[tuple[str, str], str] = {}
     for cls in ast.walk(ast.parse(src)):
         if not isinstance(cls, ast.ClassDef):
@@ -122,6 +196,9 @@ def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
                 continue
             if not isinstance(node.value, ast.Call):
                 continue
+            func = node.value.func
+            if not (isinstance(func, ast.Name) and func.id == "pfield"):
+                continue
             for kw in node.value.keywords:
                 if (kw.arg == "description" and isinstance(kw.value, ast.Constant)
                         and isinstance(kw.value.value, str)):
@@ -129,20 +206,27 @@ def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
     return out
 
 
-def _current_descriptions() -> dict[tuple[str, str], tuple[str, str, str]]:
-    """``{(class_name, field_name): (dotted_path, description, caption)}`` from the
-    live model. The caption comes along because it is part of the real search
-    haystack, so ``_lost`` needs it to avoid false positives.
+def _current_descriptions() -> dict[tuple[str, str], tuple[tuple[str, ...], str, str]]:
+    """``{(class_name, field_name): (dotted_paths, description, caption)}`` from
+    the live model. The caption comes along because it is part of the real
+    search haystack, so ``_lost`` needs it to avoid false positives.
 
     ``poles.north`` and ``poles.south`` are two ``PoleParams`` instances, so
-    five keys here map to two paths each and the later one wins. That is
-    correct rather than lossy: both paths read the SAME declaration, so one
-    report per declaration is exactly one report per edit.
+    five keys here carry TWO paths each. Reporting stays one line per
+    declaration -- both paths read the same string, so one report per edit is
+    right -- but every path is kept, because ``--section`` matches on them.
+    Keeping only the last silently broke ``--section poles.north.``: a
+    correctly-spelled prefix that matched nothing, printed a confident
+    "no tokens dropped", and exited 0 even under --fail-on-drop.
     """
     from gasgiant.params.model import iter_pfields
 
-    return {(leaf.model.__name__, leaf.name): (leaf.path, leaf.description, leaf.caption)
-            for leaf in iter_pfields()}
+    out: dict[tuple[str, str], tuple[tuple[str, ...], str, str]] = {}
+    for leaf in iter_pfields():
+        key = (leaf.model.__name__, leaf.name)
+        paths = out[key][0] + (leaf.path,) if key in out else (leaf.path,)
+        out[key] = (paths, leaf.description, leaf.caption)
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -158,13 +242,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {_MODEL} not found under {repo}", file=sys.stderr)
         return 2
 
-    old = _descriptions_at(args.base)
+    try:
+        old = _descriptions_at(args.base)
+    except _CannotRun as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2                       # never 1 -- that means "a token dropped"
     new = _current_descriptions()
+
+    def _in_scope(paths: tuple[str, ...]) -> bool:
+        return not args.section or any(p.startswith(args.section) for p in paths)
+
+    # A --section that matches nothing is a typo ('storm.' for 'storms.'), and
+    # printing "no tokens dropped / exit 0" for it is a confident all-clear over
+    # an audit that never ran.
+    if args.section and not any(_in_scope(paths) for paths, _d, _c in new.values()):
+        known = sorted({p.split(".")[0] + "." for paths, _d, _c in new.values() for p in paths})
+        print(f"error: --section {args.section!r} matched no field; "
+              f"known prefixes: {', '.join(known)}", file=sys.stderr)
+        return 2
 
     dropped_any = False
     changed = 0
-    for key, (path, new_text, caption) in sorted(new.items(), key=lambda kv: kv[1][0]):
-        if args.section and not path.startswith(args.section):
+    for key, (paths, new_text, caption) in sorted(new.items(), key=lambda kv: kv[1][0]):
+        if not _in_scope(paths):
             continue
         old_text = old.get(key)
         if old_text is None or old_text == new_text:
@@ -173,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         lost = _lost(old_text, new_text, key[1], caption)
         gained = sorted(_tokens(new_text) - _tokens(old_text))
         delta = len(new_text) - len(old_text)
+        path = " / ".join(paths)
         print(f"\n{path}  ({len(old_text)} -> {len(new_text)} chars, {delta:+d})")
         if lost:
             dropped_any = True
@@ -187,8 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     # every token it carried with it while --fail-on-drop still exited 0 --
     # a vacuous pass in the audit's primary drift mitigation.
     live_classes = {cls for (cls, _f) in new}
-    in_scope_classes = {cls for (cls, _f), (path, _d, _c) in new.items()
-                        if not args.section or path.startswith(args.section)}
+    in_scope_classes = {cls for (cls, _f), (paths, _d, _c) in new.items()
+                        if _in_scope(paths)}
     # A class that still exists is scoped by its live path. One that is GONE
     # ENTIRELY has no path to scope by, so --section cannot place it -- report
     # it either way. Dropping it instead is how the scoped path re-acquired

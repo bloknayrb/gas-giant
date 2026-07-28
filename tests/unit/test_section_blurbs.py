@@ -1,10 +1,11 @@
 """Every params section gets a one-line blurb behind the (?) beside its header.
 
-The blurb is the first text an artist reads while hunting for the right panel,
-and it is the ONE string that is always visible without hovering a single
-slider. A section with no blurb simply draws no help marker -- there is nothing
-red, nothing missing on screen, just a section that never explains itself.
-``mask`` and ``rings`` were in that state.
+The blurb is the first explanation an artist reaches while hunting for the right
+panel: one hover on the section header, versus hunting slider by slider. (The
+blurb is itself a tooltip -- ``_draw_help_marker`` draws a ``(?)`` and hangs the
+text off it, so only the glyph is always on screen.) A section with no blurb
+simply draws no marker -- nothing red, nothing visibly missing, just a section
+that never explains itself. ``mask`` and ``rings`` were in that state.
 
 ``importorskip`` because ``panels`` imports imgui_bundle at module load; the
 contents are plain data, but reaching them needs the GUI extra installed.
@@ -20,10 +21,17 @@ panels = pytest.importorskip("gasgiant.app.panels")
 
 
 def _top_level_sections() -> set[str]:
-    """The section names ``draw_params_panel`` will actually draw a header for:
-    the nested-model fields of ``PlanetParams``. Derived, never listed -- a
-    hand-written list is how ``mask`` and ``rings`` went missing in the first
-    place."""
+    """The sections that get a BLURB: the top-level nested models of
+    ``PlanetParams``.
+
+    Not the sections that get a header -- ``_draw_model`` draws one for every
+    nested ``BaseModel`` at any depth, so ``solver.baroclinic``,
+    ``poles.north`` and ``poles.south`` have headers too. It is the
+    ``if top_level:`` gate that attaches a blurb, and this predicate mirrors
+    that gate, not the header call.
+
+    Derived, never listed -- a hand-written list is how ``mask`` and ``rings``
+    went missing in the first place."""
     from pydantic import BaseModel
 
     return {

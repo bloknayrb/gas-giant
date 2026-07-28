@@ -40,8 +40,11 @@ JOVIAN skeleton, so a band-template change touches four presets at once; cobalt_
 band CENTRED on the equator needs `count ≡ 1 (mod 4)`), green_giant (an enriched
 sulfur-chromophore giant — olive/chartreuse, `sim.resolution` 4096 and pinned in
 `SIM_RES_OVERRIDES`; the ONLY preset using `vort_inject_mask = belts`, and note a mask is
-a MULTIPLIER on `vort_inject`: belt_mask covers ~48% of latitudes against shear_norm's
-~4%, so belts SPREADS churn relative to shear and the amplitude must be retuned down with
+a MULTIPLIER on `vort_inject`: belt_mask is near-binary with mean ~0.48 on green_giant
+(~0.56 on the shared Jovian skeleton), while shear_norm is a GRADED [0,1] field with mean
+~0.10 — so belts admits several times the total churn shear does (the older "~48% vs ~4%"
+pairing compared a mask mean against `frac(shear_norm > 0.5)` and overstated it ~3x), and
+so belts SPREADS churn relative to shear and the amplitude must be retuned down with
 it. Seeded band path, and on that path `count` must be EVEN — at an odd count with belts
 in the majority the median IS the top belt value, so `values < median` silently
 misclassifies one belt as a zone; the model's alternation validator only runs on the

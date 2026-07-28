@@ -278,8 +278,9 @@ class BandsParams(_Params):
         0.35, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.1, 0.6), ui="Bands",
         description="How much the band widths vary from one another. Higher = "
                     "a less regular, more natural mix of wide and narrow "
-                    "bands; 0 = every band the same width (randomness of the "
-                    "band width distribution)",
+                    "bands; 0 = every band the same size — equal-area, so "
+                    "the polar ones still read taller on a flat map "
+                    "(randomness of the band width distribution)",
     )
     edge_softness: float = pfield(
         0.012, tier=Tier.RESTART, lo=0.001, hi=0.1, rand=(0.005, 0.03), log=True,
@@ -329,9 +330,10 @@ class BandsParams(_Params):
     variance_amount: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.02, 0.12), adv=True, ui="Bands",
         description="Slow color drift along the length of each band. Higher = "
-                    "a band that shifts hue as it wraps the planet; 0 = off "
-                    "(within-band longitudinal drift — real belts hold several "
-                    "hues at once, varying slowly with longitude)",
+                    "a band that lightens and darkens as it wraps the planet; "
+                    "0 = off. For a hue-only drift at constant brightness use "
+                    "hue_variance (within-band longitudinal drift along the "
+                    "palette, varying slowly with longitude)",
     )
     faded_sector: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), adv=True, ui="Bands",
@@ -625,8 +627,9 @@ class TurbulenceParams(_Params):
         label="Billow strength",
         description="How far a band edge billows where fast and slow jets "
                     "meet. Higher = deeper scallops along the boundary; 0 = "
-                    "a straight edge (Kelvin-Helmholtz wave amplitude "
-                    "along high-shear band boundaries)",
+                    "no billows, though the edge still meanders (see "
+                    "warp_amount) — Kelvin-Helmholtz wave amplitude "
+                    "along high-shear band boundaries",
     )
     kh_wavenumber: int = pfield(
         24, tier=Tier.VELOCITY, lo=4, hi=80, rand=(14, 40), adv=True, ui="Turbulence",
@@ -639,8 +642,9 @@ class TurbulenceParams(_Params):
         0.0, tier=Tier.RESTART, lo=0.0, hi=0.08, adv=True, ui="Turbulence",
         description="Extra fine detail-noise fed to the belts alone per step, on "
                     "top of replenish_rate, so belt texture keeps regenerating "
-                    "instead of smearing flat. Higher = finer emergent "
-                    "filaments inside the belts; 0 = off",
+                    "instead of smearing flat. Higher = more of it, so the "
+                    "belts read busier; 0 = off (belt_replenish_scale sets "
+                    "how fine it is)",
     )
     belt_replenish_scale: float = pfield(
         2.0, tier=Tier.RESTART, lo=1.0, hi=4.0, adv=True, ui="Turbulence",
@@ -1681,7 +1685,8 @@ class BaroclinicParams(_Params):
     enabled: bool = pfield(
         False, tier=Tier.RESTART, adv=True, ui="Solver",
         description="Adds physically-grounded mid-latitude storms, grown by a "
-                    "baroclinic instability model instead of seeded by hand. "
+                    "baroclinic instability model, in addition to the "
+                    "hand-seeded ones. "
                     "Off = plain v1.6; requires solver type=vorticity (injects "
                     "the evolving baroclinic vorticity source into the solver). "
                     "No rand: randomize() must never silently enable it.")
@@ -1796,8 +1801,8 @@ class SolverParams(_Params):
                     "flanks only, so filaments form where shear is high. The "
                     "mask multiplies vort_inject per pixel and is NOT "
                     "normalized by how much it covers, so a wider mask puts "
-                    "more total churn in at the same amplitude — belts covers "
-                    "~48% of latitudes against shear's ~4%, so retune "
+                    "more total churn in at the same amplitude — belts lets "
+                    "through several times what shear does, so retune "
                     "vort_inject DOWN when you widen it (spatial localization "
                     "of eddy injection). Vorticity mode.")
     vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
@@ -2209,9 +2214,11 @@ class PhysicalParams(_Params):
     )
     height_midlevel: float = pfield(
         0.5, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Physical",
-        description="Which height-map value counts as the mid cloud deck. "
-                    "Values above it read as raised cloud, values below as "
-                    "a gap (the Blender importer's reference level)",
+        description="Which height-map value counts as the mid cloud deck: "
+                    "above it reads as raised cloud, below as a gap. Only "
+                    "used when the Blender import turns Displacement on — "
+                    "the default bump path ignores it (the importer's "
+                    "reference level)",
     )
     ring_inner_km: float = pfield(
         74500.0, tier=Tier.POST, lo=1000.0, hi=1000000.0, adv=True, ui="Physical",
@@ -2298,9 +2305,11 @@ class ExportParams(_Params):
     )
     png_compression: int = pfield(
         2, tier=Tier.POST, lo=0, hi=9, ui="Export",
-        description="How hard the PNG files are squeezed on export. Lower = "
-                    "much faster writes, which matters at 16K; higher = "
-                    "smaller files (zlib deflate level)",
+        description="How hard the color PNG is squeezed on export. Lower = "
+                    "much faster writes, which matters at 16K; higher = a "
+                    "smaller file. Only the color map uses it; the 16-bit "
+                    "height PNGs are always written at the default level "
+                    "(zlib deflate level)",
     )
     flow_map: bool = pfield(
         False, tier=Tier.POST, ui="Export",
@@ -2320,8 +2329,10 @@ class PlanetParams(_Params):
     )
     name: str = pfield(
         "unnamed", tier=Tier.POST, ui="Global",
-        description="Display name for this planet. Used as the preset name "
-                    "when saving",
+        description="Display name for this planet. Written into the export "
+                    "manifest, where the Blender importer uses it to name "
+                    "the object, rig and material. Saving a preset takes its "
+                    "name from the FILENAME, not from this",
     )
     sim: SimParams = Field(default_factory=SimParams)
     solver: SolverParams = Field(default_factory=SolverParams)

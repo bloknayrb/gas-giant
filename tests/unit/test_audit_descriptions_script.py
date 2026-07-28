@@ -27,7 +27,14 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
 
-audit = pytest.importorskip("audit_descriptions")
+# A PLAIN import, deliberately. `importorskip` is for genuinely optional deps
+# (imgui_bundle, scipy) -- this script is a tracked file in the same checkout,
+# so its absence is a real failure, not a reason to stand down. Under
+# importorskip, renaming the script silently turned all of these into
+# `1 skipped` with exit 0, and CI's `test` job runs without `-rs`, so the only
+# trace would be a skip count nobody diffs. This repo has already been burned
+# by exactly that (~178 GPU tests skipping while CI reported green).
+import audit_descriptions as audit  # noqa: E402  first-party; must not be skippable
 
 
 @pytest.mark.parametrize(
@@ -45,6 +52,14 @@ audit = pytest.importorskip("audit_descriptions")
         # single characters count -- the rubric's mandatory gloss is a bare `0`,
         # and a two-char floor made its removal structurally unreportable
         ("0 = off", {"0", "off"}),
+        # a leading sign is part of the number: -0.28 and 0.28 are opposite
+        # instructions to an artist ("barges use -0.28" = darken)
+        ("barges use -0.28", {"barges", "use", "-0.28"}),
+        # ...but a dash used as punctuation is not a token
+        ("churn -- the fine kind", {"churn", "fine", "kind"}),
+        # negations and scope qualifiers survive tokenization; they invert or
+        # unscope a claim, so they are never connective tissue
+        ("only in vorticity mode", {"only", "vorticity", "mode"}),
     ],
 )
 def test_tokens(text, expected):
@@ -105,8 +120,8 @@ def test_section_scoping_also_scopes_the_gone_report(monkeypatch, capsys):
     monkeypatch.setattr(
         audit, "_current_descriptions",
         lambda: {
-            ("StormsParams", "kept"): ("storms.kept", "unchanged", "Kept"),
-            ("AppearanceParams", "survivor"): ("appearance.survivor", "still here", "S"),
+            ("StormsParams", "kept"): (("storms.kept",), "unchanged", "Kept"),
+            ("AppearanceParams", "survivor"): (("appearance.survivor",), "still here", "S"),
         },
     )
     code = audit.main(["--base", "HEAD", "--section", "storms.", "--fail-on-drop"])
@@ -131,12 +146,104 @@ def test_a_wholly_deleted_class_is_reported_even_under_section(monkeypatch, caps
     )
     monkeypatch.setattr(
         audit, "_current_descriptions",
-        lambda: {("StormsParams", "kept"): ("storms.kept", "unchanged", "Kept")},
+        lambda: {("StormsParams", "kept"): (("storms.kept",), "unchanged", "Kept")},
     )
     code = audit.main(["--base", "HEAD", "--section", "storms.", "--fail-on-drop"])
     out = capsys.readouterr().out
     assert "DeletedParams.orphan" in out, "a class that vanished entirely was not reported"
     assert code == 1, "--fail-on-drop must fail when a whole described class vanished"
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        # Each of these was measured returning [] before the fix. The first
+        # three invert the claim outright; the fourth unscopes it from one
+        # solver mode to all of them.
+        ("Renders without emission", "Renders with emission", "without"),
+        ("No effect in kinematic mode", "Effect in kinematic mode", "no"),
+        ("Affects only the hero storm", "Affects the hero storm", "only"),
+        ("Applies in vorticity mode only", "Applies in vorticity mode", "only"),
+    ],
+)
+def test_a_dropped_negation_or_scope_qualifier_is_reported(old, new, expected):
+    """The rubric this audit added demands mode-specific and conditional
+    clauses be carried VERBATIM -- "a dropped activation clause is a lever that
+    silently does nothing". The tool meant to catch that was suppressing every
+    one of those words as connective tissue.
+
+    ``'The jet does not brighten its own latitude'`` -> ``'The jet brightens
+    ...'`` was the worst case: it reported ``DROPPED: does``, which reads as
+    textbook filler, and waved through a complete inversion."""
+    assert expected in audit._lost(old, new)
+
+
+def test_a_sign_flip_on_a_number_is_reported():
+    """``_tokens`` stripped ``-``, so ``-0.28`` and ``0.28`` were one token and
+    flipping an artist instruction from darken to brighten was unreportable.
+    The shape rubric cannot see it either -- the shape does not change."""
+    assert "-0.28" in audit._lost("barges use -0.28", "barges use 0.28")
+
+
+def test_an_inflection_still_is_not_a_drop_after_the_boundary_change():
+    """Guard against over-correcting: moving from whole-blob substring to
+    token-boundary matching must not resurrect the inflection noise that made
+    the DROPPED line unreadable. ``per step`` -> ``per-step`` is a hyphenation
+    change, not a lost word."""
+    assert audit._lost("decorrelates per step", "per-step decorrelation") == ["decorrelates"]
+
+
+def test_the_ast_walk_agrees_with_the_live_corpus():
+    """The one contract binding the two halves, and it had no test at all.
+
+    Every ``main`` test above monkeypatches BOTH ``_descriptions_at`` and
+    ``_current_descriptions`` away, so the AST walk and the ``iter_pfields``
+    adapter were never executed by the suite -- and they must select the same
+    population or the diff is nonsense in either direction:
+
+    * A field the walk cannot see on the OLD side is silently read as "brand
+      new" (``old_text is None`` -> ``continue``): no line, no exit code, its
+      whole history invisible. f-strings, ``"a" + "b"`` and a positional
+      description all land here.
+    * A field the walk picks up that ``iter_pfields`` does not (a plain
+      ``Field()`` in GradientStop/PaletteRow/BandTemplate gaining a
+      ``description=``) can never appear on the live side, so the GONE block
+      would fire forever -- a permanently stuck exit 1.
+
+    Comparing at HEAD is the cheap way to pin both directions at once.
+    """
+    assert set(audit._descriptions_at("HEAD")) == set(audit._current_descriptions())
+
+
+def test_an_unmatched_section_is_an_error_not_a_clean_bill(capsys):
+    """``--section storm.`` (for ``storms.``) printed "no tokens dropped" and
+    exited 0 -- a confident all-clear over an audit that never examined a single
+    field. A typo must not be indistinguishable from a pass."""
+    code = audit.main(["--base", "HEAD", "--section", "storm.", "--fail-on-drop"])
+    assert code == 2, "an unmatched --section must not report success"
+    assert "matched no field" in capsys.readouterr().err
+
+
+def test_both_pole_paths_are_scopable():
+    """``poles.north`` and ``poles.south`` share one ``PoleParams`` declaration.
+    Keying on (class, field) and storing a single path let the last one win, so
+    ``--section poles.north.`` -- a correctly spelled, legitimate prefix --
+    matched nothing and exited 0. Every path a declaration serves is kept."""
+    paths = {p for paths, _d, _c in audit._current_descriptions().values() for p in paths}
+    assert any(p.startswith("poles.north.") for p in paths)
+    assert any(p.startswith("poles.south.") for p in paths)
+
+
+def test_a_bad_base_revision_exits_2_not_1(capsys):
+    """Exit 1 means "a token was dropped". A base revision git cannot resolve
+    used to escape as an uncaught CalledProcessError -- which also exits 1, with
+    git's own explanation captured into the exception and never printed. A
+    scripted gate could not tell "copy regressed" from "could not run"."""
+    code = audit.main(["--base", "no-such-rev-xyz", "--fail-on-drop"])
+    assert code == 2, "infrastructure failure must not share the finding code"
+    err = capsys.readouterr().err
+    assert "no-such-rev-xyz" in err
+    assert "invalid object name" in err, "git's own message must reach the user"
 
 
 def test_a_genuinely_deleted_term_is_reported():
@@ -157,7 +264,7 @@ def test_main_reports_a_field_that_vanished_since_the_base(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         audit, "_current_descriptions",
-        lambda: {("StormsParams", "kept"): ("storms.kept", "unchanged copy", "Kept")},
+        lambda: {("StormsParams", "kept"): (("storms.kept",), "unchanged copy", "Kept")},
     )
     code = audit.main(["--base", "HEAD", "--fail-on-drop"])
     out = capsys.readouterr().out
