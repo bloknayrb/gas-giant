@@ -1468,7 +1468,7 @@ Color intensity of the final image. Higher = more vivid, lower = toward gray; 1.
 
 `detail.belt_texture` &mdash; range **0 to 2.5**, default **0**, tier `post`.
 
-Storm-scale folded luminance structure inside belts (0.5-3 deg, flow-backtraced so patches fold with the flow) + a belt floor for the fine filaments; the v1.4 audit's dominant texture gap on broad-band layouts
+Storm-scale folded structure inside the belts, at 0.5-3 deg across. Higher = a busier, more mottled belt interior; 0 = off (folded luminance structure, flow-backtraced so patches fold with the flow, plus a belt floor for the fine filaments — the v1.4 audit's dominant texture gap on broad-band layouts)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__belt_texture__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.2</sub></td><td align="center"><img src="img/sliders/detail__belt_texture__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
@@ -1478,7 +1478,7 @@ Storm-scale folded luminance structure inside belts (0.5-3 deg, flow-backtraced 
 
 `detail.belt_texture_fine` &mdash; range **0 to 2.5**, default **0**, tier `post`.
 
-Finer sub-grid belt fold octave: a second flow-aligned backtrace hop folds mid-frequency noise below the sim grid scale, densifying belt texture at matched scale
+A finer second octave of that belt fold, below the sim grid scale. Higher = denser belt texture at matched scale; 0 = off (a finer sub-grid octave: a second flow-aligned backtrace hop, folding mid-frequency noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__belt_texture_fine__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/detail__belt_texture_fine__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
@@ -1488,7 +1488,7 @@ Finer sub-grid belt fold octave: a second flow-aligned backtrace hop folds mid-f
 
 `detail.cellular_amount` &mdash; range **0 to 2**, default **0.6**, tier `post`.
 
-Convective cell (closed-cell/popcorn) texture in quiet zones
+Popcorn-like convective cell texture in the quiet zones. Higher = a more granular, cauliflower zone; 0 = off (closed-cell texture)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__cellular_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.9</sub></td><td align="center"><img src="img/sliders/detail__cellular_amount__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1518,7 +1518,7 @@ Render-time combed-fiber synthesis over the ELONGATED bright-cloud stamps (compa
 
 `detail.flow_phases` &mdash; range **1 to 4**, default **3**, tier `post`.
 
-Staggered advected-noise phases (more = richer filaments)
+How many staggered noise phases the detail is built from. More = richer, more layered filaments (staggered advected-noise phases)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__flow_phases__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 4</sub></td>
@@ -1528,7 +1528,7 @@ Staggered advected-noise phases (more = richer filaments)
 
 `detail.flow_stretch` &mdash; range **0.1 to 4**, default **1**, tier `post`.
 
-How far detail noise is advected along the flow
+How far the detail noise is smeared along the flow. Higher = longer, more drawn-out streaks (advection distance for the detail noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__flow_stretch__lo.jpg" width="320"><br><sub>low &middot; 0.1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.3</sub></td><td align="center"><img src="img/sliders/detail__flow_stretch__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
@@ -1538,7 +1538,7 @@ How far detail noise is advected along the flow
 
 `detail.frequency` &mdash; range **8 to 256**, default **48**, tier `post`, log scale.
 
-Base spatial frequency of the detail noise
+Size of the synthesized detail. Higher = finer grain; lower = coarser, broader texture (base spatial frequency of the detail noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__frequency__lo.jpg" width="320"><br><sub>low &middot; 8</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 64</sub></td><td align="center"><img src="img/sliders/detail__frequency__hi.jpg" width="320"><br><sub>high &middot; 256</sub></td>
@@ -1568,7 +1568,7 @@ Tightly-pitched wound-lane filaments wrapping the hero collar (the GRS 'hollow' 
 
 `detail.hero_spiral` &mdash; range **0 to 1.5**, default **0**, tier `post`.
 
-Tightly wound internal spiral lanes inside hero storms (the Juno-close-up GRS look) plus collar streamlines; winds in the hero's actual rotation sense. Stationary in the hero frame — fine for stills
+Tightly wound spiral lanes inside the hero storm, plus collar streamlines. Higher = a more strongly drawn spiral; 0 = off (the Juno-close-up GRS look; winds in the hero's actual rotation sense). Stationary in the hero frame — fine for stills
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__hero_spiral__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/detail__hero_spiral__hi.jpg" width="320"><br><sub>high &middot; 1.5</sub></td>
@@ -1588,7 +1588,7 @@ Inks the hero storm's turbulent wake as the reference GRS's chain of rolled bill
 
 `detail.intensity` &mdash; range **0 to 2**, default **0.55**, tier `post`.
 
-Export/preview detail synthesis amplitude
+How much synthesized detail is laid over the planet. Higher = more texture everywhere; 0 = off, and the detail-FX levers below go inert with it (export/preview detail synthesis amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__intensity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.95</sub></td><td align="center"><img src="img/sliders/detail__intensity__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1598,7 +1598,7 @@ Export/preview detail synthesis amplitude
 
 `detail.intermittency` &mdash; range **0 to 1**, default **0**, tier `post`.
 
-Longitudinal patchiness of the filament/striation texture: violent folded patches abutting calm laminar runs (the real mosaic's chaos is intermittent, not uniform). No rand: a draw here would reshuffle every later randomize draw
+Breaks the filament and striation texture into patches along each band, so violent folded stretches abut calm laminar runs. Higher = a more broken-up mosaic; 0 = off, the texture stays uniform (longitudinal patchiness — the real mosaic's chaos is intermittent, not uniform). No rand: a draw here would reshuffle every later randomize draw
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__intermittency__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.65</sub></td><td align="center"><img src="img/sliders/detail__intermittency__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -1608,7 +1608,7 @@ Longitudinal patchiness of the filament/striation texture: violent folded patche
 
 `detail.mottle` &mdash; range **0 to 1.5**, default **0**, tier `post`.
 
-Temperate lace mottle (35-60 deg): granular bright rings, dark dots, and lacy folds where banding gives way -- the reference's mid-latitude storm-flecked character
+Temperate lace mottle at 35-60 deg: granular bright rings, dark dots, and lacy folds where the banding gives way. Higher = a more flecked mid-latitude; 0 = off (the reference's mid-latitude storm-flecked character)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__mottle__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.1</sub></td><td align="center"><img src="img/sliders/detail__mottle__hi.jpg" width="320"><br><sub>high &middot; 1.5</sub></td>
@@ -1628,7 +1628,7 @@ Polar folded-filamentary region (the Juno cap look): dense, multi-scale, flow-fo
 
 `detail.polar_stipple` &mdash; range **0 to 2**, default **0**, tier `post`.
 
-Bright granular storm speckle (popcorn) poleward of ~55 deg (the band-to-mottle transition character)
+Bright granular storm speckle poleward of ~55 deg. Higher = a more heavily flecked cap; 0 = off (popcorn — the band-to-mottle transition character)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__polar_stipple__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.8</sub></td><td align="center"><img src="img/sliders/detail__polar_stipple__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1658,7 +1658,7 @@ Suppress the WHOLE filament-streak accumulator (the ungated base flow-streak + i
 
 `detail.striation_amount` &mdash; range **0 to 1.5**, default **0**, tier `post`.
 
-Ropey flow-parallel striations inside belts (intra-band thread texture; 0 = the pre-v1.1 look)
+Ropey threads running along the flow inside the belts. Higher = a more strongly combed belt; 0 = the pre-v1.1 look (intra-band flow-parallel striation thread texture)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__striation_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/detail__striation_amount__hi.jpg" width="320"><br><sub>high &middot; 1.5</sub></td>
@@ -1668,7 +1668,7 @@ Ropey flow-parallel striations inside belts (intra-band thread texture; 0 = the 
 
 `detail.striation_frequency` &mdash; range **16 to 512**, default **96**, tier `post`, log scale.
 
-Base spatial frequency of the striation noise
+How fine the striation threads are. Higher = tighter, thinner ropes (base spatial frequency of the striation noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/detail__striation_frequency__lo.jpg" width="320"><br><sub>low &middot; 16</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 160</sub></td><td align="center"><img src="img/sliders/detail__striation_frequency__hi.jpg" width="320"><br><sub>high &middot; 512</sub></td>

@@ -346,22 +346,6 @@ def test_every_reported_rule_is_documented():
 # -- the baseline --------------------------------------------------------------
 
 KNOWN_VIOLATIONS: set[tuple[str, str]] = {
-    ('detail.belt_texture', 'G'),
-    ('detail.belt_texture_fine', 'G'),
-    ('detail.cellular_amount', 'A'),
-    ('detail.flow_phases', 'A'),
-    ('detail.flow_phases', 'E'),
-    ('detail.flow_stretch', 'A'),
-    ('detail.flow_stretch', 'E'),
-    ('detail.frequency', 'A'),
-    ('detail.hero_spiral', 'G'),
-    ('detail.intensity', 'A'),
-    ('detail.intermittency', 'G'),
-    ('detail.mottle', 'G'),
-    ('detail.polar_stipple', 'A'),
-    ('detail.polar_stipple', 'G'),
-    ('detail.striation_amount', 'A'),
-    ('detail.striation_frequency', 'A'),
     ('storms.accent_count', 'D'),
     ('storms.barge_density', 'A'),
     ('storms.cast', 'D'),
@@ -397,8 +381,8 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
 #: prefix of anything -- the single most consequential measurement behind the
 #: rubric, since rules D and E would otherwise mean different things on
 #: different fields for ten waves.
-REMAINING_BY_RULE = {"A": 20, "B": 2, "C": 1, "D": 2, "E": 5, "G": 8}
-REMAINING_FIELDS = 31
+REMAINING_BY_RULE = {"A": 12, "B": 2, "C": 1, "D": 2, "E": 3, "G": 2}
+REMAINING_FIELDS = 18
 
 
 def test_the_remaining_debt_is_pinned():

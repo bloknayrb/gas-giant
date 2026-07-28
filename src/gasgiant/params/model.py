@@ -1424,44 +1424,63 @@ class WavesParams(_Params):
 class DetailParams(_Params):
     intensity: float = pfield(
         0.55, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 0.9), ui="Detail",
-        description="Export/preview detail synthesis amplitude",
+        description="How much synthesized detail is laid over the planet. "
+                    "Higher = more texture everywhere; 0 = off, and the "
+                    "detail-FX levers below go inert with it (export/preview "
+                    "detail synthesis amplitude)",
     )
     flow_phases: int = pfield(
         3, tier=Tier.POST, lo=1, hi=4, ui="Detail",
-        description="Staggered advected-noise phases (more = richer filaments)",
+        description="How many staggered noise phases the detail is built "
+                    "from. More = richer, more layered filaments (staggered "
+                    "advected-noise phases)",
     )
     flow_stretch: float = pfield(
         1.0, tier=Tier.POST, lo=0.1, hi=4.0, rand=(0.6, 1.6), ui="Detail",
-        description="How far detail noise is advected along the flow",
+        description="How far the detail noise is smeared along the flow. "
+                    "Higher = longer, more drawn-out streaks (advection "
+                    "distance for the detail noise)",
     )
     frequency: float = pfield(
         48.0, tier=Tier.POST, lo=8.0, hi=256.0, log=True, ui="Detail",
-        description="Base spatial frequency of the detail noise",
+        description="Size of the synthesized detail. Higher = finer grain; "
+                    "lower = coarser, broader texture (base spatial frequency "
+                    "of the detail noise)",
     )
     cellular_amount: float = pfield(
         0.6, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 1.0), ui="Detail",
-        description="Convective cell (closed-cell/popcorn) texture in quiet zones",
+        description="Popcorn-like convective cell texture in the quiet zones. "
+                    "Higher = a more granular, cauliflower zone; 0 = off "
+                    "(closed-cell texture)",
     )
     striation_amount: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.5, rand=(0.2, 0.8), ui="Detail",
-        description="Ropey flow-parallel striations inside belts (intra-band "
-                    "thread texture; 0 = the pre-v1.1 look)",
+        description="Ropey threads running along the flow inside the belts. "
+                    "Higher = a more strongly combed belt; 0 = the pre-v1.1 "
+                    "look (intra-band flow-parallel striation thread "
+                    "texture)",
     )
     striation_frequency: float = pfield(
         96.0, tier=Tier.POST, lo=16.0, hi=512.0, log=True, ui="Detail",
-        description="Base spatial frequency of the striation noise",
+        description="How fine the striation threads are. Higher = tighter, "
+                    "thinner ropes (base spatial frequency of the striation "
+                    "noise)",
     )
     polar_stipple: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, rand=(0.3, 1.0), ui="Detail",
-        description="Bright granular storm speckle (popcorn) poleward of ~55 deg "
-                    "(the band-to-mottle transition character)",
+        description="Bright granular storm speckle poleward of ~55 deg. "
+                    "Higher = a more heavily flecked cap; 0 = off (popcorn — "
+                    "the band-to-mottle transition character)",
     )
     intermittency: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail", fx=True,
-        description="Longitudinal patchiness of the filament/striation texture: "
-                    "violent folded patches abutting calm laminar runs (the real "
-                    "mosaic's chaos is intermittent, not uniform). No rand: a "
-                    "draw here would reshuffle every later randomize draw",
+        description="Breaks the filament and striation texture into patches "
+                    "along each band, so violent folded stretches abut calm "
+                    "laminar runs. Higher = a more broken-up mosaic; 0 = off, "
+                    "the texture stays uniform (longitudinal patchiness — the "
+                    "real mosaic's chaos is intermittent, not uniform). No "
+                    "rand: a draw here would reshuffle every later randomize "
+                    "draw",
     )
     hero_calm: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Detail",
@@ -1476,10 +1495,11 @@ class DetailParams(_Params):
     )
     hero_spiral: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail", fx=True,
-        description="Tightly wound internal spiral lanes inside hero storms "
-                    "(the Juno-close-up GRS look) plus collar streamlines; "
-                    "winds in the hero's actual rotation sense. Stationary in "
-                    "the hero frame — fine for stills",
+        description="Tightly wound spiral lanes inside the hero storm, plus "
+                    "collar streamlines. Higher = a more strongly drawn "
+                    "spiral; 0 = off (the Juno-close-up GRS look; winds in the "
+                    "hero's actual rotation sense). Stationary in the hero "
+                    "frame — fine for stills",
     )
     hero_collar_wrap: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, ui="Detail", fx=True,
@@ -1501,23 +1521,27 @@ class DetailParams(_Params):
     )
     belt_texture: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail", fx=True,
-        description="Storm-scale folded luminance structure inside belts "
-                    "(0.5-3 deg, flow-backtraced so patches fold with the "
-                    "flow) + a belt floor for the fine filaments; the v1.4 "
-                    "audit's dominant texture gap on broad-band layouts",
+        description="Storm-scale folded structure inside the belts, at 0.5-3 "
+                    "deg across. Higher = a busier, more mottled belt "
+                    "interior; 0 = off (folded luminance structure, "
+                    "flow-backtraced so patches fold with the flow, plus a "
+                    "belt floor for the fine filaments — the v1.4 audit's "
+                    "dominant texture gap on broad-band layouts)",
     )
     belt_texture_fine: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.5, ui="Detail", fx=True,
-        description="Finer sub-grid belt fold octave: a second flow-aligned "
-                    "backtrace hop folds mid-frequency noise below the sim "
-                    "grid scale, densifying belt texture at matched scale",
+        description="A finer second octave of that belt fold, below the sim "
+                    "grid scale. Higher = denser belt texture at matched "
+                    "scale; 0 = off (a finer sub-grid octave: a second "
+                    "flow-aligned backtrace hop, folding mid-frequency "
+                    "noise)",
     )
     mottle: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.5, ui="Detail", fx=True,
-        description="Temperate lace mottle (35-60 deg): granular bright "
-                    "rings, dark dots, and lacy folds where banding gives "
-                    "way -- the reference's mid-latitude storm-flecked "
-                    "character",
+        description="Temperate lace mottle at 35-60 deg: granular bright "
+                    "rings, dark dots, and lacy folds where the banding gives "
+                    "way. Higher = a more flecked mid-latitude; 0 = off (the "
+                    "reference's mid-latitude storm-flecked character)",
     )
     polar_filaments: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Detail", fx=True,
