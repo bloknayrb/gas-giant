@@ -514,20 +514,20 @@ class TurbulenceParams(_Params):
     intensity: float = pfield(
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.8), ui="Turbulence",
         description="Overall amount of churn everywhere on the planet. Higher = "
-                    "every band looks busier and more stirred; 0 = glassy, "
-                    "perfectly smooth flow (global turbulence amplitude, from "
+                    "every band looks busier; 0 = perfectly smooth "
+                    "flow (global turbulence amplitude, from "
                     "curl noise)",
     )
     shear_coupling: float = pfield(
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.5), adv=True, ui="Turbulence",
-        description="Extra churn where neighboring jets rub hardest. Higher = "
-                    "the band edges boil while band interiors stay calm; 0 = "
+        description="Extra churn where neighboring jets meet. Higher = "
+                    "band edges churn while band interiors stay calm; 0 = "
                     "turbulence spread evenly, ignoring jet shear",
     )
     belt_boost: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=1.0, hi=4.0, rand=(1.2, 2.5), ui="Turbulence",
         description="Extra churn inside the dark belts only. Higher = the belts "
-                    "read rough and storm-tossed against pale, calm zones; 1.0 = "
+                    "look rougher than the pale, calm zones; 1.0 = "
                     "belts churn no differently from zones (turbulence "
                     "multiplier for belts, which are cyclonic — spinning with "
                     "the local planetary rotation — and are the storm-prone "
@@ -537,14 +537,14 @@ class TurbulenceParams(_Params):
         6.0, tier=Tier.VELOCITY, lo=1.0, hi=32.0, rand=(4.0, 12.0), log=True,
         adv=True, ui="Turbulence",
         description="Size of the churn features. Higher = smaller, busier "
-                    "stirring; lower = broad lazy swirls (base spatial frequency "
+                    "stirring; lower = broad, coarse swirls (base spatial frequency "
                     "of the turbulence noise)",
     )
     evolution_rate: float = pfield(
         0.012, tier=Tier.VELOCITY, lo=0.0, hi=0.1, adv=True, ui="Turbulence",
         description="How fast the churn pattern reshuffles as the sim runs. "
-                    "Higher = restless, never settling; 0 = a frozen pattern the "
-                    "flow merely carries around (per-step rate at which the "
+                    "Higher = the pattern never settles; 0 = a frozen pattern "
+                    "the flow only carries around (per-step rate at which the "
                     "turbulence decorrelates)",
     )
     relax_tau: float = pfield(
@@ -552,7 +552,7 @@ class TurbulenceParams(_Params):
         label="Turbulence leash",
         description="How hard the bands are pulled back to their painted look "
                     "after the flow smears them. Higher = a longer leash, so "
-                    "churn stays visible instead of being tidied away "
+                    "churn stays visible for longer "
                     "(relaxation time in steps, pulling band color and height "
                     "back toward the stamp)",
     )
@@ -567,9 +567,9 @@ class TurbulenceParams(_Params):
     kh_amplitude: float = pfield(
         0.35, tier=Tier.VELOCITY, lo=0.0, hi=2.0, rand=(0.1, 0.8), adv=True, ui="Turbulence",
         label="Billow strength",
-        description="How far a band edge billows where fast and slow jets rub "
-                    "together. Higher = deeper scallops along the boundary; 0 = "
-                    "a clean straight edge (Kelvin-Helmholtz wave amplitude "
+        description="How far a band edge billows where fast and slow jets "
+                    "meet. Higher = deeper scallops along the boundary; 0 = "
+                    "a straight edge (Kelvin-Helmholtz wave amplitude "
                     "along high-shear band boundaries)",
     )
     kh_wavenumber: int = pfield(
@@ -583,13 +583,13 @@ class TurbulenceParams(_Params):
         0.0, tier=Tier.RESTART, lo=0.0, hi=0.08, adv=True, ui="Turbulence",
         description="Extra fine detail-noise fed to the belts alone per step, on "
                     "top of replenish_rate, so belt texture keeps regenerating "
-                    "instead of smearing flat. Higher = wispier emergent "
+                    "instead of smearing flat. Higher = finer emergent "
                     "filaments inside the belts; 0 = off",
     )
     belt_replenish_scale: float = pfield(
         2.0, tier=Tier.RESTART, lo=1.0, hi=4.0, adv=True, ui="Turbulence",
         description="How fine that belt-only detail is next to the planet's base "
-                    "detail. Higher = finer, wispier filaments; 1.0 = the same "
+                    "detail. Higher = finer filaments; 1.0 = the same "
                     "size as everything else (belt replenishment frequency "
                     "multiplier, relative to the base detail frequency; only "
                     "bites when belt_replenish is above 0)",
@@ -1336,19 +1336,19 @@ class WavesParams(_Params):
     hotspot_depth: float = pfield(
         0.6, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.9), ui="Waves",
         description="How dark the cloud-free hot spots read in the festoon wave "
-                    "troughs. Higher = deeper, more contrasty gaps between the "
+                    "troughs. Higher = deeper, higher-contrast gaps between the "
                     "plumes; 0 = no gaps at all",
     )
     ribbon_strength: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.0, 1.0), ui="Waves",
         description="Saturn-style ribbon wave running along one mid-latitude "
-                    "jet. Higher = a bolder meander in that jet's edge; 0 = off",
+                    "jet. Higher = a stronger meander in that jet's edge; 0 = off",
     )
     ribbon_wavenumber: int = pfield(
         12, tier=Tier.RESTART, lo=4, hi=30, ui="Waves",
         label="Ribbon wave count",
         description="How many meanders the ribbon wave makes around the planet. "
-                    "Higher = a tighter, more frequent zigzag (wavenumber of the "
+                    "Higher = tighter, more frequent meanders (wavenumber of the "
                     "Saturn-style ribbon wave)",
     )
     festoon_hero_strength: float = pfield(

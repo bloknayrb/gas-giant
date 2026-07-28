@@ -587,7 +587,7 @@ Global zonal jet speed multiplier
 
 `turbulence.belt_boost` &mdash; range **1 to 4**, default **1.6**, tier `velocity`.
 
-Extra churn inside the dark belts only. Higher = the belts read rough and storm-tossed against pale, calm zones; 1.0 = belts churn no differently from zones (turbulence multiplier for belts, which are cyclonic — spinning with the local planetary rotation — and are the storm-prone bands)
+Extra churn inside the dark belts only. Higher = the belts look rougher than the pale, calm zones; 1.0 = belts churn no differently from zones (turbulence multiplier for belts, which are cyclonic — spinning with the local planetary rotation — and are the storm-prone bands)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__belt_boost__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.6</sub></td><td align="center"><img src="img/sliders/turbulence__belt_boost__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
@@ -597,7 +597,7 @@ Extra churn inside the dark belts only. Higher = the belts read rough and storm-
 
 `turbulence.belt_replenish` &mdash; range **0 to 0.08**, default **0**, tier `restart`.
 
-Extra fine detail-noise fed to the belts alone per step, on top of replenish_rate, so belt texture keeps regenerating instead of smearing flat. Higher = wispier emergent filaments inside the belts; 0 = off
+Extra fine detail-noise fed to the belts alone per step, on top of replenish_rate, so belt texture keeps regenerating instead of smearing flat. Higher = finer emergent filaments inside the belts; 0 = off
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__belt_replenish__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.07</sub></td><td align="center"><img src="img/sliders/turbulence__belt_replenish__hi.jpg" width="320"><br><sub>high &middot; 0.08</sub></td>
@@ -607,7 +607,7 @@ Extra fine detail-noise fed to the belts alone per step, on top of replenish_rat
 
 `turbulence.belt_replenish_scale` &mdash; range **1 to 4**, default **2**, tier `restart`.
 
-How fine that belt-only detail is next to the planet's base detail. Higher = finer, wispier filaments; 1.0 = the same size as everything else (belt replenishment frequency multiplier, relative to the base detail frequency; only bites when belt_replenish is above 0)
+How fine that belt-only detail is next to the planet's base detail. Higher = finer filaments; 1.0 = the same size as everything else (belt replenishment frequency multiplier, relative to the base detail frequency; only bites when belt_replenish is above 0)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__belt_replenish_scale__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 2</sub></td><td align="center"><img src="img/sliders/turbulence__belt_replenish_scale__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
@@ -627,7 +627,7 @@ How many billows fit around the planet along a band edge. Higher = more, tighter
 
 `turbulence.kh_amplitude` &mdash; range **0 to 2**, default **0.35**, tier `velocity`.
 
-How far a band edge billows where fast and slow jets rub together. Higher = deeper scallops along the boundary; 0 = a clean straight edge (Kelvin-Helmholtz wave amplitude along high-shear band boundaries)
+How far a band edge billows where fast and slow jets meet. Higher = deeper scallops along the boundary; 0 = a straight edge (Kelvin-Helmholtz wave amplitude along high-shear band boundaries)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__kh_amplitude__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.6</sub></td><td align="center"><img src="img/sliders/turbulence__kh_amplitude__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -637,7 +637,7 @@ How far a band edge billows where fast and slow jets rub together. Higher = deep
 
 `turbulence.evolution_rate` &mdash; range **0 to 0.1**, default **0.012**, tier `velocity`.
 
-How fast the churn pattern reshuffles as the sim runs. Higher = restless, never settling; 0 = a frozen pattern the flow merely carries around (per-step rate at which the turbulence decorrelates)
+How fast the churn pattern reshuffles as the sim runs. Higher = the pattern never settles; 0 = a frozen pattern the flow only carries around (per-step rate at which the turbulence decorrelates)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__evolution_rate__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><img src="img/sliders/turbulence__evolution_rate__hi.jpg" width="320"><br><sub>high &middot; 0.1</sub></td>
@@ -647,7 +647,7 @@ How fast the churn pattern reshuffles as the sim runs. Higher = restless, never 
 
 `turbulence.intensity` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Overall amount of churn everywhere on the planet. Higher = every band looks busier and more stirred; 0 = glassy, perfectly smooth flow (global turbulence amplitude, from curl noise)
+Overall amount of churn everywhere on the planet. Higher = every band looks busier; 0 = perfectly smooth flow (global turbulence amplitude, from curl noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__intensity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__intensity__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -667,7 +667,7 @@ Fresh detail-noise fed to the whole planet every step, so texture does not wash 
 
 `turbulence.scale` &mdash; range **1 to 32**, default **6**, tier `velocity`, log scale.
 
-Size of the churn features. Higher = smaller, busier stirring; lower = broad lazy swirls (base spatial frequency of the turbulence noise)
+Size of the churn features. Higher = smaller, busier stirring; lower = broad, coarse swirls (base spatial frequency of the turbulence noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__scale__lo.jpg" width="320"><br><sub>low &middot; 1</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/turbulence__scale__hi.jpg" width="320"><br><sub>high &middot; 32</sub></td>
@@ -677,7 +677,7 @@ Size of the churn features. Higher = smaller, busier stirring; lower = broad laz
 
 `turbulence.shear_coupling` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Extra churn where neighboring jets rub hardest. Higher = the band edges boil while band interiors stay calm; 0 = turbulence spread evenly, ignoring jet shear
+Extra churn where neighboring jets meet. Higher = band edges churn while band interiors stay calm; 0 = turbulence spread evenly, ignoring jet shear
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__shear_coupling__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__shear_coupling__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -687,7 +687,7 @@ Extra churn where neighboring jets rub hardest. Higher = the band edges boil whi
 
 `turbulence.relax_tau` &mdash; range **50 to 2000**, default **350**, tier `restart`, log scale.
 
-How hard the bands are pulled back to their painted look after the flow smears them. Higher = a longer leash, so churn stays visible instead of being tidied away (relaxation time in steps, pulling band color and height back toward the stamp)
+How hard the bands are pulled back to their painted look after the flow smears them. Higher = a longer leash, so churn stays visible for longer (relaxation time in steps, pulling band color and height back toward the stamp)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__relax_tau__lo.jpg" width="320"><br><sub>low &middot; 50</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 350</sub></td><td align="center"><img src="img/sliders/turbulence__relax_tau__hi.jpg" width="320"><br><sub>high &middot; 2000</sub></td>
@@ -1203,7 +1203,7 @@ Scalloped plumes and dark hot spots along the equatorial belt edge. Higher = dee
 
 `waves.hotspot_depth` &mdash; range **0 to 1**, default **0.6**, tier `restart`.
 
-How dark the cloud-free hot spots read in the festoon wave troughs. Higher = deeper, more contrasty gaps between the plumes; 0 = no gaps at all
+How dark the cloud-free hot spots read in the festoon wave troughs. Higher = deeper, higher-contrast gaps between the plumes; 0 = no gaps at all
 
 <table><tr>
 <td align="center"><img src="img/sliders/waves__hotspot_depth__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.7</sub></td><td align="center"><img src="img/sliders/waves__hotspot_depth__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -1213,7 +1213,7 @@ How dark the cloud-free hot spots read in the festoon wave troughs. Higher = dee
 
 `waves.ribbon_strength` &mdash; range **0 to 3**, default **0**, tier `restart`.
 
-Saturn-style ribbon wave running along one mid-latitude jet. Higher = a bolder meander in that jet's edge; 0 = off
+Saturn-style ribbon wave running along one mid-latitude jet. Higher = a stronger meander in that jet's edge; 0 = off
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/waves__ribbon_strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1223,7 +1223,7 @@ Saturn-style ribbon wave running along one mid-latitude jet. Higher = a bolder m
 
 `waves.ribbon_wavenumber` &mdash; range **4 to 30**, default **12**, tier `restart`.
 
-How many meanders the ribbon wave makes around the planet. Higher = a tighter, more frequent zigzag (wavenumber of the Saturn-style ribbon wave)
+How many meanders the ribbon wave makes around the planet. Higher = tighter, more frequent meanders (wavenumber of the Saturn-style ribbon wave)
 
 <table><tr>
 <td align="center"><img src="img/sliders/waves__ribbon_wavenumber__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 12</sub></td><td align="center"><img src="img/sliders/waves__ribbon_wavenumber__hi.jpg" width="320"><br><sub>high &middot; 30</sub></td>
