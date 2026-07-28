@@ -159,23 +159,37 @@ def _defaults_baseline() -> dict[str, Any]:
 # One-line blurbs for the header (?) markers, keyed by the top-level
 # PlanetParams field name. Not exhaustive of every nested section -- only the
 # direct top-level sections, per the Phase 3 spec.
+#: One line per top-level params section, shown behind the (?) beside its
+#: header. This is the first text an artist reads while scanning for the right
+#: panel, so it says what the section CHANGES, not what it is implemented with.
+#: ``test_section_blurbs_cover_every_section`` keeps the set complete -- 'mask'
+#: and 'rings' were both missing, so two whole sections had no blurb at all.
 _SECTION_BLURBS: dict[str, str] = {
-    "sim": "Grid resolution and development-run step budget.",
-    "solver": "Velocity-field solver: kinematic vs. vorticity, Poisson/SOR "
-    "tuning, drag and injection.",
-    "bands": "Latitudinal band layout and base color banding.",
-    "jets": "Zonal jet speed/shear profile riding on the bands.",
-    "turbulence": "Eddy/noise turbulence layered onto the velocity field.",
+    "sim": "How big the simulation grid is, and how long the planet is left to "
+    "develop before the picture is final.",
+    "solver": "How the clouds are moved: the fast painterly path, or a real "
+    "fluid sim where storms interact and shed filaments. Plus its accuracy and "
+    "its brakes on runaway swirl.",
+    "bands": "The latitude stripes -- how many, how wide, how they meander, and "
+    "their base colors.",
+    "jets": "Speed and shear of the east-west winds riding on the bands.",
+    "turbulence": "Churn layered onto the wind field, and how fast it evolves.",
     "storms": "Discrete storms, including the hero (Great-Red-Spot-style) vortex.",
-    "waves": "Rossby/gravity-wave ripple overlays.",
-    "poles": "Polar vortex style and cap appearance.",
-    "appearance": "Color palette, contrast, and tonal-mapping controls.",
-    "detail": "Fine-scale procedural texture detail layers.",
+    "waves": "Rippling wave trains along the band edges: festoons, their hot "
+    "spots, and the Saturn ribbon.",
+    "poles": "What sits over each pole, and how the cap is colored.",
+    "appearance": "The final grade -- palette, contrast, saturation and tone.",
+    "detail": "Fine texture synthesized over the planet at render time, folded "
+    "along the flow.",
     "emission": "Self-emissive glow channels (lightning, aurora, hot spots). "
     "Preview via the viewport's Emission channel (aurora included) — the "
     "Color preview does not composite emission. Exported to emission.exr.",
-    "physical": "Planet radius and physical-shading parameters.",
-    "export": "Output map resolution and PNG compression for Export.",
+    "physical": "Planet radius and the shading numbers passed through to Blender.",
+    "mask": "Paint a grayscale image to calm, dim or flatten chosen regions. "
+    "Inert until you supply one.",
+    "rings": "A Saturn-style ring system, built in Blender from an exported "
+    "strip. Invisible in the GUI preview.",
+    "export": "Output resolution, projection and file compression for Export.",
 }
 
 

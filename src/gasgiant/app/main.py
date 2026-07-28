@@ -1539,7 +1539,7 @@ class StudioApp:
         # kinematic mode).
         if imgui.button("Save state...") and self._dialog is None:
             self._open_save_state_dialog()
-        item_tooltip("save the current dev run as a resumable checkpoint (.npz)")
+        item_tooltip("save the current development run as a resumable checkpoint (.npz)")
         imgui.same_line()
         if imgui.button("Load state...") and self._dialog is None:
             self._dialog = (
@@ -1560,8 +1560,9 @@ class StudioApp:
                 ),
             )
         item_tooltip(
-            "fit the per-latitude palette rows from a cylindrical true-color "
-            "reference photo (values are baked in; undoable)"
+            "fit the per-latitude palette rows from a flat cylindrical "
+            "(equirect) true-color reference photo — values are baked in, "
+            "and it is undoable"
         )
 
         # T15: epoch recipes ("Scenarios") -- documented historical atmosphere

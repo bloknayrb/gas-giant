@@ -32,6 +32,9 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
     )
     mapping: EnumProperty(
         name="Mapping",
+        description="How the color maps are projected onto the sphere. "
+        "Procedural is exact at the poles and has no seam; Mesh UV is the "
+        "EEVEE-safe fallback",
         items=(
             ("PROCEDURAL", "Procedural spherical",
              "Per-pixel equirect UV from object coordinates: exact at the "
@@ -55,6 +58,8 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
     )
     atmosphere_mode: EnumProperty(
         name="Atmosphere",
+        description="The hazy shell around the planet. Volume scatters light "
+        "properly but needs Cycles; Rim glow is a fast stylized stand-in",
         items=(
             ("VOLUME", "Volume shell", "Light-aware scattering shell (Cycles)"),
             ("RIM", "Rim glow (fast)", "Stylized facing-based rim (EEVEE-safe)"),
@@ -62,8 +67,16 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         ),
         default="VOLUME",
     )
-    limb_darkening: FloatProperty(name="Limb darkening", default=0.45, min=0.0, max=1.0)
-    limb_haze: FloatProperty(name="Limb haze", default=0.3, min=0.0, max=1.0)
+    limb_darkening: FloatProperty(
+        name="Limb darkening", default=0.45, min=0.0, max=1.0,
+        description="How much the disk dims toward its edge. Higher = a "
+        "rounder, more three-dimensional planet; 0 = flat, evenly lit",
+    )
+    limb_haze: FloatProperty(
+        name="Limb haze", default=0.3, min=0.0, max=1.0,
+        description="Brightness of the hazy ring at the planet's edge. "
+        "Higher = a thicker, milkier atmosphere against space; 0 = off",
+    )
     emission_strength: FloatProperty(
         name="Emission strength", default=1.0, min=0.0, soft_max=10.0,
         description="Multiplier on the emission map (thermal glow, lightning, "
@@ -86,7 +99,11 @@ class IMPORT_SCENE_OT_gasgiant(bpy.types.Operator, ImportHelper):
         name="Longitude offset", subtype="ANGLE", default=0.0,
         description="Rotate the planet so the feature you care about faces the camera",
     )
-    axial_tilt: FloatProperty(name="Axial tilt", subtype="ANGLE", default=0.0)
+    axial_tilt: FloatProperty(
+        name="Axial tilt", subtype="ANGLE", default=0.0,
+        description="Tip the pole away from vertical, as Saturn and Uranus "
+        "are tipped. 0 = the rotation axis stands straight up",
+    )
     demo_scene: BoolProperty(
         name="Create demo scene", default=False,
         description="Sun lamp (small angular size), black world, framed camera, "
