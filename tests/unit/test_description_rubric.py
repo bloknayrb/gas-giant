@@ -119,7 +119,7 @@ def split_headline(text: str) -> tuple[str, bool]:
     ``is_proper_prefix`` is False when no delimiter exists, i.e. the whole
     description IS the headline. That is a rubric violation (rule A), not an
     error, and it is by far the largest class in the baseline -- see
-    ``test_the_baseline_breakdown_is_pinned`` for the count.
+    ``REMAINING_BY_RULE`` for the count.
     """
     depth = 0
     for i, ch in enumerate(text):
@@ -211,10 +211,26 @@ _EXCLUDED_FROM_BLOCKLIST = {
     "uniform",
 }
 
-#: One real case, spelled out, so every hole in rule E is visible. A
-#: name-derived allowlist was rejected: it would have handed vort_eddy_drag an
-#: exemption for "eddy" -- repealing the rule exactly where it is aimed.
-PER_FIELD_ALLOW: dict[str, set[str]] = {"turbulence.shear_coupling": {"shear"}}
+#: Per-field exemptions from rule E, spelled out one by one so every hole is
+#: visible. A name-derived allowlist was rejected: it would have handed
+#: vort_eddy_drag an exemption for "eddy" -- repealing the rule exactly where it
+#: is aimed.
+#:
+#: Empty, and correctly so. The plan carried one entry,
+#: ``turbulence.shear_coupling: {"shear"}``, which was DEAD: "shear" is not on
+#: the blocklist, so the exemption granted nothing. It read as evidence the
+#: mechanism worked while exempting nothing at all.
+PER_FIELD_ALLOW: dict[str, set[str]] = {}
+
+
+def test_per_field_allowances_name_real_blocklist_terms():
+    """An exemption for a term that is not banned is not a narrow exemption --
+    it is dead config that looks like a considered decision."""
+    for path, terms in PER_FIELD_ALLOW.items():
+        assert terms <= set(BLOCKLIST), (
+            f"{path} is exempted from {sorted(terms - set(BLOCKLIST))}, which rule E "
+            f"never flags; drop the entry or add the term to BLOCKLIST"
+        )
 
 
 def test_blocklist_and_exclusions_are_disjoint():
@@ -443,43 +459,28 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('storms.pearls_count', 'A'),
     ('storms.stamp_contrast', 'A'),
     ('storms.wake_turbulence', 'A'),
-    ('turbulence.belt_boost', 'A'),
-    ('turbulence.belt_replenish', 'A'),
-    ('turbulence.belt_replenish', 'G'),
-    ('turbulence.belt_replenish_scale', 'A'),
-    ('turbulence.evolution_rate', 'A'),
-    ('turbulence.intensity', 'A'),
-    ('turbulence.kh_amplitude', 'A'),
-    ('turbulence.kh_wavenumber', 'A'),
-    ('turbulence.kh_wavenumber', 'E'),
-    ('turbulence.relax_tau', 'A'),
-    ('turbulence.scale', 'A'),
-    ('turbulence.shear_coupling', 'A'),
-    ('waves.festoon_hero_wavenumber', 'A'),
-    ('waves.festoon_hero_wavenumber', 'E'),
-    ('waves.festoon_strength', 'A'),
-    ('waves.festoon_wavenumber', 'A'),
-    ('waves.hotspot_depth', 'A'),
-    ('waves.ribbon_strength', 'A'),
-    ('waves.ribbon_wavenumber', 'A'),
-    ('waves.ribbon_wavenumber', 'E'),
 }
 
 
-def test_the_baseline_breakdown_is_pinned():
-    """The shape of the debt, per rule, so a wave's progress is readable as a
-    number going down rather than as a diff of a 133-element set.
+#: The debt still outstanding, per rule. UPDATE THIS EVERY WAVE -- it is the one
+#: line in a wave's diff that states what the wave actually bought, as a number
+#: rather than as a 100-element set difference.
+#:
+#: At Wave 0 it was ``{"A": 82, "B": 2, "C": 1, "D": 5, "E": 21, "G": 22}``
+#: over 111 fields. Rule A dominated at 82 of 226: for better than a third of
+#: the corpus the description was ONE sentence, so "the headline" was not a
+#: prefix of anything -- the single most consequential measurement behind the
+#: rubric, since rules D and E would otherwise mean different things on
+#: different fields for ten waves.
+REMAINING_BY_RULE = {"A": 66, "B": 2, "C": 1, "D": 5, "E": 18, "G": 21}
+REMAINING_FIELDS = 95
 
-    Rule A dominates at 82 of 226 fields: for better than a third of the corpus
-    the description is ONE sentence, so "S1" is not a headline at all. That is
-    the single most consequential measurement behind the rubric -- rules D and E
-    would otherwise mean different things on different fields for ten waves.
-    """
+
+def test_the_remaining_debt_is_pinned():
     from collections import Counter
 
-    breakdown = Counter(rule for _, rule in measure())
-    assert dict(breakdown) == {"A": 82, "B": 2, "C": 1, "D": 5, "E": 21, "G": 22}
-    assert len({path for path, _ in measure()}) == 111
+    assert dict(Counter(rule for _, rule in measure())) == REMAINING_BY_RULE
+    assert len({path for path, _ in measure()}) == REMAINING_FIELDS
 
 
 def test_known_violations_matches_the_corpus():

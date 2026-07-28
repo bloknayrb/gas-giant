@@ -66,6 +66,21 @@ def _tokens(text: str) -> set[str]:
             if t and t not in _STOPWORDS}
 
 
+def _lost(old_text: str, new_text: str) -> list[str]:
+    """Tokens the rewrite made UNREACHABLE, by the real search's rules.
+
+    ``panels._haystack`` does a plain lowercased substring test, so a token is
+    only lost if it is absent from the new text as a SUBSTRING -- not merely
+    absent from the new token set. Set subtraction alone reports every
+    inflection as a casualty ("festoon" -> "festoons", "billow" -> "billows",
+    "band" -> "bands"), and on the pilot wave that was 6 of 40 reported drops:
+    enough noise to train the reader to skim, which is the one thing this
+    script must not do.
+    """
+    haystack = new_text.lower()
+    return sorted(t for t in _tokens(old_text) - _tokens(new_text) if t not in haystack)
+
+
 def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
     """``{(class_name, field_name): description}`` parsed from the model at ``rev``.
 
@@ -148,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         if old_text is None or old_text == new_text:
             continue
         changed += 1
-        lost = sorted(_tokens(old_text) - _tokens(new_text))
+        lost = _lost(old_text, new_text)
         gained = sorted(_tokens(new_text) - _tokens(old_text))
         delta = len(new_text) - len(old_text)
         print(f"\n{path}  ({len(old_text)} -> {len(new_text)} chars, {delta:+d})")
