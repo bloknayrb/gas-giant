@@ -270,50 +270,75 @@ class BandTemplate(_Params):
 class BandsParams(_Params):
     count: int = pfield(
         14, tier=Tier.RESTART, lo=2, hi=MAX_BANDS, rand=(6, 24), ui="Bands",
-        description="Number of zones+belts pole to pole",
+        description="How many bands circle the planet from pole to pole, "
+                    "counting zones and belts together. Higher = narrower "
+                    "bands",
     )
     width_jitter: float = pfield(
         0.35, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.1, 0.6), ui="Bands",
-        description="Randomness of band width distribution",
+        description="How much the band widths vary from one another. Higher = "
+                    "a less regular, more natural mix of wide and narrow "
+                    "bands; 0 = every band the same width (randomness of the "
+                    "band width distribution)",
     )
     edge_softness: float = pfield(
         0.012, tier=Tier.RESTART, lo=0.001, hi=0.1, rand=(0.005, 0.03), log=True,
         adv=True, ui="Bands",
-        description="Half-width of band-edge transitions, radians of latitude"
-                    " (1 rad = 57.3 deg; default 0.012 rad is about 0.7 deg)",
+        description="How sharply one band gives way to the next. Higher = "
+                    "softer, more diffuse edges; low = a hard line (half-width "
+                    "of the band-edge transition, in radians of latitude; "
+                    "1 rad = 57.3 deg, and the default 0.012 rad is about "
+                    "0.7 deg)",
     )
     value_contrast: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.6, 1.3), ui="Bands",
-        description="Zone/belt brightness separation multiplier",
+        description="How far apart the pale zones and dark belts sit in "
+                    "brightness. Higher = a bolder, higher-contrast planet; "
+                    "1.0 = the palette's own separation (zone/belt brightness "
+                    "multiplier; inert on the band-template path)",
     )
     warp_amount: float = pfield(
         0.035, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.01, 0.09), ui="Bands",
-        description="Band-boundary meander amplitude, radians of latitude"
-                    " (1 rad = 57.3 deg; default 0.035 rad is about 2 deg)",
+        description="How far the band boundaries wander north and south. "
+                    "Higher = wavier, less ruler-straight bands; 0 = "
+                    "perfectly straight (band-boundary meander amplitude, in "
+                    "radians of latitude; 1 rad = 57.3 deg, and the default "
+                    "0.035 rad is about 2 deg)",
     )
     warp_freq: float = pfield(
         3.0, tier=Tier.RESTART, lo=0.5, hi=16.0, rand=(1.5, 6.0), log=True, adv=True, ui="Bands",
         label="Band meander scale",
-        description="Band-boundary meander spatial frequency",
+        description="How often the band boundaries wander as they wrap the "
+                    "planet. Higher = tighter, more frequent meanders "
+                    "(band-boundary meander spatial frequency)",
     )
     detail_amount: float = pfield(
         0.10, tier=Tier.RESTART, lo=0.0, hi=0.5, rand=(0.04, 0.2), ui="Bands",
-        description="Small-scale color-index noise amplitude",
+        description="How much fine color mottling breaks up each band. "
+                    "Higher = a grainier, less flat band; 0 = flat color "
+                    "(small-scale color-index noise amplitude)",
     )
     hue_jitter: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=0.15, rand=(0.0, 0.08), adv=True, ui="Bands",
-        description="Per-band color-index offset along the palette (NEB-orange vs "
-                    "SEB-brown variation); seeded independently of the band layout",
+        description="Nudges each band's color along the palette, so neighbors "
+                    "do not share one hue. Higher = more variety band to "
+                    "band; 0 = off (per-band color-index offset — NEB-orange "
+                    "vs SEB-brown variation; seeded independently of the band "
+                    "layout)",
     )
     variance_amount: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, rand=(0.02, 0.12), adv=True, ui="Bands",
-        description="Within-band longitudinal color drift (real belts hold several "
+        description="Slow color drift along the length of each band. Higher = "
+                    "a band that shifts hue as it wraps the planet; 0 = off "
+                    "(within-band longitudinal drift — real belts hold several "
                     "hues at once, varying slowly with longitude)",
     )
     faded_sector: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), adv=True, ui="Bands",
-        description="SEB-fade: one belt gets a pale desaturated sector spanning "
-                    "~100 degrees of longitude",
+        description="One belt gets a pale, desaturated sector spanning ~100 "
+                    "degrees of longitude. Higher = a more washed-out sector; "
+                    "0 = off (the SEB-fade epoch; the target is "
+                    "faded_band_index)",
     )
     belt_fade: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Bands",
@@ -341,28 +366,39 @@ class BandsParams(_Params):
     )
     contrast_envelope: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.3, 0.8), adv=True, ui="Bands",
-        description="Banding contrast collapse poleward of ~45 deg toward mottle "
-                    "(the real latitude-contrast profile)",
+        description="Fades the banding out toward the poles, into mottled "
+                    "texture. Higher = the bands dissolve further from the "
+                    "pole; 0 = off, bands stay crisp all the way up (contrast "
+                    "collapse poleward of ~45 deg — the real latitude-contrast "
+                    "profile)",
     )
     lane_density: float = pfield(
         0.0, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.0, 0.8), adv=True, ui="Bands",
-        description="Thin dark lane lines at jet cores, drawn analytically at "
-                    "derive time (a 1-3 px line cannot survive the sim grid)",
+        description="Thin dark lane lines running along the jet cores. "
+                    "Higher = more lanes, more strongly drawn; 0 = off (drawn "
+                    "analytically at derive time — a 1-3 px line cannot "
+                    "survive the sim grid)",
     )
     edge_diversity: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.2, 0.8), adv=True, ui="Bands",
-        description="Per-edge softness variation: some band edges diffuse, some "
-                    "sharp (uniform edges are a procedural tell)",
+        description="Varies softness edge by edge, so some band edges are "
+                    "diffuse and some sharp. Higher = a wider spread of edge "
+                    "styles; 0 = off, every edge shares one softness (per-edge "
+                    "softness variation; uniform edges are a procedural tell)",
     )
     width_tail: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), adv=True, ui="Bands",
-        description="Heavier-tailed band width distribution (real maps mix very "
-                    "broad zones with thin strips)",
+        description="Pushes the band widths toward extremes, mixing very broad "
+                    "bands with thin ones. Higher = a more lopsided mix; 0 = "
+                    "off (a heavier-tailed width distribution — real maps mix "
+                    "very broad zones with thin strips)",
     )
     detail_freq: float = pfield(
         12.0, tier=Tier.RESTART, lo=2.0, hi=64.0, rand=(6.0, 24.0), log=True, adv=True, ui="Bands",
         label="Band detail scale",
-        description="Small-scale noise spatial frequency",
+        description="Size of that fine color mottling. Higher = finer grain; "
+                    "lower = broader blotches (small-scale noise spatial "
+                    "frequency)",
     )
     template: BandTemplate | None = pfield(
         None, tier=Tier.RESTART, adv=True, ui="Bands",
@@ -1936,10 +1972,11 @@ class EmissionParams(_Params):
 
     thermal_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
-        description="5-micron thermal glow through cloud gaps (gated on the "
-                    "cloud-top DEPRESSION vs the band stamp: hot-spot chains "
-                    "blaze, barges glow, belts glimmer, zones stay dark). "
-                    "Preview: Emission channel, not Color",
+        description="5-micron thermal glow shining up through gaps in the "
+                    "cloud deck. Higher = a hotter interior showing through; "
+                    "0 = off (gated on the cloud-top DEPRESSION vs the band "
+                    "stamp: hot-spot chains blaze, barges glow, belts glimmer, "
+                    "zones stay dark). Preview: Emission channel, not Color",
     )
     thermal_color: tuple[float, float, float] = pfield(
         (1.0, 0.36, 0.08), tier=Tier.POST, adv=True, ui="Emission",
@@ -1960,10 +1997,11 @@ class EmissionParams(_Params):
     )
     lightning_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
-        description="Frozen lightning-flash clusters in cyclonic belts and "
-                    "at high latitudes (the Juno look: light pools under the "
-                    "deck plus sparse HDR cores). Preview: Emission channel, not "
-                    "Color",
+        description="Frozen lightning-flash clusters in the cyclonic belts and "
+                    "at high latitudes. Higher = brighter, more visible "
+                    "flashes; 0 = off (the Juno look: light pools under the "
+                    "deck plus sparse HDR cores). Preview: Emission channel, "
+                    "not Color",
     )
     lightning_color: tuple[float, float, float] = pfield(
         (0.72, 0.82, 1.0), tier=Tier.POST, adv=True, ui="Emission",
@@ -1977,11 +2015,12 @@ class EmissionParams(_Params):
     )
     aurora_strength: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Emission",
-        description="Auroral ovals around the (offset) magnetic poles; "
-                    "written to emission.exr's ALPHA channel so the importer "
-                    "can lift it onto a shell. Preview via the viewport's "
-                    "Emission channel (composited as alpha x aurora_color); "
-                    "not visible in the Color preview",
+        description="Auroral ovals ringing the (offset) magnetic poles. "
+                    "Higher = a brighter oval; 0 = off. Written to "
+                    "emission.exr's ALPHA channel so the importer can lift it "
+                    "onto a shell. Preview via the viewport's Emission channel "
+                    "(composited as alpha x aurora_color); not visible in the "
+                    "Color preview",
     )
     aurora_color: tuple[float, float, float] = pfield(
         (0.85, 0.35, 0.60), tier=Tier.POST, adv=True, ui="Emission",
@@ -2025,12 +2064,13 @@ class MaskParams(_Params):
 
     file: str | None = pfield(
         None, tier=Tier.POST, adv=True, ui="Mask",
-        description="Path to a grayscale equirect (2:1) PNG mask that paints WHERE "
-                    "the three Mask targets act (white = full effect, black = none). "
-                    "Use forward slashes. None = no mask (all Mask targets inert). "
-                    "The path is resolved relative to a loaded preset's folder and "
-                    "re-saved next to a preset you save, so a preset stays portable; "
-                    "a missing file at load warns and disables the mask (never crashes)",
+        description="Path to a grayscale PNG that paints WHERE the three Mask "
+                    "targets act — white = full effect, black = none. Must be "
+                    "a 2:1 equirect image. Use forward slashes. None = no mask "
+                    "(all Mask targets inert). The path is resolved relative to "
+                    "a loaded preset's folder and re-saved next to a preset you "
+                    "save, so a preset stays portable; a missing file at load "
+                    "warns and disables the mask (never crashes)",
     )
     band_fade: float = pfield(
         0.0, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Mask",

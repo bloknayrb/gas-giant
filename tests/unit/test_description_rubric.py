@@ -360,26 +360,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('appearance.polar_tint_strength', 'A'),
     ('appearance.saturation', 'E'),
     ('appearance.storm_tints', 'A'),
-    ('bands.contrast_envelope', 'A'),
-    ('bands.contrast_envelope', 'G'),
-    ('bands.count', 'A'),
-    ('bands.detail_amount', 'A'),
-    ('bands.detail_freq', 'A'),
-    ('bands.edge_diversity', 'G'),
-    ('bands.edge_softness', 'A'),
-    ('bands.faded_sector', 'D'),
-    ('bands.faded_sector', 'G'),
-    ('bands.hue_jitter', 'G'),
-    ('bands.lane_density', 'A'),
-    ('bands.lane_density', 'G'),
-    ('bands.value_contrast', 'A'),
-    ('bands.variance_amount', 'A'),
-    ('bands.variance_amount', 'G'),
-    ('bands.warp_amount', 'A'),
-    ('bands.warp_freq', 'A'),
-    ('bands.width_jitter', 'A'),
-    ('bands.width_tail', 'A'),
-    ('bands.width_tail', 'G'),
     ('detail.belt_texture', 'G'),
     ('detail.belt_texture_fine', 'G'),
     ('detail.cellular_amount', 'A'),
@@ -396,9 +376,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('detail.polar_stipple', 'G'),
     ('detail.striation_amount', 'A'),
     ('detail.striation_frequency', 'A'),
-    ('emission.aurora_strength', 'G'),
-    ('emission.lightning_strength', 'G'),
-    ('emission.thermal_strength', 'G'),
     ('jets.equatorial_speed', 'A'),
     ('jets.equatorial_width', 'A'),
     ('jets.hero_bracket_north_width', 'A'),
@@ -406,7 +383,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('jets.hero_bracket_south_width', 'A'),
     ('jets.polar_decay', 'A'),
     ('jets.strength', 'A'),
-    ('mask.file', 'E'),
     ('storms.accent_count', 'D'),
     ('storms.barge_density', 'A'),
     ('storms.cast', 'D'),
@@ -442,8 +418,8 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
 #: prefix of anything -- the single most consequential measurement behind the
 #: rubric, since rules D and E would otherwise mean different things on
 #: different fields for ten waves.
-REMAINING_BY_RULE = {"A": 46, "B": 2, "C": 1, "D": 4, "E": 9, "G": 21}
-REMAINING_FIELDS = 69
+REMAINING_BY_RULE = {"A": 34, "B": 2, "C": 1, "D": 3, "E": 8, "G": 11}
+REMAINING_FIELDS = 50
 
 
 def test_the_remaining_debt_is_pinned():

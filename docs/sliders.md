@@ -263,7 +263,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `bands.detail_freq` &mdash; range **2 to 64**, default **12**, tier `restart`, log scale.
 
-Small-scale noise spatial frequency
+Size of that fine color mottling. Higher = finer grain; lower = broader blotches (small-scale noise spatial frequency)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__detail_freq__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><img src="img/sliders/bands__detail_freq__hi.jpg" width="320"><br><sub>high &middot; 64</sub></td>
@@ -273,7 +273,7 @@ Small-scale noise spatial frequency
 
 `bands.warp_freq` &mdash; range **0.5 to 16**, default **3**, tier `restart`, log scale.
 
-Band-boundary meander spatial frequency
+How often the band boundaries wander as they wrap the planet. Higher = tighter, more frequent meanders (band-boundary meander spatial frequency)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__warp_freq__lo.jpg" width="320"><br><sub>low &middot; 0.5</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 3.5</sub></td><td align="center"><img src="img/sliders/bands__warp_freq__hi.jpg" width="320"><br><sub>high &middot; 16</sub></td>
@@ -293,7 +293,7 @@ Whole-belt fade (the SEB-fade epoch): blends the target band's stamped color tow
 
 `bands.contrast_envelope` &mdash; range **0 to 1**, default **0**, tier `restart`.
 
-Banding contrast collapse poleward of ~45 deg toward mottle (the real latitude-contrast profile)
+Fades the banding out toward the poles, into mottled texture. Higher = the bands dissolve further from the pole; 0 = off, bands stay crisp all the way up (contrast collapse poleward of ~45 deg — the real latitude-contrast profile)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__contrast_envelope__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.25</sub></td><td align="center"><img src="img/sliders/bands__contrast_envelope__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -303,7 +303,7 @@ Banding contrast collapse poleward of ~45 deg toward mottle (the real latitude-c
 
 `bands.count` &mdash; range **2 to 40**, default **14**, tier `restart`.
 
-Number of zones+belts pole to pole
+How many bands circle the planet from pole to pole, counting zones and belts together. Higher = narrower bands
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__count__lo.jpg" width="320"><br><sub>low &middot; 2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 16</sub></td><td align="center"><img src="img/sliders/bands__count__hi.jpg" width="320"><br><sub>high &middot; 40</sub></td>
@@ -313,7 +313,7 @@ Number of zones+belts pole to pole
 
 `bands.detail_amount` &mdash; range **0 to 0.5**, default **0.1**, tier `restart`.
 
-Small-scale color-index noise amplitude
+How much fine color mottling breaks up each band. Higher = a grainier, less flat band; 0 = flat color (small-scale color-index noise amplitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__detail_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.12</sub></td><td align="center"><img src="img/sliders/bands__detail_amount__hi.jpg" width="320"><br><sub>high &middot; 0.5</sub></td>
@@ -323,7 +323,7 @@ Small-scale color-index noise amplitude
 
 `bands.edge_diversity` &mdash; range **0 to 1**, default **0**, tier `restart`.
 
-Per-edge softness variation: some band edges diffuse, some sharp (uniform edges are a procedural tell)
+Varies softness edge by edge, so some band edges are diffuse and some sharp. Higher = a wider spread of edge styles; 0 = off, every edge shares one softness (per-edge softness variation; uniform edges are a procedural tell)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__edge_diversity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/bands__edge_diversity__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -333,7 +333,7 @@ Per-edge softness variation: some band edges diffuse, some sharp (uniform edges 
 
 `bands.edge_softness` &mdash; range **0.001 to 0.1**, default **0.012**, tier `restart`, log scale.
 
-Half-width of band-edge transitions, radians of latitude (1 rad = 57.3 deg; default 0.012 rad is about 0.7 deg)
+How sharply one band gives way to the next. Higher = softer, more diffuse edges; low = a hard line (half-width of the band-edge transition, in radians of latitude; 1 rad = 57.3 deg, and the default 0.012 rad is about 0.7 deg)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__edge_softness__lo.jpg" width="320"><br><sub>low &middot; 0.001</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.012</sub></td><td align="center"><img src="img/sliders/bands__edge_softness__hi.jpg" width="320"><br><sub>high &middot; 0.1</sub></td>
@@ -351,7 +351,7 @@ _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps 
 
 `bands.faded_sector` &mdash; range **0 to 1**, default **0**, tier `restart`.
 
-SEB-fade: one belt gets a pale desaturated sector spanning ~100 degrees of longitude
+One belt gets a pale, desaturated sector spanning ~100 degrees of longitude. Higher = a more washed-out sector; 0 = off (the SEB-fade epoch; the target is faded_band_index)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__faded_sector__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/bands__faded_sector__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -361,7 +361,7 @@ SEB-fade: one belt gets a pale desaturated sector spanning ~100 degrees of longi
 
 `bands.hue_jitter` &mdash; range **0 to 0.15**, default **0**, tier `restart`.
 
-Per-band color-index offset along the palette (NEB-orange vs SEB-brown variation); seeded independently of the band layout
+Nudges each band's color along the palette, so neighbors do not share one hue. Higher = more variety band to band; 0 = off (per-band color-index offset — NEB-orange vs SEB-brown variation; seeded independently of the band layout)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__hue_jitter__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><img src="img/sliders/bands__hue_jitter__hi.jpg" width="320"><br><sub>high &middot; 0.15</sub></td>
@@ -371,7 +371,7 @@ Per-band color-index offset along the palette (NEB-orange vs SEB-brown variation
 
 `bands.lane_density` &mdash; range **0 to 1**, default **0**, tier `velocity`.
 
-Thin dark lane lines at jet cores, drawn analytically at derive time (a 1-3 px line cannot survive the sim grid)
+Thin dark lane lines running along the jet cores. Higher = more lanes, more strongly drawn; 0 = off (drawn analytically at derive time — a 1-3 px line cannot survive the sim grid)
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/bands__lane_density__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -381,7 +381,7 @@ Thin dark lane lines at jet cores, drawn analytically at derive time (a 1-3 px l
 
 `bands.value_contrast` &mdash; range **0 to 2**, default **1**, tier `restart`.
 
-Zone/belt brightness separation multiplier
+How far apart the pale zones and dark belts sit in brightness. Higher = a bolder, higher-contrast planet; 1.0 = the palette's own separation (zone/belt brightness multiplier; inert on the band-template path)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__value_contrast__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.1</sub></td><td align="center"><img src="img/sliders/bands__value_contrast__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -391,7 +391,7 @@ Zone/belt brightness separation multiplier
 
 `bands.variance_amount` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
 
-Within-band longitudinal color drift (real belts hold several hues at once, varying slowly with longitude)
+Slow color drift along the length of each band. Higher = a band that shifts hue as it wraps the planet; 0 = off (within-band longitudinal drift — real belts hold several hues at once, varying slowly with longitude)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__variance_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.18</sub></td><td align="center"><img src="img/sliders/bands__variance_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
@@ -401,7 +401,7 @@ Within-band longitudinal color drift (real belts hold several hues at once, vary
 
 `bands.warp_amount` &mdash; range **0 to 0.3**, default **0.035**, tier `restart`.
 
-Band-boundary meander amplitude, radians of latitude (1 rad = 57.3 deg; default 0.035 rad is about 2 deg)
+How far the band boundaries wander north and south. Higher = wavier, less ruler-straight bands; 0 = perfectly straight (band-boundary meander amplitude, in radians of latitude; 1 rad = 57.3 deg, and the default 0.035 rad is about 2 deg)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__warp_amount__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.04</sub></td><td align="center"><img src="img/sliders/bands__warp_amount__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
@@ -411,7 +411,7 @@ Band-boundary meander amplitude, radians of latitude (1 rad = 57.3 deg; default 
 
 `bands.width_jitter` &mdash; range **0 to 1**, default **0.35**, tier `restart`.
 
-Randomness of band width distribution
+How much the band widths vary from one another. Higher = a less regular, more natural mix of wide and narrow bands; 0 = every band the same width (randomness of the band width distribution)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__width_jitter__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.4</sub></td><td align="center"><img src="img/sliders/bands__width_jitter__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -421,7 +421,7 @@ Randomness of band width distribution
 
 `bands.width_tail` &mdash; range **0 to 1**, default **0**, tier `restart`.
 
-Heavier-tailed band width distribution (real maps mix very broad zones with thin strips)
+Pushes the band widths toward extremes, mixing very broad bands with thin ones. Higher = a more lopsided mix; 0 = off (a heavier-tailed width distribution — real maps mix very broad zones with thin strips)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__width_tail__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.35</sub></td><td align="center"><img src="img/sliders/bands__width_tail__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -1721,7 +1721,7 @@ Modulate the night-side emission map (thermal/lightning glow + aurora) by the ma
 
 `mask.file` &mdash; file path, default **None**, tier `post`.
 
-Path to a grayscale equirect (2:1) PNG mask that paints WHERE the three Mask targets act (white = full effect, black = none). Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
+Path to a grayscale PNG that paints WHERE the three Mask targets act — white = full effect, black = none. Must be a 2:1 equirect image. Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
 
 _File-path field: the GUI shows a text entry + **Browse...** button (empty = None). Documented as text; no rendered example._
 
@@ -1756,7 +1756,7 @@ _Shown on the **emission map** (night-side glow) with all three glows enabled; t
 
 `emission.aurora_strength` &mdash; range **0 to 2**, default **0**, tier `post`.
 
-Auroral ovals around the (offset) magnetic poles; written to emission.exr's ALPHA channel so the importer can lift it onto a shell. Preview via the viewport's Emission channel (composited as alpha x aurora_color); not visible in the Color preview
+Auroral ovals ringing the (offset) magnetic poles. Higher = a brighter oval; 0 = off. Written to emission.exr's ALPHA channel so the importer can lift it onto a shell. Preview via the viewport's Emission channel (composited as alpha x aurora_color); not visible in the Color preview
 
 _Shown on the **emission map** (night-side glow) with all three glows enabled; tonemapped for display. The color map is unchanged by emission sliders._
 
@@ -1792,7 +1792,7 @@ _Shown on the **emission map** (night-side glow) with all three glows enabled; t
 
 `emission.lightning_strength` &mdash; range **0 to 2**, default **0**, tier `post`.
 
-Frozen lightning-flash clusters in cyclonic belts and at high latitudes (the Juno look: light pools under the deck plus sparse HDR cores). Preview: Emission channel, not Color
+Frozen lightning-flash clusters in the cyclonic belts and at high latitudes. Higher = brighter, more visible flashes; 0 = off (the Juno look: light pools under the deck plus sparse HDR cores). Preview: Emission channel, not Color
 
 _Shown on the **emission map** (night-side glow) with all three glows enabled; tonemapped for display. The color map is unchanged by emission sliders._
 
@@ -1816,7 +1816,7 @@ _Shown on the **emission map** (night-side glow) with all three glows enabled; t
 
 `emission.thermal_strength` &mdash; range **0 to 2**, default **0**, tier `post`.
 
-5-micron thermal glow through cloud gaps (gated on the cloud-top DEPRESSION vs the band stamp: hot-spot chains blaze, barges glow, belts glimmer, zones stay dark). Preview: Emission channel, not Color
+5-micron thermal glow shining up through gaps in the cloud deck. Higher = a hotter interior showing through; 0 = off (gated on the cloud-top DEPRESSION vs the band stamp: hot-spot chains blaze, barges glow, belts glimmer, zones stay dark). Preview: Emission channel, not Color
 
 _Shown on the **emission map** (night-side glow) with all three glows enabled; tonemapped for display. The color map is unchanged by emission sliders._
 
