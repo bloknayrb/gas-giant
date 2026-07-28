@@ -42,6 +42,9 @@ audit = pytest.importorskip("audit_descriptions")
         ("~3.6 hero radii", {"3.6", "hero", "radii"}),
         # stopwords carry no signal when dropped
         ("the and of to in", set()),
+        # single characters count -- the rubric's mandatory gloss is a bare `0`,
+        # and a two-char floor made its removal structurally unreportable
+        ("0 = off", {"0", "off"}),
     ],
 )
 def test_tokens(text, expected):
@@ -88,10 +91,43 @@ def test_a_token_still_carried_by_the_authored_caption_is_not_a_drop():
 def test_section_scoping_also_scopes_the_gone_report(monkeypatch, capsys):
     """``--section`` filtered the changed loop but not the GONE block, so
     scoping to one section still failed on a rename in another -- reporting a
-    field the caller explicitly asked not to hear about."""
+    field the caller explicitly asked not to hear about.
+
+    ``AppearanceParams`` must keep a SURVIVING field here. Scoping a removal
+    works off the class's live dotted path, so a fixture that leaves the class
+    with no live fields is not "out of scope" at all -- it is the wholly-gone
+    case the test below covers, and the two would contradict each other.
+    """
     monkeypatch.setattr(
         audit, "_descriptions_at",
         lambda rev: {("AppearanceParams", "vanished"): "some old copy"},
+    )
+    monkeypatch.setattr(
+        audit, "_current_descriptions",
+        lambda: {
+            ("StormsParams", "kept"): ("storms.kept", "unchanged", "Kept"),
+            ("AppearanceParams", "survivor"): ("appearance.survivor", "still here", "S"),
+        },
+    )
+    code = audit.main(["--base", "HEAD", "--section", "storms.", "--fail-on-drop"])
+    out = capsys.readouterr().out
+    assert "vanished" not in out, "an out-of-scope removal was reported anyway"
+    assert code == 0, "--fail-on-drop fired for a field outside the section"
+
+
+def test_a_wholly_deleted_class_is_reported_even_under_section(monkeypatch, capsys):
+    """The companion to the test above, and the case it did NOT cover.
+
+    ``in_scope_classes`` is built from the classes still present in the NEW
+    corpus, so a class deleted or renamed WHOLESALE has no live dotted path,
+    matches no section, and was filtered out of the GONE block entirely --
+    every token it carried gone in silence while ``--fail-on-drop`` exited 0.
+    That is the vacuous pass this block exists to close, reintroduced on the
+    scoped path. A class that cannot be placed must be reported, not dropped.
+    """
+    monkeypatch.setattr(
+        audit, "_descriptions_at",
+        lambda rev: {("DeletedParams", "orphan"): "Rossby locality of the hero"},
     )
     monkeypatch.setattr(
         audit, "_current_descriptions",
@@ -99,8 +135,8 @@ def test_section_scoping_also_scopes_the_gone_report(monkeypatch, capsys):
     )
     code = audit.main(["--base", "HEAD", "--section", "storms.", "--fail-on-drop"])
     out = capsys.readouterr().out
-    assert "vanished" not in out, "an out-of-scope removal was reported anyway"
-    assert code == 0, "--fail-on-drop fired for a field outside the section"
+    assert "DeletedParams.orphan" in out, "a class that vanished entirely was not reported"
+    assert code == 1, "--fail-on-drop must fail when a whole described class vanished"
 
 
 def test_a_genuinely_deleted_term_is_reported():

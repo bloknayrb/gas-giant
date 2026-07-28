@@ -184,7 +184,7 @@ _SECTION_BLURBS: dict[str, str] = {
     "Color preview does not composite emission. Exported to emission.exr.",
     "physical": "Planet radius and the shading numbers passed through to Blender.",
     "mask": "Paint a grayscale image to calm, dim or flatten chosen regions. "
-    "Inert until you supply one.",
+    "Needs both an image and a gain above 0.",
     "rings": "A Saturn-style ring system, built in Blender from an exported "
     "strip. Invisible in the GUI preview.",
     "export": "Output resolution, projection and file compression for Export.",

@@ -52,7 +52,11 @@ any all both no not only also more most less least very much many few
 
 _STOPWORDS = frozenset(_STOPWORD_TEXT.split())
 
-_TOKEN = re.compile(r"[A-Za-z0-9_.~+-]{2,}")
+#: One-char tokens count: the rubric's mandatory "0 = off" gloss hangs on a
+#: bare `0`, and a ``{2,}`` floor made its removal unreportable. Widening was
+#: measured free -- the DROPPED report over all 107 rewritten fields is
+#: byte-identical either way; only the (advisory) `added:` lines gain a "0".
+_TOKEN = re.compile(r"[A-Za-z0-9_.~+-]+")
 
 
 def _tokens(text: str) -> set[str]:
@@ -182,11 +186,17 @@ def main(argv: list[str] | None = None) -> int:
     # skips them silently, so a renamed field (or a renamed owning class) took
     # every token it carried with it while --fail-on-drop still exited 0 --
     # a vacuous pass in the audit's primary drift mitigation.
+    live_classes = {cls for (cls, _f) in new}
     in_scope_classes = {cls for (cls, _f), (path, _d, _c) in new.items()
                         if not args.section or path.startswith(args.section)}
+    # A class that still exists is scoped by its live path. One that is GONE
+    # ENTIRELY has no path to scope by, so --section cannot place it -- report
+    # it either way. Dropping it instead is how the scoped path re-acquired
+    # the very vacuous pass this block was added to close.
     removed = sorted(
         k for k in old
-        if k not in new and (not args.section or k[0] in in_scope_classes)
+        if k not in new
+        and (not args.section or k[0] in in_scope_classes or k[0] not in live_classes)
     )
     if removed:
         dropped_any = True

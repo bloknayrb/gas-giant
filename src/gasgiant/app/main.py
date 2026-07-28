@@ -1561,8 +1561,8 @@ class StudioApp:
             )
         item_tooltip(
             "fit the per-latitude palette rows from a flat cylindrical "
-            "(equirect) true-color reference photo — values are baked in, "
-            "and it is undoable"
+            "true-color reference photo — any aspect works, values are "
+            "baked in, and it is undoable"
         )
 
         # T15: epoch recipes ("Scenarios") -- documented historical atmosphere

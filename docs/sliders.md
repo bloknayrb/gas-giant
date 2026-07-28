@@ -351,7 +351,7 @@ _Optional field: the GUI shows a **pin** checkbox &mdash; unpinned (None) keeps 
 
 `bands.faded_sector` &mdash; range **0 to 1**, default **0**, tier `restart`.
 
-One belt gets a pale, desaturated sector spanning ~100 degrees of longitude. Higher = a more washed-out sector; 0 = off (the SEB-fade epoch; the target is faded_band_index)
+One belt gets a pale, desaturated sector spanning ~100 degrees of longitude. Higher = a more washed-out sector; 0 = off. Target band = faded_band_index, or the widest low/mid belt when that is unset (the SEB-fade epoch)
 
 <table><tr>
 <td align="center"><img src="img/sliders/bands__faded_sector__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0.55</sub></td><td align="center"><img src="img/sliders/bands__faded_sector__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -1721,7 +1721,7 @@ Modulate the night-side emission map (thermal/lightning glow + aurora) by the ma
 
 `mask.file` &mdash; file path, default **None**, tier `post`.
 
-Path to a grayscale PNG that paints WHERE the three Mask targets act — white = full effect, black = none. Use a 2:1 equirect image: the aspect is not checked, and a different one silently stretches. Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
+Path to a grayscale PNG that paints WHERE the three Mask targets act — white = full effect, black = none. Use a 2:1 equirect image (width exactly twice the height): any other aspect is refused with a warning and the mask stays off. Use forward slashes. None = no mask (all Mask targets inert). The path is resolved relative to a loaded preset's folder and re-saved next to a preset you save, so a preset stays portable; a missing file at load warns and disables the mask (never crashes)
 
 _File-path field: the GUI shows a text entry + **Browse...** button (empty = None). Documented as text; no rendered example._
 

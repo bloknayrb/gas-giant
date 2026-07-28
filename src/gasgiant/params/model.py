@@ -337,8 +337,8 @@ class BandsParams(_Params):
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, rand=(0.0, 0.7), adv=True, ui="Bands",
         description="One belt gets a pale, desaturated sector spanning ~100 "
                     "degrees of longitude. Higher = a more washed-out sector; "
-                    "0 = off (the SEB-fade epoch; the target is "
-                    "faded_band_index)",
+                    "0 = off. Target band = faded_band_index, or the widest "
+                    "low/mid belt when that is unset (the SEB-fade epoch)",
     )
     belt_fade: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=1.0, adv=True, ui="Bands",
@@ -2161,8 +2161,9 @@ class MaskParams(_Params):
         None, tier=Tier.POST, adv=True, ui="Mask",
         description="Path to a grayscale PNG that paints WHERE the three Mask "
                     "targets act — white = full effect, black = none. Use a "
-                    "2:1 equirect image: the aspect is not checked, and a "
-                    "different one silently stretches. Use forward slashes. "
+                    "2:1 equirect image (width exactly twice the height): any "
+                    "other aspect is refused with a warning and the mask stays "
+                    "off. Use forward slashes. "
                     "None = no mask "
                     "(all Mask targets inert). The path is resolved relative to "
                     "a loaded preset's folder and re-saved next to a preset you "
