@@ -11,6 +11,8 @@ longitude window's widest-belt heuristic (B5-4's 0.01-degree tiebreak hazard).
 Recorded LIMIT (mirrored in the field description): a faded belt keeps
 belt-like churn/dynamics -- the fade is visual (T0), not dynamical. That is
 the real SEB-fade phenomenology (revival outbreaks erupt IN the faded belt).
+That mirroring is asserted, not merely claimed here --
+``tests/unit/test_description_findability.py`` pins the token in the copy.
 """
 
 from __future__ import annotations

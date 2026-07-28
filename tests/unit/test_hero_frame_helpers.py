@@ -151,7 +151,12 @@ def test_companion_brightness_reaches_the_companions():
 
 def test_companion_brightness_default_pins_the_pre_lever_constant():
     """The pfield description claims 0.32 reproduces the pre-lever output —
-    the model default must stay 0.32 (neptune ships it explicitly)."""
+    the model default must stay 0.32 (neptune ships it explicitly).
+
+    This pins one half of the coupling. The other half — that the description
+    still MAKES the claim — is pinned in
+    ``tests/unit/test_description_findability.py``: a copy rewrite can delete
+    "0.32" from the prose without this assertion noticing."""
     from gasgiant.params.model import StormsParams
 
     assert StormsParams.model_fields["companion_brightness"].default == 0.32

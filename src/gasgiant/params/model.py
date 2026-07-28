@@ -14,9 +14,35 @@ Every tunable field carries metadata in ``json_schema_extra``:
   True = hidden unless Advanced is toggled on (or an active search matches
   it) -- power-user/fine-tuning knobs, opt-in byte-identical-off-by-default
   levers, and preset-only fields.
+- ``label``: the artist-facing widget caption. Omit it and the caption is the
+  derived ``name.replace("_", " ")``, which is right for a field whose name is
+  already plain English and wrong for one named in engine vocabulary --
+  ``vort psi drag`` is not a caption. Set it for those; the field NAME never
+  changes. Resolve captions through ``field_label``, never by re-deriving.
 
 Metadata is plain JSON data only — no callables, no GUI imports — so the core
 stays GUI-agnostic in fact, not just in name.
+
+``description`` is the artist-facing tooltip AND the search haystack, which is
+what makes it a contract rather than a comment: search bypasses the
+Basic/Advanced gate, so a word deleted from a description is a field that can
+no longer be surfaced. Write it to the rubric below -- REORDER, never delete.
+
+1.  Lead with the visual read, in one sentence: what the artist SEES change.
+    That first sentence ends at the first ``.``/``;``/``:`` outside parentheses,
+    is 15-200 characters, opens with a capital, and carries no solver jargon.
+2.  Then the direction of travel, for continuous levers ("higher = tighter").
+3.  Say what 0 does for anything that defaults to 0 ("0 = off"), and qualify
+    anything mode-specific or conditional ("vorticity mode only") VERBATIM --
+    a dropped activation clause is a lever that silently does nothing.
+4.  Physics last, in ONE trailing parenthetical. Angles get their gloss
+    (``1 rad = 57.3 deg``); cross-references to other fields stay literal so
+    search finds them.
+5.  Keep the whole thing under ~600 characters.
+
+``tests/unit/test_description_rubric.py`` measures every one of these against
+the whole corpus and pins the outstanding debt, so the rubric is enforced
+rather than merely documented.
 """
 
 from __future__ import annotations

@@ -175,7 +175,11 @@ forbidden everywhere below `app`. `gl` is the ONLY moderngl touchpoint.
 ## Lever-author checklist (adding a new opt-in visual lever)
 
 1. `pfield()` in the params model (tier + rand + ui metadata; default = no-op; add
-   `label=` if the field name is engine vocabulary).
+   `label=` if the field name is engine vocabulary). The `description` is the artist's
+   tooltip AND the search haystack — write it to the rubric in `params/model.py`'s module
+   docstring (visual read first, physics last in one parenthetical, say what 0 does).
+   `tests/unit/test_description_rubric.py` measures it and will fail a new field that
+   misses; `test_description_findability.py` pins terms no rewrite may drop.
 2. Shader uniform + preprocessor block (variant define, not a runtime branch).
 3. Variant-selection predicate: for detail-FX levers, tag the pfield `fx=True` — the
    DETAIL_FX predicate, the build-time uniform tripwire, AND the cross-ref test all derive
