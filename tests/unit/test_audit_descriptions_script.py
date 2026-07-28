@@ -70,6 +70,39 @@ def test_a_token_still_carried_by_the_field_name_is_not_a_drop():
     assert "kh" in audit._lost("KH billow wavenumber", "How many billows fit")
 
 
+def test_a_token_still_carried_by_the_authored_caption_is_not_a_drop():
+    """The haystack carries the authored ``label`` too. Omitting it would
+    report "turbulence" lost from ``relax_tau``, captioned "Turbulence leash",
+    while GUI search still reaches it -- the same false-positive class as the
+    field-name case above, and the docstring promised to cover it."""
+    lost = audit._lost(
+        "Turbulence relaxation time", "How hard the bands are pulled back",
+        "relax_tau", "Turbulence leash",
+    )
+    assert "turbulence" not in lost, "the authored caption still carries it"
+    # "relaxation" and "time" ARE genuinely gone here -- asserting an empty list
+    # would pass for the wrong reason and stop testing the caption at all.
+    assert set(lost) == {"relaxation", "time"}
+
+
+def test_section_scoping_also_scopes_the_gone_report(monkeypatch, capsys):
+    """``--section`` filtered the changed loop but not the GONE block, so
+    scoping to one section still failed on a rename in another -- reporting a
+    field the caller explicitly asked not to hear about."""
+    monkeypatch.setattr(
+        audit, "_descriptions_at",
+        lambda rev: {("AppearanceParams", "vanished"): "some old copy"},
+    )
+    monkeypatch.setattr(
+        audit, "_current_descriptions",
+        lambda: {("StormsParams", "kept"): ("storms.kept", "unchanged", "Kept")},
+    )
+    code = audit.main(["--base", "HEAD", "--section", "storms.", "--fail-on-drop"])
+    out = capsys.readouterr().out
+    assert "vanished" not in out, "an out-of-scope removal was reported anyway"
+    assert code == 0, "--fail-on-drop fired for a field outside the section"
+
+
 def test_a_genuinely_deleted_term_is_reported():
     """The property everything else exists to preserve: a real removal must not
     be filtered away by any of the suppressions above."""
@@ -88,7 +121,7 @@ def test_main_reports_a_field_that_vanished_since_the_base(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         audit, "_current_descriptions",
-        lambda: {("StormsParams", "kept"): ("storms.kept", "unchanged copy")},
+        lambda: {("StormsParams", "kept"): ("storms.kept", "unchanged copy", "Kept")},
     )
     code = audit.main(["--base", "HEAD", "--fail-on-drop"])
     out = capsys.readouterr().out

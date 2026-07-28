@@ -376,7 +376,8 @@ class BandsParams(_Params):
     lane_density: float = pfield(
         0.0, tier=Tier.VELOCITY, lo=0.0, hi=1.0, rand=(0.0, 0.8), adv=True, ui="Bands",
         description="Thin dark lane lines running along the jet cores. "
-                    "Higher = more lanes, more strongly drawn; 0 = off (drawn "
+                    "Higher = more of them, though each lane's darkness is "
+                    "seeded and does not change; 0 = off (drawn "
                     "analytically at derive time — a 1-3 px line cannot "
                     "survive the sim grid)",
     )
@@ -568,16 +569,16 @@ class TurbulenceParams(_Params):
     intensity: float = pfield(
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.8), ui="Turbulence",
         description="Overall amount of churn everywhere on the planet. Higher = "
-                    "every band looks busier; 0 = perfectly smooth "
-                    "flow (global turbulence amplitude, from "
-                    "curl noise)",
+                    "every band looks busier; 0 = no churn of its own, though "
+                    "band-edge billows and storms still stir the clouds "
+                    "(global turbulence amplitude, from curl noise)",
     )
     shear_coupling: float = pfield(
         1.0, tier=Tier.VELOCITY, lo=0.0, hi=3.0, rand=(0.5, 1.5), adv=True, ui="Turbulence",
         description="Extra churn where neighboring jets meet. Higher = "
                     "band edges churn while band interiors stay calm; 0 = "
-                    "churn that ignores jet shear entirely (belt_boost still "
-                    "applies, so it is not perfectly even)",
+                    "turbulence that ignores jet shear entirely (belt_boost "
+                    "still applies, so coverage is not perfectly even)",
     )
     belt_boost: float = pfield(
         1.6, tier=Tier.VELOCITY, lo=1.0, hi=4.0, rand=(1.2, 2.5), ui="Turbulence",
@@ -1956,8 +1957,9 @@ class AppearanceParams(_Params):
     )
     haze_color: tuple[float, float, float] = pfield(
         (0.85, 0.78, 0.62), tier=Tier.POST, ui="Appearance",
-        description="Color of the global haze. Only visible once haze_amount "
-                    "is above 0 (see haze_amount)",
+        description="Color of the global haze, its tint over the whole "
+                    "planet. Only visible once haze_amount is above 0 (see "
+                    "haze_amount)",
     )
     contrast: float = pfield(
         1.0, tier=Tier.POST, lo=0.2, hi=2.0, rand=(0.8, 1.2), ui="Appearance",

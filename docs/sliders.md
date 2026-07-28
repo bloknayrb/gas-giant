@@ -371,7 +371,7 @@ Nudges each band's color along the palette, so neighbors do not share one hue. H
 
 `bands.lane_density` &mdash; range **0 to 1**, default **0**, tier `velocity`.
 
-Thin dark lane lines running along the jet cores. Higher = more lanes, more strongly drawn; 0 = off (drawn analytically at derive time — a 1-3 px line cannot survive the sim grid)
+Thin dark lane lines running along the jet cores. Higher = more of them, though each lane's darkness is seeded and does not change; 0 = off (drawn analytically at derive time — a 1-3 px line cannot survive the sim grid)
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/bands__lane_density__hi.jpg" width="320"><br><sub>high &middot; 1</sub></td>
@@ -647,7 +647,7 @@ How fast the churn pattern reshuffles as the sim runs. Higher = the pattern neve
 
 `turbulence.intensity` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Overall amount of churn everywhere on the planet. Higher = every band looks busier; 0 = perfectly smooth flow (global turbulence amplitude, from curl noise)
+Overall amount of churn everywhere on the planet. Higher = every band looks busier; 0 = no churn of its own, though band-edge billows and storms still stir the clouds (global turbulence amplitude, from curl noise)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__intensity__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__intensity__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -677,7 +677,7 @@ Size of the churn features. Higher = smaller, busier stirring; lower = broad, co
 
 `turbulence.shear_coupling` &mdash; range **0 to 3**, default **1**, tier `velocity`.
 
-Extra churn where neighboring jets meet. Higher = band edges churn while band interiors stay calm; 0 = churn that ignores jet shear entirely (belt_boost still applies, so it is not perfectly even)
+Extra churn where neighboring jets meet. Higher = band edges churn while band interiors stay calm; 0 = turbulence that ignores jet shear entirely (belt_boost still applies, so coverage is not perfectly even)
 
 <table><tr>
 <td align="center"><img src="img/sliders/turbulence__shear_coupling__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/turbulence__shear_coupling__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>

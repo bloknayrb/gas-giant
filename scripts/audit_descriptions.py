@@ -66,7 +66,7 @@ def _tokens(text: str) -> set[str]:
             if t and t not in _STOPWORDS}
 
 
-def _lost(old_text: str, new_text: str, field_name: str = "") -> list[str]:
+def _lost(old_text: str, new_text: str, field_name: str = "", caption: str = "") -> list[str]:
     """Tokens the rewrite made UNREACHABLE, judged the way search actually works.
 
     ``panels._haystack`` is ``name + derived_label + field_label + description``,
@@ -78,12 +78,16 @@ def _lost(old_text: str, new_text: str, field_name: str = "") -> list[str]:
       wave it called 15 tokens lost where the substring rule suppresses 4 of
       them -- "per", "step", "festoon" -> "festoons", "billow" -> "billows".
     * Ignoring the field name reported ``kh`` lost from ``kh_wavenumber``, where
-      search plainly still reaches it.
+      search plainly still reaches it. The authored ``label`` counts too, and
+      omitting it would report "turbulence" lost from ``relax_tau`` (captioned
+      "Turbulence leash") for the same bad reason.
 
     Noise at that rate trains the reader to skim, which is the one thing this
     script must not do.
     """
-    haystack = f"{field_name} {field_name.replace('_', ' ')} {new_text}".lower()
+    haystack = (
+        f"{field_name} {field_name.replace('_', ' ')} {caption} {new_text}"
+    ).lower()
     return sorted(t for t in _tokens(old_text) - _tokens(new_text) if t not in haystack)
 
 
@@ -102,6 +106,7 @@ def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
     src = subprocess.run(
         ["git", "show", f"{rev}:{_MODEL}"],
         capture_output=True, text=True, check=True, encoding="utf-8",
+        cwd=Path(__file__).resolve().parents[1],  # not the caller's CWD
     ).stdout
     out: dict[tuple[str, str], str] = {}
     for cls in ast.walk(ast.parse(src)):
@@ -120,8 +125,10 @@ def _descriptions_at(rev: str) -> dict[tuple[str, str], str]:
     return out
 
 
-def _current_descriptions() -> dict[tuple[str, str], tuple[str, str]]:
-    """``{(class_name, field_name): (dotted_path, description)}`` from the live model.
+def _current_descriptions() -> dict[tuple[str, str], tuple[str, str, str]]:
+    """``{(class_name, field_name): (dotted_path, description, caption)}`` from the
+    live model. The caption comes along because it is part of the real search
+    haystack, so ``_lost`` needs it to avoid false positives.
 
     ``poles.north`` and ``poles.south`` are two ``PoleParams`` instances, so
     five keys here map to two paths each and the later one wins. That is
@@ -130,7 +137,7 @@ def _current_descriptions() -> dict[tuple[str, str], tuple[str, str]]:
     """
     from gasgiant.params.model import iter_pfields
 
-    return {(leaf.model.__name__, leaf.name): (leaf.path, leaf.description)
+    return {(leaf.model.__name__, leaf.name): (leaf.path, leaf.description, leaf.caption)
             for leaf in iter_pfields()}
 
 
@@ -152,14 +159,14 @@ def main(argv: list[str] | None = None) -> int:
 
     dropped_any = False
     changed = 0
-    for key, (path, new_text) in sorted(new.items(), key=lambda kv: kv[1][0]):
+    for key, (path, new_text, caption) in sorted(new.items(), key=lambda kv: kv[1][0]):
         if args.section and not path.startswith(args.section):
             continue
         old_text = old.get(key)
         if old_text is None or old_text == new_text:
             continue
         changed += 1
-        lost = _lost(old_text, new_text, key[1])
+        lost = _lost(old_text, new_text, key[1], caption)
         gained = sorted(_tokens(new_text) - _tokens(old_text))
         delta = len(new_text) - len(old_text)
         print(f"\n{path}  ({len(old_text)} -> {len(new_text)} chars, {delta:+d})")
@@ -175,7 +182,12 @@ def main(argv: list[str] | None = None) -> int:
     # skips them silently, so a renamed field (or a renamed owning class) took
     # every token it carried with it while --fail-on-drop still exited 0 --
     # a vacuous pass in the audit's primary drift mitigation.
-    removed = sorted(k for k in old if k not in new)
+    in_scope_classes = {cls for (cls, _f), (path, _d, _c) in new.items()
+                        if not args.section or path.startswith(args.section)}
+    removed = sorted(
+        k for k in old
+        if k not in new and (not args.section or k[0] in in_scope_classes)
+    )
     if removed:
         dropped_any = True
         print("\nGONE since the base (renamed, moved class, or deleted):")
