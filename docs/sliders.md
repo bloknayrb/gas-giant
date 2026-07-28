@@ -82,7 +82,7 @@ How far the flow moves per sim step. Higher = faster development but a coarser, 
 
 `solver.baroclinic.baro_steps_per_update` &mdash; range **10 to 1000**, default **150**, tier `restart`.
 
-Internal pacing of the baroclinic storm generator — leave at default (baroclinic steps per source refresh; fixed cadence, no rand)
+Internal pacing of the baroclinic storm generator; leave at default (baroclinic steps per source refresh; fixed cadence, no rand)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -90,7 +90,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `solver.vort_inject_mask` &mdash; dropdown, one of `global` / `belts` / `shear`, default **`global`**, tier `restart`.
 
-Spatial localization of eddy injection: global = churn everywhere; belts = cyclonic dark bands only (anticyclonic zones stay smooth); shear = jet-shear flanks only (filaments where shear is high). Vorticity mode.
+Where the injected churn is allowed to land. global = everywhere; belts = the cyclonic dark bands only, leaving the anticyclonic zones smooth; shear = the jet-shear flanks only, so filaments form where shear is high. A multiplier on vort_inject, so a mask that covers more latitudes spreads the same churn thinner (spatial localization of eddy injection). Vorticity mode.
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
@@ -110,7 +110,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 
 `solver.vort_inject` &mdash; range **0 to 5**, default **0**, tier `restart`.
 
-Broadband eddy-vorticity injection amplitude per step; the jet shear folds it into filaments (the emergent-turbulence source; 0 = off, smooth jets stay zonal). Vorticity mode.
+Feeds fresh churn into the flow every step, which the jet shear then folds into filaments. Higher = busier, more turbulent bands; 0 = off, and the jets stay smooth and east-west (broadband eddy-vorticity injection amplitude per step — the emergent-turbulence source). Vorticity mode.
 
 _Rendered against the `vorticity` solver baseline (inert under the default kinematic solver)._
 
@@ -122,7 +122,7 @@ _Rendered against the `vorticity` solver baseline (inert under the default kinem
 
 `solver.vort_eddy_drag` &mdash; range **0 to 0.3**, default **0**, tier `restart`.
 
-Linear drag fraction on the EDDY vorticity q - <q>_x (the deviation from the per-latitude zonal mean) per step. Leaves the zonal-mean jets intact, but is FLAT in wavenumber, so it damps medium eddies (festoons, band-edge waves) as hard as the gravest-mode swirl -> over-flattens the field. Prefer vort_psi_drag (scale-selective). Equirect only. 0 = off (byte-identical). Vorticity mode.
+Brake on everything that is not part of the east-west jets. It leaves the jets themselves intact, but damps mid-size features (festoons, band-edge waves) as hard as the gravest-mode planet-scale swirl, so the field over-flattens — prefer vort_psi_drag, which is scale-selective. 0 = off (byte-identical). Equirect only (linear drag fraction per step on the EDDY vorticity q - <q>_x, the deviation from the per-latitude zonal mean; FLAT in wavenumber). Vorticity mode.
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__vort_eddy_drag__hi.jpg" width="320"><br><sub>high &middot; 0.3</sub></td>
@@ -132,7 +132,7 @@ Linear drag fraction on the EDDY vorticity q - <q>_x (the deviation from the per
 
 `solver.baroclinic.enabled` &mdash; toggle (on/off), default **`False`**, tier `restart`.
 
-Inject the evolving baroclinic vorticity source into the vorticity solver (adds physically-grounded mid-latitude storms; requires solver type=vorticity). Off = plain v1.6. No rand: randomize() must never silently enable it.
+Adds physically-grounded mid-latitude storms, grown by a baroclinic instability model instead of seeded by hand. Off = plain v1.6; requires solver type=vorticity (injects the evolving baroclinic vorticity source into the solver). No rand: randomize() must never silently enable it.
 
 _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
@@ -204,7 +204,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `solver.deformation_radius` &mdash; range **0 to 3.14**, default **0**, tier `restart`.
 
-Storm locality: how far each vortex's swirl reaches. Smaller = more local — a dominant hero stirs its own band without destabilizing the rest of the map; 0 = off (infinite reach, plain 2D, byte-identical). Values in the (0, 0.05) rad band are rejected (degenerate solve). (Physics: Rossby deformation radius L_d in RADIANS, 1 rad = 57.3 deg; vorticity mode. Screens the inversion to (nabla^2 - 1/L_d^2)psi = omega — equivalent-barotropic / 1.5-layer reduced gravity — so induced velocity decays ~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail; real Jupiter has L_d << the GRS. With screening on, the advected q is equivalent-barotropic QGPV, so vortex/inject/relax strengths tuned for the plain 2D path read weaker and more localized -- expect to re-tune. No rand.)
+Storm locality — how far each vortex's swirl reaches. Smaller = more local — a dominant hero stirs its own band without destabilizing the rest of the map; 0 = off (infinite reach, plain 2D, byte-identical). Values in the (0, 0.05) rad band are rejected (degenerate solve). (Physics: Rossby deformation radius L_d in RADIANS, 1 rad = 57.3 deg; vorticity mode. Screens the inversion to (nabla^2 - 1/L_d^2)psi = omega — equivalent-barotropic / 1.5-layer reduced gravity — so induced velocity decays ~exp(-r/L_d) beyond L_d instead of the 2D ~1/r tail; real Jupiter has L_d << the GRS. With screening on, the advected q is equivalent-barotropic QGPV, so vortex/inject/relax strengths tuned for the plain 2D path read weaker and more localized -- expect to re-tune. No rand.)
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__deformation_radius__hi.jpg" width="320"><br><sub>high &middot; 3.14</sub></td>
@@ -244,7 +244,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 `solver.baroclinic.update_every` &mdash; range **1 to 512**, default **32**, tier `restart`.
 
-Internal pacing of the baroclinic storm generator — leave at default (main-solver steps between source refreshes; fixed cadence, no rand)
+Internal pacing of the baroclinic storm generator; leave at default (main-solver steps between source refreshes; fixed cadence, no rand)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 

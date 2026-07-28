@@ -407,13 +407,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('jets.polar_decay', 'A'),
     ('jets.strength', 'A'),
     ('mask.file', 'E'),
-    ('solver.baroclinic.baro_steps_per_update', 'A'),
-    ('solver.baroclinic.enabled', 'E'),
-    ('solver.baroclinic.update_every', 'A'),
-    ('solver.deformation_radius', 'D'),
-    ('solver.vort_eddy_drag', 'E'),
-    ('solver.vort_inject', 'E'),
-    ('solver.vort_inject_mask', 'E'),
     ('storms.accent_count', 'D'),
     ('storms.barge_density', 'A'),
     ('storms.cast', 'D'),
@@ -449,8 +442,8 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
 #: prefix of anything -- the single most consequential measurement behind the
 #: rubric, since rules D and E would otherwise mean different things on
 #: different fields for ten waves.
-REMAINING_BY_RULE = {"A": 48, "B": 2, "C": 1, "D": 5, "E": 13, "G": 21}
-REMAINING_FIELDS = 76
+REMAINING_BY_RULE = {"A": 46, "B": 2, "C": 1, "D": 4, "E": 9, "G": 21}
+REMAINING_FIELDS = 69
 
 
 def test_the_remaining_debt_is_pinned():

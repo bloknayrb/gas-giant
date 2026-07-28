@@ -1574,9 +1574,10 @@ class BaroclinicParams(_Params):
 
     enabled: bool = pfield(
         False, tier=Tier.RESTART, adv=True, ui="Solver",
-        description="Inject the evolving baroclinic vorticity source into the "
-                    "vorticity solver (adds physically-grounded mid-latitude "
-                    "storms; requires solver type=vorticity). Off = plain v1.6. "
+        description="Adds physically-grounded mid-latitude storms, grown by a "
+                    "baroclinic instability model instead of seeded by hand. "
+                    "Off = plain v1.6; requires solver type=vorticity (injects "
+                    "the evolving baroclinic vorticity source into the solver). "
                     "No rand: randomize() must never silently enable it.")
     gain: float = pfield(
         2.0, tier=Tier.RESTART, lo=0.0, hi=8.0, adv=True, ui="Solver",
@@ -1598,12 +1599,12 @@ class BaroclinicParams(_Params):
                     "blow-up so tests can force it)")
     baro_steps_per_update: int = pfield(
         150, tier=Tier.RESTART, lo=10, hi=1000, adv=True, ui="Fixed cadence",
-        description="Internal pacing of the baroclinic storm generator — leave "
+        description="Internal pacing of the baroclinic storm generator; leave "
                     "at default (baroclinic steps per source refresh; fixed "
                     "cadence, no rand)")
     update_every: int = pfield(
         32, tier=Tier.RESTART, lo=1, hi=512, adv=True, ui="Fixed cadence",
-        description="Internal pacing of the baroclinic storm generator — leave "
+        description="Internal pacing of the baroclinic storm generator; leave "
                     "at default (main-solver steps between source refreshes; "
                     "fixed cadence, no rand)")
 
@@ -1635,7 +1636,7 @@ class SolverParams(_Params):
     deformation_radius: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=3.14, adv=True, ui="Solver",
         label="Storm reach (0 = unlimited)",
-        description="Storm locality: how far each vortex's swirl reaches. "
+        description="Storm locality — how far each vortex's swirl reaches. "
                     "Smaller = more local — a dominant hero stirs its own band "
                     "without destabilizing the rest of the map; 0 = off "
                     "(infinite reach, plain 2D, byte-identical). Values in the "
@@ -1668,9 +1669,12 @@ class SolverParams(_Params):
                     "f = f0*sin(lat), sets the Rhines/band scale; vorticity mode)")
     vort_inject: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=5.0, adv=True, ui="Solver",
         label="Churn strength",
-        description="Broadband eddy-vorticity injection amplitude per step; the "
-                    "jet shear folds it into filaments (the emergent-turbulence "
-                    "source; 0 = off, smooth jets stay zonal). Vorticity mode.")
+        description="Feeds fresh churn into the flow every step, which the jet "
+                    "shear then folds into filaments. Higher = busier, more "
+                    "turbulent bands; 0 = off, and the jets stay smooth and "
+                    "east-west (broadband eddy-vorticity injection amplitude "
+                    "per step — the emergent-turbulence source). Vorticity "
+                    "mode.")
     vort_inject_scale: float = pfield(0.5, tier=Tier.RESTART, lo=0.1, hi=4.0, adv=True, ui="Solver",
         label="Churn scale",
         description="Size of the injected churn: higher = finer speckle that "
@@ -1680,10 +1684,13 @@ class SolverParams(_Params):
     vort_inject_mask: InjectMask = pfield(
         InjectMask.GLOBAL, tier=Tier.RESTART, adv=True, ui="Solver",
         label="Churn placement",
-        description="Spatial localization of eddy injection: global = churn "
-                    "everywhere; belts = cyclonic dark bands only (anticyclonic "
-                    "zones stay smooth); shear = jet-shear flanks only (filaments "
-                    "where shear is high). Vorticity mode.")
+        description="Where the injected churn is allowed to land. global = "
+                    "everywhere; belts = the cyclonic dark bands only, leaving "
+                    "the anticyclonic zones smooth; shear = the jet-shear "
+                    "flanks only, so filaments form where shear is high. A "
+                    "multiplier on vort_inject, so a mask that covers more "
+                    "latitudes spreads the same churn thinner (spatial "
+                    "localization of eddy injection). Vorticity mode.")
     vort_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
         label="Swirl brake (all scales)",
         description="Global brake on swirling: tames runaway planet-scale swirl "
@@ -1694,13 +1701,16 @@ class SolverParams(_Params):
                     "mode)")
     vort_eddy_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=0.3, adv=True, ui="Solver",
         label="Eddy brake (all scales, jets spared)",
-        description="Linear drag fraction on the EDDY vorticity q - <q>_x (the "
-                    "deviation from the per-latitude zonal mean) per step. Leaves "
-                    "the zonal-mean jets intact, but is FLAT in wavenumber, so it "
-                    "damps medium eddies (festoons, band-edge waves) as hard as the "
-                    "gravest-mode swirl -> over-flattens the field. Prefer "
-                    "vort_psi_drag (scale-selective). Equirect only. 0 = off "
-                    "(byte-identical). Vorticity mode.")
+        description="Brake on everything that is not part of the east-west "
+                    "jets. It leaves the jets themselves intact, but damps "
+                    "mid-size features (festoons, band-edge waves) as hard as "
+                    "the gravest-mode planet-scale swirl, so the field "
+                    "over-flattens — "
+                    "prefer vort_psi_drag, which is scale-selective. 0 = off "
+                    "(byte-identical). Equirect only (linear drag fraction per "
+                    "step on the EDDY vorticity q - <q>_x, the deviation from "
+                    "the per-latitude zonal mean; FLAT in wavenumber). "
+                    "Vorticity mode.")
     vort_psi_drag: float = pfield(0.0, tier=Tier.RESTART, lo=0.0, hi=20.0, adv=True, ui="Solver",
         label="Swirl brake (large only)",
         description="Removes oversized planet-scale swirl while PRESERVING "
