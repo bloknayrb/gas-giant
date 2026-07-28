@@ -41,14 +41,17 @@ _NOT_USER_FACING = {"filter_glob"}
 _MAX_DESCRIPTION = 400
 
 
-def _tree() -> ast.Module:
-    return ast.parse(_IMPORTER.read_text(encoding="utf-8"))
+#: Parsed once, at import; every check below walks this same tree. A ``_tree()``
+#: helper re-read and re-parsed importer.py on each of its four call sites, and
+#: nothing here mutates the tree, so the four copies were identical by
+#: construction.
+_TREE = ast.parse(_IMPORTER.read_text(encoding="utf-8"))
 
 
 def _properties() -> list[tuple[str, str | None]]:
     """``(property name, description or None)`` for every declared property."""
     out: list[tuple[str, str | None]] = []
-    for node in ast.walk(_tree()):
+    for node in ast.walk(_TREE):
         if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
             continue
         call = node.annotation  # `name: FloatProperty(...)` -- the CALL is the annotation
@@ -67,17 +70,17 @@ def _properties() -> list[tuple[str, str | None]]:
     return out
 
 
+#: Scraped once and shared: the parametrize below needs it at collection time,
+#: and the scrape guard must assert against the SAME list the cases run on.
+_PROPERTIES = _properties()
+
+
 def test_the_scrape_actually_finds_the_operator_properties():
     """Without this the whole module passes by checking an empty list -- the
     exact failure mode a scrape-based guard is prone to."""
-    names = [name for name, _ in _properties()]
+    names = [name for name, _ in _PROPERTIES]
     assert len(names) >= 12, f"scrape found only {names}"
     assert {"radius", "mesh_segments", "build_rings", "axial_tilt"} <= set(names)
-
-
-#: Parsed once. Re-deriving it per parametrized case re-parses importer.py
-#: for every property.
-_PROPERTIES = _properties()
 
 
 @pytest.mark.parametrize(
@@ -98,7 +101,7 @@ def test_every_user_facing_property_is_described(name, desc):
 def test_the_operator_itself_is_described():
     """``bl_description`` is the File > Import menu tooltip -- the single most
     visible string in the addon, and the one a ``description=`` grep misses."""
-    for node in ast.walk(_tree()):
+    for node in ast.walk(_TREE):
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "bl_description" for t in node.targets
         ):
@@ -114,7 +117,7 @@ def test_enum_items_carry_their_own_descriptions():
     nothing to say, so only non-trivial options are required to speak."""
     empty: list[str] = []
     checked: list[str] = []
-    for node in ast.walk(_tree()):
+    for node in ast.walk(_TREE):
         if not isinstance(node, ast.Tuple) or len(node.elts) != 3:
             continue
         if not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts):

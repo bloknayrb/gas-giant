@@ -170,8 +170,8 @@ def _ends_with_abbreviation(head: str) -> bool:
     ``silica.``/``mica.``/``replica.`` would do the same, and a single-sentence
     description ending that way would trip rule A spuriously.
     """
-    last = head.lower().rsplit(None, 1)[-1] if head.split() else head.lower()
-    return last in _ABBREVIATIONS
+    words = head.lower().split()
+    return bool(words) and words[-1] in _ABBREVIATIONS
 
 
 @pytest.mark.parametrize(
@@ -397,7 +397,8 @@ def violations(leaf: ParamLeaf) -> list[str]:
     out = []
     if not proper:
         out.append("A")
-    first = headline.split()[0] if headline.split() else ""
+    words = headline.split()
+    first = words[0] if words else ""
     # A leading token containing an uppercase letter is a proper noun (sRGB),
     # not sloppy copy; only an all-lowercase opener or a '(' opener is flagged.
     if headline.startswith("(") or (first and first == first.lower() and first[0].isalpha()):
@@ -435,18 +436,13 @@ def measure() -> set[tuple[str, str]]:
 # only way to observe a rule fire once the corpus stops violating it.
 
 
-class _FakeInfo:
-    def __init__(self, default):
-        self.default = default
-
-
 def _leaf(description: str, default: object = 1.0) -> ParamLeaf:
     """A ParamLeaf carrying just what `violations` reads: path, description,
     and info.default. Constructed positionally-agnostically so a field added to
     ParamLeaf does not silently break the table."""
     return SimpleNamespace(
         path="synthetic.field", name="field", description=description,
-        info=_FakeInfo(default), model=None, caption="Field", meta=None,
+        info=SimpleNamespace(default=default), model=None, caption="Field", meta=None,
     )
 
 
@@ -501,7 +497,8 @@ def test_rule_f_boundary_and_exception_list():
     assert violations(_leaf(at_limit)) == []
     assert violations(_leaf(at_limit + "x")) == ["F"]
     # LONG_EXCEPTIONS must actually exempt, or the list is decoration
-    over = SimpleNamespace(**{**vars(_leaf(at_limit + "x")), "path": next(iter(LONG_EXCEPTIONS))})
+    over = _leaf(at_limit + "x")
+    over.path = next(iter(LONG_EXCEPTIONS))
     assert violations(over) == []
 
 

@@ -37,6 +37,18 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
 import audit_descriptions as audit  # noqa: E402  first-party; must not be skippable
 
 
+def _stub_corpora(monkeypatch, old, new) -> None:
+    """Run ``main`` against a hand-built base/live pair.
+
+    Both sides are stubbed together, always: leaving either real would diff a
+    two-field fixture against the 226-field model and bury the case under the
+    whole corpus. ``_descriptions_at`` takes the revision argument and ignores
+    it, so the ``--base`` these tests pass is never resolved by git.
+    """
+    monkeypatch.setattr(audit, "_descriptions_at", lambda rev: old)
+    monkeypatch.setattr(audit, "_current_descriptions", lambda: new)
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
@@ -113,13 +125,10 @@ def test_section_scoping_also_scopes_the_gone_report(monkeypatch, capsys):
     with no live fields is not "out of scope" at all -- it is the wholly-gone
     case the test below covers, and the two would contradict each other.
     """
-    monkeypatch.setattr(
-        audit, "_descriptions_at",
-        lambda rev: {("AppearanceParams", "vanished"): "some old copy"},
-    )
-    monkeypatch.setattr(
-        audit, "_current_descriptions",
-        lambda: {
+    _stub_corpora(
+        monkeypatch,
+        old={("AppearanceParams", "vanished"): "some old copy"},
+        new={
             ("StormsParams", "kept"): (("storms.kept",), "unchanged", "Kept"),
             ("AppearanceParams", "survivor"): (("appearance.survivor",), "still here", "S"),
         },
@@ -140,13 +149,10 @@ def test_a_wholly_deleted_class_is_reported_even_under_section(monkeypatch, caps
     That is the vacuous pass this block exists to close, reintroduced on the
     scoped path. A class that cannot be placed must be reported, not dropped.
     """
-    monkeypatch.setattr(
-        audit, "_descriptions_at",
-        lambda rev: {("DeletedParams", "orphan"): "Rossby locality of the hero"},
-    )
-    monkeypatch.setattr(
-        audit, "_current_descriptions",
-        lambda: {("StormsParams", "kept"): (("storms.kept",), "unchanged", "Kept")},
+    _stub_corpora(
+        monkeypatch,
+        old={("DeletedParams", "orphan"): "Rossby locality of the hero"},
+        new={("StormsParams", "kept"): (("storms.kept",), "unchanged", "Kept")},
     )
     code = audit.main(["--base", "HEAD", "--section", "storms.", "--fail-on-drop"])
     out = capsys.readouterr().out
@@ -258,13 +264,10 @@ def test_main_reports_a_field_that_vanished_since_the_base(monkeypatch, capsys):
     absent now was skipped in silence -- a renamed field took every token it
     carried with it while ``--fail-on-drop`` still exited 0. That is the
     vacuous-pass mode of the audit's primary drift mitigation."""
-    monkeypatch.setattr(
-        audit, "_descriptions_at",
-        lambda rev: {("StormsParams", "gone_field"): "Rossby locality of the hero"},
-    )
-    monkeypatch.setattr(
-        audit, "_current_descriptions",
-        lambda: {("StormsParams", "kept"): (("storms.kept",), "unchanged copy", "Kept")},
+    _stub_corpora(
+        monkeypatch,
+        old={("StormsParams", "gone_field"): "Rossby locality of the hero"},
+        new={("StormsParams", "kept"): (("storms.kept",), "unchanged copy", "Kept")},
     )
     code = audit.main(["--base", "HEAD", "--fail-on-drop"])
     out = capsys.readouterr().out

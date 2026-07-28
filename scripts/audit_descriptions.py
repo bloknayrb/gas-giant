@@ -43,6 +43,7 @@ class _CannotRun(RuntimeError):
     found a drop". Kept separate so ``main`` can reserve exit 1 exclusively for
     findings and exit 2 for "do not read anything into this run"."""
 
+
 #: Words whose loss is never interesting: articles, prepositions, and the
 #: connective tissue a tightening pass exists to remove. Kept deliberately
 #: SMALL -- every word not listed here gets reported, because the failure mode
@@ -70,9 +71,10 @@ also very much
 #: seat meter is diagnostic ONLY and NEVER moves the storm -- and the rubric in
 #: params/model.py demands they be carried VERBATIM. Cost of un-suppressing
 #: them, measured over all 107 rewritten fields: one advisory token.
-#: Same prose-not-a-list-literal shape as _STOPWORD_TEXT above: the only
-#: question ever asked of these is "is X in here?", which scans far better as a
-#: sentence. (A bare .split() on an inline literal also trips ruff SIM905.)
+#:
+#: Prose rather than a list literal for the same reason as _STOPWORD_TEXT --
+#: "is X in here?" is the only question ever asked of it. (A bare .split() on
+#: an inline literal also trips ruff SIM905.)
 _ALWAYS_REPORT_TEXT = "no not never without only all every each any both most least more less"
 
 _ALWAYS_REPORT = frozenset(_ALWAYS_REPORT_TEXT.split())
@@ -224,8 +226,8 @@ def _current_descriptions() -> dict[tuple[str, str], tuple[tuple[str, ...], str,
     out: dict[tuple[str, str], tuple[tuple[str, ...], str, str]] = {}
     for leaf in iter_pfields():
         key = (leaf.model.__name__, leaf.name)
-        paths = out[key][0] + (leaf.path,) if key in out else (leaf.path,)
-        out[key] = (paths, leaf.description, leaf.caption)
+        seen = out[key][0] if key in out else ()
+        out[key] = (seen + (leaf.path,), leaf.description, leaf.caption)
     return out
 
 

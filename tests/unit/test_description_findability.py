@@ -52,7 +52,6 @@ import pytest
 from gasgiant.params.model import iter_pfields
 
 _LEAVES = {leaf.path: leaf for leaf in iter_pfields()}
-_DESCRIPTIONS = {path: leaf.description for path, leaf in _LEAVES.items()}
 
 
 def _findable_by(path: str, term: str) -> bool:
@@ -67,7 +66,7 @@ def _findable_by(path: str, term: str) -> bool:
 
 def _copy_of(path: str) -> str:
     """The description alone, lowercased -- what the LOAD_BEARING half judges."""
-    return _DESCRIPTIONS[path].lower()
+    return _LEAVES[path].description.lower()
 
 
 #: ``(term, the field it must keep reaching)``. Each is a term a user who knows
@@ -211,7 +210,7 @@ MODE_QUALIFIED = [
 @pytest.mark.parametrize(("path", "pattern"), MODE_QUALIFIED,
                          ids=[p for p, _ in MODE_QUALIFIED])
 def test_a_mode_scoped_lever_still_says_so(path, pattern):
-    assert re.search(pattern, _DESCRIPTIONS[path]), (
+    assert re.search(pattern, _LEAVES[path].description), (
         f"{path} lost its activation clause (expected /{pattern}/). Without it "
         f"the tooltip describes a lever that does nothing in the artist's "
         f"current mode -- move the clause, never delete it."
@@ -230,7 +229,7 @@ def test_hero_emergence_keeps_its_mechanism_scoping():
     vorticity-only and (1) and (3) mode-agnostic, because (1) and (3) still
     occur as list markers further up.
     """
-    text = _DESCRIPTIONS["storms.hero_emergence"]
+    text = _LEAVES["storms.hero_emergence"].description
     assert "levers (1)(3) need solver.type=vorticity" in text, (
         "the mode-scoping sentence changed. Mechanisms (1) and (3) are the "
         "omega-path ones; re-scoping or renumbering them makes the tooltip "

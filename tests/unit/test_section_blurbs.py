@@ -14,8 +14,9 @@ contents are plain data, but reaching them needs the GUI extra installed.
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
-from gasgiant.params.model import PlanetParams
+from gasgiant.params.model import PlanetParams, Tier
 
 panels = pytest.importorskip("gasgiant.app.panels")
 
@@ -32,8 +33,6 @@ def _top_level_sections() -> set[str]:
 
     Derived, never listed -- a hand-written list is how ``mask`` and ``rings``
     went missing in the first place."""
-    from pydantic import BaseModel
-
     return {
         name for name, info in PlanetParams.model_fields.items()
         if isinstance(info.annotation, type) and issubclass(info.annotation, BaseModel)
@@ -64,8 +63,6 @@ def test_a_blurb_is_a_sentence_not_a_label(section):
 def test_the_tier_glyph_legend_covers_every_tier():
     """The P/V/R badges beside each slider are meaningless without their
     hover legend, and a new Tier would ship with a badge nobody can decode."""
-    from gasgiant.params.model import Tier
-
     assert {t.value for t in Tier} == set(panels._TIER_GLYPHS)
     for tier, (glyph, _color, legend) in panels._TIER_GLYPHS.items():
         assert len(glyph) == 1, f"{tier}: the badge is a single letter"
