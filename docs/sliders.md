@@ -69,7 +69,7 @@ _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
 `sim.dt_scale` &mdash; range **0.2 to 3**, default **1**, tier `restart`.
 
-Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)
+How far the flow moves per sim step. Higher = faster development but a coarser, less stable solve (time-step multiplier; peak jet displacement ~1.2 cells at 1.0)
 
 <table><tr>
 <td align="center"><img src="img/sliders/sim__dt_scale__lo.jpg" width="320"><br><sub>low &middot; 0.2</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><img src="img/sliders/sim__dt_scale__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1236,7 +1236,7 @@ How many meanders the ribbon wave makes around the planet. Higher = tighter, mor
 
 `poles.north.cyclone_count` &mdash; range **3 to 9**, default **6**, tier `restart`.
 
-Ring cyclones around the central one (cyclone_cluster style)
+How many cyclones ring the central one. Higher = a denser rosette around the pole (cyclone_cluster style only)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__north__cyclone_count__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 8</sub></td><td align="center"><img src="img/sliders/poles__north__cyclone_count__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
@@ -1246,7 +1246,7 @@ Ring cyclones around the central one (cyclone_cluster style)
 
 `poles.south.cyclone_count` &mdash; range **3 to 9**, default **6**, tier `restart`.
 
-Ring cyclones around the central one (cyclone_cluster style)
+How many cyclones ring the central one. Higher = a denser rosette around the pole (cyclone_cluster style only)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__cyclone_count__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 5</sub></td><td align="center"><img src="img/sliders/poles__south__cyclone_count__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
@@ -1256,7 +1256,7 @@ Ring cyclones around the central one (cyclone_cluster style)
 
 `poles.north.field_density` &mdash; range **0 to 2**, default **0**, tier `restart`.
 
-Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's dense cyclone hierarchy; 0 = off)
+Fills the cap poleward of 70 deg with a background of small cyclones. Higher = a busier, more crowded pole; 0 = off (the dense cyclone hierarchy of PIA21641)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__north__field_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/poles__north__field_density__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1266,7 +1266,7 @@ Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's de
 
 `poles.south.field_density` &mdash; range **0 to 2**, default **0**, tier `restart`.
 
-Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's dense cyclone hierarchy; 0 = off)
+Fills the cap poleward of 70 deg with a background of small cyclones. Higher = a busier, more crowded pole; 0 = off (the dense cyclone hierarchy of PIA21641)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__field_density__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.4</sub></td><td align="center"><img src="img/sliders/poles__south__field_density__hi.jpg" width="320"><br><sub>high &middot; 2</sub></td>
@@ -1276,7 +1276,7 @@ Background small-cyclone field filling the cap poleward of 70 deg (PIA21641's de
 
 `poles.north.polygon_sides` &mdash; range **3 to 9**, default **6**, tier `restart`.
 
-Polygon wavenumber of the polar jet (polygon_jet style)
+How many sides the polar jet's polygon has. 6 = Saturn's hexagon (polygon wavenumber; polygon_jet style only)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__north__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__north__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
@@ -1286,7 +1286,7 @@ Polygon wavenumber of the polar jet (polygon_jet style)
 
 `poles.south.polygon_sides` &mdash; range **3 to 9**, default **6**, tier `restart`.
 
-Polygon wavenumber of the polar jet (polygon_jet style)
+How many sides the polar jet's polygon has. 6 = Saturn's hexagon (polygon wavenumber; polygon_jet style only)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__polygon_sides__lo.jpg" width="320"><br><sub>low &middot; 3</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 6</sub></td><td align="center"><img src="img/sliders/poles__south__polygon_sides__hi.jpg" width="320"><br><sub>high &middot; 9</sub></td>
@@ -1296,7 +1296,7 @@ Polygon wavenumber of the polar jet (polygon_jet style)
 
 `poles.north.strength` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
-Polar feature vorticity amplitude (central cyclone / polygon jet)
+How strongly the polar feature swirls. Higher = a tighter, better-defined cap; 0 = flat (vorticity amplitude of the central cyclone / polygon jet)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__north__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__north__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1306,7 +1306,7 @@ Polar feature vorticity amplitude (central cyclone / polygon jet)
 
 `poles.south.strength` &mdash; range **0 to 3**, default **1**, tier `restart`.
 
-Polar feature vorticity amplitude (central cyclone / polygon jet)
+How strongly the polar feature swirls. Higher = a tighter, better-defined cap; 0 = flat (vorticity amplitude of the central cyclone / polygon jet)
 
 <table><tr>
 <td align="center"><img src="img/sliders/poles__south__strength__lo.jpg" width="320"><br><sub>low &middot; 0</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1.35</sub></td><td align="center"><img src="img/sliders/poles__south__strength__hi.jpg" width="320"><br><sub>high &middot; 3</sub></td>
@@ -1316,7 +1316,7 @@ Polar feature vorticity amplitude (central cyclone / polygon jet)
 
 `poles.north.style` &mdash; dropdown, one of `cyclone_cluster` / `polygon_jet` / `plain_vortex` / `calm`, default **`cyclone_cluster`**, tier `restart`.
 
-Polar feature style
+Which polar feature sits over this pole. cyclone_cluster = a central cyclone ringed by others (Jupiter); polygon_jet = a hexagonal jet (Saturn); plain_vortex = one tight swirl; calm = nothing at all
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
@@ -1324,7 +1324,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 `poles.south.style` &mdash; dropdown, one of `cyclone_cluster` / `polygon_jet` / `plain_vortex` / `calm`, default **`plain_vortex`**, tier `restart`.
 
-Polar feature style
+Which polar feature sits over this pole. cyclone_cluster = a central cyclone ringed by others (Jupiter); polygon_jet = a hexagonal jet (Saturn); plain_vortex = one tight swirl; calm = nothing at all
 
 _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
@@ -1843,7 +1843,7 @@ _Shown on the **emission map** (night-side glow) with all three glows enabled; t
 
 `physical.height_midlevel` &mdash; range **0 to 1**, default **0.5**, tier `post`.
 
-Height-map value mapped to the mid cloud deck (Blender importer reference level)
+Which height-map value counts as the mid cloud deck. Values above it read as raised cloud, values below as a gap (the Blender importer's reference level)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -1851,7 +1851,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `physical.height_scale` &mdash; range **0 to 0.05**, default **0.004**, tier `post`.
 
-Cloud-deck relief as a fraction of planet radius (full height-map range)
+How far the cloud deck stands out in relief. Higher = deeper displacement in Blender (a fraction of planet radius, across the full height-map range)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -1859,7 +1859,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `physical.radius_km` &mdash; range **1000 to 200000**, default **69911**, tier `post`.
 
-Planet equatorial radius in kilometers, passed through to the Blender importer for scale
+Planet equatorial radius in kilometers. A scale hint only: it changes nothing in the texture, and is passed through to the Blender importer
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -1898,7 +1898,7 @@ _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
 `export.png_compression` &mdash; range **0 to 9**, default **2**, tier `post`.
 
-PNG deflate level (low = much faster at 16K)
+How hard the PNG files are squeezed on export. Lower = much faster writes, which matters at 16K; higher = smaller files (zlib deflate level)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -1914,7 +1914,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 `export.width` &mdash; range **512 to 16384**, default **2048**, tier `post`.
 
-Equirect map width in pixels; height is width/2
+Map width in pixels. Height is always half the width, the standard 2:1 equirect ratio
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
@@ -1925,7 +1925,7 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 `rings.brightness` &mdash; range **0 to 2**, default **1**, tier `post`.
 
-Multiplier on the ice reflectance (ring RGB brightness)
+How bright the rings read. Higher = whiter, more reflective ice; 1.0 = the physically-derived value (multiplier on the ice reflectance, ring RGB)
 
 <table><tr>
 <td align="center"><sub>low &middot; 0<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 1</sub></td><td align="center"><sub>high &middot; 2<br>(not rendered)</sub></td>

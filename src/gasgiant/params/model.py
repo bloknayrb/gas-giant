@@ -396,7 +396,10 @@ class SimParams(_Params):
     dt_scale: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.2, hi=3.0, ui="Simulation",
         label="Time step",
-        description="Time-step multiplier (peak jet displacement ~1.2 cells at 1.0)",
+        description="How far the flow moves per sim step. Higher = faster "
+                    "development but a coarser, less stable solve "
+                    "(time-step multiplier; peak jet displacement ~1.2 "
+                    "cells at 1.0)",
     )
     resolution_invariant: bool = pfield(
         False, tier=Tier.RESTART, adv=True, ui="Simulation",
@@ -1758,24 +1761,34 @@ class PoleStyle(StrEnum):
 class PoleParams(_Params):
     style: PoleStyle = pfield(
         PoleStyle.CYCLONE_CLUSTER, tier=Tier.RESTART, ui="Poles",
-        description="Polar feature style",
+        description="Which polar feature sits over this pole. cyclone_cluster = a central "
+                    "cyclone ringed by others (Jupiter); polygon_jet = a "
+                    "hexagonal jet (Saturn); plain_vortex = one tight swirl; "
+                    "calm = nothing at all",
     )
     cyclone_count: int = pfield(
         6, tier=Tier.RESTART, lo=3, hi=9, rand=(5, 8), ui="Poles",
-        description="Ring cyclones around the central one (cyclone_cluster style)",
+        description="How many cyclones ring the central one. Higher = a "
+                    "denser rosette around the pole (cyclone_cluster style "
+                    "only)",
     )
     polygon_sides: int = pfield(
         6, tier=Tier.RESTART, lo=3, hi=9, ui="Poles",
-        description="Polygon wavenumber of the polar jet (polygon_jet style)",
+        description="How many sides the polar jet's polygon has. 6 = "
+                    "Saturn's hexagon (polygon wavenumber; polygon_jet "
+                    "style only)",
     )
     strength: float = pfield(
         1.0, tier=Tier.RESTART, lo=0.0, hi=3.0, rand=(0.6, 1.5), ui="Poles",
-        description="Polar feature vorticity amplitude (central cyclone / polygon jet)",
+        description="How strongly the polar feature swirls. Higher = a "
+                    "tighter, better-defined cap; 0 = flat (vorticity "
+                    "amplitude of the central cyclone / polygon jet)",
     )
     field_density: float = pfield(
         0.0, tier=Tier.RESTART, lo=0.0, hi=2.0, rand=(0.4, 1.4), ui="Poles",
-        description="Background small-cyclone field filling the cap poleward of "
-                    "70 deg (PIA21641's dense cyclone hierarchy; 0 = off)",
+        description="Fills the cap poleward of 70 deg with a background of "
+                    "small cyclones. Higher = a busier, more crowded pole; "
+                    "0 = off (the dense cyclone hierarchy of PIA21641)",
     )
 
 
@@ -2036,17 +2049,21 @@ class PhysicalParams(_Params):
 
     radius_km: float = pfield(
         69911.0, tier=Tier.POST, lo=1000.0, hi=200000.0, adv=True, ui="Physical",
-        description="Planet equatorial radius in kilometers, passed through to the "
-                    "Blender importer for scale",
+        description="Planet equatorial radius in kilometers. A scale hint "
+                    "only: it changes nothing in the texture, and is passed "
+                    "through to the Blender importer",
     )
     height_scale: float = pfield(
         0.004, tier=Tier.POST, lo=0.0, hi=0.05, adv=True, ui="Physical",
-        description="Cloud-deck relief as a fraction of planet radius (full height-map range)",
+        description="How far the cloud deck stands out in relief. Higher = "
+                    "deeper displacement in Blender (a fraction of planet "
+                    "radius, across the full height-map range)",
     )
     height_midlevel: float = pfield(
         0.5, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Physical",
-        description="Height-map value mapped to the mid cloud deck (Blender importer "
-                    "reference level)",
+        description="Which height-map value counts as the mid cloud deck. "
+                    "Values above it read as raised cloud, values below as "
+                    "a gap (the Blender importer's reference level)",
     )
     ring_inner_km: float = pfield(
         74500.0, tier=Tier.POST, lo=1000.0, hi=1000000.0, adv=True, ui="Physical",
@@ -2088,11 +2105,14 @@ class RingsParams(_Params):
     )
     brightness: float = pfield(
         1.0, tier=Tier.POST, lo=0.0, hi=2.0, adv=True, ui="Rings",
-        description="Multiplier on the ice reflectance (ring RGB brightness)",
+        description="How bright the rings read. Higher = whiter, more "
+                    "reflective ice; 1.0 = the physically-derived value "
+                    "(multiplier on the ice reflectance, ring RGB)",
     )
     tint_color: tuple[float, float, float] = pfield(
         (0.86, 0.83, 0.78), tier=Tier.POST, adv=True, ui="Rings",
-        description="Slightly warm ice tint (linear RGB) applied to the ring particles",
+        description="Color of the ring ice. The default is a slightly warm "
+                    "off-white (linear RGB, applied to the ring particles)",
     )
     fine_grain: float = pfield(
         0.15, tier=Tier.POST, lo=0.0, hi=1.0, adv=True, ui="Rings",
@@ -2111,7 +2131,8 @@ class ProjectionKind(StrEnum):
 class ExportParams(_Params):
     width: int = pfield(
         2048, tier=Tier.POST, lo=512, hi=16384, ui="Export",
-        description="Equirect map width in pixels; height is width/2",
+        description="Map width in pixels. Height is always half the width, "
+                    "the standard 2:1 equirect ratio",
     )
     projection: ProjectionKind = pfield(
         ProjectionKind.EQUIRECT, tier=Tier.POST, ui="Export",
@@ -2127,7 +2148,9 @@ class ExportParams(_Params):
     )
     png_compression: int = pfield(
         2, tier=Tier.POST, lo=0, hi=9, ui="Export",
-        description="PNG deflate level (low = much faster at 16K)",
+        description="How hard the PNG files are squeezed on export. Lower = "
+                    "much faster writes, which matters at 16K; higher = "
+                    "smaller files (zlib deflate level)",
     )
     flow_map: bool = pfield(
         False, tier=Tier.POST, ui="Export",
@@ -2147,7 +2170,8 @@ class PlanetParams(_Params):
     )
     name: str = pfield(
         "unnamed", tier=Tier.POST, ui="Global",
-        description="Display/preset name",
+        description="Display name for this planet. Used as the preset name "
+                    "when saving",
     )
     sim: SimParams = Field(default_factory=SimParams)
     solver: SolverParams = Field(default_factory=SolverParams)

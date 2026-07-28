@@ -399,8 +399,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('emission.aurora_strength', 'G'),
     ('emission.lightning_strength', 'G'),
     ('emission.thermal_strength', 'G'),
-    ('export.png_compression', 'A'),
-    ('export.width', 'E'),
     ('jets.equatorial_speed', 'A'),
     ('jets.equatorial_width', 'A'),
     ('jets.hero_bracket_north_width', 'A'),
@@ -409,27 +407,6 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
     ('jets.polar_decay', 'A'),
     ('jets.strength', 'A'),
     ('mask.file', 'E'),
-    ('name', 'A'),
-    ('physical.height_midlevel', 'A'),
-    ('physical.height_scale', 'A'),
-    ('physical.radius_km', 'A'),
-    ('poles.north.cyclone_count', 'A'),
-    ('poles.north.field_density', 'A'),
-    ('poles.north.polygon_sides', 'A'),
-    ('poles.north.polygon_sides', 'E'),
-    ('poles.north.strength', 'A'),
-    ('poles.north.strength', 'E'),
-    ('poles.north.style', 'A'),
-    ('poles.south.cyclone_count', 'A'),
-    ('poles.south.field_density', 'A'),
-    ('poles.south.polygon_sides', 'A'),
-    ('poles.south.polygon_sides', 'E'),
-    ('poles.south.strength', 'A'),
-    ('poles.south.strength', 'E'),
-    ('poles.south.style', 'A'),
-    ('rings.brightness', 'A'),
-    ('rings.tint_color', 'A'),
-    ('sim.dt_scale', 'A'),
     ('solver.baroclinic.baro_steps_per_update', 'A'),
     ('solver.baroclinic.enabled', 'E'),
     ('solver.baroclinic.update_every', 'A'),
@@ -472,8 +449,8 @@ KNOWN_VIOLATIONS: set[tuple[str, str]] = {
 #: prefix of anything -- the single most consequential measurement behind the
 #: rubric, since rules D and E would otherwise mean different things on
 #: different fields for ten waves.
-REMAINING_BY_RULE = {"A": 66, "B": 2, "C": 1, "D": 5, "E": 18, "G": 21}
-REMAINING_FIELDS = 95
+REMAINING_BY_RULE = {"A": 48, "B": 2, "C": 1, "D": 5, "E": 13, "G": 21}
+REMAINING_FIELDS = 76
 
 
 def test_the_remaining_debt_is_pinned():
