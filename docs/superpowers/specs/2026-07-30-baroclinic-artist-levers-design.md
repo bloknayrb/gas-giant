@@ -127,6 +127,37 @@ None of these is adjustable today at any level of the API.
 bound that keeps `assert_coherent` satisfied; both bounds come from §2's measurements and
 are enforced via `pfield(lo=, hi=)`, which map to pydantic `ge`/`le` on a strict model.
 
+#### 3.2a Two construction defects, found by rendering
+
+Neither was anticipated here. Both were found by driving the levers through the real
+facade path rather than by measuring the seeding maths, and both made `latitude`
+degrade the feature to off partway along its own declared range. They are the same
+class of bug as the `xi` ceiling in §2 — an apparent physics limit that is really the
+base-state builder clipping a layer.
+
+The interface swing is `A = xi*H2_mean/tan(latitude)`, so it diverges as the band moves
+equatorward: it nearly doubles between 45° and 28°.
+
+1. **Upper layer.** `h1 = H1_mean - A*cumint`. At build, before a single step, 45°
+   clears the floor by only 184 m of 12,500 and 35°/28°/20° clip outright. Fixed by
+   deepening the upper layer instead of clipping it, only when it would otherwise clip.
+   The realized total depth is then read back off the built state, because
+   `H1_mean + H2_mean` is no longer it and `L_D` and the growth-rate diagnostics
+   consume it.
+
+2. **Lower layer, at the equator.** Deepening the upper layer does not help a band that
+   straddles f = 0, where the source proxy `zeta = (gp2/f)*lap(h2e)` also diverges.
+   Measured region at a 2000-step warmup: every `(latitude, width)` fails once `width`
+   reaches `latitude`, and every `width <= latitude - 5` is clean across 10–75°. This is
+   a CROSS-FIELD constraint, so no single-field `lo`/`hi` can express it. Resolved by
+   clamping the effective half-width off the equator — the physically honest answer,
+   since a geostrophic band cannot cross f = 0 at all — with the clamp reported through
+   `validation_warnings` rather than applied silently. The rule lives in the params
+   layer because params may not import `sim` and `validation_warnings` needs it.
+
+One effective width feeds both the seeding envelope and the source mask; had they
+disagreed, the mask would clip the storms it exists to pass.
+
 ### 3.3 Bug fix: silent mid-run outcrop
 
 `BaroclinicSourceDriver.advance` catches `PositivityViolation`, logs, latches
@@ -228,4 +259,24 @@ No preset bakes any of these levers under this design; every default is a no-op.
 3. Whether `eddy_scale` should ship at all, given that its safe range is bounded by an
    outcrop cliff whose margin depends on the *driver step budget*, which in turn depends
    on `warmup_steps`, `update_every`, `baro_steps_per_update` and the run length — a
-   coupling no single slider bound can express.
+   coupling no single slider bound can express. §3.2a resolved the same shape of problem
+   for `latitude`/`width` by clamping rather than bounding; the same treatment may be
+   right here, but it has not been measured.
+4. Which values to bake, if any. Rendered at 4096 through the real facade path,
+   `phase_jitter 1` with `spectrum_width 2` keeps the crisp discrete festoon character
+   that is the one good thing about today's output, while breaking both the crest
+   alignment and the wavelength monotony. `2` with `4` goes too far — the band edge
+   softens and the plumes stop reading as discrete storms. Nothing is baked under this
+   design; every default is a no-op.
+
+## 9. What rendering caught that measuring did not
+
+Worth recording as a working note, because it recurred twice in one pass. Every defect in
+§3.2a was invisible to the source-grid measurements and to the unit tests, and appeared
+immediately on the first render through the real `params -> facade -> driver` path. The
+metrics answered "does the lever move the field it claims to" correctly and completely,
+and had nothing to say about "does the lever work across the range it advertises".
+
+Both were surfaced by §3.3 — the outcrop fix. Under the previous swallow-and-latch
+behaviour the driver would have reported `active` with a frozen source, and a dead slider
+would have shipped looking like a working one.
