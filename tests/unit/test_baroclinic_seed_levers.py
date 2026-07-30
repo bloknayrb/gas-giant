@@ -195,3 +195,57 @@ def test_deepening_is_inert_at_the_default_band():
     assert float(st.h1.min()) > 1.0
     assert st._H_mean == pytest.approx(25000.0, abs=1e-9), (
         "no deepening happened, so the realized depth is the requested one")
+
+
+# -- the equator clamp --------------------------------------------------------
+
+
+def test_the_band_is_clamped_off_the_equator():
+    """A band straddling f = 0 is not a configuration to support.
+
+    Both the source proxy (gp2/f) and the base-state swing (~cot latitude)
+    diverge at the equator, and the LOWER layer clips at build -- which the
+    upper-layer deepening does not address. Measured: every (latitude, width)
+    combination fails once width reaches latitude.
+    """
+    from gasgiant.params.model import baroclinic_effective_width as eff
+    # Inert where the band already clears the equator, including the default.
+    assert eff(45.0, 25.0) == 25.0
+    assert eff(75.0, 40.0) == 40.0
+    # Clamped where it would not.
+    assert eff(10.0, 25.0) == 5.0
+    assert eff(20.0, 40.0) == 15.0
+    # Never degenerate, even at the extreme corner of the declared ranges.
+    assert eff(10.0, 40.0) > 0.0
+
+
+@pytest.mark.parametrize("latitude,width", [
+    (10.0, 40.0), (10.0, 25.0), (15.0, 25.0), (20.0, 40.0),
+    (25.0, 40.0), (30.0, 40.0), (45.0, 25.0), (75.0, 40.0),
+])
+def test_every_declared_band_corner_builds_and_warms(latitude, width):
+    """The clamp must map the WHOLE declared (latitude, width) rectangle into the
+    measured-usable region -- otherwise a slider still fails partway along."""
+    from gasgiant.params.model import baroclinic_effective_width
+    st = ref.baroclinic_test_state(
+        **{**BASE, "phi_test_deg": latitude,
+           "band_halfwidth_deg": baroclinic_effective_width(latitude, width)})
+    assert float(st.h1.min()) > 1.0, "upper layer clipped at build"
+    assert float(st.h2.min()) > 1.0, "lower layer clipped at build"
+    for _ in range(2000):
+        ref.step_2layer(st)          # PositivityViolation here fails the test
+
+
+def test_the_clamp_is_reported_not_silent():
+    """An artist who asked for a wider belt than they got must be told."""
+    from gasgiant.params.model import PlanetParams, SolverType
+    p = PlanetParams()
+    p.solver.type = SolverType.VORTICITY
+    p.solver.baroclinic.enabled = True
+    p.solver.baroclinic.latitude = 12.0
+    p.solver.baroclinic.width = 30.0
+    assert any("across the equator" in w for w in p.validation_warnings())
+
+    p.solver.baroclinic.latitude = 45.0
+    p.solver.baroclinic.width = 25.0
+    assert not any("across the equator" in w for w in p.validation_warnings())

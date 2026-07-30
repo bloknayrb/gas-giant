@@ -87,7 +87,7 @@ Moves the whole belt of extra storms north or south. 45 sits them in the mid-lat
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 10<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><sub>high &middot; 75<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__latitude__lo.jpg" width="320"><br><sub>low &middot; 10</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__latitude__hi.jpg" width="320"><br><sub>high &middot; 75</sub></td>
 </tr></table>
 
 ### Band width
@@ -99,7 +99,7 @@ How tall the belt of extra storms is. Higher spreads them over more latitudes; l
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 5<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 25</sub></td><td align="center"><sub>high &middot; 40<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__width__lo.jpg" width="320"><br><sub>low &middot; 5</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 25</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__width__hi.jpg" width="320"><br><sub>high &middot; 40</sub></td>
 </tr></table>
 
 ### baro steps per update
@@ -233,7 +233,7 @@ Breaks up the row of storms so their crests stop lining up in a vertical comb. H
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__phase_jitter__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
 </tr></table>
 
 ### Storm edge softness
@@ -245,7 +245,7 @@ Softens the storms' fine structure. Higher gives smooth broad shapes; too low le
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.5<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 1.26</sub></td><td align="center"><sub>high &middot; 6<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__smooth__lo.jpg" width="320"><br><sub>low &middot; 0.5</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 1.26</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__smooth__hi.jpg" width="320"><br><sub>high &middot; 6</sub></td>
 </tr></table>
 
 ### Storm reach (0 = unlimited)
@@ -267,7 +267,7 @@ Size of each storm in the belt. Higher makes fewer, broader storms; lower makes 
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 0.02<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0.075</sub></td><td align="center"><sub>high &middot; 0.15<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__eddy_scale__lo.jpg" width="320"><br><sub>low &middot; 0.02</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0.075</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__eddy_scale__hi.jpg" width="320"><br><sub>high &middot; 0.15</sub></td>
 </tr></table>
 
 ### Storms around the planet
@@ -279,7 +279,7 @@ How many storms are seeded around a full circle of longitude. Pair it with Storm
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><sub>high &middot; 20<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__zonal_count__lo.jpg" width="320"><br><sub>low &middot; 4</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__zonal_count__hi.jpg" width="320"><br><sub>high &middot; 20</sub></td>
 </tr></table>
 
 ### Swirl brake (all scales)
@@ -329,7 +329,7 @@ Varies the gaps between storms so they stop repeating at one fixed spacing. High
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 6<br>(not rendered)</sub></td>
+<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__spectrum_width__hi.jpg" width="320"><br><sub>high &middot; 6</sub></td>
 </tr></table>
 
 ### warmup steps

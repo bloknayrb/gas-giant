@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import logging
 
+from gasgiant.params.model import baroclinic_effective_width
 from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
 
@@ -59,12 +60,18 @@ class BaroclinicSourceDriver:
         self.grid_h = grid_h
         self.outcropped = False
         self.smooth_sigma = smooth_sigma
-        self.lat_band, self.taper = bsrc.mask_band_for(latitude, width)
+        # ONE effective width feeds both the seeding envelope and the source
+        # mask; if they disagreed the mask would clip the storms it exists to
+        # pass. Clamped to keep the band off the equator (the rule lives in the
+        # params layer so validation_warnings can surface it); inert at the
+        # default band.
+        self.width = baroclinic_effective_width(latitude, width)
+        self.lat_band, self.taper = bsrc.mask_band_for(latitude, self.width)
         self.st = ref.baroclinic_test_state(
             W=bsrc.SRC_W, H=bsrc.SRC_H, unstable=True, seed=seed,
             gp1=bsrc.GP1, gp2=gp2, xi_unstable=bsrc.XI,
             m_zonal=m_zonal,
-            phi_test_deg=latitude, band_halfwidth_deg=width,
+            phi_test_deg=latitude, band_halfwidth_deg=self.width,
             phase_jitter=phase_jitter, spectrum_width=spectrum_width,
             pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0,
         )

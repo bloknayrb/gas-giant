@@ -1674,6 +1674,34 @@ INJECT_MASK_CODE: dict[InjectMask, int] = {
 }
 
 
+#: The baroclinic storm band must not reach the equator. The source is a
+#: GEOSTROPHIC proxy, zeta = (gp2/f) * lap(h2e), and the base state's interface
+#: swing scales as xi*H2/tan(latitude) -- both diverge as f -> 0, so a band
+#: straddling the equator clips the LOWER layer at build and outcrops in warmup.
+#: Measured region (2000-step warmup): every (latitude, width) fails once width
+#: reaches latitude, and every width <= latitude - 5 is clean across 10..75.
+#:
+#: This lives in the params layer because ``validation_warnings`` needs it and
+#: params may not import ``sim``; ``sim.baroclinic_source`` consumes it from here
+#: so there is exactly one implementation of the rule.
+BAROCLINIC_EQUATOR_GUARD_DEG = 5.0
+
+
+def baroclinic_effective_width(latitude: float, width: float) -> float:
+    """The storm-band half-width actually used, clamped off the equator.
+
+    Clamping rather than rejecting is the physically honest choice: "centre 10,
+    width 25" asks for a band from -15 to +35 degrees, and a geostrophic
+    baroclinic band cannot cross f = 0 at all. Every slider position stays
+    renderable, and ``validation_warnings`` tells the artist when the clamp bit.
+
+    Inert wherever the band already clears the equator, so the default
+    (45 +/- 25) is unchanged.
+    """
+    return min(float(width),
+               max(1.0, float(latitude) - BAROCLINIC_EQUATOR_GUARD_DEG))
+
+
 class BaroclinicParams(_Params):
     """Opt-in 2-layer baroclinic vorticity source coupled into the vorticity
     solver's equirect pass (M3). OFF by default => byte-identical to plain v1.6.
@@ -2433,6 +2461,21 @@ class PlanetParams(_Params):
         deliberately NOT enumerated here -- read them; the list went stale twice
         as cast levers grew."""
         warnings: list[str] = []
+        # A storm band reaching the equator is clamped rather than rejected: a
+        # geostrophic baroclinic band cannot cross f = 0, and both the source
+        # proxy (gp2/f) and the base-state interface swing (~cot latitude)
+        # diverge there. Clamping keeps every slider position renderable, but it
+        # means the artist asked for a wider belt than they got, so say so.
+        bp = self.solver.baroclinic
+        if bp.enabled:
+            eff = baroclinic_effective_width(bp.latitude, bp.width)
+            if eff < bp.width:
+                warnings.append(
+                    f"solver.baroclinic.width={bp.width:g} would put the storm "
+                    f"band across the equator at latitude={bp.latitude:g}; it is "
+                    f"clamped to {eff:g} (a geostrophic band cannot cross f=0). "
+                    f"Move latitude poleward to use the full width."
+                )
         if self.solver.type == SolverType.KINEMATIC:
             for field_name in ("hero_solid_core", "oval_solid_core"):
                 value = getattr(self.storms, field_name)
