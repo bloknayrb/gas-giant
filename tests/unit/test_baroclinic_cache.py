@@ -1,0 +1,176 @@
+"""On-disk warm-state cache: key soundness, round-trip, and failure tolerance.
+
+Split by cost. Everything here is pure key/file work and runs in the fast loop;
+the tests that actually warm a solver (a real ~700-step advance) live in
+test_baroclinic_driver.py behind the `slow` marker.
+
+The stakes are lopsided. A cache MISS costs a re-warmup -- slow, never wrong. A
+false HIT serves a state warmed under different physics and every render
+downstream is quietly wrong. So the key tests below are all miss-direction: each
+asserts that some change DOES produce a different key.
+"""
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from gasgiant.sim import baroclinic_cache as bcache
+
+
+@pytest.fixture
+def cache_dir(tmp_path):
+    return tmp_path / "baro_cache"
+
+
+def _state(seed: float = 1.0) -> dict[str, np.ndarray]:
+    return {f: np.full((4, 8), seed + i, dtype=np.float64)
+            for i, f in enumerate(bcache.EVOLVING_FIELDS)}
+
+
+# -- the key ------------------------------------------------------------------
+
+
+def test_same_inputs_give_the_same_key():
+    assert bcache.warm_cache_key(a=1, b=2.5) == bcache.warm_cache_key(a=1, b=2.5)
+
+
+def test_key_is_order_independent():
+    """Keys are built from **kwargs, whose iteration order follows the call
+    site. Sorting is what stops a harmless argument reshuffle in the driver from
+    orphaning every cached entry."""
+    assert bcache.warm_cache_key(a=1, b=2) == bcache.warm_cache_key(b=2, a=1)
+
+
+@pytest.mark.parametrize("changed", [
+    {"latitude": 46.0}, {"seed": 1}, {"gp2": 0.08}, {"m_zonal": 15},
+    {"warmup_steps": 8001}, {"phase_jitter": 0.5}, {"spectrum_width": 1},
+    {"width": 24.0}, {"gp1": 0.06}, {"xi": 3.1},
+])
+def test_every_input_changes_the_key(changed):
+    base = dict(latitude=45.0, seed=0, gp2=0.075, m_zonal=14, warmup_steps=8000,
+                phase_jitter=0.0, spectrum_width=0, width=25.0, gp1=0.05, xi=3.0)
+    assert bcache.warm_cache_key(**base) != bcache.warm_cache_key(**{**base, **changed})
+
+
+def test_key_distinguishes_int_and_float():
+    """`spectrum_width` is an int and `phase_jitter` a float; a key built by
+    stringifying without type information would collide 0 with 0.0 and serve a
+    jittered state to an unjittered request."""
+    assert bcache.warm_cache_key(x=0) != bcache.warm_cache_key(x=0.0)
+
+
+def test_fingerprint_covers_every_module_that_shapes_the_warm_state():
+    """The driver file is in the fingerprint because it owns the literals passed
+    into the state builder (pert_amp_frac, dt_safety, nu4) -- values no caller
+    supplies and no other file records. Dropping it from the list would let an
+    edit to those silently reuse states warmed under the old ones."""
+    import hashlib
+    from pathlib import Path
+    here = Path(bcache.__file__).parent
+    h = hashlib.sha256()
+    for name in ("shallow_water_ref.py", "baroclinic_source.py",
+                 "baroclinic_driver.py"):
+        h.update((here / name).read_bytes())
+    assert bcache.solver_fingerprint() == h.hexdigest()
+
+
+def test_fingerprint_participates_in_the_key(monkeypatch):
+    monkeypatch.setattr(bcache, "_fingerprint", "0" * 64)
+    a = bcache.warm_cache_key(x=1)
+    monkeypatch.setattr(bcache, "_fingerprint", "1" * 64)
+    assert bcache.warm_cache_key(x=1) != a
+
+
+# -- round-trip ---------------------------------------------------------------
+
+
+def test_miss_on_empty_cache(cache_dir):
+    assert bcache.load_warm_state("deadbeef", cache_dir) is None
+
+
+def test_round_trip_is_bit_exact(cache_dir):
+    """float64 in, the SAME float64 out. A lossy round-trip would put the
+    resumed run on a different trajectory from the one that was warmed."""
+    saved = _state()
+    bcache.save_warm_state("k", saved, cache_dir)
+    loaded = bcache.load_warm_state("k", cache_dir)
+    assert loaded is not None
+    for f in bcache.EVOLVING_FIELDS:
+        assert np.array_equal(loaded[f], saved[f]), f
+        assert loaded[f].dtype == saved[f].dtype, f
+
+
+def test_save_creates_the_directory(cache_dir):
+    assert not cache_dir.exists()
+    bcache.save_warm_state("k", _state(), cache_dir)
+    assert bcache.warm_cache_path("k", cache_dir).is_file()
+
+
+def test_save_leaves_no_temp_files(cache_dir):
+    bcache.save_warm_state("k", _state(), cache_dir)
+    assert [p.name for p in cache_dir.iterdir()] == ["k.npz"]
+
+
+# -- failure tolerance --------------------------------------------------------
+
+
+def test_corrupt_entry_degrades_to_a_miss_and_is_removed(cache_dir):
+    """A truncated write or a half-copied directory must cost a re-warmup, not
+    an exception -- and must not cost it twice."""
+    bcache.save_warm_state("k", _state(), cache_dir)
+    path = bcache.warm_cache_path("k", cache_dir)
+    path.write_bytes(b"not an npz")
+    assert bcache.load_warm_state("k", cache_dir) is None
+    assert not path.exists(), "a corrupt entry must be removed, not re-read"
+
+
+def test_entry_missing_a_field_degrades_to_a_miss(cache_dir):
+    """An entry written by an older build with a smaller EVOLVING_FIELDS would
+    load but leave part of the state at its initial value -- a silently wrong
+    resume. The KeyError must surface as a miss instead."""
+    cache_dir.mkdir(parents=True)
+    partial = _state()
+    del partial["v2"]
+    np.savez_compressed(bcache.warm_cache_path("k", cache_dir), **partial)
+    assert bcache.load_warm_state("k", cache_dir) is None
+
+
+def test_unwritable_cache_is_not_fatal(cache_dir, monkeypatch):
+    """A read-only or full disk must not take down a working sim."""
+    def boom(*a, **k):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(bcache.Path, "mkdir", boom)
+    bcache.save_warm_state("k", _state(), cache_dir)  # must NOT raise
+    assert bcache.load_warm_state("k", cache_dir) is None
+
+
+# -- eviction -----------------------------------------------------------------
+
+
+def test_prune_evicts_oldest_first_until_under_cap(cache_dir):
+    cache_dir.mkdir(parents=True)
+    for i, name in enumerate(["old", "mid", "new"]):
+        p = cache_dir / f"{name}.npz"
+        p.write_bytes(b"x" * 1000)
+        import os
+        os.utime(p, (1000 + i, 1000 + i))
+    bcache._prune(cache_dir, max_bytes=2500)
+    assert sorted(p.stem for p in cache_dir.glob("*.npz")) == ["mid", "new"]
+
+
+def test_a_fresh_save_never_evicts_itself(cache_dir, monkeypatch):
+    """The new entry is the newest by mtime, so oldest-first eviction cannot
+    reach it -- otherwise a cap smaller than one entry would warm, write, delete,
+    and re-warm forever, paying the full ~52 s every single time.
+
+    Also pins that the cap is read at CALL time: as a default argument it would
+    bind at import and this override would silently do nothing.
+    """
+    import os
+    bcache.save_warm_state("first", _state(), cache_dir)
+    os.utime(bcache.warm_cache_path("first", cache_dir), (1000, 1000))
+    monkeypatch.setattr(bcache, "BARO_CACHE_MAX_BYTES", 1)
+    bcache.save_warm_state("second", _state(2.0), cache_dir)
+    assert bcache.load_warm_state("second", cache_dir) is not None
+    assert bcache.load_warm_state("first", cache_dir) is None, "cap must still bite"

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import copy
 import logging
+from pathlib import Path
 
 from gasgiant.params.model import baroclinic_effective_width
+from gasgiant.sim import baroclinic_cache as bcache
 from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
 
@@ -44,7 +46,7 @@ class BaroclinicSourceDriver:
     The constructor takes ONLY inputs the warm state depends on. Everything
     consumed when a source is derived -- the output grid and the smoothing
     sigma -- is an argument to `current_source` instead, because the warmup is
-    the expensive part (~69 s at the default 8000 steps on a 192x96 grid) and
+    the expensive part (~52 s at the default 8000 steps on a 192x96 grid) and
     the facade caches the driver on exactly those constructor inputs.
 
     Keeping the split in the signatures is what makes the cache honest. Stored
@@ -52,6 +54,12 @@ class BaroclinicSourceDriver:
     facade's cache key AND re-pushed onto every reused driver; miss the second
     half and the artist's slider silently does nothing. As arguments the value
     is supplied fresh at each call and the mistake is unrepresentable.
+
+    `cache_dir` opts into the on-disk warm-state cache (`baroclinic_cache`),
+    which turns a repeat visit to a configuration into a ~50 ms load instead of
+    a ~52 s warmup, across process restarts. Default None = no disk cache, so a
+    test that means to exercise the real warmup gets one and nothing writes to
+    the user's home unless a caller asks for it. The facade opts in.
     """
 
     def __init__(self, warmup_steps: int = 9000, seed: int = 0,
@@ -60,7 +68,8 @@ class BaroclinicSourceDriver:
                  latitude: float | None = None,
                  width: float | None = None,
                  phase_jitter: float = 0.0,
-                 spectrum_width: int = 0) -> None:
+                 spectrum_width: int = 0,
+                 cache_dir: Path | None = None) -> None:
         # None sentinels rather than `= bsrc.GP2` defaults: a default argument
         # binds ONCE at def time, which would freeze the module constants and
         # silently break the tests that monkeypatch them to force an outcrop.
@@ -84,14 +93,34 @@ class BaroclinicSourceDriver:
             phase_jitter=phase_jitter, spectrum_width=spectrum_width,
             pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0,
         )
-        try:
-            self.advance(warmup_steps)
-        except BaroclinicOutcropError as exc:
-            raise BaroclinicWarmupError(
-                f"BaroclinicSourceDriver: warmup outcropped within {warmup_steps} "
-                f"steps -- the source never reached a finite-amplitude state. "
-                f"Reduce warmup_steps or eddy_scale. ({exc})"
-            ) from exc
+        # The key carries the RUNTIME module constants, not only their on-disk
+        # text: bsrc.GP1/XI/SRC_W/SRC_H are read above and the tests monkeypatch
+        # them, which a source fingerprint alone cannot see (see baroclinic_cache).
+        key = bcache.warm_cache_key(
+            warmup_steps=warmup_steps, seed=seed, m_zonal=m_zonal, gp2=gp2,
+            latitude=latitude, width=self.width,
+            phase_jitter=phase_jitter, spectrum_width=spectrum_width,
+            gp1=bsrc.GP1, xi=bsrc.XI, src_w=bsrc.SRC_W, src_h=bsrc.SRC_H,
+        ) if cache_dir is not None else None
+        cached = bcache.load_warm_state(key, cache_dir) if key is not None else None
+        if cached is not None:
+            for field, arr in cached.items():
+                setattr(self.st, field, arr)
+        else:
+            try:
+                self.advance(warmup_steps)
+            except BaroclinicOutcropError as exc:
+                raise BaroclinicWarmupError(
+                    f"BaroclinicSourceDriver: warmup outcropped within {warmup_steps} "
+                    f"steps -- the source never reached a finite-amplitude state. "
+                    f"Reduce warmup_steps or eddy_scale. ({exc})"
+                ) from exc
+            # Only a SURVIVING warmup is cached. An outcropped state is useless
+            # to a later run, and the facade already remembers failing keys.
+            if key is not None:
+                bcache.save_warm_state(
+                    key, {f: getattr(self.st, f) for f in bcache.EVOLVING_FIELDS},
+                    cache_dir)
         # Post-warmup snapshot: a reused driver (cache hit on a RESTART rebuild)
         # restores this so every development run starts from the identical
         # baroclinic state -- deterministic regardless of prior preview ticks.

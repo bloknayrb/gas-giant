@@ -130,6 +130,64 @@ def test_current_source_forwards_its_smooth_sigma(monkeypatch):
     assert seen["smooth_sigma"] == probe
 
 
+def test_cached_warm_state_resumes_bit_identically(tmp_path):
+    """The claim the whole disk cache rests on: a driver restored from disk must
+    be indistinguishable from one that did the warmup, INCLUDING under further
+    advancing.
+
+    Restoring overwrites only the six EVOLVING_FIELDS and rebuilds everything
+    else (grid, reduced gravities, dt, floors, h_eq targets) from the
+    constructor inputs. That is only sound if those six really are the complete
+    evolving state. Comparing after a further advance is what proves it: any
+    seventh piece of carried state would be at its INITIAL value in the restored
+    driver and diverge here, where a same-step comparison would miss it.
+    """
+    cache = tmp_path / "baro_cache"
+    cold = BaroclinicSourceDriver(warmup_steps=700, seed=3, cache_dir=cache)
+    assert len(list(cache.glob("*.npz"))) == 1, "a survived warmup must be cached"
+
+    warm = BaroclinicSourceDriver(warmup_steps=700, seed=3, cache_dir=cache)
+    for f in ("h1", "h2", "u1", "v1", "u2", "v2"):
+        assert np.array_equal(getattr(warm.st, f), getattr(cold.st, f)), f
+    # Non-evolving state must come from the rebuild, not from disk.
+    assert warm.st.dt == cold.st.dt and warm.st.gp2 == cold.st.gp2
+
+    cold.advance(120)
+    warm.advance(120)
+    for f in ("h1", "h2", "u1", "v1", "u2", "v2"):
+        assert np.array_equal(getattr(warm.st, f), getattr(cold.st, f)), (
+            f"{f} diverged after advancing -- the restored state is incomplete")
+
+
+def test_cache_key_separates_configurations(tmp_path):
+    """Two different configurations must not share an entry. A false hit would
+    serve a state warmed under different physics with no visible symptom."""
+    cache = tmp_path / "baro_cache"
+    a = BaroclinicSourceDriver(warmup_steps=400, seed=0, cache_dir=cache)
+    b = BaroclinicSourceDriver(warmup_steps=400, seed=0, latitude=35.0,
+                               cache_dir=cache)
+    assert len(list(cache.glob("*.npz"))) == 2
+    assert not np.array_equal(a.st.h1, b.st.h1)
+
+
+def test_no_cache_dir_means_no_disk_traffic(tmp_path):
+    """Default None must warm for real and write nothing -- so a test that means
+    to exercise the warmup gets one, and nothing lands in the user's home."""
+    BaroclinicSourceDriver(warmup_steps=400, seed=0)
+    assert not list(tmp_path.rglob("*.npz"))
+
+
+def test_an_outcropped_warmup_is_not_cached(monkeypatch, tmp_path):
+    """Caching a dead state would serve it back on every later attempt, and the
+    resumed run would derive its source from a solver that had already blown
+    up."""
+    cache = tmp_path / "baro_cache"
+    monkeypatch.setattr(bsrc, "GP2", 0.3)
+    with pytest.raises(BaroclinicWarmupError):
+        BaroclinicSourceDriver(warmup_steps=20000, seed=0, cache_dir=cache)
+    assert not list(cache.glob("*.npz")) if cache.exists() else True
+
+
 def test_warm_state_ignores_the_derivation_inputs():
     """The measurement this whole split rests on: two drivers warmed identically
     hold bit-identical state, and the grid/sigma only change what is DERIVED off

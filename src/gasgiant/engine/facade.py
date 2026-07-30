@@ -267,7 +267,7 @@ class Simulation:
         # EVERY input the warm state depends on belongs here, and NOTHING else.
         # A lever missing from this key is a lever the artist can move while the
         # facade silently hands back the driver warmed at the OLD value. A lever
-        # wrongly PRESENT costs a ~69 s re-warmup to rebuild a bit-identical
+        # wrongly PRESENT costs a ~52 s re-warmup to rebuild a bit-identical
         # state -- which is why the equirect size and `smooth` are absent: both
         # are consumed at derivation time (see BaroclinicSourceDriver's class
         # docstring), and the warmup runs on the fixed 192x96 source grid
@@ -292,6 +292,7 @@ class Simulation:
             self._baro_degraded_reason = self._baro_failed_reason
             return
         try:
+            from gasgiant.sim import baroclinic_cache as bcache
             from gasgiant.sim.baroclinic_driver import (
                 BaroclinicSourceDriver,
                 BaroclinicWarmupError,
@@ -302,7 +303,12 @@ class Simulation:
                 m_zonal=bp.zonal_count, gp2=bp.eddy_scale,
                 latitude=bp.latitude, width=bp.width,
                 phase_jitter=bp.phase_jitter,
-                spectrum_width=bp.spectrum_width)
+                spectrum_width=bp.spectrum_width,
+                # Read as a module ATTRIBUTE at call time, never captured into a
+                # default argument -- the same binds-once trap the driver's own
+                # sentinel defaults document. Lets conftest redirect the whole
+                # suite away from the user's real ~/.gasgiant cache.
+                cache_dir=bcache.BARO_CACHE_DIR)
             self._baro_key = key
             self._baro_failed_key = None
             self._baro_failed_reason = None

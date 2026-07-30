@@ -250,7 +250,7 @@ _LEVERS = [
 #: Levers consumed when a source is DERIVED off the warm state, never during the
 #: warmup. Measured: the warm state is bit-identical across smooth 1.26 vs 4.0
 #: (the solver runs on the fixed 192x96 source grid and never sees the sigma).
-#: These must NOT appear in the cache key -- a ~69 s re-warmup to rebuild an
+#: These must NOT appear in the cache key -- a ~52 s re-warmup to rebuild an
 #: identical state -- but they MUST still reach current_source on a reused
 #: driver, or the slider is dead. Both halves are pinned below.
 _DERIVATION_LEVERS = ["smooth"]
@@ -292,7 +292,7 @@ def test_derivation_levers_do_not_invalidate_the_cached_driver(monkeypatch, fiel
     """The win: moving a derivation-time lever must REUSE the warm driver.
 
     Keyed on it, every nudge of "Storm edge softness" cost a full re-warmup
-    (~69 s at the default 8000 steps) to rebuild a state measured bit-identical.
+    (~52 s at the default 8000 steps) to rebuild a state measured bit-identical.
     """
     monkeypatch.setattr(bdrv, "BaroclinicSourceDriver", _CountingDriver)
     _CountingDriver.built = []
@@ -346,6 +346,28 @@ def test_reused_driver_derives_at_the_CURRENT_grid_and_smooth(monkeypatch):
     sim._update_baroclinic_source()
     assert driver.derived_with[-1] == (128, 64, 4.0), (
         "a reused driver must derive at the current grid and smooth")
+
+
+def test_facade_opts_into_the_disk_cache(monkeypatch):
+    """The facade is the ONLY production caller that turns the on-disk warm-state
+    cache on -- the driver defaults to off so tests exercise real warmups. Drop
+    this wiring and every driver test still passes (they pass cache_dir
+    explicitly) while the GUI quietly goes back to paying ~52 s per new
+    configuration, forever. Nothing else would notice.
+
+    Asserting the value is the CURRENT module attribute also pins that the
+    facade reads it at call time rather than capturing it into a default
+    argument, which is what lets conftest keep the suite out of the developer's
+    real ~/.gasgiant cache.
+    """
+    from gasgiant.sim import baroclinic_cache as bcache
+    monkeypatch.setattr(bdrv, "BaroclinicSourceDriver", _CountingDriver)
+    _CountingDriver.built = []
+    sim = _stub_sim(_params(enabled=True))
+    sim._init_baroclinic()
+    assert _CountingDriver.built[-1]["cache_dir"] == bcache.BARO_CACHE_DIR
+    assert "pytest" in str(bcache.BARO_CACHE_DIR), (
+        "the autouse conftest fixture must redirect the cache away from $HOME")
 
 
 def test_a_failed_warmup_is_not_retried(monkeypatch):
