@@ -39,13 +39,26 @@ class BaroclinicOutcropError(RuntimeError):
 
 
 class BaroclinicSourceDriver:
-    def __init__(self, grid_w: int, grid_h: int,
-                 warmup_steps: int = 9000, seed: int = 0,
+    """Warm baroclinic state plus the derivation that reads a source off it.
+
+    The constructor takes ONLY inputs the warm state depends on. Everything
+    consumed when a source is derived -- the output grid and the smoothing
+    sigma -- is an argument to `current_source` instead, because the warmup is
+    the expensive part (~69 s at the default 8000 steps on a 192x96 grid) and
+    the facade caches the driver on exactly those constructor inputs.
+
+    Keeping the split in the signatures is what makes the cache honest. Stored
+    as attributes, a derivation-time input has to be BOTH excluded from the
+    facade's cache key AND re-pushed onto every reused driver; miss the second
+    half and the artist's slider silently does nothing. As arguments the value
+    is supplied fresh at each call and the mistake is unrepresentable.
+    """
+
+    def __init__(self, warmup_steps: int = 9000, seed: int = 0,
                  m_zonal: int | None = None,
                  gp2: float | None = None,
                  latitude: float | None = None,
                  width: float | None = None,
-                 smooth_sigma: float | None = None,
                  phase_jitter: float = 0.0,
                  spectrum_width: int = 0) -> None:
         # None sentinels rather than `= bsrc.GP2` defaults: a default argument
@@ -55,11 +68,7 @@ class BaroclinicSourceDriver:
         gp2 = bsrc.GP2 if gp2 is None else gp2
         latitude = bsrc.PHI_TEST_DEG if latitude is None else latitude
         width = bsrc.BAND_HALFWIDTH_DEG if width is None else width
-        smooth_sigma = bsrc.SMOOTH_SIGMA if smooth_sigma is None else smooth_sigma
-        self.grid_w = grid_w
-        self.grid_h = grid_h
         self.outcropped = False
-        self.smooth_sigma = smooth_sigma
         # ONE effective width feeds both the seeding envelope and the source
         # mask; if they disagreed the mask would clip the storms it exists to
         # pass. Clamped to keep the band off the equator (the rule lives in the
@@ -117,16 +126,20 @@ class BaroclinicSourceDriver:
         self.st = copy.deepcopy(self._warm_st)
         self.outcropped = False
 
-    def current_source(self):
+    def current_source(self, grid_w: int, grid_h: int, smooth_sigma: float):
         """Coherent unit-std evolving source on the equirect grid (grid_h, grid_w).
-        Passes the coherence gate (raises if the source is a checkerboard)."""
+        Passes the coherence gate (raises if the source is a checkerboard).
+
+        Both arguments are derivation-only -- neither touches the warm state, so
+        changing either must NOT cost a re-warmup. See the class docstring.
+        """
         zeta = bsrc.geostrophic_vorticity_source(
-            self.st, smooth_sigma=self.smooth_sigma,
+            self.st, smooth_sigma=smooth_sigma,
             lat_band=self.lat_band, taper=self.taper)
         # in_band: the gate must follow the band, or a steered `latitude`
         # puts the storms outside the rows it samples and it grades noise.
         bsrc.assert_coherent(zeta, in_band=True)
-        return bsrc.resample_to_equirect(zeta, self.grid_w, self.grid_h)
+        return bsrc.resample_to_equirect(zeta, grid_w, grid_h)
 
     @property
     def eddy_var(self) -> float:

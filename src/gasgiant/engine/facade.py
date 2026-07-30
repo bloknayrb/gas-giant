@@ -107,6 +107,7 @@ class Simulation:
         self._baro_update_every = 0
         self._baro_gain = 0.0
         self._baro_steps_per_update = 0
+        self._baro_smooth = 0.0
         self._baro_degraded_reason: str | None = None
         # Warmup failures are remembered on their OWN key, not on _baro_key: the
         # disable/re-enable cycle an artist performs after a failure nulls
@@ -257,23 +258,28 @@ class Simulation:
         # persistent q directly with no dt and so DOES scale -- see scale_rate.)
         self._baro_gain = bp.gain
         self._baro_steps_per_update = bp.baro_steps_per_update
+        self._baro_smooth = bp.smooth
         self._baro_degraded_reason = None
         if not bp.enabled:
             self._baro_driver = None
             self._baro_key = None
             return
-        w, h = self.solver.equirect.size
-        # EVERY input the warm state depends on belongs here. A lever missing from
-        # this key is a lever the artist can move while the facade silently hands
-        # back the driver warmed at the OLD value.
+        # EVERY input the warm state depends on belongs here, and NOTHING else.
+        # A lever missing from this key is a lever the artist can move while the
+        # facade silently hands back the driver warmed at the OLD value. A lever
+        # wrongly PRESENT costs a ~69 s re-warmup to rebuild a bit-identical
+        # state -- which is why the equirect size and `smooth` are absent: both
+        # are consumed at derivation time (see BaroclinicSourceDriver's class
+        # docstring), and the warmup runs on the fixed 192x96 source grid
+        # regardless of either. Both are passed fresh to `current_source`.
         # `width` enters as the EQUATOR-CLAMPED value the driver actually warms
         # on, not the raw slider: at latitude=12 every width >= 7 clamps to 7, and
         # keying on the raw number would pay a full re-warmup to rebuild a
         # bit-identical state. Inert wherever the clamp is (including the default).
-        key = (w, h, bp.warmup_steps, self.params.seed,
+        key = (bp.warmup_steps, self.params.seed,
                bp.latitude, baroclinic_effective_width(bp.latitude, bp.width),
                bp.eddy_scale, bp.zonal_count,
-               bp.smooth, bp.phase_jitter, bp.spectrum_width)
+               bp.phase_jitter, bp.spectrum_width)
         if self._baro_driver is not None and self._baro_key == key:
             self._baro_driver.reset()  # deterministic: each dev run starts post-warmup
             return  # reuse cached driver (no re-warmup)
@@ -291,11 +297,10 @@ class Simulation:
                 BaroclinicWarmupError,
             )
             self._baro_driver = BaroclinicSourceDriver(
-                grid_w=w, grid_h=h, warmup_steps=bp.warmup_steps,
+                warmup_steps=bp.warmup_steps,
                 seed=self.params.seed,
                 m_zonal=bp.zonal_count, gp2=bp.eddy_scale,
                 latitude=bp.latitude, width=bp.width,
-                smooth_sigma=bp.smooth,
                 phase_jitter=bp.phase_jitter,
                 spectrum_width=bp.spectrum_width)
             self._baro_key = key
@@ -406,9 +411,13 @@ class Simulation:
         from gasgiant.sim import baroclinic_source as bsrc
         from gasgiant.sim import shallow_water_ref as ref
         from gasgiant.sim.baroclinic_driver import BaroclinicOutcropError
+        w, h = self.solver.equirect.size
         try:
             self._baro_driver.advance(self._baro_steps_per_update)
-            src = self._baro_driver.current_source()
+            # Grid and smoothing are passed EVERY refresh rather than baked into
+            # the driver, so a cached (re-warmed-for-free) driver still tracks
+            # the current resolution and `smooth`. See the driver class docstring.
+            src = self._baro_driver.current_source(w, h, self._baro_smooth)
         # BaroclinicOutcropError is the live outcrop signal (advance converts
         # PositivityViolation into it). The bare PositivityViolation arm is
         # belt-and-braces for a driver that steps the solver somewhere other than

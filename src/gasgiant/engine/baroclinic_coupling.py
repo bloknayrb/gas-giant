@@ -44,6 +44,10 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
     """Develop `sim` to completion while injecting the evolving baroclinic source.
     Returns timing/coverage stats."""
     stats = CouplingStats()
+    # Derivation-time inputs, read off the sim rather than baked into the driver
+    # (which caches only its warm state -- see BaroclinicSourceDriver).
+    w, h = sim.solver.equirect.size
+    smooth = sim.params.solver.baroclinic.smooth
     while not sim.is_developed:
         t0 = time.perf_counter()
         driver.advance(baro_steps_per_update)
@@ -54,7 +58,8 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
         # `baro_outcropped` field: driver.advance raises BaroclinicOutcropError, so
         # control never reaches the return and any such flag would be a constant
         # False. Callers learn about an outcrop from the exception.
-        sim.set_external_vorticity_source(driver.current_source(), gain=gain)
+        sim.set_external_vorticity_source(
+            driver.current_source(w, h, smooth), gain=gain)
         t2 = time.perf_counter()
 
         remaining = sim.steps_target - sim.steps_done

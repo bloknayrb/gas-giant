@@ -238,9 +238,28 @@ default so the whole group is byte-identical until an artist moves one:
   that — it rejects grid-scale sources and a washed-out band is large-scale — so
   the bound carries it. Measured with the FIXED window instead, 20° and 25° look
   broken and are not; that error nearly cost a third of the usable range.
-- The facade driver cache keys on every one of them plus the equator-clamped
-  width, and remembers a key that FAILED warmup so a known-doomed multi-minute
-  computation is not re-run on each later rebuild.
+- The facade driver cache keys on the levers that shape the WARM STATE plus the
+  equator-clamped width, and remembers a key that FAILED warmup so a
+  known-doomed multi-minute computation is not re-run on each later rebuild.
+  Warming is the expensive half: measured 8.65 ms/step on the fixed 192×96
+  source grid, so ~69 s at the default `warmup_steps` 8000 and ~173 s at the
+  20000 ceiling, all of it synchronous on the caller's thread.
+- **What is NOT in that key.** `smooth` and the output grid are consumed when a
+  source is *derived* off the warm state, never during the warmup — the solver
+  runs at 192×96 regardless of the export resolution and never sees the sigma.
+  Both are measured bit-identical across the warm state (output grids 512 vs
+  2048; sigma 1.26 vs 4.0), so keying on them bought a ~69 s re-warmup to
+  rebuild an identical array, on the single most common RESTART edit in the app
+  (preview at 2048, render at 4096). They are arguments to
+  `BaroclinicSourceDriver.current_source` rather than constructor state, which
+  is what keeps the split honest: held as attributes, a derivation-time input
+  has to be both excluded from the key *and* re-pushed onto every reused
+  driver, and missing the second half silently kills the slider. Passed at the
+  call site, the mistake is unrepresentable. A new baroclinic field must be
+  classified into one list or the other in
+  `tests/unit/test_facade_baroclinic_status.py`, which pins both directions —
+  warm-state levers invalidate, derivation levers do not, and a reused driver
+  still derives at the current grid and sigma.
 
 ## Invalidation tiers
 

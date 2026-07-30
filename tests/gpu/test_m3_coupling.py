@@ -48,14 +48,18 @@ def test_coupled_run_develops_and_changes_render(gpu):
     base._release_sim()
 
     sim = Simulation(_params(steps=96), gpu)
-    w, h = sim.solver.equirect.size
-    driver = BaroclinicSourceDriver(grid_w=w, grid_h=h, warmup_steps=3000, seed=0)
+    driver = BaroclinicSourceDriver(warmup_steps=3000, seed=0)
     stats = run_coupled(sim, driver, gain=2.0, update_every=4,
                         baro_steps_per_update=100)
     coupled_rgb = np.clip(sim.render_maps(512)["color"][..., :3], 0, 1)
+    # Read BEFORE the release: _release_sim() nulls sim.solver, and is_developed
+    # dereferences solver.step_index. Asserting it afterwards raised AttributeError
+    # unconditionally -- the test could never reach the render comparison it exists
+    # for. Only gpu-full (non-blocking) runs this file, so it went unseen.
+    developed = sim.is_developed
     sim._release_sim()
 
-    assert sim.is_developed
+    assert developed
     assert stats.v16_steps >= 96
     assert stats.source_updates >= 4
     assert float(np.abs(coupled_rgb - base_rgb).mean()) > 1e-4
@@ -82,8 +86,7 @@ def test_coupled_vorticity_bounded_over_long_horizon(gpu):
     base._release_sim()
 
     sim = Simulation(_params(steps=steps), gpu)
-    w, h = sim.solver.equirect.size
-    driver = BaroclinicSourceDriver(grid_w=w, grid_h=h, warmup_steps=3000, seed=0)
+    driver = BaroclinicSourceDriver(warmup_steps=3000, seed=0)
     run_coupled(sim, driver, gain=2.0, update_every=32, baro_steps_per_update=150)
     coupled_mean = _midband_mean_abs_omega(sim)
     sim._release_sim()
@@ -108,8 +111,7 @@ def test_coupled_enriches_texture_keeping_bands(gpu):
     base._release_sim()
 
     sim = Simulation(_params(steps=96), gpu)
-    w, h = sim.solver.equirect.size
-    driver = BaroclinicSourceDriver(grid_w=w, grid_h=h, warmup_steps=6000, seed=0)
+    driver = BaroclinicSourceDriver(warmup_steps=6000, seed=0)
     run_coupled(sim, driver, gain=2.0, update_every=4, baro_steps_per_update=200)
     coupled_rgb = np.clip(sim.render_maps(512)["color"][..., :3], 0, 1)
     sim._release_sim()

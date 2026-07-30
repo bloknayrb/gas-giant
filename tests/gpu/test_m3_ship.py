@@ -249,13 +249,13 @@ def test_mid_run_incoherence_degrades(gpu, monkeypatch):
         real = sim._baro_driver.current_source
         calls = {"n": 0}
 
-        def flaky():
+        def flaky(*args):
             calls["n"] += 1
             if calls["n"] == 2:  # fail the second refresh (at step_index 16)
                 # the EXPECTED degrade signal the facade catches -- a plain
                 # ValueError would now (post-refactor) propagate, not degrade.
                 raise IncoherentSourceError("coherence gate (injected)")
-            return real()
+            return real(*args)
 
         monkeypatch.setattr(sim._baro_driver, "current_source", flaky)
         sim.run_to_completion(chunk=8)  # must NOT raise

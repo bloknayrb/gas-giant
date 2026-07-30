@@ -61,12 +61,21 @@ def _stub_sim(params: PlanetParams) -> Simulation:
 
 
 class _StubDriver:
-    def __init__(self, grid_w: int, grid_h: int, warmup_steps: int, seed: int,
-                 **levers) -> None:
-        # **levers absorbs the storm-band fields (latitude/width/eddy_scale/
-        # zonal_count/smooth/phase_jitter/spectrum_width) so this stub does not
-        # have to be re-edited every time one is added.
+    def __init__(self, warmup_steps: int, seed: int, **levers) -> None:
+        # **levers absorbs the warm-state storm-band fields (latitude/width/
+        # eddy_scale/zonal_count/phase_jitter/spectrum_width) so this stub does
+        # not have to be re-edited every time one is added. The output grid and
+        # `smooth` are deliberately NOT here -- they reach current_source.
         self.levers = levers
+        self.derived_with: list[tuple] = []
+
+    def advance(self, n: int) -> None:
+        pass
+
+    def current_source(self, grid_w: int, grid_h: int, smooth_sigma: float):
+        import numpy as np
+        self.derived_with.append((grid_w, grid_h, smooth_sigma))
+        return np.zeros((grid_h, grid_w), dtype=np.float32)
 
     def reset(self) -> None:
         pass
@@ -150,16 +159,17 @@ def _mid_run_sim(source_exc: Exception | None) -> Simulation:
     sim._baro_update_every = 16
     sim._baro_gain = 0.5
     sim._baro_steps_per_update = 1
+    sim._baro_smooth = 1.26
 
     class Driver:
         def advance(self, n: int) -> None:
             pass
 
-        def current_source(self):
+        def current_source(self, grid_w: int, grid_h: int, smooth_sigma: float):
             if source_exc is not None:
                 raise source_exc
             import numpy as np
-            return np.zeros((32, 64), dtype=np.float32)
+            return np.zeros((grid_h, grid_w), dtype=np.float32)
 
     sim._baro_driver = Driver()
     return sim
@@ -224,18 +234,26 @@ class _CountingDriver(_StubDriver):
         _CountingDriver.built.append(kw)
 
 
-#: (params field, driver kwarg, test value). Three of the seven are renamed on
-#: the way down -- the artist-facing name is plain English, the driver keeps the
-#: physics name -- so the mapping is asserted rather than assumed.
+#: (params field, driver kwarg, test value) for the levers that shape the WARM
+#: STATE and so must invalidate the cache. Two of the six are renamed on the way
+#: down -- the artist-facing name is plain English, the driver keeps the physics
+#: name -- so the mapping is asserted rather than assumed.
 _LEVERS = [
     ("latitude", "latitude", 30.0),
     ("width", "width", 18.0),
     ("eddy_scale", "gp2", 0.09),
     ("zonal_count", "m_zonal", 10),
-    ("smooth", "smooth_sigma", 2.5),
     ("phase_jitter", "phase_jitter", 2.0),
     ("spectrum_width", "spectrum_width", 4),
 ]
+
+#: Levers consumed when a source is DERIVED off the warm state, never during the
+#: warmup. Measured: the warm state is bit-identical across smooth 1.26 vs 4.0
+#: (the solver runs on the fixed 192x96 source grid and never sees the sigma).
+#: These must NOT appear in the cache key -- a ~69 s re-warmup to rebuild an
+#: identical state -- but they MUST still reach current_source on a reused
+#: driver, or the slider is dead. Both halves are pinned below.
+_DERIVATION_LEVERS = ["smooth"]
 
 
 @pytest.mark.parametrize("field,kwarg,value", _LEVERS)
@@ -259,12 +277,75 @@ def test_every_storm_band_lever_invalidates_the_cached_driver(
 
 def test_lever_list_covers_every_storm_band_field():
     """Guards the guard: a new lever added to the params model without a row in
-    ``_LEVERS`` would leave the cache-key test silently not covering it."""
+    ``_LEVERS`` or ``_DERIVATION_LEVERS`` would leave it silently uncovered --
+    and the two lists demand OPPOSITE cache behaviour, so a new field has to be
+    classified deliberately rather than defaulting into either."""
     from gasgiant.params.model import BaroclinicParams
-    covered = {f for f, _, _ in _LEVERS}
+    covered = {f for f, _, _ in _LEVERS} | set(_DERIVATION_LEVERS)
     cadence = {"enabled", "gain", "warmup_steps",
                "baro_steps_per_update", "update_every"}
     assert set(BaroclinicParams.model_fields) - cadence == covered
+
+
+@pytest.mark.parametrize("field", _DERIVATION_LEVERS)
+def test_derivation_levers_do_not_invalidate_the_cached_driver(monkeypatch, field):
+    """The win: moving a derivation-time lever must REUSE the warm driver.
+
+    Keyed on it, every nudge of "Storm edge softness" cost a full re-warmup
+    (~69 s at the default 8000 steps) to rebuild a state measured bit-identical.
+    """
+    monkeypatch.setattr(bdrv, "BaroclinicSourceDriver", _CountingDriver)
+    _CountingDriver.built = []
+    sim = _stub_sim(_params(enabled=True))
+
+    sim._init_baroclinic()
+    assert len(_CountingDriver.built) == 1, "first call must build"
+
+    setattr(sim.params.solver.baroclinic, field, 2.5)
+    sim._init_baroclinic()
+    assert len(_CountingDriver.built) == 1, f"{field} must NOT invalidate the cache"
+
+
+def test_resolution_change_does_not_invalidate_the_cached_driver(monkeypatch):
+    """Same win for the output grid, and this is the most common RESTART edit in
+    the app (preview at 2048, render at 4096). The warmup runs on the fixed
+    192x96 source grid; measured bit-identical across output grids 512 vs 2048."""
+    monkeypatch.setattr(bdrv, "BaroclinicSourceDriver", _CountingDriver)
+    _CountingDriver.built = []
+    sim = _stub_sim(_params(enabled=True))
+
+    sim._init_baroclinic()
+    assert len(_CountingDriver.built) == 1
+
+    sim.params.sim.resolution = 4096
+    sim.solver.equirect.size = (4096, 2048)
+    sim._init_baroclinic()
+    assert len(_CountingDriver.built) == 1, "resolution must NOT invalidate the cache"
+
+
+def test_reused_driver_derives_at_the_CURRENT_grid_and_smooth(monkeypatch):
+    """The other half, and the thing that makes the reuse safe rather than a
+    silent bug: a driver kept across a resolution/`smooth` edit must derive with
+    the NEW values. If the facade let them stay baked into the driver, both
+    sliders would go quietly dead and only an app restart would apply them."""
+    monkeypatch.setattr(bdrv, "BaroclinicSourceDriver", _StubDriver)
+    sim = _stub_sim(_params(enabled=True))
+    sim._init_baroclinic()
+    driver = sim._baro_driver
+    sim._baro_next_update = 0
+    sim._baro_update_every = 16
+
+    sim._update_baroclinic_source()
+    assert driver.derived_with[-1] == (64, 32, 1.26), "baseline: current params"
+
+    sim.params.solver.baroclinic.smooth = 4.0
+    sim.solver.equirect.size = (128, 64)
+    sim._init_baroclinic()
+    assert sim._baro_driver is driver, "precondition: the driver must be REUSED"
+
+    sim._update_baroclinic_source()
+    assert driver.derived_with[-1] == (128, 64, 4.0), (
+        "a reused driver must derive at the current grid and smooth")
 
 
 def test_a_failed_warmup_is_not_retried(monkeypatch):
