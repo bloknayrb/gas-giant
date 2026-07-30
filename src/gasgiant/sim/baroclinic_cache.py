@@ -17,12 +17,15 @@ touch the user's real cache.
 serves a state warmed under different physics, which is far worse than the
 re-warmup it saves, so the key is deliberately over-broad in two ways:
 
-1. It fingerprints the full source text of every module that shapes the warm
-   state -- including ``baroclinic_driver`` itself, which owns the literals
-   (``pert_amp_frac``, ``dt_safety``, ``nu4``) passed into the state builder.
-   Editing a docstring in one of those files therefore invalidates the whole
-   cache. That is the intended trade: a spurious re-warmup while you are
-   actively editing the solver is exactly when you want one.
+1. It fingerprints the full source text of the modules listed in
+   ``_FINGERPRINTED`` -- including ``baroclinic_driver`` itself, which owns the
+   literals (``pert_amp_frac``, ``dt_safety``, ``nu4``) passed into the state
+   builder, and ``params/seeds.py``, whose ``subseed`` draws the
+   phase_jitter/spectrum_width seeding realization. Editing a docstring in any
+   of them invalidates the whole cache. That is the intended trade: a spurious
+   re-warmup while you are actively editing the solver is exactly when you want
+   one. The list is CURATED, not derived from the import graph -- see
+   ``solver_fingerprint``.
 2. It carries the RUNTIME values of the ``baroclinic_source`` constants the
    driver reads, not just their on-disk text. Tests monkeypatch ``bsrc.XI`` and
    ``bsrc.GP2`` to force an outcrop; those never change the file, so a
@@ -42,10 +45,10 @@ log = logging.getLogger(__name__)
 
 BARO_CACHE_DIR = Path.home() / ".gasgiant" / "baro_cache"
 
-#: Entries are ~740 KiB compressed, and the key space is continuous (an artist
+#: Entries are 768 KiB compressed, and the key space is continuous (an artist
 #: sweeping a slider lands on a new one each time they stop), so unlike the
 #: thumbnail cache -- keyed per preset, a bounded set -- this one needs a bound.
-#: 64 MiB is ~88 configurations; well past any single tuning session.
+#: 64 MiB is ~85 configurations; well past any single tuning session.
 BARO_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
 #: The complete evolving state. `step_2layer` writes exactly these six, and
@@ -60,19 +63,38 @@ EVOLVING_FIELDS = ("h1", "u1", "v1", "h2", "u2", "v2")
 _fingerprint: str | None = None
 
 
+#: Every first-party module whose source text can change the warm state, relative
+#: to this file. `params/seeds.py` is here because `shallow_water_ref._seed_pattern`
+#: draws the seeding realization through `subseed(...)` whenever `phase_jitter` or
+#: `spectrum_width` is on, and that realization lands in h2/u2/v2 at t=0 -- three
+#: of the six EVOLVING_FIELDS. This module is here because it owns
+#: EVOLVING_FIELDS, i.e. which arrays a restore puts back at all.
+_FINGERPRINTED = (
+    "shallow_water_ref.py",
+    "baroclinic_source.py",
+    "baroclinic_driver.py",
+    "baroclinic_cache.py",
+    "../params/seeds.py",
+)
+
+
 def solver_fingerprint() -> str:
-    """sha256 over the source text of every module that shapes the warm state.
+    """sha256 over the source text of the modules listed in ``_FINGERPRINTED``.
 
     Computed once per process. Read from disk rather than from a version
     constant so it cannot go stale: there is no step where someone edits the
     solver and forgets to bump something.
+
+    Note the list is a curated claim, not a derived one -- nothing walks the
+    import graph, so a NEW first-party dependency of the warm state has to be
+    added here by hand. Over-inclusion is free (a spurious re-warmup);
+    under-inclusion is a false hit, so err toward adding.
     """
     global _fingerprint
     if _fingerprint is None:
         here = Path(__file__).parent
         h = hashlib.sha256()
-        for name in ("shallow_water_ref.py", "baroclinic_source.py",
-                     "baroclinic_driver.py"):
+        for name in _FINGERPRINTED:
             h.update((here / name).read_bytes())
         _fingerprint = h.hexdigest()
     return _fingerprint
@@ -103,6 +125,16 @@ def load_warm_state(key: str, cache_dir: Path = BARO_CACHE_DIR
     A damaged entry (truncated write, half-copied directory, a file from a
     different numpy) must never be fatal -- it degrades to a re-warmup, and the
     bad file is removed so it cannot cost the same detour twice.
+
+    The REMOVAL is itself best-effort, and that is not paranoia. On Windows a
+    perfectly valid entry that happens to be exclusively locked at that instant
+    (an AV scan or a backup/sync agent touching ~/.gasgiant) makes np.load fail
+    AND makes the unlink fail with WinError 32. An unguarded unlink here escapes
+    every caller: the driver does not wrap the load, `_init_baroclinic` catches
+    only ImportError and BaroclinicWarmupError, so a PermissionError would exit
+    Simulation.__init__ and, from the GUI, throw through the imgui frame
+    callback on a RESTART-tier edit. A locked cache file must cost a re-warmup,
+    never the application.
     """
     path = warm_cache_path(key, cache_dir)
     if not path.is_file():
@@ -113,7 +145,11 @@ def load_warm_state(key: str, cache_dir: Path = BARO_CACHE_DIR
     except Exception as exc:  # noqa: BLE001 -- any unreadable file degrades alike
         log.warning("baroclinic warm-state cache: discarding unreadable %s (%s)",
                     path.name, exc)
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as rm_exc:
+            log.warning("baroclinic warm-state cache: could not remove %s (%s)",
+                        path.name, rm_exc)
         return None
     log.info("baroclinic warm-state cache: hit (%s)", path.name)
     return state
@@ -127,14 +163,24 @@ def save_warm_state(key: str, state: dict[str, np.ndarray],
     entry (or nothing) rather than a truncated file that later reads as a
     corrupt hit. Never raises: a cache that cannot be written is a performance
     problem, not a correctness one, and must not take down a working sim.
+
+    The `finally` matters: a write that dies partway (ENOSPC, quota, a failing
+    replace) would otherwise strand its temp file forever. `_prune` globs
+    ``*.npz`` and cannot match a ``.tmp`` suffix, so a stranded temp counts
+    toward neither the total nor eviction -- the cap could never reclaim it. A
+    successful `replace` has already consumed the temp, so the unlink is a
+    no-op on the happy path.
     """
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         path = warm_cache_path(key, cache_dir)
         tmp = path.with_suffix(f".npz.{id(state):x}.tmp")
-        with tmp.open("wb") as fh:
-            np.savez_compressed(fh, **state)
-        tmp.replace(path)
+        try:
+            with tmp.open("wb") as fh:
+                np.savez_compressed(fh, **state)
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
         _prune(cache_dir)
     except OSError as exc:
         log.warning("baroclinic warm-state cache: write failed (%s)", exc)
@@ -154,6 +200,11 @@ def _prune(cache_dir: Path, max_bytes: int | None = None) -> None:
     would silently do nothing. Same trap the driver's sentinel defaults carry.
     """
     max_bytes = BARO_CACHE_MAX_BYTES if max_bytes is None else max_bytes
+    # Sweep temps stranded by a crash (a kill between open and replace outruns
+    # save_warm_state's `finally`). Harmless to read past -- nothing ever opens
+    # them -- but invisible to the cap below, which globs *.npz.
+    for stale in cache_dir.glob("*.tmp"):
+        stale.unlink(missing_ok=True)
     entries = sorted(cache_dir.glob("*.npz"), key=lambda p: p.stat().st_mtime)
     total = sum(p.stat().st_size for p in entries)
     while total > max_bytes and len(entries) > 1:

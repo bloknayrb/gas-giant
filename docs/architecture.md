@@ -272,17 +272,29 @@ default so the whole group is byte-identical until an artist moves one:
 - **The disk cache is only as good as its key**, and the failure is asymmetric:
   a miss costs a re-warmup, a false hit silently serves a state warmed under
   different physics. So it is deliberately over-broad. It fingerprints the full
-  source text of `shallow_water_ref.py`, `baroclinic_source.py` *and*
-  `baroclinic_driver.py` — the last because the driver owns the literals
-  (`pert_amp_frac`, `dt_safety`, `nu4`) passed into the state builder, which no
-  caller supplies and no other file records. Editing any of the three
-  invalidates everything, which is the right trade: a spurious re-warmup while
-  you are editing the solver is exactly when you want one. The key also carries
-  the *runtime* values of the `baroclinic_source` constants (`GP1`, `XI`,
-  `SRC_W`, `SRC_H`), because the tests monkeypatch them and a text-only
-  fingerprint cannot see that. One consequence worth knowing: shipping a
-  prebuilt warm state in the package is not viable while the fingerprint works
-  this way — any edit to those three files would silently retire it.
+  source text of the five modules in `_FINGERPRINTED`: the solver
+  (`shallow_water_ref.py`), its constants (`baroclinic_source.py`), the driver
+  (which owns the literals `pert_amp_frac`, `dt_safety`, `nu4` passed into the
+  state builder — values no caller supplies and no other file records), the
+  cache module itself (it owns `EVOLVING_FIELDS`, i.e. which arrays a restore
+  puts back at all), and `params/seeds.py` (whose `subseed` draws the
+  `phase_jitter`/`spectrum_width` seeding realization, which lands in h2/u2/v2
+  at t=0). Editing any of the five invalidates everything, which is the right
+  trade: a spurious re-warmup while you are editing the solver is exactly when
+  you want one. The key also carries the *runtime* values of the
+  `baroclinic_source` constants (`GP1`, `XI`, `SRC_W`, `SRC_H`), because the
+  tests monkeypatch them and a text-only fingerprint cannot see that.
+- **That list is curated, not derived** — nothing walks the import graph, so a
+  new first-party dependency of the warm state has to be added by hand.
+  Over-inclusion is free; under-inclusion is a false hit, so err toward adding.
+  `params/seeds.py` was missing from the original list and found in review. Two
+  consequences worth knowing: shipping a prebuilt warm state in the package is
+  not viable while the fingerprint works this way (any edit to those five files
+  silently retires it), and the disk key is guarded against constructor drift
+  by `test_disk_cache_key_covers_every_warm_state_constructor_input`, which
+  compares `inspect.signature(BaroclinicSourceDriver.__init__)` against the
+  kwargs the driver actually passes — the fingerprint cannot cover this, since
+  it is a per-build constant and cannot separate two *values* of a new lever.
 
 ## Invalidation tiers
 

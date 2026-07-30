@@ -46,8 +46,10 @@ class BaroclinicSourceDriver:
     The constructor takes ONLY inputs the warm state depends on. Everything
     consumed when a source is derived -- the output grid and the smoothing
     sigma -- is an argument to `current_source` instead, because the warmup is
-    the expensive part (~52 s at the default 8000 steps on a 192x96 grid) and
-    the facade caches the driver on exactly those constructor inputs.
+    the expensive part (~52 s on a 192x96 grid at the 8000 steps every shipped
+    preset uses; this signature's own `warmup_steps` default of 9000 predates
+    the pfield and only applies to a caller that passes nothing) and the facade
+    caches the driver on exactly those constructor inputs.
 
     Keeping the split in the signatures is what makes the cache honest. Stored
     as attributes, a derivation-time input has to be BOTH excluded from the

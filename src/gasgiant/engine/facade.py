@@ -224,8 +224,9 @@ class Simulation:
         self.release()
 
     def _init_baroclinic(self) -> None:
-        """Build/reuse the baroclinic source driver when enabled. Caches on the
-        grid plus EVERY input the warm state depends on (see `key` below) so
+        """Build/reuse the baroclinic source driver when enabled. Caches on
+        EVERY input the warm state depends on and nothing else (see `key`
+        below -- notably NOT the grid, which only the derivation uses) so
         unrelated RESTART edits don't re-warm, and remembers a key that FAILED
         warmup so a known-doomed multi-minute computation is not re-run on every
         later rebuild. On the
@@ -273,9 +274,10 @@ class Simulation:
         # docstring), and the warmup runs on the fixed 192x96 source grid
         # regardless of either. Both are passed fresh to `current_source`.
         # `width` enters as the EQUATOR-CLAMPED value the driver actually warms
-        # on, not the raw slider: at latitude=12 every width >= 7 clamps to 7, and
-        # keying on the raw number would pay a full re-warmup to rebuild a
-        # bit-identical state. Inert wherever the clamp is (including the default).
+        # on, not the raw slider: at latitude=20 (the equatorward bound) every
+        # width >= 15 clamps to 15, so keying on the raw number would pay a full
+        # re-warmup to rebuild a bit-identical state. Inert wherever the clamp is
+        # not binding, including at the default band (45 +- 25).
         key = (bp.warmup_steps, self.params.seed,
                bp.latitude, baroclinic_effective_width(bp.latitude, bp.width),
                bp.eddy_scale, bp.zonal_count,

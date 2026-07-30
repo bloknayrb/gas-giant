@@ -59,19 +59,54 @@ def test_key_distinguishes_int_and_float():
     assert bcache.warm_cache_key(x=0) != bcache.warm_cache_key(x=0.0)
 
 
-def test_fingerprint_covers_every_module_that_shapes_the_warm_state():
-    """The driver file is in the fingerprint because it owns the literals passed
-    into the state builder (pert_amp_frac, dt_safety, nu4) -- values no caller
-    supplies and no other file records. Dropping it from the list would let an
-    edit to those silently reuse states warmed under the old ones."""
+def test_fingerprint_hashes_exactly_the_listed_files():
+    """A PIN on the file list, not a proof of coverage -- nothing here walks the
+    import graph, so this cannot tell you the list is complete. It tells you the
+    list has not silently shrunk. Named accordingly: the earlier name claimed a
+    property it could not check, and the list was in fact missing
+    ``params/seeds.py`` at the time.
+
+    Each entry earns its place:
+      - shallow_water_ref: the solver itself
+      - baroclinic_source: the grid size and the reduced-gravity constants
+      - baroclinic_driver: the literals passed into the state builder
+        (pert_amp_frac, dt_safety, nu4), which no caller supplies
+      - baroclinic_cache: owns EVOLVING_FIELDS, i.e. what a restore puts back
+      - params/seeds: subseed() draws the phase_jitter/spectrum_width seeding
+        realization, which lands in h2/u2/v2 at t=0
+    """
     import hashlib
     from pathlib import Path
+    assert bcache._FINGERPRINTED == (
+        "shallow_water_ref.py", "baroclinic_source.py", "baroclinic_driver.py",
+        "baroclinic_cache.py", "../params/seeds.py")
     here = Path(bcache.__file__).parent
     h = hashlib.sha256()
-    for name in ("shallow_water_ref.py", "baroclinic_source.py",
-                 "baroclinic_driver.py"):
+    for name in bcache._FINGERPRINTED:
         h.update((here / name).read_bytes())
     assert bcache.solver_fingerprint() == h.hexdigest()
+
+
+def test_every_fingerprinted_file_exists():
+    """A typo'd path would raise FileNotFoundError from every cache lookup --
+    and the first place that surfaces is Simulation construction."""
+    from pathlib import Path
+    here = Path(bcache.__file__).parent
+    for name in bcache._FINGERPRINTED:
+        assert (here / name).is_file(), name
+
+
+def test_seeds_module_is_fingerprinted():
+    """Pinned separately because it is the non-obvious one and the easiest to
+    drop in a cleanup: it lives in a DIFFERENT layer (params) and is reached
+    only indirectly, via shallow_water_ref._seed_pattern, and only when
+    phase_jitter or spectrum_width is non-default. Its output lands in three of
+    the six EVOLVING_FIELDS at t=0."""
+    from pathlib import Path
+    resolved = {(Path(bcache.__file__).parent / n).resolve()
+                for n in bcache._FINGERPRINTED}
+    from gasgiant.params import seeds
+    assert Path(seeds.__file__).resolve() in resolved
 
 
 def test_fingerprint_participates_in_the_key(monkeypatch):
@@ -133,6 +168,49 @@ def test_entry_missing_a_field_degrades_to_a_miss(cache_dir):
     del partial["v2"]
     np.savez_compressed(bcache.warm_cache_path("k", cache_dir), **partial)
     assert bcache.load_warm_state("k", cache_dir) is None
+
+
+def test_an_undeletable_corrupt_entry_is_not_fatal(cache_dir, monkeypatch):
+    """The removal in the recovery path must itself be best-effort.
+
+    Reachable without any corruption at all: on Windows a VALID entry that is
+    exclusively locked at that instant (AV scan, backup/sync agent touching
+    ~/.gasgiant) fails np.load AND fails the unlink with WinError 32. An
+    unguarded unlink escapes every caller -- the driver does not wrap the load,
+    _init_baroclinic catches only ImportError and BaroclinicWarmupError -- so it
+    would exit Simulation.__init__ and, from the GUI, throw through the imgui
+    frame callback on a RESTART-tier edit. A locked cache file must cost a
+    re-warmup, never the application.
+    """
+    bcache.save_warm_state("k", _state(), cache_dir)
+    bcache.warm_cache_path("k", cache_dir).write_bytes(b"not an npz")
+
+    def locked(*a, **k):
+        raise PermissionError(32, "being used by another process")
+
+    monkeypatch.setattr(bcache.Path, "unlink", locked)
+    assert bcache.load_warm_state("k", cache_dir) is None  # must NOT raise
+
+
+def test_a_failed_write_strands_no_temp_file(cache_dir, monkeypatch):
+    """_prune globs *.npz and cannot match a .tmp suffix, so a stranded temp
+    counts toward neither the total nor eviction -- the 64 MiB cap could never
+    reclaim it, and nothing else ever opens or removes it."""
+    def die(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(bcache.np, "savez_compressed", die)
+    bcache.save_warm_state("k", _state(), cache_dir)  # must NOT raise
+    assert list(cache_dir.iterdir()) == [], "a failed write must leave nothing behind"
+
+
+def test_prune_sweeps_temps_stranded_by_a_crash(cache_dir):
+    """save_warm_state's `finally` cannot run if the process is killed between
+    open and replace, so the sweep is the second line of defence."""
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "k.npz.deadbeef.tmp").write_bytes(b"x" * 100)
+    bcache._prune(cache_dir)
+    assert not list(cache_dir.glob("*.tmp"))
 
 
 def test_unwritable_cache_is_not_fatal(cache_dir, monkeypatch):

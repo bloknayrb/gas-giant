@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from gasgiant.engine.baroclinic_coupling import CouplingStats, residency_recommendation
+from gasgiant.sim import baroclinic_cache as bcache
 from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
 from gasgiant.sim.baroclinic_driver import (
@@ -130,7 +131,7 @@ def test_current_source_forwards_its_smooth_sigma(monkeypatch):
     assert seen["smooth_sigma"] == probe
 
 
-def test_cached_warm_state_resumes_bit_identically(tmp_path):
+def test_cached_warm_state_resumes_bit_identically(tmp_path, monkeypatch):
     """The claim the whole disk cache rests on: a driver restored from disk must
     be indistinguishable from one that did the warmup, INCLUDING under further
     advancing.
@@ -141,12 +142,31 @@ def test_cached_warm_state_resumes_bit_identically(tmp_path):
     evolving state. Comparing after a further advance is what proves it: any
     seventh piece of carried state would be at its INITIAL value in the restored
     driver and diverge here, where a same-step comparison would miss it.
+
+    The step counter is what makes any of that mean something. The warmup is a
+    deterministic pure-numpy function of the constructor inputs, so a second
+    construction that MISSED would re-warm to bit-identical arrays and re-save
+    under the same key -- every assertion below would pass with the cache
+    permanently dead, and so would the file-count check (still one entry). The
+    counter is the only thing here that can tell a hit from a miss.
     """
     cache = tmp_path / "baro_cache"
     cold = BaroclinicSourceDriver(warmup_steps=700, seed=3, cache_dir=cache)
     assert len(list(cache.glob("*.npz"))) == 1, "a survived warmup must be cached"
 
+    steps = {"n": 0}
+    real_step = ref.step_2layer
+
+    def counting(st):
+        steps["n"] += 1
+        return real_step(st)
+
+    monkeypatch.setattr(ref, "step_2layer", counting)
     warm = BaroclinicSourceDriver(warmup_steps=700, seed=3, cache_dir=cache)
+    assert steps["n"] == 0, (
+        "cache MISS: the second construction ran the warmup instead of loading "
+        "from disk, so every comparison below is vacuous")
+
     for f in ("h1", "h2", "u1", "v1", "u2", "v2"):
         assert np.array_equal(getattr(warm.st, f), getattr(cold.st, f)), f
     # Non-evolving state must come from the rebuild, not from disk.
@@ -157,6 +177,43 @@ def test_cached_warm_state_resumes_bit_identically(tmp_path):
     for f in ("h1", "h2", "u1", "v1", "u2", "v2"):
         assert np.array_equal(getattr(warm.st, f), getattr(cold.st, f)), (
             f"{f} diverged after advancing -- the restored state is incomplete")
+
+
+def test_disk_cache_key_covers_every_warm_state_constructor_input(tmp_path, monkeypatch):
+    """Guards the guard, the way test_lever_list_covers_every_storm_band_field
+    does for the facade's in-memory key -- which the disk key had no equivalent
+    of.
+
+    ``warm_cache_key(**inputs)`` takes arbitrary kwargs, and the driver's call
+    site is a hand-written list with no programmatic link to ``__init__``. Add a
+    warm-state lever, thread it into the constructor, forget the key, and every
+    existing test still passes: the key tests hash their own literal dicts and
+    can only prove "a kwarg I passed affects the hash", never that the DRIVER
+    passed it. The stale entry would then survive restarts and get copied
+    between machines -- worse than the in-memory cache, not better.
+
+    The fingerprint does not save you here: adding a lever edits
+    baroclinic_driver.py and wipes the cache once, but a fingerprint is a
+    per-build constant and cannot separate two VALUES of the new lever.
+    """
+    import inspect
+    seen: dict = {}
+    real = bcache.warm_cache_key
+
+    def spy(**kw):
+        seen.update(kw)
+        return real(**kw)
+
+    monkeypatch.setattr(bcache, "warm_cache_key", spy)
+    BaroclinicSourceDriver(warmup_steps=1, seed=0, cache_dir=tmp_path)
+
+    ctor = set(inspect.signature(BaroclinicSourceDriver.__init__).parameters)
+    # `self` is not an input; `cache_dir` selects WHERE the entry lives and must
+    # never be part of what identifies it.
+    ctor -= {"self", "cache_dir"}
+    assert ctor <= set(seen), (
+        f"warm-state constructor inputs missing from the disk cache key: "
+        f"{sorted(ctor - set(seen))}")
 
 
 def test_cache_key_separates_configurations(tmp_path):
@@ -172,9 +229,19 @@ def test_cache_key_separates_configurations(tmp_path):
 
 def test_no_cache_dir_means_no_disk_traffic(tmp_path):
     """Default None must warm for real and write nothing -- so a test that means
-    to exercise the warmup gets one, and nothing lands in the user's home."""
+    to exercise the warmup gets one, and nothing lands in the user's home.
+
+    Asserts against BARO_CACHE_DIR, which is where a regression would actually
+    write. An earlier version watched this test's own tmp_path, which the driver
+    has no reason to touch under any bug -- it could not have caught the thing it
+    is named for. (conftest's autouse fixture has already pointed
+    BARO_CACHE_DIR at a per-test temp dir, so this reads the redirected one.)
+    """
+    assert not list(bcache.BARO_CACHE_DIR.glob("*.npz")) \
+        if bcache.BARO_CACHE_DIR.exists() else True
     BaroclinicSourceDriver(warmup_steps=400, seed=0)
-    assert not list(tmp_path.rglob("*.npz"))
+    assert not bcache.BARO_CACHE_DIR.exists() or \
+        not list(bcache.BARO_CACHE_DIR.glob("*.npz"))
 
 
 def test_an_outcropped_warmup_is_not_cached(monkeypatch, tmp_path):
