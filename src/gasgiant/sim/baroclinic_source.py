@@ -31,6 +31,26 @@ GP1, GP2, XI = 0.05, 0.075, 3.0
 # does not blur the eddies away. Both consumed by baroclinic_driver.
 M_ZONAL = 14
 SMOOTH_SIGMA = 1.26
+# Band the seeding envelope occupies, and the default mask that follows it. The
+# mask must TRACK the band: it is applied to |latitude|, so it also mirrors the
+# northern-hemisphere seeding into the south.
+PHI_TEST_DEG, BAND_HALFWIDTH_DEG = 45.0, 25.0
+
+
+def mask_band_for(latitude: float, width: float,
+                  taper: float = 8.0) -> tuple[tuple[float, float], float]:
+    """`(lat_band, taper)` for `geostrophic_vorticity_source`, given the seeding
+    band's centre and half-width in degrees.
+
+    The mask must stay WIDER than the seeded envelope or it clips the storms it
+    is meant to pass; it is padded by the taper on each side and clamped to a
+    latitude range that keeps the 1/cos^2 zonal Laplacian away from the poles.
+    Returns the historical (10.0, 80.0) at the default 45 +/- 25 band, so the
+    default path is unchanged.
+    """
+    lo = max(1.0, latitude - width - taper)
+    hi = min(88.0, latitude + width + taper)
+    return (lo, hi), taper
 
 # Coherence gate: a usable source's dominant zonal wavenumber must be low (reject
 # the C-grid checkerboard, m~44-51). Raised 15->20 to give the m~14 production

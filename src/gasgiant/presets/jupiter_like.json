@@ -8,7 +8,9 @@
     "sim": {
       "resolution": 2048,
       "dev_steps": 500,
-      "dt_scale": 1.0
+      "dt_scale": 1.0,
+      "resolution_invariant": false,
+      "reference_resolution": 2048
     },
     "solver": {
       "type": "kinematic",
@@ -29,7 +31,14 @@
         "gain": 2.0,
         "warmup_steps": 8000,
         "baro_steps_per_update": 150,
-        "update_every": 32
+        "update_every": 32,
+        "latitude": 45.0,
+        "width": 25.0,
+        "eddy_scale": 0.075,
+        "zonal_count": 14,
+        "smooth": 1.26,
+        "phase_jitter": 0.0,
+        "spectrum_width": 0
       }
     },
     "bands": {
@@ -100,7 +109,18 @@
       "strength": 1.0,
       "equatorial_speed": 1.6,
       "equatorial_width": 0.12,
-      "polar_decay": 0.5
+      "polar_decay": 0.5,
+      "local_jet_speed": 0.0,
+      "local_jet_latitude": -20.0,
+      "local_jet_width": 0.05,
+      "hero_bracket_north": 0.0,
+      "hero_bracket_south": 0.0,
+      "hero_bracket_north_offset": 1.0,
+      "hero_bracket_south_offset": -1.0,
+      "hero_bracket_window": 1.0,
+      "hero_bracket_feather": 1.4,
+      "hero_bracket_north_width": 0.8,
+      "hero_bracket_south_width": 0.8
     },
     "turbulence": {
       "intensity": 1.0,
@@ -120,6 +140,7 @@
       "hero_radius": 0.15,
       "hero_strength": 1.0,
       "hero_latitude": -22.5,
+      "hero_longitude": null,
       "rim_contrast": 2.0,
       "hero_aspect": 2.0,
       "hero_mottle": 0.0,
@@ -127,37 +148,51 @@
       "hero_rim_tint": 0.0,
       "hero_rim_warp": 0.0,
       "hero_wake_detail": 0.0,
+      "hero_wake_dir": "auto",
       "hero_solid_core": 0.0,
+      "hero_emergence": 0.0,
       "wake_turbulence": 1.8,
       "hero_tint": 0.9,
       "hero_brightness": 0.05,
       "hero_companions": 0,
+      "companion_aspect": 1.0,
+      "companion_brightness": 0.32,
+      "hero_shape": 1.0,
+      "hero_shape_seed": 0,
+      "hero_taper": 0.0,
+      "hero_flow_aspect": 1.0,
       "oval_density": 3.0,
       "oval_solid_core": 0.0,
       "accent_count": 0,
       "accent_latitude": null,
+      "accent_longitude": null,
       "accent_tint": 0.9,
       "accent_brightness": 0.12,
       "accent_radius": 0.05,
+      "accent_aspect": 1.0,
       "barge_density": 2.989,
       "pearls_count": 14,
       "outbreak_count": 1,
       "outbreak_strength": 1.0,
       "outbreak_latitude": null,
+      "outbreak_longitude": null,
       "outbreak_phase": null,
       "outbreak_lat_min": 0.2,
       "small_density": 3.0,
       "stamp_contrast": 2.0,
       "stamp_tint_contrast": null,
       "merge_rate": 0.7,
-      "merge_debris": 1.0
+      "merge_debris": 1.0,
+      "cast": []
     },
     "waves": {
       "festoon_strength": 2.6,
       "festoon_wavenumber": 12,
       "hotspot_depth": 0.7,
       "ribbon_strength": 0.0,
-      "ribbon_wavenumber": 12
+      "ribbon_wavenumber": 12,
+      "festoon_hero_strength": 0.0,
+      "festoon_hero_wavenumber": 11
     },
     "poles": {
       "north": {
@@ -752,6 +787,25 @@
           ]
         }
       ],
+      "band_tint_stops": [
+        {
+          "pos": 0.0,
+          "color": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "pos": 1.0,
+          "color": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "band_tint_strength": 0.0,
       "haze_amount": 0.05,
       "haze_color": [
         0.85,
@@ -764,6 +818,7 @@
       "chroma_scale": 1.0,
       "chroma_variance": 0.35,
       "hue_variance": 0.3,
+      "detail_chroma": 0.0,
       "chroma_aging": 0.35,
       "polar_tint_color": [
         0.36,
@@ -792,7 +847,17 @@
       "belt_texture_fine": 1.4,
       "mottle": 1.1,
       "polar_filaments": 1.3,
-      "spread": 0.25
+      "spread": 0.25,
+      "cirrus_fibers": 0.0,
+      "cirrus_fiber_freq": 6.0,
+      "streak_mute": 0.0,
+      "hero_wake_braid": 0.0
+    },
+    "mask": {
+      "file": null,
+      "band_fade": 0.0,
+      "emission_gain": 0.0,
+      "detail_gain": 0.0
     },
     "emission": {
       "thermal_strength": 0.35,
@@ -823,11 +888,26 @@
     "physical": {
       "radius_km": 69911.0,
       "height_scale": 0.004,
-      "height_midlevel": 0.5
+      "height_midlevel": 0.5,
+      "ring_inner_km": 74500.0,
+      "ring_outer_km": 136780.0
+    },
+    "rings": {
+      "enabled": false,
+      "opacity": 1.0,
+      "brightness": 1.0,
+      "tint_color": [
+        0.86,
+        0.83,
+        0.78
+      ],
+      "fine_grain": 0.15
     },
     "export": {
       "width": 2048,
-      "png_compression": 2
+      "projection": "equirect",
+      "png_compression": 2,
+      "flow_map": false
     }
   }
 }

@@ -78,6 +78,30 @@ How far the flow moves per sim step. Higher = faster development but a coarser, 
 
 ## Solver
 
+### Band centre latitude
+
+`solver.baroclinic.latitude` &mdash; range **10 to 75**, default **45**, tier `restart`.
+
+Moves the whole belt of extra storms north or south. 45 sits them in the mid-latitudes, like Jupiter's temperate belts; low values crowd them toward the equator (centre of the unstable shear zone, in degrees north; mirrored to the southern hemisphere by the source mask).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><sub>low &middot; 10<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><sub>high &middot; 75<br>(not rendered)</sub></td>
+</tr></table>
+
+### Band width
+
+`solver.baroclinic.width` &mdash; range **5 to 40**, default **25**, tier `restart`.
+
+How tall the belt of extra storms is. Higher spreads them over more latitudes; lower squeezes them into one narrow lane (half-width of the seeding envelope in degrees, so the belt spans latitude +/- this).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><sub>low &middot; 5<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 25</sub></td><td align="center"><sub>high &middot; 40<br>(not rendered)</sub></td>
+</tr></table>
+
 ### baro steps per update
 
 `solver.baroclinic.baro_steps_per_update` &mdash; range **10 to 1000**, default **150**, tier `restart`.
@@ -132,7 +156,7 @@ Brake on everything that is not part of the east-west jets. It leaves the jets t
 
 `solver.baroclinic.enabled` &mdash; toggle (on/off), default **`False`**, tier `restart`.
 
-Adds physically-grounded mid-latitude storms, grown by a baroclinic instability model, in addition to the hand-seeded ones. Off = plain v1.6; requires solver type=vorticity (injects the evolving baroclinic vorticity source into the solver). No rand: randomize() must never silently enable it.
+Adds a band of extra mid-latitude storms, shaped by a 2-layer atmosphere model, on top of the hand-seeded ones. Off = plain v1.6; requires solver type=vorticity (injects the evolving baroclinic vorticity source into the solver). No rand: randomize() must never silently enable it.
 
 _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
@@ -200,6 +224,30 @@ Solver convergence speed — leave at 1.7: it changes solve time, not the pictur
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 
+### Stagger the storm band
+
+`solver.baroclinic.phase_jitter` &mdash; range **0 to 4**, default **0**, tier `restart`.
+
+Breaks up the row of storms so their crests stop lining up in a vertical comb. Higher staggers them further; 0 = off, every crest shares one phase. 2 is a good starting point (random per-latitude phase offset in radians applied to the seeded pattern).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 4<br>(not rendered)</sub></td>
+</tr></table>
+
+### Storm edge softness
+
+`solver.baroclinic.smooth` &mdash; range **0.5 to 6**, default **1.26**, tier `restart`.
+
+Softens the storms' fine structure. Higher gives smooth broad shapes; too low lets grid-scale speckle through and the belt drops out (Gaussian blur in source-grid pixels, applied before the source is resampled).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.5<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 1.26</sub></td><td align="center"><sub>high &middot; 6<br>(not rendered)</sub></td>
+</tr></table>
+
 ### Storm reach (0 = unlimited)
 
 `solver.deformation_radius` &mdash; range **0 to 3.14**, default **0**, tier `restart`.
@@ -208,6 +256,30 @@ Storm locality — how far each vortex's swirl reaches. Smaller = more local —
 
 <table><tr>
 <td align="center"><img src="img/sliders/_baseline_kinematic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__deformation_radius__hi.jpg" width="320"><br><sub>high &middot; 3.14</sub></td>
+</tr></table>
+
+### Storm size
+
+`solver.baroclinic.eddy_scale` &mdash; range **0.02 to 0.15**, default **0.075**, tier `restart`, log scale.
+
+Size of each storm in the belt. Higher makes fewer, broader storms; lower makes them smaller and more numerous. Raising it far past the default destabilizes the generator and the belt drops out (reduced gravity setting the deformation radius; the upper bound keeps it clear of the layer blow-up).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><sub>low &middot; 0.02<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0.075</sub></td><td align="center"><sub>high &middot; 0.15<br>(not rendered)</sub></td>
+</tr></table>
+
+### Storms around the planet
+
+`solver.baroclinic.zonal_count` &mdash; range **4 to 20**, default **14**, tier `restart`.
+
+How many storms are seeded around a full circle of longitude. Pair it with Storm size -- a count far from what that size supports just fades out (seeded zonal wavenumber; the coherence gate rejects anything above 20).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><sub>low &middot; 4<br>(not rendered)</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 14</sub></td><td align="center"><sub>high &middot; 20<br>(not rendered)</sub></td>
 </tr></table>
 
 ### Swirl brake (all scales)
@@ -247,6 +319,18 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 Internal pacing of the baroclinic storm generator; leave at default (main-solver steps between source refreshes; fixed cadence, no rand)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
+
+### Vary the storm spacing
+
+`solver.baroclinic.spectrum_width` &mdash; range **0 to 6**, default **0**, tier `restart`.
+
+Varies the gaps between storms so they stop repeating at one fixed spacing. Higher mixes in a wider range of sizes; 0 = off, every storm identically spaced. 4 is a good starting point (seeds neighbouring zonal wavenumbers either side of Storms around the planet).
+
+_Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
+
+<table><tr>
+<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><sub>high &middot; 6<br>(not rendered)</sub></td>
+</tr></table>
 
 ### warmup steps
 

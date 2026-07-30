@@ -1684,9 +1684,8 @@ class BaroclinicParams(_Params):
 
     enabled: bool = pfield(
         False, tier=Tier.RESTART, adv=True, ui="Solver",
-        description="Adds physically-grounded mid-latitude storms, grown by a "
-                    "baroclinic instability model, in addition to the "
-                    "hand-seeded ones. "
+        description="Adds a band of extra mid-latitude storms, shaped by a "
+                    "2-layer atmosphere model, on top of the hand-seeded ones. "
                     "Off = plain v1.6; requires solver type=vorticity (injects "
                     "the evolving baroclinic vorticity source into the solver). "
                     "No rand: randomize() must never silently enable it.")
@@ -1718,6 +1717,70 @@ class BaroclinicParams(_Params):
         description="Internal pacing of the baroclinic storm generator; leave "
                     "at default (main-solver steps between source refreshes; "
                     "fixed cadence, no rand)")
+
+    # -- Shape of the storm band (were hardcoded module constants) ------------
+    # Every default below reproduces the previous hardcoded value, so the whole
+    # group is byte-identical until an artist moves one.
+    latitude: float = pfield(
+        45.0, tier=Tier.RESTART, lo=10.0, hi=75.0, adv=True,
+        ui="Storm band", label="Band centre latitude",
+        description="Moves the whole belt of extra storms north or south. "
+                    "45 sits them in the mid-latitudes, like Jupiter's "
+                    "temperate belts; low values crowd them toward the "
+                    "equator (centre of the unstable shear zone, in degrees "
+                    "north; mirrored to the southern hemisphere by the "
+                    "source mask).")
+    width: float = pfield(
+        25.0, tier=Tier.RESTART, lo=5.0, hi=40.0, adv=True,
+        ui="Storm band", label="Band width",
+        description="How tall the belt of extra storms is. Higher spreads them "
+                    "over more latitudes; lower squeezes them into one narrow "
+                    "lane (half-width of the seeding envelope in degrees, so "
+                    "the belt spans latitude +/- this).")
+    eddy_scale: float = pfield(
+        0.075, tier=Tier.RESTART, lo=0.02, hi=0.15, log=True, adv=True,
+        ui="Storm band", label="Storm size",
+        description="Size of each storm in the belt. Higher makes fewer, "
+                    "broader storms; lower makes them smaller and more "
+                    "numerous. Raising it far past the default destabilizes "
+                    "the generator and the belt drops out (reduced gravity "
+                    "setting the deformation radius; the upper bound keeps it "
+                    "clear of the layer blow-up).")
+    zonal_count: int = pfield(
+        14, tier=Tier.RESTART, lo=4, hi=20, adv=True,
+        ui="Storm band", label="Storms around the planet",
+        description="How many storms are seeded around a full circle of "
+                    "longitude. Pair it with Storm size -- a count far from "
+                    "what that size supports just fades out (seeded zonal "
+                    "wavenumber; the coherence gate rejects anything above "
+                    "20).")
+    smooth: float = pfield(
+        1.26, tier=Tier.RESTART, lo=0.5, hi=6.0, adv=True,
+        ui="Storm band", label="Storm edge softness",
+        description="Softens the storms' fine structure. Higher gives smooth "
+                    "broad shapes; too low lets grid-scale speckle through and "
+                    "the belt drops out (Gaussian blur in source-grid pixels, "
+                    "applied before the source is resampled).")
+
+    # -- Break up the seeded pattern's regularity -----------------------------
+    # Both default to a no-op and both draw from their own named subseed stream,
+    # so the broadband seed noise stays bitwise fixed and each is an isolated axis.
+    phase_jitter: float = pfield(
+        0.0, tier=Tier.RESTART, lo=0.0, hi=4.0, adv=True,
+        ui="Storm band", label="Stagger the storm band",
+        description="Breaks up the row of storms so their crests stop lining "
+                    "up in a vertical comb. Higher staggers them further; "
+                    "0 = off, every crest shares one phase. 2 is a good "
+                    "starting point (random per-latitude phase offset in "
+                    "radians applied to the seeded pattern).")
+    spectrum_width: int = pfield(
+        0, tier=Tier.RESTART, lo=0, hi=6, adv=True,
+        ui="Storm band", label="Vary the storm spacing",
+        description="Varies the gaps between storms so they stop repeating at "
+                    "one fixed spacing. Higher mixes in a wider range of "
+                    "sizes; 0 = off, every storm identically spaced. 4 is a "
+                    "good starting point (seeds neighbouring zonal "
+                    "wavenumbers either side of Storms around the planet).")
 
 
 # Practical floor for a screened-Poisson deformation radius: below ~a few grid

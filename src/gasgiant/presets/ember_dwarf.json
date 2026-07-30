@@ -31,7 +31,14 @@
         "gain": 2.0,
         "warmup_steps": 8000,
         "baro_steps_per_update": 150,
-        "update_every": 32
+        "update_every": 32,
+        "latitude": 45.0,
+        "width": 25.0,
+        "eddy_scale": 0.075,
+        "zonal_count": 14,
+        "smooth": 1.26,
+        "phase_jitter": 0.0,
+        "spectrum_width": 0
       }
     },
     "bands": {

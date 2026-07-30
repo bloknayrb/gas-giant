@@ -464,7 +464,10 @@ def test_other_sections_have_constant_ui_no_separators_expected():
         if section == "solver":
             # B2-3: the baroclinic cadence trio renders under its own "Fixed
             # cadence" sub-label (it used to ship ui="" and draw unlabeled).
-            assert labels == {"Solver", "Fixed cadence"}, (
+            # "Storm band" groups the levers that shape the baroclinic storm
+            # belt, kept apart from the cadence trio because those are "leave at
+            # default" pacing and these are the ones an artist actually moves.
+            assert labels == {"Solver", "Fixed cadence", "Storm band"}, (
                 f"solver sub-groups drifted: {labels}"
             )
             continue

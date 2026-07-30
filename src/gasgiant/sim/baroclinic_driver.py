@@ -4,7 +4,7 @@ Owns a validated 2-layer baroclinic CPU solver spun to a finite-amplitude
 warm start, then advanced in lockstep with the v1.6 turbulence solver. Each
 cadence it re-derives the coherent geostrophic vorticity source (the EVOLVING
 imprint, not the spike's static stamp) and resamples it to the equirect grid.
-On lower-layer outcrop it holds the last good state.
+On lower-layer outcrop it holds the last good state and reports it.
 """
 from __future__ import annotations
 
@@ -26,48 +26,82 @@ class BaroclinicWarmupError(RuntimeError):
     IncoherentSourceError/ValueError pattern in baroclinic_source."""
 
 
+class BaroclinicOutcropError(RuntimeError):
+    """The lower layer outcropped DURING the run, after a clean warmup.
+
+    Distinct from BaroclinicWarmupError because it is raised from `advance`
+    rather than from construction, and the facade handles the two at different
+    points. Before this existed `advance` swallowed the outcrop and only latched
+    a flag, so the facade's mid-run handler could never fire: `baroclinic_status`
+    kept reporting 'active' while the source was frozen on its last good state --
+    silently reinstating the static stamp this driver exists to replace."""
+
+
 class BaroclinicSourceDriver:
     def __init__(self, grid_w: int, grid_h: int,
                  warmup_steps: int = 9000, seed: int = 0,
-                 m_zonal: int = bsrc.M_ZONAL) -> None:
+                 m_zonal: int | None = None,
+                 gp2: float | None = None,
+                 latitude: float | None = None,
+                 width: float | None = None,
+                 smooth_sigma: float | None = None,
+                 phase_jitter: float = 0.0,
+                 spectrum_width: int = 0) -> None:
+        # None sentinels rather than `= bsrc.GP2` defaults: a default argument
+        # binds ONCE at def time, which would freeze the module constants and
+        # silently break the tests that monkeypatch them to force an outcrop.
+        m_zonal = bsrc.M_ZONAL if m_zonal is None else m_zonal
+        gp2 = bsrc.GP2 if gp2 is None else gp2
+        latitude = bsrc.PHI_TEST_DEG if latitude is None else latitude
+        width = bsrc.BAND_HALFWIDTH_DEG if width is None else width
+        smooth_sigma = bsrc.SMOOTH_SIGMA if smooth_sigma is None else smooth_sigma
         self.grid_w = grid_w
         self.grid_h = grid_h
         self.outcropped = False
+        self.smooth_sigma = smooth_sigma
+        self.lat_band, self.taper = bsrc.mask_band_for(latitude, width)
         self.st = ref.baroclinic_test_state(
             W=bsrc.SRC_W, H=bsrc.SRC_H, unstable=True, seed=seed,
-            gp1=bsrc.GP1, gp2=bsrc.GP2, xi_unstable=bsrc.XI,
+            gp1=bsrc.GP1, gp2=gp2, xi_unstable=bsrc.XI,
             m_zonal=m_zonal,
+            phi_test_deg=latitude, band_halfwidth_deg=width,
+            phase_jitter=phase_jitter, spectrum_width=spectrum_width,
             pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0,
         )
-        self.advance(warmup_steps)
-        if self.outcropped:
+        try:
+            self.advance(warmup_steps)
+        except BaroclinicOutcropError as exc:
             raise BaroclinicWarmupError(
                 f"BaroclinicSourceDriver: warmup outcropped within {warmup_steps} "
                 f"steps -- the source never reached a finite-amplitude state. "
-                f"Reduce warmup_steps or xi_unstable."
-            )
+                f"Reduce warmup_steps or eddy_scale. ({exc})"
+            ) from exc
         # Post-warmup snapshot: a reused driver (cache hit on a RESTART rebuild)
         # restores this so every development run starts from the identical
         # baroclinic state -- deterministic regardless of prior preview ticks.
         self._warm_st = copy.deepcopy(self.st)
 
     def advance(self, n: int) -> None:
-        """Advance the baroclinic solver n steps. On lower-layer outcrop
-        (PositivityViolation -- the ONLY ValueError reachable from step_2layer's
-        explicit call tree) latch `outcropped`, log it, and stop stepping; the
-        last good state is retained. Any OTHER exception (a genuine bug) is NOT
-        swallowed here -- it propagates so it cannot masquerade as a benign
-        outcrop (which, with the stable gp2=0.075 config, should never happen)."""
+        """Advance the baroclinic solver n steps.
+
+        On lower-layer outcrop (PositivityViolation -- the ONLY ValueError
+        reachable from step_2layer's explicit call tree) latch `outcropped`, keep
+        the last good state, and RAISE BaroclinicOutcropError so the caller can
+        degrade visibly. Swallowing it here is what let a dead source masquerade
+        as a live one. Any OTHER exception (a genuine bug) propagates untouched.
+        """
+        if self.outcropped:
+            raise BaroclinicOutcropError(
+                "baroclinic solver already outcropped; no further advance is "
+                "possible from the held state")
         for _ in range(n):
-            if self.outcropped:
-                return
             try:
                 ref.step_2layer(self.st)
             except ref.PositivityViolation as exc:
                 log.warning("baroclinic lower-layer outcrop; holding last good "
                             "state: %s", exc)
                 self.outcropped = True
-                return
+                raise BaroclinicOutcropError(str(exc)) from exc
 
     def reset(self) -> None:
         """Restore the post-warmup state. Called when a cached driver is reused
@@ -79,7 +113,9 @@ class BaroclinicSourceDriver:
     def current_source(self):
         """Coherent unit-std evolving source on the equirect grid (grid_h, grid_w).
         Passes the coherence gate (raises if the source is a checkerboard)."""
-        zeta = bsrc.geostrophic_vorticity_source(self.st, smooth_sigma=bsrc.SMOOTH_SIGMA)
+        zeta = bsrc.geostrophic_vorticity_source(
+            self.st, smooth_sigma=self.smooth_sigma,
+            lat_band=self.lat_band, taper=self.taper)
         bsrc.assert_coherent(zeta)
         return bsrc.resample_to_equirect(zeta, self.grid_w, self.grid_h)
 

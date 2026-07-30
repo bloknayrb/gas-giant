@@ -48,8 +48,8 @@ from gasgiant.params.model import ParamLeaf, StormOverride, StormsParams, iter_p
 #: them); this module deliberately does not carry a third copy.
 CORPUS: list[ParamLeaf] = list(iter_pfields())
 
-CORPUS_LEAVES = 226
-CORPUS_UNIQUE_DESCRIPTIONS = 221
+CORPUS_LEAVES = 233
+CORPUS_UNIQUE_DESCRIPTIONS = 228
 
 
 def test_corpus_size_is_pinned():

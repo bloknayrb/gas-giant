@@ -7,7 +7,11 @@ import pytest
 from gasgiant.engine.baroclinic_coupling import CouplingStats, residency_recommendation
 from gasgiant.sim import baroclinic_source as bsrc
 from gasgiant.sim import shallow_water_ref as ref
-from gasgiant.sim.baroclinic_driver import BaroclinicSourceDriver
+from gasgiant.sim.baroclinic_driver import (
+    BaroclinicOutcropError,
+    BaroclinicSourceDriver,
+    BaroclinicWarmupError,
+)
 
 # ~150s of CPU reference-solver work; excluded from the fast loop (-m "not gpu and not slow").
 pytestmark = pytest.mark.slow
@@ -24,19 +28,44 @@ def test_driver_source_evolves():
     assert float(np.abs(src_a - src_b).mean()) > 1e-3, "source must evolve in time"
 
 
-def test_driver_holds_on_outcrop(monkeypatch):
-    """Advancing far past lower-layer outcrop must not raise; the driver holds
-    the last good state and still emits a finite, coherent source.
+def test_driver_reports_outcrop_and_holds_last_good_state(monkeypatch):
+    """Advancing past lower-layer outcrop must RAISE, and still hold the last
+    good state so the caller can degrade rather than crash.
 
-    The production config (gp2=0.075) is intentionally stable and does NOT outcrop
-    (survives 40k+ steps), so force the legacy unstable gp2=0.3 to exercise the
-    hold-on-outcrop path (it outcrops ~step 12.3k)."""
+    Previously advance() swallowed the outcrop and only latched a flag. That made
+    the facade's mid-run handler unreachable: `baroclinic_status` kept reporting
+    'active' while the source was frozen on a dead state -- silently reinstating
+    the static stamp the driver exists to replace. The raise is the contract.
+
+    The production eddy_scale (0.075) is intentionally stable and does NOT outcrop
+    (survives 40k+ steps), so force the legacy unstable 0.3 to exercise the path
+    (it outcrops ~step 12.3k)."""
     monkeypatch.setattr(bsrc, "GP2", 0.3)
     d = BaroclinicSourceDriver(grid_w=64, grid_h=32, warmup_steps=500, seed=0)
-    d.advance(20000)                       # well past the gp2=0.3 outcrop (~12.3k)
+    with pytest.raises(BaroclinicOutcropError):
+        d.advance(20000)               # well past the gp2=0.3 outcrop (~12.3k)
     assert d.outcropped is True
     src = d.current_source()
-    assert np.all(np.isfinite(src))
+    assert np.all(np.isfinite(src)), "the held state must still derive a usable source"
+
+
+def test_advance_after_outcrop_keeps_raising(monkeypatch):
+    """Once outcropped there is nothing left to advance, so every later call must
+    keep reporting it rather than returning as if it had done the work."""
+    monkeypatch.setattr(bsrc, "GP2", 0.3)
+    d = BaroclinicSourceDriver(grid_w=64, grid_h=32, warmup_steps=500, seed=0)
+    with pytest.raises(BaroclinicOutcropError):
+        d.advance(20000)
+    with pytest.raises(BaroclinicOutcropError):
+        d.advance(1)
+
+
+def test_warmup_outcrop_still_raises_the_warmup_error(monkeypatch):
+    """A warmup outcrop must keep surfacing as BaroclinicWarmupError -- the
+    facade catches that distinctly at construction, and app/main.py toasts it."""
+    monkeypatch.setattr(bsrc, "GP2", 0.3)
+    with pytest.raises(BaroclinicWarmupError):
+        BaroclinicSourceDriver(grid_w=64, grid_h=32, warmup_steps=20000, seed=0)
 
 
 def test_reset_restores_warm_state():

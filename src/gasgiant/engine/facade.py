@@ -251,7 +251,12 @@ class Simulation:
             self._baro_key = None
             return
         w, h = self.solver.equirect.size
-        key = (w, h, bp.warmup_steps, self.params.seed)
+        # EVERY input the warm state depends on belongs here. A lever missing from
+        # this key is a lever the artist can move while the facade silently hands
+        # back the driver warmed at the OLD value.
+        key = (w, h, bp.warmup_steps, self.params.seed,
+               bp.latitude, bp.width, bp.eddy_scale, bp.zonal_count,
+               bp.smooth, bp.phase_jitter, bp.spectrum_width)
         if self._baro_driver is not None and self._baro_key == key:
             self._baro_driver.reset()  # deterministic: each dev run starts post-warmup
             return  # reuse cached driver (no re-warmup)
@@ -262,7 +267,12 @@ class Simulation:
             )
             self._baro_driver = BaroclinicSourceDriver(
                 grid_w=w, grid_h=h, warmup_steps=bp.warmup_steps,
-                seed=self.params.seed)
+                seed=self.params.seed,
+                m_zonal=bp.zonal_count, gp2=bp.eddy_scale,
+                latitude=bp.latitude, width=bp.width,
+                smooth_sigma=bp.smooth,
+                phase_jitter=bp.phase_jitter,
+                spectrum_width=bp.spectrum_width)
             self._baro_key = key
         # ImportError FIRST: if the driver import itself failed, the
         # BaroclinicWarmupError name below was never bound.
@@ -361,10 +371,12 @@ class Simulation:
         swallowed as a degrade."""
         from gasgiant.sim import baroclinic_source as bsrc
         from gasgiant.sim import shallow_water_ref as ref
+        from gasgiant.sim.baroclinic_driver import BaroclinicOutcropError
         try:
             self._baro_driver.advance(self._baro_steps_per_update)
             src = self._baro_driver.current_source()
-        except (ref.PositivityViolation, bsrc.IncoherentSourceError) as exc:
+        except (BaroclinicOutcropError, ref.PositivityViolation,
+                bsrc.IncoherentSourceError) as exc:
             log.warning("baroclinic source disabled mid-run: %s", exc)
             self.set_external_vorticity_source(None)
             self._degrade_baroclinic(str(exc))

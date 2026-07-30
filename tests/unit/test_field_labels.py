@@ -296,6 +296,16 @@ EXPECTED_LABELS = {
     "waves.ribbon_wavenumber": "Ribbon wave count",
     "waves.festoon_hero_wavenumber": "Festoon count (hero)",
     "detail.cirrus_fiber_freq": "Cirrus fiber scale",
+    # The baroclinic storm-band levers: every one is named in physics vocabulary
+    # in the model (gp2, m_zonal, phi_test) and would otherwise read as engine
+    # jargon on the one string that is always visible.
+    "solver.baroclinic.latitude": "Band centre latitude",
+    "solver.baroclinic.width": "Band width",
+    "solver.baroclinic.eddy_scale": "Storm size",
+    "solver.baroclinic.zonal_count": "Storms around the planet",
+    "solver.baroclinic.smooth": "Storm edge softness",
+    "solver.baroclinic.phase_jitter": "Stagger the storm band",
+    "solver.baroclinic.spectrum_width": "Vary the storm spacing",
 }
 
 
