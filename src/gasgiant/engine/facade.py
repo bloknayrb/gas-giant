@@ -108,6 +108,10 @@ class Simulation:
         self._baro_gain = 0.0
         self._baro_steps_per_update = 0
         self._baro_degraded_reason: str | None = None
+        # Warmup failures are remembered on their OWN key, not on _baro_key: the
+        # disable/re-enable cycle an artist performs after a failure nulls
+        # _baro_key, which would discard the memo and re-run the doomed warmup.
+        self._baro_failed_key: tuple | None = None
         self._baro_failed_reason: str | None = None
         self._build()
 
@@ -273,10 +277,12 @@ class Simulation:
         if self._baro_driver is not None and self._baro_key == key:
             self._baro_driver.reset()  # deterministic: each dev run starts post-warmup
             return  # reuse cached driver (no re-warmup)
-        if self._baro_key == key:
-            # Same key, no driver: this configuration already failed warmup. Stay
-            # degraded rather than re-running a computation known to die (up to
-            # 20000 CPU steps, ~2 min) on every unrelated RESTART edit.
+        if self._baro_failed_key == key:
+            # This exact configuration already failed warmup. Stay degraded rather
+            # than re-running a computation known to die (up to 20000 CPU steps,
+            # ~2 min) on every unrelated RESTART edit, or on a re-enable.
+            self._baro_driver = None
+            self._baro_key = None
             self._baro_degraded_reason = self._baro_failed_reason
             return
         try:
@@ -293,6 +299,8 @@ class Simulation:
                 phase_jitter=bp.phase_jitter,
                 spectrum_width=bp.spectrum_width)
             self._baro_key = key
+            self._baro_failed_key = None
+            self._baro_failed_reason = None
         # ImportError FIRST: if the driver import itself failed, the
         # BaroclinicWarmupError name below was never bound.
         except ImportError as exc:
@@ -304,11 +312,14 @@ class Simulation:
 
     def _degrade_baroclinic(self, reason: str, key: tuple | None = None) -> None:
         """Drop to uncoupled. Pass `key` from the BUILD path so the failure is
-        remembered and not retried; the mid-run path passes none, because the
-        config warmed fine and only died partway through development."""
+        remembered and never retried; the mid-run path passes none, because that
+        config warmed FINE and only died partway through development -- retrying
+        it is correct."""
         self._baro_driver = None
-        self._baro_key = key
-        self._baro_failed_reason = reason
+        self._baro_key = None
+        if key is not None:
+            self._baro_failed_key = key
+            self._baro_failed_reason = reason
         self._baro_degraded_reason = reason
 
     @property

@@ -69,7 +69,12 @@ M_GATE_MAX = 20
 def dominant_zonal_m(field2d: np.ndarray,
                      row_frac: tuple[float, float] = (0.20, 0.42)) -> tuple[int, np.ndarray]:
     """Dominant zonal wavenumber of a (H, W) field: FFT a band of mid-latitude
-    rows, average the power spectra, return argmax m (excluding DC) + spectrum."""
+    rows, average the power spectra, return argmax m (excluding DC) + spectrum.
+
+    The default ``row_frac`` samples latitudes 53.4..15.9 deg -- a window sized
+    for the ORIGINAL fixed 45 +/- 25 band. It does not follow a moved band; use
+    ``dominant_zonal_m_in_band`` for anything the artist can steer.
+    """
     H, _ = field2d.shape
     r0, r1 = int(row_frac[0] * H), int(row_frac[1] * H)
     rows = field2d[r0:r1]
@@ -77,6 +82,31 @@ def dominant_zonal_m(field2d: np.ndarray,
     spec = (np.abs(np.fft.rfft(rows, axis=1)) ** 2).mean(axis=0)
     m = int(np.argmax(spec[1:]) + 1)
     return m, spec
+
+
+def dominant_zonal_m_in_band(field2d: np.ndarray,
+                             amp_frac: float = 0.15) -> tuple[int, np.ndarray]:
+    """Same, but over the rows actually CARRYING the band.
+
+    Rows are chosen by amplitude rather than by a fixed latitude window, so the
+    measurement follows the band wherever `latitude`/`width` put it. With the
+    fixed window, a band centred at 75 deg with half-width 8 (67..83) lies
+    entirely OUTSIDE the sampled rows: the gate then reads empty rows and reports
+    a meaningless m=1, and a band that only partly overlaps mixes in empty rows
+    whose noise can dominate the argmax. Both were reachable from the shipped
+    slider ranges.
+
+    Falls back to the whole field if nothing clears the threshold, so this can
+    never select an empty set.
+    """
+    amp = np.abs(field2d).sum(axis=1)
+    peak = float(amp.max())
+    rows = field2d[amp > amp_frac * peak] if peak > 0 else field2d
+    if rows.shape[0] == 0:
+        rows = field2d
+    rows = rows - rows.mean(axis=1, keepdims=True)
+    spec = (np.abs(np.fft.rfft(rows, axis=1)) ** 2).mean(axis=0)
+    return int(np.argmax(spec[1:]) + 1), spec
 
 
 def _gaussian_kernel1d(sigma: float) -> np.ndarray:
@@ -147,9 +177,17 @@ class IncoherentSourceError(ValueError):
     distinctly from an unrelated ValueError raised by a genuine bug."""
 
 
-def assert_coherent(field2d: np.ndarray) -> int:
-    """Reject a checkerboard source. Returns the dominant zonal m (<= M_GATE_MAX)."""
-    m, _ = dominant_zonal_m(field2d)
+def assert_coherent(field2d: np.ndarray, in_band: bool = False) -> int:
+    """Reject a checkerboard source. Returns the dominant zonal m (<= M_GATE_MAX).
+
+    ``in_band=True`` measures over the rows carrying the band instead of the fixed
+    mid-latitude window -- required once `latitude`/`width` are artist-steerable,
+    because the fixed window does not follow the band and will happily gate on
+    empty rows. Default stays the fixed window so existing callers and the pinned
+    source tests are unchanged.
+    """
+    m, _ = (dominant_zonal_m_in_band(field2d) if in_band
+            else dominant_zonal_m(field2d))
     if m > M_GATE_MAX:
         raise IncoherentSourceError(
             f"source dominant zonal m={m} exceeds coherence gate {M_GATE_MAX} "

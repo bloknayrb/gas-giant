@@ -80,14 +80,14 @@ How far the flow moves per sim step. Higher = faster development but a coarser, 
 
 ### Band centre latitude
 
-`solver.baroclinic.latitude` &mdash; range **15 to 75**, default **45**, tier `restart`.
+`solver.baroclinic.latitude` &mdash; range **20 to 75**, default **45**, tier `restart`.
 
 Moves the whole belt of extra storms north or south. 45 sits them in the mid-latitudes, like Jupiter's temperate belts; low values crowd them toward the equator (centre of the unstable shear zone, in degrees north; mirrored to the southern hemisphere by the source mask).
 
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/solver__baroclinic__latitude__lo.jpg" width="320"><br><sub>low &middot; 15</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__latitude__hi.jpg" width="320"><br><sub>high &middot; 75</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__latitude__lo.jpg" width="320"><br><sub>low &middot; 20</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__latitude__hi.jpg" width="320"><br><sub>high &middot; 75</sub></td>
 </tr></table>
 
 ### Band width

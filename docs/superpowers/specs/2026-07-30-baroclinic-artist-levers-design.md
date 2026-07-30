@@ -158,6 +158,32 @@ equatorward: it nearly doubles between 45° and 28°.
 One effective width feeds both the seeding envelope and the source mask; had they
 disagreed, the mask would clip the storms it exists to pass.
 
+3. **The coherence gate did not follow the band.** `dominant_zonal_m` samples a
+   fixed row window — latitudes 53.4–15.9°, sized for the original hardcoded
+   45 ± 25 band. Once `latitude` is a slider that window is simply the wrong
+   place: a band at 75 ± 8 spans 67–83° and lies *entirely* outside it, so
+   `assert_coherent` graded empty rows and returned m=1 on a band that was
+   perfectly clean. This masqueraded as a physics failure and nearly cost a
+   correct part of the range — the "bad corner" disappeared the moment the metric
+   was fixed. `assert_coherent(..., in_band=True)` selects rows by amplitude;
+   the default-band verdict is unchanged.
+
+   The general lesson is sharper than the specific bug: **a metric calibrated for
+   a fixed configuration silently becomes a measurement of the wrong thing when
+   you make that configuration adjustable.** Every diagnostic that carries a
+   hardcoded window needs re-examining in the same pass as the lever that moves
+   what it looks at.
+
+`latitude`'s equatorward bound of 20° comes from what survives once the metric is
+trustworthy: the worst-width share of zonal power at the seeded m=14 runs 0.94 at
+75°, 0.81 at 45°, 0.48 at 20°, collapsing only at 15° (clamped width 10 reads m=2
+at 0.045). Measured through the FIXED window the same sweep condemns 20° (spurious
+m=43) and 25° (0.24) — so the broken metric would have cost a third of the usable
+range on top of the corner it falsely failed. The coherence gate cannot catch that failure — it rejects grid-scale
+sources, and a washed-out band is large-scale — so the bound carries it, and the
+corner test asserts both the gate AND that the dominant mode is still the seeded
+one.
+
 ### 3.3 Bug fix: silent mid-run outcrop
 
 `BaroclinicSourceDriver.advance` catches `PositivityViolation`, logs, latches
@@ -268,6 +294,27 @@ No preset bakes any of these levers under this design; every default is a no-op.
    alignment and the wavelength monotony. `2` with `4` goes too far — the band edge
    softens and the plumes stop reading as discrete storms. Nothing is baked under this
    design; every default is a no-op.
+
+## 8a. Measured usable range (band-aware gate, 8000-step warmup, seed 0)
+
+Share of zonal power at the seeded m=14, over the rows carrying the band. Every
+cell reports dominant m=14 unless noted.
+
+```
+lat \ width      8       25       40
+  15          0.496   m=2 0.045   m=2 0.045     <- clamped to width 10; collapses
+  20          0.763    0.483     0.483
+  25          0.799    0.766     0.766
+  30          0.891    0.774     0.774
+  45          0.853    0.895     0.888
+  60          0.681    0.654     0.497
+  75          0.591    0.757     0.834
+```
+
+`latitude`'s bound of 20 is the last clean row. Measured through the FIXED window
+the same sweep reads 20 as a spurious m=43 and 25 as 0.24, and reports m=1 with an
+undefined share at 75/8 — it under-reads everywhere (45/25 reads 0.844 against the
+true 0.895), so it was not merely wrong at the extremes.
 
 ## 9. What rendering caught that measuring did not
 

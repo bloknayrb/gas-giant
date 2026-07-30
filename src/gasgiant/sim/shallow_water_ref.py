@@ -798,7 +798,11 @@ def _balanced_sheared_base(
     # Deepen the upper layer rather than clip it, and ONLY when it would
     # otherwise clip. At the default construction h1 clears the floor by 184 m,
     # so this is inert there and the default state stays bitwise unchanged.
-    swing = float(A * cumint.max())
+    # (A * cumint).max(), NOT A * cumint.max(): A = shear*a*f_test/gp2 flips
+    # sign for a SOUTHERN band (f_test < 0 while shear stays positive), and h1
+    # is then minimised at cumint.min(). Taking the max of the product is
+    # sign-safe and identical on the northern path.
+    swing = float((A * cumint).max())
     H1_mean = max(H1_mean, swing + 0.01 * H2_mean)
 
     h2_prof = H2_mean + A * cumint

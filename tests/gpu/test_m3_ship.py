@@ -124,13 +124,29 @@ def test_graceful_warmup_outcrop(gpu, monkeypatch):
     """A warmup past outcrop must degrade to uncoupled (driver=None), NOT crash
     construction, and render the same as the uncoupled run.
 
-    The production config (gp2=0.075) is intentionally stable and never outcrops,
-    so force the legacy unstable gp2=0.3 (outcrops ~12.3k) to exercise the
-    graceful-degrade path with a warmup beyond it."""
+    The production config is intentionally stable and never outcrops, so force an
+    unstable supercriticality to exercise the graceful-degrade path.
+
+    Patching `bsrc.XI` rather than `bsrc.GP2`: the facade now threads the eddy
+    scale explicitly (`gp2=bp.eddy_scale`), so the driver's `bsrc.GP2` fallback is
+    never consulted on the facade path and patching it silently does NOTHING --
+    the sim would build at the stable 0.075, survive the warmup, and fail this
+    assertion for the wrong reason. `xi_unstable` is still read from the module,
+    and `eddy_scale` cannot reach an unstable value anyway (its pfield caps at
+    0.15). The precondition below fails loudly if that ever stops being true."""
     from gasgiant.sim import baroclinic_source as bsrc
-    monkeypatch.setattr(bsrc, "GP2", 0.3)
+    from gasgiant.sim import shallow_water_ref as ref
+    monkeypatch.setattr(bsrc, "XI", 25.0)
+    # Precondition: the patch must actually reach the state builder. Without this,
+    # a future refactor that threads xi through params turns the whole test into a
+    # silent no-op that asserts the degrade path from a sim that never degraded.
+    probe = ref.baroclinic_test_state(
+        W=bsrc.SRC_W, H=bsrc.SRC_H, unstable=True, seed=0, gp1=bsrc.GP1,
+        gp2=bsrc.GP2, xi_unstable=bsrc.XI, m_zonal=bsrc.M_ZONAL,
+        pert_amp_frac=1e-3, dt_safety=0.30, nu4=0.0)
+    with pytest.raises(ref.PositivityViolation):
+        ref.step_2layer(probe)
     p = _baro_params()
-    p.solver.baroclinic = p.solver.baroclinic.model_copy(update={"warmup_steps": 15000})
     sim = Simulation(p, gpu)  # must NOT raise
     try:
         assert sim._baro_driver is None, "warmup outcrop must degrade to uncoupled"

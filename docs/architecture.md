@@ -224,6 +224,20 @@ default so the whole group is byte-identical until an artist moves one:
   **clamped** off f=0 by `params.model.baroclinic_effective_width`, reported
   through `validation_warnings`. The clamp rule lives in the params layer because
   `validation_warnings` needs it and params may not import `sim`.
+- The coherence gate follows the band. `dominant_zonal_m`'s default row window
+  samples latitudes 53.4–15.9°, which was correct while the band was hardcoded at
+  45 ± 25 and is wrong the moment `latitude` is steerable — a band at 75 ± 8 spans
+  67–83° and lies *entirely* outside it, so the gate graded empty rows and
+  reported a meaningless m=1. `assert_coherent(..., in_band=True)` selects rows by
+  amplitude instead; the driver uses it, and the verdict is unchanged on the
+  default band.
+- `latitude` is bounded at 20° on the equatorward side, measured *through the
+  band-aware gate*: the seeded mode must still dominate, and the worst-width share
+  of zonal power at m=14 runs 0.94 at 75° / 0.81 at 45° / 0.48 at 20°, collapsing
+  only at 15° (clamped width 10 reads m=2 at 0.045). The gate alone cannot catch
+  that — it rejects grid-scale sources and a washed-out band is large-scale — so
+  the bound carries it. Measured with the FIXED window instead, 20° and 25° look
+  broken and are not; that error nearly cost a third of the usable range.
 - The facade driver cache keys on every one of them plus the equator-clamped
   width, and remembers a key that FAILED warmup so a known-doomed multi-minute
   computation is not re-run on each later rebuild.

@@ -169,7 +169,7 @@ def test_levers_do_not_perturb_the_broadband_noise_realisation():
 # -- the storm band construction ---------------------------------------------
 
 
-@pytest.mark.parametrize("latitude", [15.0, 20.0, 28.0, 35.0, 45.0, 60.0, 75.0])
+@pytest.mark.parametrize("latitude", [20.0, 30.0, 45.0, 60.0, 75.0])
 def test_the_band_builds_without_clipping_anywhere_in_its_declared_range(latitude):
     """A slider must not promise a range it cannot deliver.
 
@@ -213,30 +213,42 @@ def test_the_band_is_clamped_off_the_equator():
     assert eff(45.0, 25.0) == 25.0
     assert eff(75.0, 40.0) == 40.0
     # Clamped where it would not.
-    assert eff(15.0, 25.0) == 10.0
     assert eff(20.0, 40.0) == 15.0
+    assert eff(30.0, 40.0) == 25.0
     # Never below the narrowest band the source grid can represent, even at the
     # extreme corner of the declared ranges.
     from gasgiant.params.model import BAROCLINIC_MIN_WIDTH_DEG
-    assert eff(15.0, 40.0) >= BAROCLINIC_MIN_WIDTH_DEG
+    assert eff(20.0, 40.0) >= BAROCLINIC_MIN_WIDTH_DEG
 
 
 @pytest.mark.slow          # 8 x 2000 CPU reference-solver steps, ~96 s total
 @pytest.mark.parametrize("latitude,width", [
-    (15.0, 8.0), (15.0, 40.0), (20.0, 40.0), (25.0, 40.0),
-    (30.0, 40.0), (45.0, 25.0), (75.0, 8.0), (75.0, 40.0),
+    (20.0, 8.0), (20.0, 40.0), (30.0, 40.0), (45.0, 8.0),
+    (45.0, 25.0), (45.0, 40.0), (75.0, 8.0), (75.0, 40.0),
 ])
 def test_every_declared_band_corner_builds_and_warms(latitude, width):
     """The clamp must map the WHOLE declared (latitude, width) rectangle into the
     measured-usable region -- otherwise a slider still fails partway along."""
     from gasgiant.params.model import baroclinic_effective_width
+    eff = baroclinic_effective_width(latitude, width)
     st = ref.baroclinic_test_state(
-        **{**BASE, "phi_test_deg": latitude,
-           "band_halfwidth_deg": baroclinic_effective_width(latitude, width)})
+        **{**BASE, "phi_test_deg": latitude, "band_halfwidth_deg": eff})
     assert float(st.h1.min()) > 1.0, "upper layer clipped at build"
     assert float(st.h2.min()) > 1.0, "lower layer clipped at build"
     for _ in range(2000):
         ref.step_2layer(st)          # PositivityViolation here fails the test
+
+    # Surviving the solver is NOT enough, and asserting only that is what let a
+    # washed-out band at latitude 15 (dominant m=2, 2.3% of power at the seeded
+    # mode) sit inside the declared range. Check what the driver would actually
+    # ship: the coherence gate must pass AND the seeded mode must still dominate.
+    band, taper = bsrc.mask_band_for(latitude, eff)
+    zeta = bsrc.geostrophic_vorticity_source(
+        st, smooth_sigma=bsrc.SMOOTH_SIGMA, lat_band=band, taper=taper)
+    # in_band mirrors production: the fixed-window gate samples latitudes
+    # 53.4..15.9 and does not follow a steered band, so it grades empty rows.
+    m = bsrc.assert_coherent(zeta, in_band=True)   # raises -> test fails
+    assert m == bsrc.M_ZONAL, f"dominant mode drifted off the seeded one: {m}"
 
 
 def test_the_clamp_is_reported_not_silent():
@@ -245,8 +257,8 @@ def test_the_clamp_is_reported_not_silent():
     p = PlanetParams()
     p.solver.type = SolverType.VORTICITY
     p.solver.baroclinic.enabled = True
-    p.solver.baroclinic.latitude = 15.0
-    p.solver.baroclinic.width = 30.0
+    p.solver.baroclinic.latitude = 20.0
+    p.solver.baroclinic.width = 40.0
     assert any("across the equator" in w for w in p.validation_warnings())
 
     p.solver.baroclinic.latitude = 45.0
@@ -297,3 +309,35 @@ def test_band_defaults_agree_across_all_three_homes():
     b = PlanetParams().solver.baroclinic
     assert (ref._PHI_TEST_DEG, ref._BAND_HALFWIDTH_DEG) == (
         bsrc.PHI_TEST_DEG, bsrc.BAND_HALFWIDTH_DEG) == (b.latitude, b.width)
+
+
+def test_the_coherence_gate_follows_a_steered_band():
+    """The production gate must measure the band, not a fixed latitude window.
+
+    `dominant_zonal_m`'s default samples rows 19..40 of 96 -- latitudes
+    53.4..15.9 -- which was correct while the band was hardcoded at 45 +/- 25 and
+    is wrong the moment `latitude` becomes a slider. A band at 75 +/- 8 spans
+    67..83 and lies ENTIRELY outside that window, so the fixed gate reads empty
+    rows and reports a meaningless m=1 while the band itself is clean.
+    """
+    st = _state(phi_test_deg=75.0, band_halfwidth_deg=8.0)
+    band, taper = bsrc.mask_band_for(75.0, 8.0)
+    zeta = bsrc.geostrophic_vorticity_source(
+        st, smooth_sigma=bsrc.SMOOTH_SIGMA, lat_band=band, taper=taper)
+
+    fixed, _ = bsrc.dominant_zonal_m(zeta)
+    in_band, _ = bsrc.dominant_zonal_m_in_band(zeta)
+    assert fixed != bsrc.M_ZONAL, (
+        "if the fixed window ever starts covering this band, this test has "
+        "stopped proving anything")
+    assert in_band == bsrc.M_ZONAL, in_band
+
+
+def test_band_aware_and_fixed_gates_agree_on_the_default_band():
+    """The band-aware path must not move the DEFAULT gate verdict -- that is what
+    keeps `in_band=True` from being a behaviour change for the shipped config."""
+    st = _state()
+    band, taper = bsrc.mask_band_for(bsrc.PHI_TEST_DEG, bsrc.BAND_HALFWIDTH_DEG)
+    zeta = bsrc.geostrophic_vorticity_source(
+        st, smooth_sigma=bsrc.SMOOTH_SIGMA, lat_band=band, taper=taper)
+    assert bsrc.dominant_zonal_m(zeta)[0] == bsrc.dominant_zonal_m_in_band(zeta)[0]

@@ -123,7 +123,9 @@ class BaroclinicSourceDriver:
         zeta = bsrc.geostrophic_vorticity_source(
             self.st, smooth_sigma=self.smooth_sigma,
             lat_band=self.lat_band, taper=self.taper)
-        bsrc.assert_coherent(zeta)
+        # in_band: the gate must follow the band, or a steered `latitude`
+        # puts the storms outside the rows it samples and it grades noise.
+        bsrc.assert_coherent(zeta, in_band=True)
         return bsrc.resample_to_equirect(zeta, self.grid_w, self.grid_h)
 
     @property

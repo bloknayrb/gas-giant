@@ -1692,8 +1692,20 @@ BAROCLINIC_EQUATOR_GUARD_DEG = 5.0
 #: 4-degree Gaussian against dphi = 1.875 -- about 2.1 cells. Below that the
 #: trapezoidal interface integral stops realizing the requested band-centre shear
 #: and the seeded envelope is a few pixels tall, so the slider would be promising
-#: a range it cannot deliver. ``latitude``'s minimum of 15 is set so the clamp
-#: never lands under this floor (15 - 5 = 10).
+#: a range it cannot deliver.
+#:
+#: ``latitude``'s own minimum of 20 comes from a stronger constraint, measured at
+#: the shipped 8000-step warmup through the driver's real source path with the
+#: BAND-AWARE gate: the seeded mode has to still DOMINATE. Share of zonal power at
+#: m=14, worst width at each centre -- 75deg 0.94, 45deg 0.81, 30deg 0.46,
+#: 25deg 0.77, 20deg 0.48; at 15deg the clamped width-10 band collapses to m=2 at
+#: 0.045. The coherence gate cannot catch that: it rejects GRID-SCALE sources and
+#: a washed-out band is large-scale, so the bound has to carry it.
+#:
+#: Measure this with ``dominant_zonal_m_in_band``. The fixed-window
+#: ``dominant_zonal_m`` samples latitudes 53.4..15.9 and mixes empty rows into a
+#: moved band, which condemns 20deg (reads a spurious m=43) and 25deg (reads
+#: 0.24) -- both are fine.
 BAROCLINIC_MIN_WIDTH_DEG = 8.0
 
 
@@ -1761,7 +1773,7 @@ class BaroclinicParams(_Params):
     # Every default below reproduces the previous hardcoded value, so the whole
     # group is byte-identical until an artist moves one.
     latitude: float = pfield(
-        45.0, tier=Tier.RESTART, lo=15.0, hi=75.0, adv=True,
+        45.0, tier=Tier.RESTART, lo=20.0, hi=75.0, adv=True,
         ui="Storm band", label="Band centre latitude",
         description="Moves the whole belt of extra storms north or south. "
                     "45 sits them in the mid-latitudes, like Jupiter's "
