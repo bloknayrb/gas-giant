@@ -37,19 +37,27 @@ SMOOTH_SIGMA = 1.26
 PHI_TEST_DEG, BAND_HALFWIDTH_DEG = 45.0, 25.0
 
 
+#: Padding between the seeded envelope and the mask that passes it, in degrees.
+#: This is NOT the taper (8.0): it is sized so the default 45 +/- 25 band
+#: reproduces the historical hardcoded mask exactly, and the two numbers being
+#: close is a coincidence worth not collapsing. Using the taper here silently
+#: moved the default source (max |diff| 0.885 on a unit-std source).
+MASK_PAD_DEG = 10.0
+
+
 def mask_band_for(latitude: float, width: float,
                   taper: float = 8.0) -> tuple[tuple[float, float], float]:
     """`(lat_band, taper)` for `geostrophic_vorticity_source`, given the seeding
     band's centre and half-width in degrees.
 
     The mask must stay WIDER than the seeded envelope or it clips the storms it
-    is meant to pass; it is padded by the taper on each side and clamped to a
+    is meant to pass; it is padded by MASK_PAD_DEG on each side and clamped to a
     latitude range that keeps the 1/cos^2 zonal Laplacian away from the poles.
-    Returns the historical (10.0, 80.0) at the default 45 +/- 25 band, so the
-    default path is unchanged.
+    Returns exactly the historical (10.0, 80.0) at the default 45 +/- 25 band, so
+    the default source is unchanged -- pinned by test_mask_band_default.
     """
-    lo = max(1.0, latitude - width - taper)
-    hi = min(88.0, latitude + width + taper)
+    lo = max(1.0, latitude - width - MASK_PAD_DEG)
+    hi = min(88.0, latitude + width + MASK_PAD_DEG)
     return (lo, hi), taper
 
 # Coherence gate: a usable source's dominant zonal wavenumber must be low (reject

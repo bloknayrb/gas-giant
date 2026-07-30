@@ -212,6 +212,40 @@ before proposing work in these areas.
   added nothing. The baroclinic coupling **engine feature is kept** (opt-in,
   default-off, byte-identical when off) — only the factory preset is gone. See the
   top-of-file note in `scripts/build_vorticity_presets.py`.
+- **Baroclinic MODE GROWTH — FALSIFIED, all four paths (2026-07-30).** The reason
+  the comb above reads mechanical is now measured: the injected source is the
+  initial **decaying seed**, never a grown wave. Eddy interface variance decays
+  monotonically at every configuration tried, and the seeding block plants ONE
+  zonal mode at ONE global phase broadcast to every latitude row.
+  `resample_to_equirect`'s unit-std normalisation hides the amplitude collapse, and
+  `test_production_config_is_stable_and_coherent` passes on a decaying seed because
+  it asserts only no-outcrop and a dominant mode in [10, 20]. Closed:
+  - **`gp2` 0.075 → 0.3** (the PR #3 revert): 173-step outcrop margin against
+    `gas_giant_warm`'s real driver budget, `ember_dwarf`/`neptune` outcropping
+    mid-run, emergent m=7–8 (the feature size PR #3 moved away from), and
+    `SMOOTH_SIGMA` 2.54 turning out to be load-bearing gate-masking over a field
+    with 62% of its power at m≥26.
+  - **Raising `xi`**: exhausted. The apparent ceiling is a base-state construction
+    artifact (the UPPER layer goes negative at build: h1 min −3921 m at xi=4), not
+    physics. Remove the artifact and every run still decays — so the limit is
+    scale, not rate.
+  - **Refining the source grid**: growth does appear once L_D exceeds ~2.8 cells
+    (384×192), but the thing that grows is the **C-grid computational mode**, not
+    the baroclinic one — the seeded m=14 falls from 67% to 1.8% of the power while
+    m ≥ W/8 rises to 86% and the dominant mode becomes 91. At 512×256 the same
+    failure arrives 2.2× earlier and 1540× stronger (dominant m=119). The two grids
+    disagree completely. `assert_coherent` would reject both.
+  - **Polar zonal filter** (proposed to make the grid refinement affordable): dead.
+    `dt_safety = 0.30` is already at the accuracy limit — unfiltered timestep
+    multipliers measure faithful to 1.25× and diverge 5.7× at 2.0× — so the polar
+    CFL was never the binding constraint and there is no headroom to reclaim. Cost
+    stays H⁴ (512 ≈ 3.4 h, 768 ≈ 12 h) and no interactive slider is possible on
+    that path.
+
+  What shipped instead makes the seed **irregular rather than regular**
+  (`phase_jitter`, `spectrum_width`, plus the band-shape levers) — "looks less
+  mechanical", explicitly NOT "physically correct". Full record:
+  `docs/superpowers/specs/2026-07-30-baroclinic-artist-levers-design.md`.
 - **Jupiter polar-cyclone discreteness — DEFERRED (blocked).** Rendering discrete
   polar cyclone rings (Juno-style popcorn/ring structure) is blocked on
   vortex-merger physics — without it, injected polar vortices merge into a smooth

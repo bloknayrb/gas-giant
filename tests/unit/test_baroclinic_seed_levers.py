@@ -169,7 +169,7 @@ def test_levers_do_not_perturb_the_broadband_noise_realisation():
 # -- the storm band construction ---------------------------------------------
 
 
-@pytest.mark.parametrize("latitude", [10.0, 20.0, 28.0, 35.0, 45.0, 60.0, 75.0])
+@pytest.mark.parametrize("latitude", [15.0, 20.0, 28.0, 35.0, 45.0, 60.0, 75.0])
 def test_the_band_builds_without_clipping_anywhere_in_its_declared_range(latitude):
     """A slider must not promise a range it cannot deliver.
 
@@ -213,15 +213,18 @@ def test_the_band_is_clamped_off_the_equator():
     assert eff(45.0, 25.0) == 25.0
     assert eff(75.0, 40.0) == 40.0
     # Clamped where it would not.
-    assert eff(10.0, 25.0) == 5.0
+    assert eff(15.0, 25.0) == 10.0
     assert eff(20.0, 40.0) == 15.0
-    # Never degenerate, even at the extreme corner of the declared ranges.
-    assert eff(10.0, 40.0) > 0.0
+    # Never below the narrowest band the source grid can represent, even at the
+    # extreme corner of the declared ranges.
+    from gasgiant.params.model import BAROCLINIC_MIN_WIDTH_DEG
+    assert eff(15.0, 40.0) >= BAROCLINIC_MIN_WIDTH_DEG
 
 
+@pytest.mark.slow          # 8 x 2000 CPU reference-solver steps, ~96 s total
 @pytest.mark.parametrize("latitude,width", [
-    (10.0, 40.0), (10.0, 25.0), (15.0, 25.0), (20.0, 40.0),
-    (25.0, 40.0), (30.0, 40.0), (45.0, 25.0), (75.0, 40.0),
+    (15.0, 8.0), (15.0, 40.0), (20.0, 40.0), (25.0, 40.0),
+    (30.0, 40.0), (45.0, 25.0), (75.0, 8.0), (75.0, 40.0),
 ])
 def test_every_declared_band_corner_builds_and_warms(latitude, width):
     """The clamp must map the WHOLE declared (latitude, width) rectangle into the
@@ -242,10 +245,55 @@ def test_the_clamp_is_reported_not_silent():
     p = PlanetParams()
     p.solver.type = SolverType.VORTICITY
     p.solver.baroclinic.enabled = True
-    p.solver.baroclinic.latitude = 12.0
+    p.solver.baroclinic.latitude = 15.0
     p.solver.baroclinic.width = 30.0
     assert any("across the equator" in w for w in p.validation_warnings())
 
     p.solver.baroclinic.latitude = 45.0
     p.solver.baroclinic.width = 25.0
     assert not any("across the equator" in w for w in p.validation_warnings())
+
+
+# -- pins on the two output-changing bugs found in review ---------------------
+
+
+def test_mask_band_default_reproduces_the_historical_hardcoded_mask():
+    """`mask_band_for` must return EXACTLY the mask the source used before it was
+    parameterised, or enabling baroclinic renders differently than it did.
+
+    Sizing the pad from `taper` (8) instead of MASK_PAD_DEG (10) gives (12, 78)
+    and moves the default source by max 0.885 on a unit-std field -- and nothing
+    else catches it: the metric helpers here call
+    `geostrophic_vorticity_source` with its own default lat_band and never route
+    through `mask_band_for`, the GPU m3 gates are inequality-based, and p05 is
+    vacuous because no preset enables baroclinic.
+    """
+    assert bsrc.mask_band_for(bsrc.PHI_TEST_DEG, bsrc.BAND_HALFWIDTH_DEG) == (
+        (10.0, 80.0), 8.0)
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 4, 6])
+def test_spectrum_width_holds_the_injected_amplitude_fixed(k):
+    """`spectrum_width` must vary SPACING only. Independent phases give
+    var(sum) = sum(amp^2)/2 and a lone cosine has var 1/2, so the divisor is
+    sqrt(sum(amp^2)); using sqrt(0.5*sum(amp^2)) normalizes to unit variance and
+    silently makes this a 1.41x amplitude lever too -- which would also eat the
+    184 m of build-time upper-layer headroom the default construction has.
+    """
+    lam = (np.arange(bsrc.SRC_W) + 0.5) * (2.0 * np.pi / bsrc.SRC_W)
+    single = float(np.cos(bsrc.M_ZONAL * lam).std())
+    packet = float(ref._seed_pattern(
+        lam, bsrc.SRC_H, bsrc.SRC_W, bsrc.M_ZONAL, 0.0, 0.0, k, 0).std())
+    assert packet == pytest.approx(single, rel=1e-9)
+
+
+def test_band_defaults_agree_across_all_three_homes():
+    """45/25 lives in the params defaults, in `baroclinic_source` (the driver's
+    None fallback) and in `shallow_water_ref` (the `phi_test_deg=None` fallback).
+    Only params <-> bsrc was pinned; edit the `ref` privates and the driver would
+    silently keep 45 while every direct `baroclinic_test_state()` caller moved.
+    """
+    from gasgiant.params.model import PlanetParams
+    b = PlanetParams().solver.baroclinic
+    assert (ref._PHI_TEST_DEG, ref._BAND_HALFWIDTH_DEG) == (
+        bsrc.PHI_TEST_DEG, bsrc.BAND_HALFWIDTH_DEG) == (b.latitude, b.width)

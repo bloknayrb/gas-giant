@@ -1682,9 +1682,19 @@ INJECT_MASK_CODE: dict[InjectMask, int] = {
 #: reaches latitude, and every width <= latitude - 5 is clean across 10..75.
 #:
 #: This lives in the params layer because ``validation_warnings`` needs it and
-#: params may not import ``sim``; ``sim.baroclinic_source`` consumes it from here
-#: so there is exactly one implementation of the rule.
+#: params may not import ``sim``; ``sim.baroclinic_driver`` imports it from here
+#: (and is the ONLY consumer) so there is exactly one implementation of the rule.
 BAROCLINIC_EQUATOR_GUARD_DEG = 5.0
+
+#: Narrowest storm band the fixed 192x96 source grid can actually represent, and
+#: therefore the floor on both the ``width`` slider and the equator clamp above.
+#: ``_balanced_sheared_base`` uses ``sigma_phi = 0.5 * width``, so width 8 is a
+#: 4-degree Gaussian against dphi = 1.875 -- about 2.1 cells. Below that the
+#: trapezoidal interface integral stops realizing the requested band-centre shear
+#: and the seeded envelope is a few pixels tall, so the slider would be promising
+#: a range it cannot deliver. ``latitude``'s minimum of 15 is set so the clamp
+#: never lands under this floor (15 - 5 = 10).
+BAROCLINIC_MIN_WIDTH_DEG = 8.0
 
 
 def baroclinic_effective_width(latitude: float, width: float) -> float:
@@ -1699,7 +1709,8 @@ def baroclinic_effective_width(latitude: float, width: float) -> float:
     (45 +/- 25) is unchanged.
     """
     return min(float(width),
-               max(1.0, float(latitude) - BAROCLINIC_EQUATOR_GUARD_DEG))
+               max(BAROCLINIC_MIN_WIDTH_DEG,
+                   float(latitude) - BAROCLINIC_EQUATOR_GUARD_DEG))
 
 
 class BaroclinicParams(_Params):
@@ -1750,7 +1761,7 @@ class BaroclinicParams(_Params):
     # Every default below reproduces the previous hardcoded value, so the whole
     # group is byte-identical until an artist moves one.
     latitude: float = pfield(
-        45.0, tier=Tier.RESTART, lo=10.0, hi=75.0, adv=True,
+        45.0, tier=Tier.RESTART, lo=15.0, hi=75.0, adv=True,
         ui="Storm band", label="Band centre latitude",
         description="Moves the whole belt of extra storms north or south. "
                     "45 sits them in the mid-latitudes, like Jupiter's "
@@ -1759,7 +1770,7 @@ class BaroclinicParams(_Params):
                     "north; mirrored to the southern hemisphere by the "
                     "source mask).")
     width: float = pfield(
-        25.0, tier=Tier.RESTART, lo=5.0, hi=40.0, adv=True,
+        25.0, tier=Tier.RESTART, lo=8.0, hi=40.0, adv=True,
         ui="Storm band", label="Band width",
         description="How tall the belt of extra storms is. Higher spreads them "
                     "over more latitudes; lower squeezes them into one narrow "
@@ -1794,13 +1805,13 @@ class BaroclinicParams(_Params):
     # Both default to a no-op and both draw from their own named subseed stream,
     # so the broadband seed noise stays bitwise fixed and each is an isolated axis.
     phase_jitter: float = pfield(
-        0.0, tier=Tier.RESTART, lo=0.0, hi=4.0, adv=True,
+        0.0, tier=Tier.RESTART, lo=0.0, hi=2.5, adv=True,
         ui="Storm band", label="Stagger the storm band",
         description="Breaks up the row of storms so their crests stop lining "
-                    "up in a vertical comb. Higher staggers them further; "
-                    "0 = off, every crest shares one phase. 2 is a good "
-                    "starting point (random per-latitude phase offset in "
-                    "radians applied to the seeded pattern).")
+                    "up in a vertical comb. Higher staggers them further, and "
+                    "2 is already fully staggered; 0 = off, every crest shares "
+                    "one phase (random per-latitude phase offset in radians "
+                    "applied to the seeded pattern; 1 rad = 57.3 deg).")
     spectrum_width: int = pfield(
         0, tier=Tier.RESTART, lo=0, hi=6, adv=True,
         ui="Storm band", label="Vary the storm spacing",

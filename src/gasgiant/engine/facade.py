@@ -20,7 +20,11 @@ import numpy as np
 
 from gasgiant.engine.invalidation import diff_tiers
 from gasgiant.gl import GpuContext
-from gasgiant.params.model import PlanetParams, Tier
+from gasgiant.params.model import (
+    PlanetParams,
+    Tier,
+    baroclinic_effective_width,
+)
 from gasgiant.render.detail import DetailSynth
 from gasgiant.render.maps import MapDeriver
 from gasgiant.sim.bands import generate_bands
@@ -104,6 +108,7 @@ class Simulation:
         self._baro_gain = 0.0
         self._baro_steps_per_update = 0
         self._baro_degraded_reason: str | None = None
+        self._baro_failed_reason: str | None = None
         self._build()
 
     # -- construction / restart -------------------------------------------------
@@ -214,8 +219,11 @@ class Simulation:
         self.release()
 
     def _init_baroclinic(self) -> None:
-        """Build/reuse the baroclinic source driver when enabled. Caches on
-        (grid, warmup, seed) so unrelated RESTART edits don't re-warm. On the
+        """Build/reuse the baroclinic source driver when enabled. Caches on the
+        grid plus EVERY input the warm state depends on (see `key` below) so
+        unrelated RESTART edits don't re-warm, and remembers a key that FAILED
+        warmup so a known-doomed multi-minute computation is not re-run on every
+        later rebuild. On the
         DOCUMENTED degrade signals only -- warmup outcrop (BaroclinicWarmupError)
         or a missing optional numerics dep (ImportError) -- degrade to uncoupled
         (driver=None, status 'degraded' + reason), never crash construction; a
@@ -254,12 +262,23 @@ class Simulation:
         # EVERY input the warm state depends on belongs here. A lever missing from
         # this key is a lever the artist can move while the facade silently hands
         # back the driver warmed at the OLD value.
+        # `width` enters as the EQUATOR-CLAMPED value the driver actually warms
+        # on, not the raw slider: at latitude=12 every width >= 7 clamps to 7, and
+        # keying on the raw number would pay a full re-warmup to rebuild a
+        # bit-identical state. Inert wherever the clamp is (including the default).
         key = (w, h, bp.warmup_steps, self.params.seed,
-               bp.latitude, bp.width, bp.eddy_scale, bp.zonal_count,
+               bp.latitude, baroclinic_effective_width(bp.latitude, bp.width),
+               bp.eddy_scale, bp.zonal_count,
                bp.smooth, bp.phase_jitter, bp.spectrum_width)
         if self._baro_driver is not None and self._baro_key == key:
             self._baro_driver.reset()  # deterministic: each dev run starts post-warmup
             return  # reuse cached driver (no re-warmup)
+        if self._baro_key == key:
+            # Same key, no driver: this configuration already failed warmup. Stay
+            # degraded rather than re-running a computation known to die (up to
+            # 20000 CPU steps, ~2 min) on every unrelated RESTART edit.
+            self._baro_degraded_reason = self._baro_failed_reason
+            return
         try:
             from gasgiant.sim.baroclinic_driver import (
                 BaroclinicSourceDriver,
@@ -278,14 +297,18 @@ class Simulation:
         # BaroclinicWarmupError name below was never bound.
         except ImportError as exc:
             log.warning("baroclinic coupling disabled: dependency missing (%s)", exc)
-            self._degrade_baroclinic(f"dependency missing: {exc}")
+            self._degrade_baroclinic(f"dependency missing: {exc}", key)
         except BaroclinicWarmupError as exc:
             log.warning("baroclinic coupling disabled: warmup outcropped (%s)", exc)
-            self._degrade_baroclinic(str(exc))
+            self._degrade_baroclinic(str(exc), key)
 
-    def _degrade_baroclinic(self, reason: str) -> None:
+    def _degrade_baroclinic(self, reason: str, key: tuple | None = None) -> None:
+        """Drop to uncoupled. Pass `key` from the BUILD path so the failure is
+        remembered and not retried; the mid-run path passes none, because the
+        config warmed fine and only died partway through development."""
         self._baro_driver = None
-        self._baro_key = None
+        self._baro_key = key
+        self._baro_failed_reason = reason
         self._baro_degraded_reason = reason
 
     @property
@@ -375,6 +398,11 @@ class Simulation:
         try:
             self._baro_driver.advance(self._baro_steps_per_update)
             src = self._baro_driver.current_source()
+        # BaroclinicOutcropError is the live outcrop signal (advance converts
+        # PositivityViolation into it). The bare PositivityViolation arm is
+        # belt-and-braces for a driver that steps the solver somewhere other than
+        # advance -- no production path raises it here, and the stub drivers in
+        # test_facade_baroclinic_status inject it directly.
         except (BaroclinicOutcropError, ref.PositivityViolation,
                 bsrc.IncoherentSourceError) as exc:
             log.warning("baroclinic source disabled mid-run: %s", exc)

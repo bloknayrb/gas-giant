@@ -26,7 +26,6 @@ class CouplingStats:
     baro_seconds: float = 0.0
     upload_seconds: float = 0.0
     v16_seconds: float = 0.0
-    baro_outcropped: bool = False  # the baroclinic source froze (outcropped) mid-run
 
 
 def residency_recommendation(stats: CouplingStats) -> str:
@@ -51,7 +50,10 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
         t1 = time.perf_counter()
         # Measurement harness: NOT wrapped in try/except on purpose -- a coherence
         # gate / outcrop here SHOULD surface loudly (unlike the facade dev loop,
-        # which degrades to uncoupled). Keep the asymmetry deliberate.
+        # which degrades to uncoupled). Keep the asymmetry deliberate. Hence no
+        # `baro_outcropped` field: driver.advance raises BaroclinicOutcropError, so
+        # control never reaches the return and any such flag would be a constant
+        # False. Callers learn about an outcrop from the exception.
         sim.set_external_vorticity_source(driver.current_source(), gain=gain)
         t2 = time.perf_counter()
 
@@ -65,5 +67,4 @@ def run_coupled(sim: Simulation, driver: BaroclinicSourceDriver, gain: float,
         stats.v16_seconds += t3 - t2
         stats.v16_steps += n
         stats.source_updates += 1
-    stats.baro_outcropped = driver.outcropped
     return stats

@@ -80,26 +80,26 @@ How far the flow moves per sim step. Higher = faster development but a coarser, 
 
 ### Band centre latitude
 
-`solver.baroclinic.latitude` &mdash; range **10 to 75**, default **45**, tier `restart`.
+`solver.baroclinic.latitude` &mdash; range **15 to 75**, default **45**, tier `restart`.
 
 Moves the whole belt of extra storms north or south. 45 sits them in the mid-latitudes, like Jupiter's temperate belts; low values crowd them toward the equator (centre of the unstable shear zone, in degrees north; mirrored to the southern hemisphere by the source mask).
 
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/solver__baroclinic__latitude__lo.jpg" width="320"><br><sub>low &middot; 10</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__latitude__hi.jpg" width="320"><br><sub>high &middot; 75</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__latitude__lo.jpg" width="320"><br><sub>low &middot; 15</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 45</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__latitude__hi.jpg" width="320"><br><sub>high &middot; 75</sub></td>
 </tr></table>
 
 ### Band width
 
-`solver.baroclinic.width` &mdash; range **5 to 40**, default **25**, tier `restart`.
+`solver.baroclinic.width` &mdash; range **8 to 40**, default **25**, tier `restart`.
 
 How tall the belt of extra storms is. Higher spreads them over more latitudes; lower squeezes them into one narrow lane (half-width of the seeding envelope in degrees, so the belt spans latitude +/- this).
 
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/solver__baroclinic__width__lo.jpg" width="320"><br><sub>low &middot; 5</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 25</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__width__hi.jpg" width="320"><br><sub>high &middot; 40</sub></td>
+<td align="center"><img src="img/sliders/solver__baroclinic__width__lo.jpg" width="320"><br><sub>low &middot; 8</sub></td><td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 25</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__width__hi.jpg" width="320"><br><sub>high &middot; 40</sub></td>
 </tr></table>
 
 ### baro steps per update
@@ -226,14 +226,14 @@ _Passed to the Blender importer / controls the output file, not the texture appe
 
 ### Stagger the storm band
 
-`solver.baroclinic.phase_jitter` &mdash; range **0 to 4**, default **0**, tier `restart`.
+`solver.baroclinic.phase_jitter` &mdash; range **0 to 2.5**, default **0**, tier `restart`.
 
-Breaks up the row of storms so their crests stop lining up in a vertical comb. Higher staggers them further; 0 = off, every crest shares one phase. 2 is a good starting point (random per-latitude phase offset in radians applied to the seeded pattern).
+Breaks up the row of storms so their crests stop lining up in a vertical comb. Higher staggers them further, and 2 is already fully staggered; 0 = off, every crest shares one phase (random per-latitude phase offset in radians applied to the seeded pattern; 1 rad = 57.3 deg).
 
 _Rendered against the `baroclinic` solver baseline (inert under the default kinematic solver)._
 
 <table><tr>
-<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__phase_jitter__hi.jpg" width="320"><br><sub>high &middot; 4</sub></td>
+<td align="center"><img src="img/sliders/_baseline_baroclinic.jpg" width="320"><br><sub>preset &middot; 0</sub></td><td align="center"><img src="img/sliders/solver__baroclinic__phase_jitter__hi.jpg" width="320"><br><sub>high &middot; 2.5</sub></td>
 </tr></table>
 
 ### Storm edge softness

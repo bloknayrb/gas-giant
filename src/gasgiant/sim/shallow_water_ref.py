@@ -723,9 +723,13 @@ def _seed_pattern(lam, H, W, m_zonal, phase, jitter, k_width, seed):
     acc = np.zeros((H, W))
     for i, m in enumerate(ms):
         acc = acc + amp[i] * np.cos(m * lam[None, :] + phase + ph[i] + off)
-    # Renormalize to the single-mode variance so `pert_amp_frac` keeps meaning
+    # Renormalize to the SINGLE-MODE variance so `pert_amp_frac` keeps meaning
     # the same injected amplitude regardless of how many modes are seeded.
-    return acc / np.sqrt(0.5 * float((amp ** 2).sum()))
+    # Independent phases => var(acc) = sum(amp^2)/2, and a lone cos has var 1/2,
+    # so the divisor is sqrt(sum(amp^2)). Dividing by sqrt(0.5*sum(amp^2))
+    # instead normalizes to UNIT variance and quietly makes this a 1.41x
+    # amplitude lever as well as a spacing one.
+    return acc / np.sqrt(float((amp ** 2).sum()))
 
 
 def _band_envelope(phi: np.ndarray, phi0: float, halfwidth: float) -> np.ndarray:
@@ -837,15 +841,17 @@ def baroclinic_test_state(
     v' = (gp2/f0)(1/(a cos)) dh2'/dlambda) so it does NOT radiate gravity waves
     (the M2-adv lesson).
 
-    H = H1_mean + H2_mean is the total layer-mean depth used in L_D.
+    The total layer-mean depth used in L_D is read back off the BUILT state
+    (`Htot` below), NOT computed as H1_mean + H2_mean: _balanced_sheared_base
+    deepens the upper layer when the interface swing would otherwise clip it,
+    so those are not equal away from the default band (at latitude=45 width=40
+    the realized depth is 32160, not 25000).
     """
     phi_test = np.radians(_PHI_TEST_DEG if phi_test_deg is None else phi_test_deg)
     band_hw = np.radians(
         _BAND_HALFWIDTH_DEG if band_halfwidth_deg is None else band_halfwidth_deg)
     f0 = 2.0 * omega * np.sin(phi_test)
     beta = 2.0 * omega * np.cos(phi_test) / a
-    Htot = H1_mean + H2_mean
-
     # Critical shear & the requested supercriticality.
     U_crit = beta * gp2 * H2_mean / (f0 * f0)
     xi = xi_unstable if unstable else xi_stable
