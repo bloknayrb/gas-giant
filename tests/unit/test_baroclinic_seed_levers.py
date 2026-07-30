@@ -1,4 +1,4 @@
-"""The two seeding levers that break up the injected source's regularity.
+"""The baroclinic artist levers: the storm band, and the two seeding levers.
 
 The baroclinic source never grows -- eddy variance decays monotonically at every
 resolution and every affordable configuration (falsification record:
@@ -164,3 +164,34 @@ def test_levers_do_not_perturb_the_broadband_noise_realisation():
     for over in ({"phase_jitter": 2.0}, {"spectrum_width": 4},
                  {"phase_jitter": 2.0, "spectrum_width": 4}):
         assert np.allclose(_state(**over).h2.mean(axis=1), base, rtol=0, atol=1e-9), over
+
+
+# -- the storm band construction ---------------------------------------------
+
+
+@pytest.mark.parametrize("latitude", [10.0, 20.0, 28.0, 35.0, 45.0, 60.0, 75.0])
+def test_the_band_builds_without_clipping_anywhere_in_its_declared_range(latitude):
+    """A slider must not promise a range it cannot deliver.
+
+    The base state sets h1 = H1_mean - A*cumint with A = xi*H2_mean/tan(lat), so
+    the interface swing diverges as the band moves equatorward -- it nearly
+    doubles between 45 and 28 degrees. Before the upper layer was allowed to
+    deepen, everything at or below ~35 degrees clipped h1 to the floor, which
+    breaks the geostrophic balance the base state exists to satisfy; the warmup
+    then outcropped and the feature silently switched itself off partway down
+    a slider an artist was dragging.
+    """
+    st = ref.baroclinic_test_state(
+        **{**BASE, "phi_test_deg": latitude,
+           "band_halfwidth_deg": min(25.0, latitude * 0.55)})
+    assert float(st.h1.min()) > 1.0, "upper layer clipped at build"
+    assert float(st.h2.min()) > 1.0, "lower layer clipped at build"
+
+
+def test_deepening_is_inert_at_the_default_band():
+    """The deepening must not fire where it is not needed, or it would move the
+    default render. At the default construction h1 clears the floor already."""
+    st = _state()
+    assert float(st.h1.min()) > 1.0
+    assert st._H_mean == pytest.approx(25000.0, abs=1e-9), (
+        "no deepening happened, so the realized depth is the requested one")

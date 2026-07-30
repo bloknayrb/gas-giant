@@ -782,6 +782,21 @@ def _balanced_sheared_base(
     dphi_arr = np.diff(phi)
     cumint = np.concatenate([[0.0], np.cumsum(0.5 * (bump[:-1] + bump[1:]) * dphi_arr)])
     cumint = cumint - float((g.cos_c * cumint).sum() / g.cos_c.sum())
+
+    # The UPPER layer is what this construction can drive negative: h1 = H1_mean
+    # - A*cumint, and A = xi*H2_mean/tan(phi_test), which diverges as the band
+    # moves equatorward -- the swing nearly doubles between 45 and 28 degrees,
+    # and grows linearly with xi besides. Clipping h1 at the floor silently
+    # breaks the geostrophic balance this base state exists to satisfy, and the
+    # run then outcrops during warmup: the band latitude looks like a slider that
+    # switches the feature off below ~35 degrees.
+    #
+    # Deepen the upper layer rather than clip it, and ONLY when it would
+    # otherwise clip. At the default construction h1 clears the floor by 184 m,
+    # so this is inert there and the default state stays bitwise unchanged.
+    swing = float(A * cumint.max())
+    H1_mean = max(H1_mean, swing + 0.01 * H2_mean)
+
     h2_prof = H2_mean + A * cumint
     # Flat top free surface: eta1 = H1_mean + H2_mean (const) => h1 = eta1 - h2.
     h1_prof = (H1_mean + H2_mean) - h2_prof
@@ -889,6 +904,15 @@ def baroclinic_test_state(
 
     h1 = np.maximum(h1, h_floor)
     h2 = np.maximum(h2, h_floor)
+
+    # Read the total depth back off the BUILT state rather than trusting the
+    # requested means: _balanced_sheared_base deepens the upper layer when the
+    # interface swing would otherwise clip it, so H1_mean + H2_mean is not the
+    # realized depth away from the default band. L_D and the growth-rate
+    # diagnostics below read this, and would otherwise be silently wrong exactly
+    # where the construction had to intervene. Equal to H1_mean + H2_mean
+    # whenever no deepening happened, so the default path is unchanged.
+    Htot = float((h1 + h2).mean())
 
     # dt: production a-aware polar CFL with the barotropic external-mode speed.
     c_gw = np.sqrt(gp1 * (h1 + h2).max())
