@@ -295,6 +295,25 @@ default so the whole group is byte-identical until an artist moves one:
   compares `inspect.signature(BaroclinicSourceDriver.__init__)` against the
   kwargs the driver actually passes — the fingerprint cannot cover this, since
   it is a per-build constant and cannot separate two *values* of a new lever.
+- **Every cache failure degrades to a re-warmup, never to an exception.** This
+  is a hard rule rather than defensive habit: the driver does not wrap the
+  cache, and `facade._init_baroclinic` catches only `ImportError` and
+  `BaroclinicWarmupError`, so anything else escapes `Simulation.__init__` and,
+  from the GUI, throws through the imgui frame callback on a RESTART-tier edit.
+  A locked cache file must cost 52 s, not the application. The paths that need
+  it are less exotic than they sound — on Windows an AV scan or a sync agent
+  touching `~/.gasgiant` can make a *valid* entry fail both `np.load` and the
+  unlink that recovers from it. Covered: an unreadable entry, an undeletable
+  one, a write that fails for a non-`OSError` reason (the zip layer raises
+  `LargeZipFile`/`ValueError`; a compress under pressure raises `MemoryError`),
+  an unreadable *source* file during fingerprinting (which returns `None` and
+  disables the cache — without trustworthy source identity a hit could be
+  foreign physics; only a success is memoized, so a transient lock costs one
+  uncached construction), and an undeletable stale temp, which is guarded
+  because an abort there would skip the eviction loop and silently switch the
+  64 MiB cap off. The temp sweep also ignores files younger than an hour: a
+  fresh `.tmp` may be a concurrent process's in-flight write, and sweeping it
+  turns that process's `replace` into a `FileNotFoundError`.
 
 ## Invalidation tiers
 

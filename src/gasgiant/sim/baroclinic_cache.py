@@ -37,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +45,12 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 BARO_CACHE_DIR = Path.home() / ".gasgiant" / "baro_cache"
+
+#: A temp file younger than this may still be an in-flight write by a CONCURRENT
+#: process (a GUI session and a CLI export share the cache), whose `replace`
+#: would then fail with FileNotFoundError. Only temps old enough to be certainly
+#: abandoned get swept.
+_TMP_SWEEP_AGE_S = 3600.0
 
 #: Entries are 768 KiB compressed, and the key space is continuous (an artist
 #: sweeping a slider lands on a new one each time they stop), so unlike the
@@ -78,7 +85,7 @@ _FINGERPRINTED = (
 )
 
 
-def solver_fingerprint() -> str:
+def solver_fingerprint() -> str | None:
     """sha256 over the source text of the modules listed in ``_FINGERPRINTED``.
 
     Computed once per process. Read from disk rather than from a version
@@ -89,36 +96,67 @@ def solver_fingerprint() -> str:
     import graph, so a NEW first-party dependency of the warm state has to be
     added here by hand. Over-inclusion is free (a spurious re-warmup);
     under-inclusion is a false hit, so err toward adding.
+
+    Returns None if the sources cannot be read -- the SAME Windows lock this
+    module guards against for the cache file, but landing on a .py; or a frozen
+    install with no .py on disk. This is the FIRST thing a cache lookup does, so
+    an unguarded read would escape `_init_baroclinic`'s two-arm except and crash
+    Simulation construction before any of the careful degrade paths below could
+    run. A None fingerprint disables the cache: without trustworthy source
+    identity a hit could be a state warmed under different physics.
+
+    The memo only records a SUCCESS, so a transient lock costs one uncached
+    construction rather than poisoning the cache for the whole process.
     """
     global _fingerprint
     if _fingerprint is None:
         here = Path(__file__).parent
         h = hashlib.sha256()
-        for name in _FINGERPRINTED:
-            h.update((here / name).read_bytes())
+        try:
+            for name in _FINGERPRINTED:
+                h.update((here / name).read_bytes())
+        except OSError as exc:
+            log.warning("baroclinic warm-state cache: cannot fingerprint the "
+                        "solver sources, disabling the cache (%s)", exc)
+            return None
         _fingerprint = h.hexdigest()
     return _fingerprint
 
 
-def warm_cache_key(**inputs) -> str:
+def warm_cache_key(**inputs) -> str | None:
     """Stable content hash of the warm-state inputs plus the solver fingerprint.
+
+    None -- meaning "do not use the cache" -- when the fingerprint is
+    unavailable; see ``solver_fingerprint``.
 
     Pure: no filesystem writes, no GL. Callers pass every constructor input the
     warmup depends on; passing a derivation-time input (the output grid, the
     smoothing sigma) would be a bug -- see ``BaroclinicSourceDriver``.
     """
+    fingerprint = solver_fingerprint()
+    if fingerprint is None:
+        return None
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"),
                            default=repr)
-    return hashlib.sha256(
-        f"{solver_fingerprint()}|{canonical}".encode()).hexdigest()
+    return hashlib.sha256(f"{fingerprint}|{canonical}".encode()).hexdigest()
 
 
-def warm_cache_path(key: str, cache_dir: Path = BARO_CACHE_DIR) -> Path:
-    """On-disk path for a warm state (``<cache_dir>/<key>.npz``)."""
+def warm_cache_path(key: str, cache_dir: Path | None = None) -> Path:
+    """On-disk path for a warm state (``<cache_dir>/<key>.npz``).
+
+    None sentinel rather than ``= BARO_CACHE_DIR``, here and on the two
+    functions below, for the reason spelled out on ``_prune``: a default
+    argument binds ONCE at import, so the module constant would freeze. That is
+    not academic for this particular constant -- the autouse ``conftest``
+    fixture redirects the cache by monkeypatching exactly this attribute, so a
+    frozen default would silently read and write the developer's real
+    ``~/.gasgiant/baro_cache`` from inside the test suite.
+    """
+    cache_dir = BARO_CACHE_DIR if cache_dir is None else cache_dir
     return cache_dir / f"{key}.npz"
 
 
-def load_warm_state(key: str, cache_dir: Path = BARO_CACHE_DIR
+def load_warm_state(key: str, cache_dir: Path | None = None
                     ) -> dict[str, np.ndarray] | None:
     """The cached evolving arrays, or None on any miss.
 
@@ -135,6 +173,15 @@ def load_warm_state(key: str, cache_dir: Path = BARO_CACHE_DIR
     Simulation.__init__ and, from the GUI, throw through the imgui frame
     callback on a RESTART-tier edit. A locked cache file must cost a re-warmup,
     never the application.
+
+    The except stays broad ON PURPOSE, and so does unlinking on any of it --
+    reviewed and kept twice, so weigh it before narrowing. Narrowing to the
+    errors that clearly mean "bad file" (BadZipFile, ValueError, KeyError,
+    EOFError) would protect a valid entry from being destroyed by a transient
+    failure whose unlink happens to succeed, at a cost of 52 s once. But an
+    UNLISTED corruption signature then leaves a permanently unreadable file that
+    costs a warning and a re-warmup on every construction, forever, with nothing
+    that ever clears it. Bounded one-off loss beats unbounded repeat loss.
     """
     path = warm_cache_path(key, cache_dir)
     if not path.is_file():
@@ -156,13 +203,20 @@ def load_warm_state(key: str, cache_dir: Path = BARO_CACHE_DIR
 
 
 def save_warm_state(key: str, state: dict[str, np.ndarray],
-                    cache_dir: Path = BARO_CACHE_DIR) -> None:
+                    cache_dir: Path | None = None) -> None:
     """Write a warm state, then prune the directory back under its cap.
 
     Written to a temp file and renamed, so an interrupted write leaves the old
     entry (or nothing) rather than a truncated file that later reads as a
     corrupt hit. Never raises: a cache that cannot be written is a performance
     problem, not a correctness one, and must not take down a working sim.
+
+    The except is deliberately broad, matching `load_warm_state`. OSError alone
+    does not deliver on "never raises": np.savez_compressed goes through the zip
+    layer, which can raise LargeZipFile or ValueError, and a compress under
+    memory pressure can raise MemoryError. Any of those would exit
+    Simulation.__init__ past `_init_baroclinic`'s narrow except -- the exact
+    failure this promise exists to prevent.
 
     The `finally` matters: a write that dies partway (ENOSPC, quota, a failing
     replace) would otherwise strand its temp file forever. `_prune` globs
@@ -171,6 +225,7 @@ def save_warm_state(key: str, state: dict[str, np.ndarray],
     successful `replace` has already consumed the temp, so the unlink is a
     no-op on the happy path.
     """
+    cache_dir = BARO_CACHE_DIR if cache_dir is None else cache_dir
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         path = warm_cache_path(key, cache_dir)
@@ -182,7 +237,7 @@ def save_warm_state(key: str, state: dict[str, np.ndarray],
         finally:
             tmp.unlink(missing_ok=True)
         _prune(cache_dir)
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
         log.warning("baroclinic warm-state cache: write failed (%s)", exc)
 
 
@@ -203,8 +258,21 @@ def _prune(cache_dir: Path, max_bytes: int | None = None) -> None:
     # Sweep temps stranded by a crash (a kill between open and replace outruns
     # save_warm_state's `finally`). Harmless to read past -- nothing ever opens
     # them -- but invisible to the cap below, which globs *.npz.
+    #
+    # Guarded per file, and NOT because a stranded temp is precious. An
+    # undeletable one (the same AV/sync lock as elsewhere) would otherwise abort
+    # _prune before the eviction loop, so the 64 MiB cap would silently stop
+    # being enforced for as long as that file existed -- and from
+    # save_warm_state the abort is swallowed and logged as "write failed" even
+    # though the write succeeded.
+    cutoff = time.time() - _TMP_SWEEP_AGE_S
     for stale in cache_dir.glob("*.tmp"):
-        stale.unlink(missing_ok=True)
+        try:
+            if stale.stat().st_mtime <= cutoff:
+                stale.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("baroclinic warm-state cache: could not sweep %s (%s)",
+                        stale.name, exc)
     entries = sorted(cache_dir.glob("*.npz"), key=lambda p: p.stat().st_mtime)
     total = sum(p.stat().st_size for p in entries)
     while total > max_bytes and len(entries) > 1:

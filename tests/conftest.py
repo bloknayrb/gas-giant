@@ -22,7 +22,7 @@ def _isolate_baroclinic_cache(tmp_path, monkeypatch):
 
     Two reasons this is autouse rather than opt-in. Writing: the facade opts
     into the disk cache, so any test that builds a baroclinic-enabled
-    Simulation would otherwise deposit ~740 KiB in the developer's real
+    Simulation would otherwise deposit ~768 KiB in the developer's real
     ``~/.gasgiant/baro_cache``. Reading: a hit would let a test skip the warmup
     it is there to exercise, so a regression in the warmup could pass on a
     machine that had run the suite before and fail on a clean checkout -- the

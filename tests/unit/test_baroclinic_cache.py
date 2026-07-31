@@ -207,10 +207,112 @@ def test_a_failed_write_strands_no_temp_file(cache_dir, monkeypatch):
 def test_prune_sweeps_temps_stranded_by_a_crash(cache_dir):
     """save_warm_state's `finally` cannot run if the process is killed between
     open and replace, so the sweep is the second line of defence."""
+    import os
     cache_dir.mkdir(parents=True)
-    (cache_dir / "k.npz.deadbeef.tmp").write_bytes(b"x" * 100)
+    tmp = cache_dir / "k.npz.deadbeef.tmp"
+    tmp.write_bytes(b"x" * 100)
+    os.utime(tmp, (1000, 1000))  # older than the sweep age
     bcache._prune(cache_dir)
     assert not list(cache_dir.glob("*.tmp"))
+
+
+def test_prune_leaves_a_FRESH_temp_alone(cache_dir):
+    """A temp younger than the sweep age may be a CONCURRENT process's in-flight
+    write (a GUI session and a CLI export share ~/.gasgiant/baro_cache). Sweeping
+    it turns that process's `replace` into a FileNotFoundError, so its warmup is
+    thrown away -- 52 s lost to a cache that was supposed to save it."""
+    cache_dir.mkdir(parents=True)
+    tmp = cache_dir / "k.npz.deadbeef.tmp"
+    tmp.write_bytes(b"x" * 100)
+    bcache._prune(cache_dir)
+    assert tmp.exists()
+
+
+def test_an_undeletable_temp_does_not_stop_eviction(cache_dir, monkeypatch):
+    """An unguarded sweep aborts _prune BEFORE the eviction loop, so one locked
+    temp would silently switch the 64 MiB cap off for as long as it existed --
+    and from save_warm_state the abort is swallowed as a 'write failed' warning
+    even though the write succeeded."""
+    import os
+    cache_dir.mkdir(parents=True)
+    tmp = cache_dir / "stuck.npz.beef.tmp"
+    tmp.write_bytes(b"x" * 100)
+    os.utime(tmp, (1000, 1000))
+    for i, name in enumerate(["old", "new"]):
+        p = cache_dir / f"{name}.npz"
+        p.write_bytes(b"x" * 1000)
+        os.utime(p, (2000 + i, 2000 + i))
+
+    real_unlink = bcache.Path.unlink
+
+    def locked(self, *a, **k):
+        if self.name.endswith(".tmp"):
+            raise PermissionError(32, "being used by another process")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(bcache.Path, "unlink", locked)
+    bcache._prune(cache_dir, max_bytes=1500)  # must NOT raise
+    assert [p.stem for p in cache_dir.glob("*.npz")] == ["new"], "cap must still bite"
+
+
+def test_a_non_OSError_write_failure_is_not_fatal(cache_dir, monkeypatch):
+    """'Never raises' has to mean it. np.savez_compressed reaches the zip layer
+    (LargeZipFile, ValueError) and compresses under whatever memory is left
+    (MemoryError); none of those are OSError, and any of them would exit
+    Simulation.__init__ past _init_baroclinic's two-arm except."""
+    def die(*a, **k):
+        raise MemoryError("unable to allocate")
+
+    monkeypatch.setattr(bcache.np, "savez_compressed", die)
+    bcache.save_warm_state("k", _state(), cache_dir)  # must NOT raise
+    assert bcache.load_warm_state("k", cache_dir) is None
+
+
+def test_unreadable_solver_sources_disable_the_cache(cache_dir, monkeypatch):
+    """The fingerprint is the FIRST thing a lookup does, ahead of every degrade
+    path in this module, and it is reached from the driver's constructor. An
+    unguarded read_bytes -- the same AV lock, or a frozen install with no .py on
+    disk -- would crash Simulation construction. A cache may only ever cost a
+    re-warmup."""
+    monkeypatch.setattr(bcache, "_fingerprint", None)
+
+    def locked(self, *a, **k):
+        raise PermissionError(32, "being used by another process")
+
+    monkeypatch.setattr(bcache.Path, "read_bytes", locked)
+    assert bcache.solver_fingerprint() is None
+    assert bcache.warm_cache_key(x=1) is None, "no source identity => no cache"
+
+
+def test_a_failed_fingerprint_is_not_memoized(cache_dir, monkeypatch):
+    """A transient lock must cost ONE uncached construction, not poison the
+    cache for the rest of the process. Only a success is memoized."""
+    monkeypatch.setattr(bcache, "_fingerprint", None)
+    calls = {"n": 0}
+    real = bcache.Path.read_bytes
+
+    def flaky(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError(32, "being used by another process")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(bcache.Path, "read_bytes", flaky)
+    assert bcache.solver_fingerprint() is None
+    assert bcache.solver_fingerprint() is not None, "the retry must not be blocked"
+
+
+def test_the_default_cache_dir_is_read_at_CALL_time(tmp_path, monkeypatch):
+    """As `cache_dir: Path = BARO_CACHE_DIR` the default binds at import, and the
+    autouse conftest fixture -- which redirects the cache by monkeypatching this
+    exact attribute -- would silently stop working: any caller that omitted
+    cache_dir would read and write the developer's real ~/.gasgiant/baro_cache
+    from inside the test suite."""
+    monkeypatch.setattr(bcache, "BARO_CACHE_DIR", tmp_path / "elsewhere")
+    assert bcache.warm_cache_path("k").parent == tmp_path / "elsewhere"
+    bcache.save_warm_state("k", _state())
+    assert (tmp_path / "elsewhere" / "k.npz").is_file()
+    assert bcache.load_warm_state("k") is not None
 
 
 def test_unwritable_cache_is_not_fatal(cache_dir, monkeypatch):
