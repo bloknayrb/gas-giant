@@ -51,7 +51,7 @@ uv run gasgiant validate out/jove        # seam/pole invariants
 # Override how long the planet develops before the snapshot:
 uv run gasgiant export --preset saturn_pale --dev-steps 1000 --out out/saturn
 
-# Big one: 16384x8192 (about half a minute on an RTX 3070)
+# Big one: 16384x8192 (about half a minute on an RTX 3070); --res goes to 32768
 uv run gasgiant export --preset jupiter_like --res 16384 --out out/jove16k
 
 # Animate: export an N-frame color sequence, advancing the sim between frames

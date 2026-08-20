@@ -57,6 +57,20 @@ log = logging.getLogger(__name__)
 # Extra steps to adapt after a VELOCITY-tier change once the run was finished.
 _ADAPT_STEPS = 120
 
+# Widest map render_maps() will build in one piece. The portable floor for
+# GL_MAX_TEXTURE_SIZE across the GPUs this ships on (AMD/Intel/llvmpipe report
+# 16384; NVIDIA reports 32768), and also about where a single rgba32f map stops
+# being a sane host readback -- 16384 is 2.1 GB, 32768 would be 8.6 GB.
+# export.width may exceed this; the tiled exporter serves those widths.
+RENDER_MAPS_MAX_WIDTH = 16384
+
+
+class ResolutionUnsupportedError(ValueError):
+    """A width this code path cannot serve, with a working alternative named.
+
+    ValueError subclass so existing `except ValueError` handlers (e.g. the CLI's
+    checkpoint-load guard) keep catching it."""
+
 
 def _hero_lat_deg(params: PlanetParams) -> float | None:
     """The pinned-hero latitude threaded into build_profiles for the
@@ -805,9 +819,24 @@ class Simulation:
     def render_maps(self, width: int | None = None) -> dict[str, np.ndarray]:
         """Run the development to completion if needed, then derive maps at the
         given width and read them back. (Phase 4 replaces this with the tiled,
-        detail-injected export.)"""
-        self.run_to_completion()
+        detail-injected export.)
+
+        Capped at ``RENDER_MAPS_MAX_WIDTH``: this is the UNTILED path, so it
+        allocates a single ``w x w/2`` rgba32f (8.6 GB at 32768, plus the same
+        again when emission is on) and would also exceed ``GL_MAX_TEXTURE_SIZE``
+        on AMD/Intel/llvmpipe, which report 16384. ``export.width`` accepts more
+        than this; the tiled exporter (``export.exporter.export_job``) is what
+        serves those widths."""
         w = width or self.params.export.width
+        if w > RENDER_MAPS_MAX_WIDTH:
+            # Before run_to_completion: no reason to spend a full dev run on a
+            # width this path is going to refuse.
+            raise ResolutionUnsupportedError(
+                f"render_maps() cannot serve width {w}: it allocates the whole "
+                f"map as one texture and is capped at {RENDER_MAPS_MAX_WIDTH}. "
+                f"Use the tiled export path (gasgiant.export.exporter) instead."
+            )
+        self.run_to_completion()
         color_tex = self.gpu.texture2d((w, w // 2), 4, "f4")
         height_tex = self.gpu.texture2d((w, w // 2), 1, "f4")
         # Allocated only when enabled (a 16K rgba32f texture is 2 GB).

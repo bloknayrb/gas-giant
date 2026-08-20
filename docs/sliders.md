@@ -1996,7 +1996,7 @@ _Choice field (GUI dropdown) &mdash; documented as text; no rendered example._
 
 ### width
 
-`export.width` &mdash; range **512 to 16384**, default **2048**, tier `post`.
+`export.width` &mdash; range **512 to 32768**, default **2048**, tier `post`.
 
 Map width in pixels. On the default equirect projection the height is half the width, the standard 2:1 ratio; on the cube projection each of the six faces is width/4 square instead
 

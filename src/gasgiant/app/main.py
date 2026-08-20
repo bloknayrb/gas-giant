@@ -138,14 +138,17 @@ SESSION_PATH = Path.home() / ".gasgiant" / "session.json"
 THUMB_DISPLAY_W = 88.0
 THUMB_DISPLAY_H = THUMB_DISPLAY_W / 2.0
 
-# Export-resolution presets for the combo next to the Export button. Widths are
-# within ExportParams.width's (512, 16384) bounds; height is always width // 2.
+# Export-resolution presets for the combo next to the Export button. Widths stay
+# within ExportParams.width's schema bounds (asserted by
+# test_export_resolutions_within_bounds, which reads them off the model rather
+# than restating them here); height is always width // 2.
 EXPORT_RESOLUTIONS: list[tuple[int, str]] = [
     (1024, "1K"),
     (2048, "2K"),
     (4096, "4K"),
     (8192, "8K"),
     (16384, "16K"),
+    (32768, "32K"),
 ]
 
 # Playback speed options for draw_equirect's steps-per-frame. "Max" is bounded

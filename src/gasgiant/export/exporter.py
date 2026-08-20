@@ -50,6 +50,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# H.264 caps a coded width/height at 16384 px (level-independent), so a video
+# encode is refused above it even though a still map set of that size is fine.
+H264_MAX_DIM = 16384
+
 TILE = 1024
 
 # Sequence export encodes each finished frame off-thread (PNG deflate / EXR ZIP
@@ -79,6 +83,18 @@ def roi_tile_origin(
         o = int(round(c * full - tile / 2.0))
         return max(0, min(full - tile, o))
     return axis(center_x, full_w), axis(center_y, full_h)
+
+
+def enumerate_tiles(w: int, h: int, tile: int = TILE) -> list[tuple[int, int]]:
+    """Top-left corners of the tiles covering a ``w x h`` map, row-major.
+
+    Row-major matters beyond tidiness: it makes every horizontal band of height
+    ``tile`` complete before the next band starts, which is what lets a consumer
+    finish with a band (encode it, flush it) instead of holding the whole map.
+    The last column/row are short when ``w``/``h`` are not multiples of ``tile``;
+    callers clamp against ``w``/``h``, so the corners alone define the cover.
+    """
+    return [(x, y) for y in range(0, h, tile) for x in range(0, w, tile)]
 
 
 def derive_tile(
@@ -316,11 +332,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
         yield from _export_cube_job(sim, out_dir, snap, params, w, gpu)
         return
 
-    tiles = [
-        (x, y)
-        for y in range(0, h, TILE)
-        for x in range(0, w, TILE)
-    ]
+    tiles = enumerate_tiles(w, h)
     total = len(tiles) + 2  # + encode + manifest
 
     emission_on = params.emission.enabled
@@ -568,6 +580,20 @@ def export_sequence_job(
             "sequence export requires export.projection 'equirect'; "
             "a cube-map set has no color.png to sequence"
         )
+    if video:
+        # Fail fast BEFORE any dev/GL work, for the same reason as the cube guard
+        # above: H.264 caps a coded dimension at 16384, so a wider sequence would
+        # render every frame and only then die inside ffmpeg. Guarded HERE rather
+        # than in the CLI because the GUI reaches this job directly
+        # (app/main.py's _start_export), and build_ffmpeg_cmd's width/height are
+        # documented as unused -- neither call site would otherwise check.
+        seq_w = width or base_params.export.width
+        if seq_w > H264_MAX_DIM:
+            raise ValueError(
+                f"--video cannot encode a {seq_w}px-wide sequence: H.264 caps a "
+                f"coded dimension at {H264_MAX_DIM}. Export the frames without "
+                f"video, or lower export.width."
+            )
     if ramp_to is not None:
         # Fail fast BEFORE any GL/dev work: a RESTART-tier or seed diff can't ramp.
         from gasgiant.params.interp import validate_ramp
