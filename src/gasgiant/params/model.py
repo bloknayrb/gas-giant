@@ -2399,7 +2399,7 @@ class ProjectionKind(StrEnum):
 
 class ExportParams(_Params):
     width: int = pfield(
-        2048, tier=Tier.POST, lo=512, hi=16384, ui="Export",
+        2048, tier=Tier.POST, lo=512, hi=32768, ui="Export",
         description="Map width in pixels. On the default equirect projection "
                     "the height is half the width, the standard 2:1 ratio; on "
                     "the cube projection each of the six faces is width/4 "

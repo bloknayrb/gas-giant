@@ -132,6 +132,27 @@ def main(argv: list[str] | None = None) -> int:
     return _validate(args)
 
 
+def _range_error(group: str, field: str, flag: str, value: int) -> str | None:
+    """Message for an out-of-range CLI override, or None if it is fine.
+
+    Bounds are read off the schema rather than restated here, so changing a cap
+    in the params model moves this message with it. Without this, assigning into
+    the model (which is validate_assignment=True) surfaces as a raw pydantic
+    traceback rather than a CLI error."""
+    from gasgiant.params.model import PlanetParams
+
+    info = PlanetParams.model_fields[group].annotation.model_fields[field]
+    lo = next(m.ge for m in info.metadata if hasattr(m, "ge"))
+    hi = next(m.le for m in info.metadata if hasattr(m, "le"))
+    if not lo <= value <= hi:
+        return f"error: {flag} {value} is out of range ({lo}..{hi})"
+    return None
+
+
+def _export_width_error(res: int) -> str | None:
+    return _range_error("export", "width", "--res", res)
+
+
 def _resolve_params_from_args(args: argparse.Namespace, *, default_preset: str):
     """Resolve the params for a preset-building subcommand (export/checkpoint):
     apply any --recipe overlay onto the base preset, then the CLI overrides
@@ -177,8 +198,14 @@ def _resolve_params_from_args(args: argparse.Namespace, *, default_preset: str):
     if updates:
         params = params.model_copy(update=updates)
     if args.res is not None:
+        if (msg := _export_width_error(args.res)) is not None:
+            print(msg, file=sys.stderr)
+            return None, 2
         params.export.width = args.res
     if getattr(args, "dev_steps", None) is not None:
+        if (msg := _range_error("sim", "dev_steps", "--dev-steps", args.dev_steps)) is not None:
+            print(msg, file=sys.stderr)
+            return None, 2
         params.sim.dev_steps = args.dev_steps
 
     # Mask sidecar: load_preset already resolved a relative path against the
@@ -195,7 +222,7 @@ def _resolve_params_from_args(args: argparse.Namespace, *, default_preset: str):
 def _export(args: argparse.Namespace) -> int:
     from gasgiant.engine import Simulation
     from gasgiant.engine.checkpoint import load_checkpoint
-    from gasgiant.export.exporter import run_export, run_export_sequence
+    from gasgiant.export.exporter import H264_MAX_DIM, run_export, run_export_sequence
     from gasgiant.export.video import ffmpeg_available as _ffmpeg_available
 
     if (args.frames is None) != (args.steps_per_frame is None):
@@ -239,6 +266,9 @@ def _export(args: argparse.Namespace) -> int:
             # they re-derive maps without touching the resumed dev state.
             new_params = sim.params.model_copy(deep=True)
             if args.res is not None:
+                if (msg := _export_width_error(args.res)) is not None:
+                    print(msg, file=sys.stderr)
+                    return 2
                 new_params.export.width = args.res
             if args.name is not None:
                 new_params.name = args.name
@@ -253,6 +283,16 @@ def _export(args: argparse.Namespace) -> int:
     if args.frames is not None:
         if args.video and not _ffmpeg_available():
             print("error: --video needs ffmpeg on PATH (not found)", file=sys.stderr)
+            return 2
+        if args.video and params.export.width > H264_MAX_DIM:
+            # export_sequence_job raises on this too (the guard the GUI relies
+            # on); checking here as well turns it into a clean CLI error before
+            # the sim is built and developed.
+            print(
+                f"error: --video cannot encode a {params.export.width}px-wide "
+                f"sequence: H.264 caps a coded dimension at {H264_MAX_DIM}",
+                file=sys.stderr,
+            )
             return 2
         ramp_to = None
         if args.ramp_to is not None:
