@@ -287,7 +287,12 @@ def run(res: int, steps: int, tracer_mult: int, seed: int,
     adv_belt = belt_crop(advected).astype(np.float32)
     rot_belt = np.rot90(adv_belt).copy()
 
+    # Contrast retention: 1.0 = the tracer kept its seed variance, 0.0 = fully
+    # homogenized. Each step is one bicubic resample, so a long run diffuses the
+    # scalar numerically -- and a detail layer that has washed out cannot carry
+    # primary structure however well-oriented what remains is.
     out = {
+        "contrast_retained": round(float(advected.std() / max(seed_arr.std(), 1e-9)), 4),
         "coher_seed_control": round(float(coher(seed_belt)), 4),
         "coher_advected": round(float(coher(adv_belt)), 4),
         "coher_advected_rot90": round(float(coher(rot_belt)), 4),
@@ -299,10 +304,14 @@ def run(res: int, steps: int, tracer_mult: int, seed: int,
         out["coher_translate_control"] = round(float(coher(belt_crop(cadv))), 4)
         ctrl_vel.release()
         ccur.release(); cnxt.release()
+    fields = {"seed": seed_belt, "advected": adv_belt}
     if fcur is not None:
         frozen = gpu.read_texture(fcur)[..., 0]
-        out["coher_frozen_control"] = round(float(coher(belt_crop(frozen))), 4)
+        frozen_belt = belt_crop(frozen).astype(np.float32)
+        out["coher_frozen_control"] = round(float(coher(frozen_belt)), 4)
+        fields["frozen"] = frozen_belt
         fcur.release(); fnxt.release()
+    out["_fields"] = fields
 
     sim.release()
     cur.release(); nxt.release()
@@ -329,6 +338,10 @@ def main() -> None:
     ap.add_argument("--no-frozen-control", action="store_true",
                     help="skip the frozen-field control (it costs `steps` extra "
                          "advections, though no extra solver steps)")
+    ap.add_argument("--dump-dir", type=Path, default=None,
+                    help="write the seed/advected/frozen belt crops as PNGs -- "
+                         "the metric cannot distinguish folded filaments from "
+                         "streamline stripes, so looking is not optional")
     ap.add_argument("--out", type=Path, default=None,
                     help="also write the result dict as JSON here, so arms can be "
                          "compared without retyping numbers")
@@ -344,7 +357,22 @@ def main() -> None:
     # FIXED step count means LESS development at higher resolution. Recording it
     # is what keeps arms comparable -- omitting it is what let the original gate
     # compare a run against a proxy carrying 8x its development.
+    fields = result.pop("_fields", {})
     result["flow_time"] = round(result["dt"] * result["steps"], 3)
+
+    if args.dump_dir is not None:
+        # coher cannot tell FOLDED FILAMENTS from STREAMLINE STRIPES -- both are
+        # orientation-coherent, and stripes are the frozen field's KNOWN failure
+        # mode (docs/roadmap.md:254-276). So a frozen control that outscores the
+        # evolving one is not self-interpreting. Write the fields out and look.
+        import cv2
+
+        args.dump_dir.mkdir(parents=True, exist_ok=True)
+        for name, f in fields.items():
+            lo, hi = float(f.min()), float(f.max())
+            img = np.uint8(255 * (f - lo) / max(hi - lo, 1e-9))
+            cv2.imwrite(str(args.dump_dir / f"{name}.png"), img)
+        print(f"  dumped {len(fields)} belt crops to {args.dump_dir}")
 
     print("\n==== detail-character crux result ====")
     for k, v in result.items():
