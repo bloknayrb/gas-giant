@@ -6,12 +6,31 @@ high-res tracer"): advecting ONE extra *high-resolution* passive tracer through 
 dynamics grid — folds an isotropic seed into ORIENTED (zonally-elongated filamentary)
 structure, the morphology a frozen-field render trick cannot produce (F17, FALSIFIED).
 
-The crux gate the roadmap pre-registers: measure the structure-tensor ORIENTATION
-COHERENCE of the resulting tracer and check whether it crosses the F17 bar
-    kinematic/isotropic control  ~0.14
-    vorticity-solver tracer       0.384   (the go bar)
-    Cassini reference             0.62    (strong target)
-Go/no-go on that number BEFORE committing the multi-session subsystem build.
+MEASURE, do not grade. The roadmap pre-registered a go/no-go against 0.384, and
+that framing does not survive scrutiny -- this script no longer prints a verdict
+against it:
+  * 0.384 is the SHIPPED jupiter_vorticity v1.6 RENDER's own score
+    (docs/realism.md:558-564), so reaching it demonstrates PARITY with today, not
+    improvement -- and the premise of the feature is that today reads as noise.
+  * docs/realism.md:581-584 says so outright: "The blind judge panel is the gate;
+    0.384 is an improvement benchmark, not a pass/fail threshold."
+  * It was measured on RENDERED LUMINANCE, not a raw tracer, and on a belt crop
+    3.6x finer than this one (100 deg of longitude fitted to 640px, against 360
+    deg here). The same reference image scores 0.617 at that crop scale and 0.653
+    at this one, so the anchors are not commensurable with this script's output.
+  * The absolute drifts -18%..-29% with dynamics resolution for IDENTICAL content
+    (the INTER_AREA resize in belt_crop), while the isotropic seed control stays
+    flat at 0.083-0.085. So the SEPARATION RATIO is the resolution-robust
+    statistic and the absolute is not.
+
+Report the ratios, compare arms against each other, then RENDER and look.
+
+FLOW-TIME is the axis that actually drives the absolute magnitude, and it is easy
+to get wrong: dt ~ 1/resolution (sim/solver.py::compute_dt), so a FIXED step count
+means LESS development at higher resolution. flow_time = dt * steps ~= 3.913 *
+steps / res, which reproduces every row of the 2026-07-08 verdict table. The proxy
+that scored 0.314 ran at flow-time 10.7; `--res 2048 --steps 700` is 1.34, i.e. 8x
+LESS developed. Match flow-time when comparing across resolutions.
 
 METRIC: identical operator to the calibrated project metric — we import
 `scripts/measure_morphology.py::coher` (structure-tensor coherence c=(l1-l2)/(l1+l2),
@@ -47,6 +66,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -163,7 +183,8 @@ def belt_crop(field2d: np.ndarray, lat_half_deg: float = 30.0,
 
 
 def run(res: int, steps: int, tracer_mult: int, seed: int,
-        k_lo: float, k_hi: float, control_translate: bool) -> dict:
+        k_lo: float, k_hi: float, control_translate: bool,
+        control_frozen: bool = True) -> dict:
     gpu = GpuContext.headless()
     gpu.make_current()
     print(f"GL renderer: {gpu.ctx.info.get('GL_RENDERER', '?')}")
@@ -214,6 +235,18 @@ def run(res: int, steps: int, tracer_mult: int, seed: int,
         ccur = r32f(seed_arr)
         cnxt = r32f(np.zeros((th, tw), np.float32))
 
+    # H1 -- FROZEN-FIELD CONTROL. The distinction this whole line rests on is
+    # "an EVOLVING field folds chaotically, a FROZEN one cannot" -- and that was
+    # recorded as "FALSIFIED by analysis" (docs/roadmap.md:254) with no
+    # measurement, against a spike whose three controls (seed / translate /
+    # rot90) do not test it. Same seed, same kernel, same step count, advected
+    # through the FINAL velocity held fixed: if this lands near the evolving
+    # tracer, the premise is wrong and nothing downstream matters.
+    fcur = fnxt = None
+    if control_frozen:
+        fcur = r32f(seed_arr)
+        fnxt = r32f(np.zeros((th, tw), np.float32))
+
     ctx = gpu.ctx
     t0 = time.time()
     for i in range(steps):
@@ -235,6 +268,21 @@ def run(res: int, steps: int, tracer_mult: int, seed: int,
 
     advected = gpu.read_texture(cur)[..., 0]
 
+    if fcur is not None:
+        # vel_tex now HOLDS the final state; simply not stepping the solver is
+        # what makes this the frozen field. Same `steps`, so the two tracers see
+        # the same number of interpolations -- only time-dependence differs.
+        t_frozen = time.time()
+        for i in range(steps):
+            fcur.use(location=0); kernel["u_src"].value = 0
+            vel_tex.use(location=1); kernel["u_vel"].value = 1
+            fnxt.bind_to_image(0, read=False, write=True)
+            kernel.run(gx, gy, 1); ctx.memory_barrier()
+            fcur, fnxt = fnxt, fcur
+            if (i + 1) % max(1, steps // 5) == 0:
+                print(f"  frozen-control step {i + 1}/{steps} "
+                      f"({time.time() - t_frozen:.1f}s)")
+
     seed_belt = belt_crop(seed_arr).astype(np.float32)
     adv_belt = belt_crop(advected).astype(np.float32)
     rot_belt = np.rot90(adv_belt).copy()
@@ -250,10 +298,23 @@ def run(res: int, steps: int, tracer_mult: int, seed: int,
         cadv = gpu.read_texture(ccur)[..., 0]
         out["coher_translate_control"] = round(float(coher(belt_crop(cadv))), 4)
         ctrl_vel.release()
+        ccur.release(); cnxt.release()
+    if fcur is not None:
+        frozen = gpu.read_texture(fcur)[..., 0]
+        out["coher_frozen_control"] = round(float(coher(belt_crop(frozen))), 4)
+        fcur.release(); fnxt.release()
 
     sim.release()
     cur.release(); nxt.release()
     return out
+
+
+
+
+# Below this flow-time the premise test cannot discriminate: the velocity field
+# has barely evolved over the run, so the frozen control IS approximately the
+# evolving one. The proxy that scored 0.314 ran at flow-time 10.7.
+_PREMISE_MIN_FLOW_TIME = 2.0
 
 
 def main() -> None:
@@ -265,33 +326,83 @@ def main() -> None:
     ap.add_argument("--k-lo", type=float, default=24.0, help="seed band low wavenumber (cyc)")
     ap.add_argument("--k-hi", type=float, default=96.0, help="seed band high wavenumber (cyc)")
     ap.add_argument("--no-translate-control", action="store_true")
+    ap.add_argument("--no-frozen-control", action="store_true",
+                    help="skip the frozen-field control (it costs `steps` extra "
+                         "advections, though no extra solver steps)")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="also write the result dict as JSON here, so arms can be "
+                         "compared without retyping numbers")
     args = ap.parse_args()
 
-    res = args.res
     result = run(
-        res=res, steps=args.steps, tracer_mult=args.tracer_mult, seed=args.seed,
-        k_lo=args.k_lo, k_hi=args.k_hi, control_translate=not args.no_translate_control,
+        res=args.res, steps=args.steps, tracer_mult=args.tracer_mult, seed=args.seed,
+        k_lo=args.k_lo, k_hi=args.k_hi,
+        control_translate=not args.no_translate_control,
+        control_frozen=not args.no_frozen_control,
     )
+    # Flow-time is what the absolute number actually tracks: dt ~ 1/res, so a
+    # FIXED step count means LESS development at higher resolution. Recording it
+    # is what keeps arms comparable -- omitting it is what let the original gate
+    # compare a run against a proxy carrying 8x its development.
+    result["flow_time"] = round(result["dt"] * result["steps"], 3)
 
     print("\n==== detail-character crux result ====")
     for k, v in result.items():
         print(f"  {k:>26}: {v}")
+
     c_adv = result["coher_advected"]
     c_ctl = result["coher_seed_control"]
-    print("\n  bar: isotropic control ~0.14 | GO 0.384 | strong 0.62")
-    print(f"  advected {c_adv}  vs seed control {c_ctl}  "
-          f"(separation x{c_adv / max(c_ctl, 1e-6):.2f})")
-    print(f"  rot90(advected) {result['coher_advected_rot90']} "
-          "(must collapse toward control if the signal is oriented HORIZONTAL structure)")
-    if c_adv >= 0.62:
-        verdict = "GO (strong): clears the 0.62 reference target"
-    elif c_adv >= 0.384:
-        verdict = "GO: clears the 0.384 bar"
-    elif c_adv > 1.5 * c_ctl:
-        verdict = "SEPARATES from control but below the 0.384 bar (see fidelity caveat)"
-    else:
-        verdict = "NO separation from the isotropic control"
-    print(f"  VERDICT (this fidelity): {verdict}")
+    sep = c_adv / max(c_ctl, 1e-6)
+
+    # HEADLINE = the separation RATIO, not the absolute. The absolute drifts
+    # -18%..-29% with dynamics resolution for IDENTICAL content (the belt crop's
+    # INTER_AREA resize), while the seed control measures flat at 0.083-0.085
+    # across res 256-2048 -- so the ratio is resolution-robust and the absolute
+    # is not.
+    print(f"\n  SEPARATION x{sep:.2f}   (advected {c_adv} / seed control {c_ctl})")
+    print(f"  rot90(advected) {result['coher_advected_rot90']} -- must collapse "
+          "toward the control if the signal is oriented HORIZONTAL structure")
+
+    if "coher_frozen_control" in result:
+        c_fro = result["coher_frozen_control"]
+        fsep = c_adv / max(c_fro, 1e-6)
+        print(f"\n  PREMISE TEST -- evolving {c_adv} vs frozen {c_fro}  (x{fsep:.2f})")
+        if result["flow_time"] < _PREMISE_MIN_FLOW_TIME:
+            # At short development the two fields ARE nearly the same field: the
+            # velocity has barely evolved over the run, so frozen ~= evolving by
+            # construction and a low ratio says nothing. Only a run with real
+            # flow-time can discriminate.
+            print(f"    (under-developed: flow-time {result['flow_time']} < "
+                  f"{_PREMISE_MIN_FLOW_TIME}. The velocity barely changes over "
+                  "this run, so")
+            print("     frozen ~= evolving is EXPECTED and carries no verdict. "
+                  "Re-run with more flow-time.)")
+        elif fsep < 1.15:
+            print("    ** evolving does NOT beat frozen. The premise that a "
+                  "time-dependent field folds")
+            print("       where a frozen one cannot is not showing up here. "
+                  "STOP and re-derive before")
+            print("       building anything on it.")
+        else:
+            print("    evolving beats frozen -- the time-dependence is doing the "
+                  "work, as designed.")
+
+    # Deliberately NO pass/fail verdict against 0.384. That number is the SHIPPED
+    # jupiter_vorticity v1.6 RENDER's own score (docs/realism.md:558-564) -- i.e.
+    # parity with today, not success. It was measured on rendered luminance
+    # rather than a raw tracer, and on a belt crop 3.6x finer than this one
+    # (100 deg of longitude fitted to 640px, vs 360 deg here; the same reference
+    # image scores 0.617 there and 0.653 here). realism.md:581-584 states it
+    # outright: "The blind judge panel is the gate; 0.384 is an improvement
+    # benchmark, not a pass/fail threshold."
+    print("\n  No pass/fail verdict: compare arms to each other, then render and look.")
+    print("  (0.384 is the shipped v1.6 RENDER's score on a 3.6x finer crop -- not "
+          "a bar this raw tracer can be held to.)")
+
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"\n  wrote {args.out}")
 
 
 if __name__ == "__main__":
