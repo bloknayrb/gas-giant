@@ -314,6 +314,52 @@ before proposing work in these areas.
 > spike at dynamics 1024–2048 / 700 steps / tracer 4× confirming advected
 > coher ≥ 0.384 (re-run the harness unchanged). The design premise below stands.
 
+> **SUPERSEDED 2026-08-20 — the gate above was run, and it does not decide what it
+> was written to decide.** Native RTX 3070, harness corrected first (see
+> `scripts/spike_detail_character.py`; the verdict banner is gone). Three reasons the
+> pre-registered form was unsound, and one measured result that matters more:
+>
+> * **0.384 is not a bar this can be held to.** It is the *shipped* `jupiter_vorticity`
+>   v1.6 RENDER's own score (`docs/realism.md:558-564`) — so reaching it shows parity
+>   with today, not improvement — measured on rendered luminance rather than a raw
+>   tracer, on a belt crop **3.6x finer** than the spike's (100 deg of longitude fitted
+>   to 640 px against 360 deg). The same reference image scores 0.617 at that crop scale
+>   and 0.653 at the spike's. And `docs/realism.md:581-584` already says it outright:
+>   "The blind judge panel is the gate; 0.384 is an improvement benchmark, not a
+>   pass/fail threshold."
+> * **"Coherence rose monotonically with resolution" is not what the table shows** —
+>   0.314 at grid 256 fell to 0.298 at grid 384. So "0.31 is a lower bound" does not
+>   follow. Nor does the development half: `dt ~ 1/res`, so a fixed 700 steps is *less*
+>   developed at higher resolution, and `--res 2048 --steps 700` carries **8x less**
+>   flow-time than the proxy it was meant to beat.
+> * **`coher` cannot see the failure mode.** It is amplitude-invariant and rewards any
+>   oriented structure. A frozen-field control (added 2026-08-20; the falsification at
+>   the top of this section was "by analysis", never measured) **outscores** the evolving
+>   tracer, 0.44 against 0.25 — because dye on a steady field winds along streamlines
+>   into closed spirals, which is maximally oriented. The frozen arm's higher score is
+>   the signature of the failure mode, not evidence it works. Looking at the fields is
+>   not optional.
+> * **The measured blocker is CONTRAST, not orientation.** Belt-crop contrast retention
+>   at dynamics 1024 / tracer 4x collapses with flow-time: 0.83 (175 steps) -> 0.54
+>   (700) -> 0.13 (2800) -> **0.027** (5600). By the proxy's own flow-time the tracer has
+>   almost no signal left, and because `coher` is amplitude-invariant nothing in the
+>   original run would have revealed that.
+>
+> **This is a fixable design gap, not a kill.** The spike advects an *unforced* passive
+> scalar, which in a mixing flow must decay to uniform — variance cascades to sub-grid
+> scales and dissipates, and no advection scheme prevents it. Production
+> `sim/kernels/advect.comp` does not have this problem because it does not run unforced:
+> line 8, "relaxation forcing + detail replenishment", with `result += (target - result)
+> * u_relax_k` at 229-230. **A detail tracer needs a replenishment term of its own**;
+> that, not resolution or step count, is the next thing to design and measure. (The spike
+> also runs a single plain semi-Lagrangian pass where production runs 3-pass MacCormack,
+> so it is additionally more dissipative than the real thing.)
+>
+> Until a forced variant is measured, treat the multiplier result as unproven too:
+> tracer-mult 1 and 4 scored identically (x3.06 vs x3.04), but dissipation destroys the
+> finest scales first — exactly what the multiplier buys.
+
+
 The render detail's fBm reads as noise because fluid folded-filament morphology is a
 **dynamics** property, and no frozen-field render trick produces it (see the
 FALSIFIED entry above; F17). The genuinely viable path, identified 2026-07-06 and
