@@ -367,6 +367,43 @@ higher grid resolution is **not** transformative for matched-scale density.
 The density gap is injection-frequency-limited, not grid-limited →
 **sim.resolution stays 2048** (Checkpoint A not triggered).
 
+### What EXPORT resolution buys, measured with detail off (2026-08-20)
+
+`export.width` now reaches 32768. What that actually adds is **procedural detail
+sampled more finely, not more simulation** — measured, not assumed.
+
+Method: export `gas_giant_warm` at 16384 and 24576, once shipped and once with
+`detail.intensity = 0`, and integrate the power spectrum of a matched belt crop
+above the 16384 Nyquist (22.8 cycles/degree of longitude). Absolute power, since
+the ON/OFF totals differ.
+
+| 24576 export | above-16K-Nyquist | absolute power |
+|---|---:|---:|
+| detail ON (shipped, `intensity` 0.95) | 1.01 % | 2.177e+06 |
+| **detail OFF (`intensity` 0.0)** | **0.00 %** | **3.385e+02** |
+
+**The procedural layer supplies effectively 100 % of it** — a factor of ~6400.
+That is expected and it is structural, not a tuning accident: `detail.comp` is
+`f(lon, lat)` evaluated at FULL OUTPUT RESOLUTION, so it manufactures content at
+any width, while sim structure is a bilinear stretch of the solver grid (4096 on
+warm, i.e. finest content ~5.7 cyc/deg, far below 16K's Nyquist). No export width
+can resolve simulation the solver never computed.
+
+Consequences:
+
+* Describe the 32K cap honestly — it is a **detail-sampling** feature. It is worth
+  having (151.0 s vs 110.9 s at 16384 for warm), and it matters most where the
+  analytic layer is actually near its resolvability limit, i.e. high
+  `detail.frequency` / `striation_frequency`. Both shipped presets sit at
+  frequency 64 against a model bound of 256.
+* Preset-dependence is real but small next to this: on `jupiter_like` the same
+  detail-ON measurement gives 3.78 % against warm's 1.01 %, at identical detail
+  settings — the difference is sim content, not the procedural layer.
+* This is the sharpest argument yet FOR the sim-advected high-res tracer
+  (`docs/roadmap.md`, "detail CHARACTER"): an advected tracer is the only proposed
+  mechanism that would put genuine simulated structure at these scales. Until then
+  everything above the solver's own Nyquist is procedural by construction.
+
 ### Pre-registered v1.5 targets (recorded BEFORE P5 tuning; scripts committed)
 
 Baselines measured on the v1.4 preset (v1.5 knobs at defaults), jupiter_like
