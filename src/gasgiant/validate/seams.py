@@ -28,6 +28,27 @@ POLE_VERTICAL_FACTOR = 3.0
 ABS_FLOOR = 1e-3
 
 
+def quantization_floor(arr: np.ndarray, *, half: bool) -> float:
+    """The smallest difference that is MEANINGFUL in ``arr``.
+
+    ABS_FLOOR alone assumes the stored values are finely quantized. That holds
+    for png16 and float32 EXR but not for HALF EXR: float16's ulp at 2.0 is
+    1.95e-3, already above ABS_FLOOR, so on a near-flat but nonzero map a seam
+    difference of a single representable step would be reported as a real
+    discontinuity. Raise the floor to the actual step size at the map's peak.
+    """
+    if not half:
+        return ABS_FLOOR
+    # Masked reductions, not arr[isfinite(arr)]: fancy-indexing plus np.abs
+    # would cost ~2.25x the map in temporaries, and a 32K emission alpha is
+    # 2.00 GiB. initial=0.0 reproduces the all-non-finite fallback exactly,
+    # since only the magnitude is used.
+    finite = np.isfinite(arr)
+    lo = float(np.min(arr, where=finite, initial=0.0))
+    hi = float(np.max(arr, where=finite, initial=0.0))
+    return max(ABS_FLOOR, float(np.spacing(np.float16(max(-lo, hi)))))
+
+
 @dataclass
 class CheckResult:
     name: str
@@ -59,7 +80,9 @@ def _flat(arr: np.ndarray) -> np.ndarray:
     return a[..., None] if a.ndim == 2 else a
 
 
-def check_wrap_continuity(arr: np.ndarray, name: str, report: Report) -> None:
+def check_wrap_continuity(
+    arr: np.ndarray, name: str, report: Report, *, abs_floor: float = ABS_FLOOR
+) -> None:
     a = _flat(arr)
     seam = float(np.abs(a[:, 0] - a[:, -1]).mean())
     # Interior reference from a column subsample — same statistics, no
@@ -68,7 +91,7 @@ def check_wrap_continuity(arr: np.ndarray, name: str, report: Report) -> None:
     stride = max(w // 1024, 1)
     cols = np.arange(0, w - 1, stride)
     interior = float(np.abs(a[:, cols + 1] - a[:, cols]).mean())
-    limit = max(WRAP_FACTOR * interior, ABS_FLOOR)
+    limit = max(WRAP_FACTOR * interior, abs_floor)
     report.add(
         f"{name}: wrap continuity",
         bool(seam <= limit),
@@ -76,7 +99,9 @@ def check_wrap_continuity(arr: np.ndarray, name: str, report: Report) -> None:
     )
 
 
-def check_pole_rows(arr: np.ndarray, name: str, report: Report) -> None:
+def check_pole_rows(
+    arr: np.ndarray, name: str, report: Report, *, abs_floor: float = ABS_FLOOR
+) -> None:
     """Pole continuity, two invariants per pole.
 
     High-frequency content legitimately still varies along the near-pole row
@@ -92,7 +117,7 @@ def check_pole_rows(arr: np.ndarray, name: str, report: Report) -> None:
     ):
         var0 = float(r0.std(axis=0).mean())
         var1 = float(r1.std(axis=0).mean())
-        limit_t = max(POLE_TANGENTIAL_FACTOR * var1, ABS_FLOOR)
+        limit_t = max(POLE_TANGENTIAL_FACTOR * var1, abs_floor)
         report.add(
             f"{name}: {label} pole tangential variation",
             bool(var0 <= limit_t),
@@ -100,7 +125,7 @@ def check_pole_rows(arr: np.ndarray, name: str, report: Report) -> None:
         )
         jump = float(np.abs(r0 - r1).mean())
         step = float(np.abs(r1 - r2).mean())
-        limit_v = max(POLE_VERTICAL_FACTOR * step, ABS_FLOOR)
+        limit_v = max(POLE_VERTICAL_FACTOR * step, abs_floor)
         report.add(
             f"{name}: {label} pole vertical continuity",
             bool(jump <= limit_v),
@@ -115,6 +140,10 @@ def check_finite(arr: np.ndarray, name: str, report: Report) -> None:
 
 def check_pole_speed(arr: np.ndarray, name: str, report: Report) -> None:
     """Pole continuity for a VECTOR (flow) map, checked on the SPEED magnitude.
+
+    Takes no ``abs_floor``: flow is the one map class never written as half
+    (only emission has export.emission_half), so it always gets ABS_FLOOR via
+    ``check_pole_rows``. A half flow map would need the floor threaded here too.
 
     The (east, north) components of a flow map rotate through the tangent basis
     as you go around a near-pole ring — a solid polar vortex is +east on one
@@ -142,7 +171,9 @@ _BAND_LO_DEG = 55.0
 _BAND_HI_DEG = 70.0
 
 
-def check_latitude_band_continuity(arr: np.ndarray, name: str, report: Report) -> None:
+def check_latitude_band_continuity(
+    arr: np.ndarray, name: str, report: Report, *, abs_floor: float = ABS_FLOOR
+) -> None:
     """No horizontal seam across the polar routing / domain blend band."""
     a = _flat(arr)
     h = a.shape[0]
@@ -162,8 +193,8 @@ def check_latitude_band_continuity(arr: np.ndarray, name: str, report: Report) -
         mean_r = d.mean(axis=1)
         std_r = d.std(axis=1)
         med = float(np.median(mean_r))
-        size_limit = max(BAND_SEAM_SIZE_FACTOR * med, ABS_FLOOR)
-        uniformity = mean_r / (std_r + ABS_FLOOR)
+        size_limit = max(BAND_SEAM_SIZE_FACTOR * med, abs_floor)
+        uniformity = mean_r / (std_r + abs_floor)
         seam_rows = (mean_r > size_limit) & (uniformity > BAND_SEAM_UNIFORMITY)
         worst = int(np.argmax(mean_r * (uniformity > BAND_SEAM_UNIFORMITY)))
         report.add(
@@ -318,25 +349,40 @@ def validate_cube_arrays(face_maps: dict[str, dict[str, np.ndarray]]) -> Report:
 
 
 def validate_arrays(
-    maps: dict[str, np.ndarray], flow_names: frozenset[str] | set[str] = frozenset()
+    maps: dict[str, np.ndarray],
+    flow_names: frozenset[str] | set[str] = frozenset(),
+    half_names: frozenset[str] | set[str] = frozenset(),
 ) -> Report:
     """Run the seam/pole/continuity checks on each named map.
 
     ``flow_names`` marks maps whose RG channels are an (east, north) VELOCITY
     field: they wrap-check on the components but take the pole check on the SPEED
     magnitude (``check_pole_speed``) rather than per-component, because the
-    components rotate through the basis around the pole (see ``check_pole_speed``)."""
+    components rotate through the basis around the pole (see ``check_pole_speed``).
+
+    ``half_names`` marks maps loaded from a HALF EXR. They arrive upcast to
+    float32 and are otherwise indistinguishable, but their quantization step is
+    coarse enough near the top of the range to trip the flat-image floor -- see
+    ``quantization_floor``."""
     report = Report()
     for name, arr in maps.items():
         is_flow = name in flow_names
+        floor = quantization_floor(arr, half=name in half_names)
         check_finite(arr, name, report)
-        check_wrap_continuity(arr, name, report)
+        check_wrap_continuity(arr, name, report, abs_floor=floor)
         if is_flow:
             check_pole_speed(arr, name, report)
         else:
-            check_pole_rows(arr, name, report)
-            check_latitude_band_continuity(arr, name, report)
+            check_pole_rows(arr, name, report, abs_floor=floor)
+            check_latitude_band_continuity(arr, name, report, abs_floor=floor)
     return report
+
+
+def _unknown_format(name: str, fmt: str) -> str:
+    return (
+        f"map {name!r} declares unknown format {fmt!r}; refusing to report a "
+        f"pass on a map that was never read"
+    )
 
 
 def validate_mapset(mapset_dir: Path) -> Report:
@@ -354,7 +400,7 @@ def validate_mapset(mapset_dir: Path) -> Report:
                 path = mapset_dir / rel
                 if entry["format"] == "png16":
                     arrs[fn] = read_png16(path)
-                elif entry["format"] == "exr32f":
+                elif entry["format"] in ("exr32f", "exr16f"):
                     if entry.get("channels", 1) >= 3:
                         # HDR emission-class map: continuity in log space (sparse
                         # radiance cores make the raw statistic flaky), NaN/Inf
@@ -362,17 +408,33 @@ def validate_mapset(mapset_dir: Path) -> Report:
                         arrs[fn] = np.log1p(np.maximum(read_exr_rgba(path)[..., :3], 0.0))
                     else:
                         arrs[fn] = read_exr_gray(path)
+                else:
+                    raise ValueError(_unknown_format(name, entry["format"]))
             face_maps[name] = arrs
         return validate_cube_arrays(face_maps)
 
     maps: dict[str, np.ndarray] = {}
     flow_names: set[str] = set()
+    half_names: set[str] = set()
     finite_only: dict[str, np.ndarray] = {}
     for name, entry in manifest["maps"].items():
         path = mapset_dir / entry["file"]
         if entry["format"] == "png16":
             maps[name] = read_png16(path)
-        elif entry["format"] == "exr32f":
+        elif entry["format"] in ("exr32f", "exr16f"):
+            if entry["format"] == "exr16f":
+                # Only the RAW-valued maps. The _rgb_log companion is log1p
+                # of the same data, and log1p compresses a half ulp to an
+                # absolute step in log space of ulp(x)/(1+x), which is bounded
+                # by 2**-10 = 9.766e-4 (float16 has 10 mantissa bits) and
+                # measured at worst 9.765e-4. That clears ABS_FLOOR = 1e-3 by
+                # only 2.3%, so this is a real bound, not slack: LOWERING
+                # ABS_FLOOR below ~9.8e-4 breaks it and _rgb_log would then
+                # need the half floor too. Treating it as half today would
+                # inflate its floor 2-4x (peak-dependent) and make the check
+                # less sensitive than it should be.
+                half_names.add(name)
+                half_names.add(f"{name}_alpha")
             if name == "flow":
                 # Flow/velocity map: keep the RG (east, north) channels; the pole
                 # check runs on speed magnitude, not per-component (see
@@ -395,7 +457,13 @@ def validate_mapset(mapset_dir: Path) -> Report:
                 maps[f"{name}_alpha"] = arr[..., 3]
             else:
                 maps[name] = read_exr_gray(path)
-    report = validate_arrays(maps, flow_names=flow_names)
+        else:
+            # No else here meant an unrecognized format fell through BOTH
+            # branches: the map was silently never added, and Report.ok --
+            # all() over the checks it never contributed -- stayed True. A
+            # missed edit here was a silent PASS on an unvalidated map.
+            raise ValueError(_unknown_format(name, entry["format"]))
+    report = validate_arrays(maps, flow_names=flow_names, half_names=half_names)
     for name, arr in finite_only.items():
         check_finite(arr, name, report)
     return report

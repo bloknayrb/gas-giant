@@ -1,7 +1,12 @@
-"""Image writers: 16-bit PNG via OpenCV, float32 EXR via OpenEXR.
+"""Image writers: 16-bit PNG via OpenCV, EXR via OpenEXR.
 
-All writers take float32 arrays in [0, 1] (or unbounded for EXR) and own the
-format conversion. Isolated here so a library swap touches one file.
+Two families. The ``*_u16`` PNG writers take uint16 the CALLER converted and do
+no conversion at all -- whole-map conversion costs 2.00x the buffer, so the
+tiled export quantizes per tile instead; the rounding contract lives on
+:func:`write_png16_gray_u16`. The rest take float32 in [0, 1] (unbounded for
+EXR) and own the conversion. :func:`write_exr_rgba` preserves float16 input.
+
+Isolated here so a library swap touches one file.
 """
 
 from __future__ import annotations
@@ -26,10 +31,41 @@ def write_png16_rgb(path: Path, rgb: np.ndarray, compression: int = 2) -> None:
 
 
 def write_png16_rgb_u16(path: Path, rgb_u16: np.ndarray, compression: int = 2) -> None:
-    """(H, W, 3) uint16 (already converted) -> 16-bit RGB PNG, no extra copy."""
-    if rgb_u16.dtype != np.uint16 or rgb_u16.ndim != 3:
-        raise ValueError(f"expected (H, W, 3) uint16, got {rgb_u16.dtype} {rgb_u16.shape}")
-    ok = cv2.imwrite(str(path), rgb_u16[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, int(compression)])
+    """(H, W, 3) uint16 RGB (already converted) -> 16-bit RGB PNG.
+
+    Costs a full contiguous duplicate of the input: OpenCV cannot wrap a
+    negative-stride array as a Mat, so ``[..., ::-1]`` is materialised inside
+    imwrite (measured at 1.00x the buffer). Callers assembling a whole map
+    should store BGR and use :func:`write_png16_bgr_u16` instead. Kept as the
+    reference that entry point is pinned against (tests/unit/test_writers.py).
+    """
+    _check_u16_rgb(rgb_u16)
+    _imwrite(path, rgb_u16[..., ::-1], compression)
+
+
+def write_png16_bgr_u16(path: Path, bgr_u16: np.ndarray, compression: int = 2) -> None:
+    """(H, W, 3) uint16 ALREADY IN BGR ORDER -> 16-bit RGB PNG, no extra copy.
+
+    OpenCV's native channel order, so a contiguous input reaches libpng with no
+    duplicate at all -- 3.00 GiB saved on a 32768-wide color map. The caller
+    owns two things: reversing the channels at assembly time, and passing a
+    C-contiguous buffer. A non-contiguous view is still written CORRECTLY, just
+    at 1.00x the buffer in extra memory -- i.e. the entire saving vanishes with
+    no other symptom -- so contiguity is checked rather than assumed.
+    """
+    _check_u16_rgb(bgr_u16, contiguous=True)
+    _imwrite(path, bgr_u16, compression)
+
+
+def _check_u16_rgb(arr: np.ndarray, *, contiguous: bool = False) -> None:
+    if arr.dtype != np.uint16 or arr.ndim != 3 or arr.shape[2] != 3:
+        raise ValueError(f"expected (H, W, 3) uint16, got {arr.dtype} {arr.shape}")
+    if contiguous and not arr.flags.c_contiguous:
+        raise ValueError("expected a C-contiguous buffer; a view costs a full duplicate")
+
+
+def _imwrite(path: Path, arr: np.ndarray, compression: int) -> None:
+    ok = cv2.imwrite(str(path), arr, [cv2.IMWRITE_PNG_COMPRESSION, int(compression)])
     if not ok:
         raise OSError(f"cv2.imwrite failed for {path}")
 
@@ -51,13 +87,28 @@ def write_png8_rgb(path: Path, rgb: np.ndarray, compression: int = 2) -> None:
 
 
 def write_png16_gray(path: Path, gray: np.ndarray, compression: int = 2) -> None:
-    """(H, W) float32 0..1 -> 16-bit grayscale PNG."""
+    """(H, W) float32 0..1 -> 16-bit grayscale PNG. Values are clipped.
+
+    The conversion costs 2.00x the input in temporaries (measured), which on a
+    whole 32K height map is 4.00 GiB. Callers scattering tiles should convert
+    per-tile and use :func:`write_png16_gray_u16`; the remaining whole-map
+    caller is the sequence's frame-0 height, which runs on the main thread.
+    """
     if gray.ndim != 2:
         raise ValueError(f"expected (H, W) array, got {gray.shape}")
     u16 = (np.clip(gray, 0.0, 1.0) * 65535.0 + 0.5).astype(np.uint16)
-    ok = cv2.imwrite(str(path), u16, [cv2.IMWRITE_PNG_COMPRESSION, int(compression)])
-    if not ok:
-        raise OSError(f"cv2.imwrite failed for {path}")
+    _imwrite(path, u16, compression)
+
+
+def write_png16_gray_u16(path: Path, gray_u16: np.ndarray, compression: int = 2) -> None:
+    """(H, W) uint16 (already converted) -> 16-bit grayscale PNG, no temporaries.
+
+    Bit-identical to :func:`write_png16_gray` fed the float the caller converted,
+    provided the caller uses the same ``clip(x, 0, 1) * 65535 + 0.5`` rounding.
+    """
+    if gray_u16.dtype != np.uint16 or gray_u16.ndim != 2:
+        raise ValueError(f"expected (H, W) uint16, got {gray_u16.dtype} {gray_u16.shape}")
+    _imwrite(path, gray_u16, compression)
 
 
 def write_exr_gray(path: Path, gray: np.ndarray) -> None:
@@ -71,13 +122,19 @@ def write_exr_gray(path: Path, gray: np.ndarray) -> None:
 
 
 def write_exr_rgba(path: Path, rgba: np.ndarray) -> None:
-    """(H, W, 4) float32 (unbounded HDR) -> RGBA ZIP-compressed scanline EXR.
-    Grouped "RGBA" channels produce standard R/G/B/A planes on disk —
-    exactly what Blender's Image Texture expects."""
+    """(H, W, 4) float32 or float16 (unbounded HDR) -> RGBA ZIP scanline EXR.
+
+    Grouped "RGBA" channels produce standard R/G/B/A planes on disk - exactly
+    what Blender's Image Texture expects. Do NOT coerce the dtype: float16 in
+    must write a HALF EXR, or export.emission_half DOUBLES the caller's peak
+    (the upcast copy) instead of halving it.
+    """
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         raise ValueError(f"expected (H, W, 4) array, got {rgba.shape}")
+    if rgba.dtype not in (np.float32, np.float16):
+        raise ValueError(f"expected float32 or float16, got {rgba.dtype}")
     header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
-    channels = {"RGBA": np.ascontiguousarray(rgba, dtype=np.float32)}
+    channels = {"RGBA": np.ascontiguousarray(rgba)}
     with OpenEXR.File(header, channels) as f:
         f.write(str(path))
 

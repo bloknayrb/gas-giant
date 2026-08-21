@@ -2177,8 +2177,9 @@ class EmissionParams(_Params):
     """Emission map components (night-side glow for Blender emission
     shading). All-zero strengths disable the map: no emission.exr is
     written and manifest consumers tolerate its absence. Values are linear
-    radiance multipliers (the EXR is float32 HDR; AgX rolls strong emitters
-    off into bloomable hotspots). Preview via the viewport's Emission channel
+    radiance multipliers (the EXR is HDR -- float32, or half if
+    export.emission_half; AgX rolls strong emitters off into bloomable
+    hotspots). Preview via the viewport's Emission channel
     (aurora composited as alpha x aurora_color); the Color preview never
     composites emission. No rand on the strengths: emission is invisible in
     the default Color view, so seeded randomization silently enabling it
@@ -2419,11 +2420,28 @@ class ExportParams(_Params):
     )
     png_compression: int = pfield(
         2, tier=Tier.POST, lo=0, hi=9, ui="Export",
-        description="How hard the color PNG is squeezed on export. Lower = "
-                    "much faster writes, which matters at 16K; higher = a "
-                    "smaller file. Only the color map uses it; the 16-bit "
-                    "height PNGs are always written at the default level "
-                    "(zlib deflate level)",
+        description="How hard the PNG maps are squeezed on export. Lower = "
+                    "much faster writes, which matters at 16K and up; higher = "
+                    "a smaller file. The color map is the slow one, so this "
+                    "sets the pace of the whole export: a 32K map set measures "
+                    "about 120s at level 2 against 58s at level 0, for roughly "
+                    "a quarter more disk, which makes 0 worth having while you "
+                    "iterate. On a detailed map 1 and 2 land within a "
+                    "fraction of a percent of each other. Applies to "
+                    "the color map and to the 16-bit height PNGs in a frame "
+                    "sequence (zlib deflate level)",
+    )
+    emission_half: bool = pfield(
+        False, tier=Tier.POST, ui="Export", adv=True,
+        label="Half-float emission EXR",
+        description="Writes emission.exr at half precision instead of full. The "
+                    "glow looks the same; the file is about 2.4x smaller and "
+                    "writes about twice as fast, so it is the better default for "
+                    "anything you are not compositing in 32-bit. Off = full "
+                    "float32, byte for byte what earlier versions wrote. Only "
+                    "affects the emission map (half carries ~450x the headroom "
+                    "the brightest thermal + lightning + aurora stack can reach, "
+                    "assuming colour components stay within 0..1). No rand.",
     )
     flow_map: bool = pfield(
         False, tier=Tier.POST, ui="Export",

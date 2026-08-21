@@ -62,7 +62,7 @@
               "nz": { "type": "string" }
             }
           },
-          "format": { "enum": ["png16", "exr32f"] },
+          "format": { "enum": ["png16", "exr32f", "exr16f"] },
           "colorspace": { "enum": ["srgb", "non-color"] },
           "channels": { "type": "integer", "minimum": 1, "maximum": 4 },
           "convention": { "type": "string" },

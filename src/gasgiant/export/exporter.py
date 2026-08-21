@@ -18,6 +18,7 @@ import logging
 import shutil
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -38,8 +39,9 @@ from gasgiant.export.writers import (
     read_exr_gray,
     write_exr_gray,
     write_exr_rgba,
+    write_png16_bgr_u16,
     write_png16_gray,
-    write_png16_rgb_u16,
+    write_png16_gray_u16,
 )
 from gasgiant.jobs import Progress
 from gasgiant.params.presets import to_preset_doc
@@ -55,13 +57,6 @@ log = logging.getLogger(__name__)
 H264_MAX_DIM = 16384
 
 TILE = 1024
-
-# Sequence export encodes each finished frame off-thread (PNG deflate / EXR ZIP
-# of a full map is seconds of pure CPU). Bound the in-flight encodes so a long
-# sequence can't buffer every frame's arrays in memory: when more than this many
-# futures are pending, the generator keeps yielding until they drain.
-_MAX_PENDING_ENCODES = 6
-
 
 def roi_tile_origin(
     center_x: float,
@@ -147,6 +142,65 @@ def derive_tile(
     )
 
 
+def _tex(gpu: Any, made: list[Any], channels: int, dtype: str, **kw: Any) -> Any:
+    """Create a TILE-sized texture and record it, so a later failure in the same
+    acquisition block can release what was already acquired."""
+    tex = gpu.texture2d((TILE, TILE), channels, dtype, **kw)
+    made.append(tex)
+    return tex
+
+
+def _release_all(texs: list[Any]) -> None:
+    for tex in texs:
+        with contextlib.suppress(Exception):
+            tex.release()
+
+
+def _emission_format(params: Any) -> str:
+    """Manifest format token for emission.exr. Half-float is a per-export choice
+    (export.emission_half), so it is declared per map rather than implied by the
+    schema version -- and it must agree with the buffer dtype at every site."""
+    return "exr16f" if params.export.emission_half else "exr32f"
+
+
+def _emission_dtype(params: Any) -> Any:
+    """Assembly-buffer dtype for emission, the partner of ``_emission_format``.
+
+    Kept as a function because there are three assembly sites (map set, cube,
+    sequence) and they must all agree: an earlier revision wired half-float into
+    two of them, so the base map came out half while every sequence frame stayed
+    float32. Nothing raised -- the frames block carries no format token, so no
+    reader could notice."""
+    return np.float16 if params.export.emission_half else np.float32
+
+
+def _to_u16(a: np.ndarray) -> np.ndarray:
+    """Float in [0, 1] -> uint16, using the ONE rounding the 16-bit PNG writers
+    document (``clip(x, 0, 1) * 65535 + 0.5``). ``write_png16_gray_u16`` is
+    bit-identical to ``write_png16_gray`` only while this matches; the pin is
+    tests/unit/test_writers.py.
+
+    Applied per TILE, never to a whole map: the whole-map form costs 2.00x the
+    buffer in temporaries, which on a 32K height map is 4.00 GiB."""
+    return (np.clip(a, 0.0, 1.0) * 65535.0 + 0.5).astype(np.uint16)
+
+
+def _scatter_color_bgr(dst: np.ndarray, rgb: np.ndarray, x0: int, y0: int) -> None:
+    """Quantize a float RGB tile into a whole-map color buffer, STORING BGR.
+
+    BGR is OpenCV's native order, so ``write_png16_bgr_u16`` can hand the whole
+    buffer to libpng directly; storing RGB would make cv2 materialise a
+    contiguous duplicate of the entire map (3.00 GiB at 32768). This reversal is
+    the only reason that writer is correct -- drop it and every exported color
+    map has red and blue swapped, silently. The channel-order pins are
+    tests/gpu/test_cube_export.py and tests/gpu/test_export_sequence.py.
+
+    ``[..., ::-1]`` is a read-only view of ``read_texture``'s non-writeable
+    result; it materialises here, one tile at a time."""
+    th, tw = rgb.shape[:2]
+    dst[y0 : y0 + th, x0 : x0 + tw] = _to_u16(rgb[..., ::-1])
+
+
 def _cube_face_size(width: int) -> int:
     """Per-face square size for a cube map derived from the equirect ``width``.
 
@@ -182,6 +236,7 @@ def _export_cube_job(
         )
     face_size = _cube_face_size(width)
     emission_on = params.emission.enabled
+    emission_dtype = _emission_dtype(params)
     tiles = [
         (x, y)
         for y in range(0, face_size, TILE)
@@ -189,12 +244,24 @@ def _export_cube_job(
     ]
     total = 6 * len(tiles) + 2  # + encode + manifest
 
-    tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
-    tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
-    tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
+    made: list[Any] = []
+    try:  # outside the try below: a throw here would leak snap (see export_job)
+        tile_color = _tex(gpu, made, 4, "f4")
+        tile_height = _tex(gpu, made, 1, "f4")
+        tile_emission = _tex(gpu, made, 4, "f4") if emission_on else None
+        # Double-buffered face assembly (see _FrameSet). The cube job used to
+        # allocate a set per face and submit a copy of each, with no bound at
+        # all -- up to 6 sets plus copies live at once in the worst case (the
+        # measured 32768 peak was 8.60 GiB, ~5 sets, since encodes do retire
+        # while later faces render). This is also the allocation most likely to
+        # fail, and it comes AFTER the textures -- hence the release below.
+        sets = [_alloc_cube_set(face_size, emission_on, emission_dtype) for _ in range(2)]
+    except BaseException:
+        _release_all(made)
+        snap.release()
+        raise
 
     pool = ThreadPoolExecutor(max_workers=3)
-    futures: list[Future] = []
     written: list[Path] = []
     completed = False
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -203,11 +270,8 @@ def _export_cube_job(
         started = time.perf_counter()
         step = 0
         for face in range(6):
-            color_full = np.empty((face_size, face_size, 3), dtype=np.uint16)
-            height_full = np.empty((face_size, face_size), dtype=np.float32)
-            emission_full = (
-                np.empty((face_size, face_size, 4), dtype=np.float32) if emission_on else None
-            )
+            fs = sets[face % len(sets)]
+            yield from fs.drain(step, total, f"cube face {face + 1}/6 encoding")
             for x0, y0 in tiles:
                 tw = min(TILE, face_size - x0)
                 th = min(TILE, face_size - y0)
@@ -225,15 +289,14 @@ def _export_cube_job(
                     mask=snap.mask, mask_params=params.mask,
                     projection_cube=True, cube_face=face,
                 )
-                color = gpu.read_texture(tile_color)[:th, :tw, :3]
-                color_full[y0 : y0 + th, x0 : x0 + tw] = (
-                    np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
-                ).astype(np.uint16)
-                height_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(tile_height)[
+                _scatter_color_bgr(
+                    fs.color, gpu.read_texture(tile_color)[:th, :tw, :3], x0, y0
+                )
+                fs.height[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(tile_height)[
                     :th, :tw, 0
                 ]
                 if emission_on:
-                    emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                    fs.emission[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
                         tile_emission
                     )[:th, :tw]
                 step += 1
@@ -242,22 +305,19 @@ def _export_cube_job(
             fn = CUBE_FACE_NAMES[face]
             cpath = out_dir / f"color_{fn}.png"
             written.append(cpath)
-            futures.append(pool.submit(
-                write_png16_rgb_u16, cpath, color_full.copy(), params.export.png_compression,
+            fs.futures.append(pool.submit(
+                write_png16_bgr_u16, cpath, fs.color, params.export.png_compression,
             ))
             hpath = out_dir / f"height_{fn}.exr"
             written.append(hpath)
-            futures.append(pool.submit(write_exr_gray, hpath, height_full.copy()))
+            fs.futures.append(pool.submit(write_exr_gray, hpath, fs.height))
             if emission_on:
                 epath = out_dir / f"emission_{fn}.exr"
                 written.append(epath)
-                futures.append(pool.submit(write_exr_rgba, epath, emission_full.copy()))
+                fs.futures.append(pool.submit(write_exr_rgba, epath, fs.emission))
 
-        while not all(f.done() for f in futures):
-            yield Progress(total - 1, total, "encoding")
-            time.sleep(0.01)
-        for f in futures:
-            f.result()  # surface worker exceptions
+        for fs in sets:  # every set, before the manifest counts the files
+            yield from fs.drain(total - 1, total, "encoding")
 
         def _faces(prefix: str, ext: str) -> dict[str, str]:
             return {fn: f"{prefix}_{fn}.{ext}" for fn in CUBE_FACE_NAMES}
@@ -274,7 +334,7 @@ def _export_cube_job(
         }
         if emission_on:
             maps["emission"] = {
-                "faces": _faces("emission", "exr"), "format": "exr32f",
+                "faces": _faces("emission", "exr"), "format": _emission_format(params),
                 "colorspace": "non-color", "channels": 4,
                 "aurora_color": list(params.emission.aurora_color),
             }
@@ -338,16 +398,33 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
     emission_on = params.emission.enabled
     flow_on = params.export.flow_map
     rings_on = params.rings.enabled
-    color_full = np.empty((h, w, 3), dtype=np.uint16)
-    height_full = np.empty((h, w), dtype=np.float32)
-    emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
-    flow_full = np.empty((h, w, 4), dtype=np.float32) if flow_on else None
+    emission_dtype = _emission_dtype(params)
+    # These allocations sit OUTSIDE the try below, so a failure here would skip
+    # its finally and leak the snapshot's cloned GL textures (~400 MB VRAM at
+    # sim.resolution 4096). The GUI catches MemoryError and keeps running, so
+    # that leak accumulates across retries. Release explicitly and re-raise;
+    # moving them inside the try instead would raise UnboundLocalError from the
+    # finally's unconditional tile-texture .release() calls.
+    made: list[Any] = []  # textures created so far, for the failure path below
+    try:
+        color_full = np.empty((h, w, 3), dtype=np.uint16)
+        height_full = np.empty((h, w), dtype=np.float32)
+        emission_full = np.empty((h, w, 4), dtype=emission_dtype) if emission_on else None
+        flow_full = np.empty((h, w, 4), dtype=np.float32) if flow_on else None
 
-    tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
-    tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
-    tile_detail = gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
-    tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
-    tile_flow = gpu.texture2d((TILE, TILE), 4, "f4") if flow_on else None
+        tile_color = _tex(gpu, made, 4, "f4")
+        tile_height = _tex(gpu, made, 1, "f4")
+        tile_detail = _tex(gpu, made, 1, "f4", linear=True)
+        tile_emission = _tex(gpu, made, 4, "f4") if emission_on else None
+        tile_flow = _tex(gpu, made, 4, "f4") if flow_on else None
+    except BaseException:
+        # Release EVERYTHING already acquired, not just the snapshot: a throw on
+        # a later line here would otherwise strand the earlier tile textures
+        # (~24 MB of VRAM). The GUI catches and keeps running, so it accumulates
+        # across retries -- the same failure this guard exists to prevent.
+        _release_all(made)
+        snap.release()
+        raise
 
     pool = ThreadPoolExecutor(max_workers=3)
     futures: list[Future] = []
@@ -363,12 +440,12 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
                 sim, snap, params, x0, y0, w, h,
                 tile_color, tile_height, tile_detail, tile_emission,
             )
-            color = gpu.read_texture(tile_color)[:th, :tw, :3]
-            height = gpu.read_texture(tile_height)[:th, :tw, 0]
-            color_full[y0 : y0 + th, x0 : x0 + tw] = (
-                np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
-            ).astype(np.uint16)
-            height_full[y0 : y0 + th, x0 : x0 + tw] = height
+            _scatter_color_bgr(
+                color_full, gpu.read_texture(tile_color)[:th, :tw, :3], x0, y0
+            )
+            height_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(tile_height)[
+                :th, :tw, 0
+            ]
             if emission_on:
                 emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
                     tile_emission
@@ -390,7 +467,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
         # Encode off-thread; keep yielding so the GUI stays live.
         futures.append(
             pool.submit(
-                write_png16_rgb_u16, out_dir / "color.png", color_full,
+                write_png16_bgr_u16, out_dir / "color.png", color_full,
                 params.export.png_compression,
             )
         )
@@ -407,11 +484,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
             # untouched, so a rings-enabled export is byte-identical there.
             rings_strip = ring_strip(params)
             futures.append(pool.submit(write_exr_rgba, out_dir / "rings.exr", rings_strip))
-        while not all(f.done() for f in futures):
-            yield Progress(len(tiles) + 1, total, "encoding")
-            time.sleep(0.01)
-        for f in futures:
-            f.result()  # surface worker exceptions
+        yield from _drain(futures, len(tiles) + 1, total, "encoding")
 
         maps = {
             "color": {
@@ -428,7 +501,7 @@ def export_job(sim: Any, out_dir: Path, width: int | None = None) -> Iterator[Pr
             # applied at import (aurora_color travels in the manifest so the
             # importer can tint it / lift it onto a shell).
             maps["emission"] = {
-                "file": "emission.exr", "format": "exr32f",
+                "file": "emission.exr", "format": _emission_format(params),
                 "colorspace": "non-color", "channels": 4,
                 "aurora_color": list(params.emission.aurora_color),
             }
@@ -503,14 +576,87 @@ def run_export(sim: Any, out_dir: Path, width: int | None = None) -> None:
         pass
 
 
-def _reap(f: Future) -> bool:
-    """True (and surface any worker exception) once encode future ``f`` is done;
-    False while it is still running. Lets the sequence job prune finished encodes
-    and fail fast on an encode error."""
-    if f.done():
-        f.result()  # re-raise a worker exception at the driver
-        return True
-    return False
+def _drain(
+    futures: list[Future], step: int, total: int, message: str
+) -> Iterator[Progress]:
+    """Yield until every future is done, then surface its result and clear.
+
+    Yields rather than blocking: the GUI drives the export one ``next()`` per
+    frame and cancels between them, so a blocking wait would freeze it for a
+    whole encode -- over a minute for a 32K color PNG, which alone accounts for
+    at least the 61.5 s that png_compression 0 takes off a 32K map set -- and
+    cancel would be unobservable for that long.
+
+    ``f.result()`` is what raises. ``concurrent.futures.wait()`` and a bare
+    ``done()`` loop both return silently on a failed future, which would turn a
+    failed encode into a reported-success export.
+    """
+    while not all(f.done() for f in futures):
+        yield Progress(step, total, message)
+        time.sleep(0.005)
+    for f in futures:
+        f.result()
+    futures.clear()
+
+
+@dataclass
+class _FrameSet:
+    """One frame's whole-map assembly buffers, plus the encode futures that own
+    them.
+
+    Double-buffered: the renderer fills set ``fi % n_sets`` only after that
+    set's previous encodes have completed, so buffers go to the pool with NO
+    copy and the host peak is exactly ``n_sets`` sets at any width. ``n_sets``
+    is two except on a sequence short enough not to need both. Two is also the
+    throughput optimum -- for a two-stage pipeline, two buffers give a steady
+    state period of ``max(render, encode)``, which is the floor whichever stage
+    dominates, so a third buffer cannot help. (Which one dominates is not fixed:
+    at the default png_compression the color PNG dominates; at level 0 the
+    render does.)
+
+    The futures live HERE rather than in one flat list on purpose. With a shared
+    list, a slow color encode on set A plus three fast completions elsewhere
+    leaves a low total count, and the loop would refill set A while its writer
+    is still reading it -- a silent horizontal splice of two frames.
+    """
+
+    color: np.ndarray
+    height: np.ndarray | None
+    emission: np.ndarray | None
+    futures: list[Future] = field(default_factory=list)
+
+    def drain(self, step: int, total: int, message: str) -> Iterator[Progress]:
+        """Wait for THIS set's encodes before the renderer refills it. Waiting
+        per set rather than on a shared list is the whole double-buffer
+        invariant -- see the class docstring."""
+        yield from _drain(self.futures, step, total, message)
+
+
+def _alloc_equirect_set(
+    h: int, w: int, all_maps: bool, emission_on: bool, emission_dtype: Any
+) -> _FrameSet:
+    """Sequence frame buffers. Height is uint16 here (the sequence writes 16-bit
+    gray PNGs), which halves it AND removes the 2.00x conversion temporary the
+    float writer would otherwise build inside a worker thread. ``emission_dtype``
+    must match what export_job used for frame 0, or the base map and the frames
+    disagree on precision."""
+    return _FrameSet(
+        color=np.empty((h, w, 3), dtype=np.uint16),
+        height=np.empty((h, w), dtype=np.uint16) if all_maps else None,
+        emission=np.empty((h, w, 4), dtype=emission_dtype) if emission_on else None,
+    )
+
+
+def _alloc_cube_set(face_size: int, emission_on: bool, emission_dtype: Any) -> _FrameSet:
+    """Cube face buffers. Height stays float32 -- the cube writes EXR."""
+    return _FrameSet(
+        color=np.empty((face_size, face_size, 3), dtype=np.uint16),
+        height=np.empty((face_size, face_size), dtype=np.float32),
+        emission=(
+            np.empty((face_size, face_size, 4), dtype=emission_dtype)
+            if emission_on else None
+        ),
+    )
 
 
 def export_sequence_job(
@@ -590,7 +736,7 @@ def export_sequence_job(
         seq_w = width or base_params.export.width
         if seq_w > H264_MAX_DIM:
             raise ValueError(
-                f"--video cannot encode a {seq_w}px-wide sequence: H.264 caps a "
+                f"cannot encode video for a {seq_w}px-wide sequence: H.264 caps a "
                 f"coded dimension at {H264_MAX_DIM}. Export the frames without "
                 f"video, or lower export.width."
             )
@@ -602,9 +748,8 @@ def export_sequence_job(
 
     frames_dir = out_dir / "frames"
     written: list[Path] = []
-    tile_texs: list[Any] = []
+    made: list[Any] = []
     pool = ThreadPoolExecutor(max_workers=3)
-    futures: list[Future] = []
     completed = False
     try:
         # Frame 0: the full mapset export (writes color/height/(emission)/
@@ -635,7 +780,12 @@ def export_sequence_job(
             h0 = frames_dir / "height_0000.png"
             written.append(h0)
             # Per-frame height is a 16-bit gray PNG; convert the base float EXR.
-            write_png16_gray(h0, np.clip(read_exr_gray(out_dir / "height.exr"), 0.0, 1.0))
+            # write_png16_gray clips internally; an outer np.clip here is
+            # redundant (bitwise idempotent) and only adds a whole-map temporary.
+            write_png16_gray(
+                h0, read_exr_gray(out_dir / "height.exr"),
+                params.export.png_compression,
+            )
             if emission_on:
                 e0 = frames_dir / "emission_0000.exr"
                 written.append(e0)
@@ -643,17 +793,27 @@ def export_sequence_job(
         step += 1
         yield Progress(step, total, "frame 0")
 
-        tile_color = gpu.texture2d((TILE, TILE), 4, "f4")
-        tile_height = gpu.texture2d((TILE, TILE), 1, "f4")
-        tile_detail = gpu.texture2d((TILE, TILE), 1, "f4", linear=True)
-        tile_texs += [tile_color, tile_height, tile_detail]
-        tile_emission = gpu.texture2d((TILE, TILE), 4, "f4") if emission_on else None
-        if tile_emission is not None:
-            tile_texs.append(tile_emission)
+        tile_color = _tex(gpu, made, 4, "f4")
+        tile_height = _tex(gpu, made, 1, "f4")
+        tile_detail = _tex(gpu, made, 1, "f4", linear=True)
+        tile_emission = _tex(gpu, made, 4, "f4") if emission_on else None
 
-        color_full = np.empty((h, w, 3), dtype=np.uint16)
-        height_full = np.empty((h, w), dtype=np.float32) if all_maps else None
-        emission_full = np.empty((h, w, 4), dtype=np.float32) if emission_on else None
+        # Double-buffered frame assembly (see _FrameSet). Allocated HERE, not at
+        # the top of the try: export_job's own whole-map buffers are alive until
+        # its generator completes above, and the frame-0 height conversion just
+        # above builds a transient of its own. Hoisting these would stack all
+        # three. np.empty charges commit immediately on Windows, so the ordering
+        # is load-bearing for commit, not just resident set.
+        # One set per frame this loop will actually render, capped at two:
+        # frames == 1 renders none here (frame 0 is export_job's), frames == 2
+        # renders exactly one. A full set is 12.00 GiB at 32768 --all-maps, so
+        # allocating an unused one is not a rounding error.
+        n_sets = min(max(frames - 1, 0), 2)
+        emission_dtype = _emission_dtype(params)
+        sets = [
+            _alloc_equirect_set(h, w, all_maps, emission_on, emission_dtype)
+            for _ in range(n_sets)
+        ]
 
         for fi in range(1, frames):
             if ramp_to is not None:
@@ -667,6 +827,12 @@ def export_sequence_job(
             sim.extend_run(steps_per_frame)
             snap = sim.create_snapshot()
             try:
+                # This set's previous encodes must finish before we overwrite it.
+                # Placed after create_snapshot so extend_run + the snapshot clone
+                # overlap the pending encode for free.
+                fs = sets[fi % n_sets]
+                yield from fs.drain(step, total, f"frame {fi} encoding")
+
                 for ti, (x0, y0) in enumerate(tiles):
                     tw = min(TILE, w - x0)
                     th = min(TILE, h - y0)
@@ -674,16 +840,15 @@ def export_sequence_job(
                         sim, snap, snap.params, x0, y0, w, h,
                         tile_color, tile_height, tile_detail, tile_emission,
                     )
-                    color = gpu.read_texture(tile_color)[:th, :tw, :3]
-                    color_full[y0 : y0 + th, x0 : x0 + tw] = (
-                        np.clip(color, 0.0, 1.0) * 65535.0 + 0.5
-                    ).astype(np.uint16)
+                    _scatter_color_bgr(
+                        fs.color, gpu.read_texture(tile_color)[:th, :tw, :3], x0, y0
+                    )
                     if all_maps:
-                        height_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
-                            tile_height
-                        )[:th, :tw, 0]
+                        fs.height[y0 : y0 + th, x0 : x0 + tw] = _to_u16(
+                            gpu.read_texture(tile_height)[:th, :tw, 0]
+                        )
                     if emission_on:
-                        emission_full[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
+                        fs.emission[y0 : y0 + th, x0 : x0 + tw] = gpu.read_texture(
                             tile_emission
                         )[:th, :tw]
                     step += 1
@@ -691,38 +856,32 @@ def export_sequence_job(
             finally:
                 snap.release()
 
-            # Frame arrays complete: enqueue the encodes off-thread. Copy the
-            # reused buffers so the worker owns a stable snapshot; track paths
-            # BEFORE submitting so a partial file is always in the cleanup list.
+            # Frame arrays complete: enqueue the encodes off-thread. The buffers
+            # go WITHOUT a copy -- this set is not refilled until its futures
+            # complete. Track paths BEFORE submitting so a partial file is
+            # always in the cleanup list.
             cpath = frames_dir / f"frame_{fi:04d}.png"
             written.append(cpath)
-            futures.append(pool.submit(
-                write_png16_rgb_u16, cpath, color_full.copy(), params.export.png_compression,
+            fs.futures.append(pool.submit(
+                write_png16_bgr_u16, cpath, fs.color, params.export.png_compression,
             ))
             if all_maps:
                 hpath = frames_dir / f"height_{fi:04d}.png"
                 written.append(hpath)
-                futures.append(pool.submit(write_png16_gray, hpath, height_full.copy()))
+                fs.futures.append(pool.submit(
+                    write_png16_gray_u16, hpath, fs.height,
+                    params.export.png_compression,
+                ))
             if emission_on:
                 epath = frames_dir / f"emission_{fi:04d}.exr"
                 written.append(epath)
-                futures.append(pool.submit(write_exr_rgba, epath, emission_full.copy()))
+                fs.futures.append(pool.submit(write_exr_rgba, epath, fs.emission))
 
-            # Bound in-flight encodes: reap finished ones (surfacing errors) and,
-            # while too many remain, keep yielding so we don't block or OOM.
-            futures = [f for f in futures if not _reap(f)]
-            while len(futures) > _MAX_PENDING_ENCODES:
-                yield Progress(step, total, f"frame {fi} encoding")
-                time.sleep(0.005)
-                futures = [f for f in futures if not _reap(f)]
-
-        # Drain remaining encodes before the manifest counts them.
-        while not all(f.done() for f in futures):
-            yield Progress(step, total, "encoding")
-            time.sleep(0.01)
-        for f in futures:
-            f.result()  # surface worker exceptions
-        futures = []
+        # Drain EVERY set before the manifest counts the files -- and before
+        # encode_video_job below, which reads frame_%04d.png off disk and would
+        # otherwise start on a frame still being written (short mp4, exit 0).
+        for fs in sets:
+            yield from fs.drain(step, total, "encoding")
 
         # Optional mp4 (color frames drive it); tracked for cleanup on cancel.
         maps_block: dict[str, list[str]] | None = None
@@ -750,8 +909,7 @@ def export_sequence_job(
         yield Progress(total, total, "done")
     finally:
         pool.shutdown(wait=True)
-        for tex in tile_texs:
-            tex.release()
+        _release_all(made)
         if not completed:
             # Remove only files WE wrote: the per-frame maps plus the base map
             # set (export_job's own cancellation already covers the frame-0

@@ -798,6 +798,7 @@
       "width": 2048,
       "projection": "equirect",
       "png_compression": 2,
+      "emission_half": false,
       "flow_map": false
     }
   }

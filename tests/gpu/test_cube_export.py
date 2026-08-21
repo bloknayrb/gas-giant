@@ -190,3 +190,61 @@ def test_cube_export_round_trip_and_continuity(gpu, tmp_path):
 
     report = validate_mapset(out)
     assert report.ok, report.summary()
+
+
+def _derive_cube_face(sim, snap, params, face: int, face_size: int, gpu) -> np.ndarray:
+    """Mirror of _export_cube_job's per-face derive call (float RGB in [0,1])."""
+    tex_c = gpu.texture2d((face_size, face_size), 4, "f4")
+    tex_hh = gpu.texture2d((face_size, face_size), 1, "f4")
+    try:
+        sim.deriver.derive(
+            snap.tracers_eq, snap.tracers_n, snap.tracers_s,
+            snap.patch_rho_max, snap.blend_band, tex_c, tex_hh, params.appearance,
+            detail_tex=None, detail_intensity=0.0,
+            origin=(0, 0), full_size=(face_size, face_size),
+            lanes=snap.lanes, warp=snap.warp,
+            emission_out=None, emission=None, seed=params.seed,
+            profile_dyn=snap.profile_dyn, profile_stamp=snap.profile_stamp,
+            mask=snap.mask, mask_params=params.mask,
+            projection_cube=True, cube_face=face,
+        )
+        return gpu.read_texture(tex_c)[..., :3].copy()
+    finally:
+        tex_c.release()
+        tex_hh.release()
+
+
+def test_cube_export_color_channels_identical(gpu, tmp_path):
+    """(d) The STORED cube face PNG carries the same channel order as the derive
+    that produced it.
+
+    The other cube tests cannot see a red/blue swap: (b) compares in-memory
+    textures and (c) checks seam continuity, which is channel-symmetric. The
+    scatter in _export_cube_job's per-face tile loop (_scatter_color_bgr) and
+    its writer are otherwise unpinned, so this is the only guard on the cube
+    leg's channel order.
+    """
+    from gasgiant.export.exporter import _cube_face_size
+    from gasgiant.export.writers import read_png16
+
+    face_size = _cube_face_size(1024)
+    p = _params(1024)
+    p.export.projection = ProjectionKind.CUBE
+    out = tmp_path / "cube"
+    run_export(Simulation(p, gpu), out)
+
+    ref_sim = Simulation(_params(1024), gpu)
+    ref_sim.run_to_completion()
+    snap = ref_sim.create_snapshot()
+    try:
+        assert len(snap.lanes) == 0
+        for face, fn in enumerate(CUBE_FACE_NAMES):
+            ref = _derive_cube_face(ref_sim, snap, snap.params, face, face_size, gpu)
+            ref_u16 = (np.clip(ref, 0.0, 1.0) * 65535.0 + 0.5).astype(np.uint16)
+            ref_norm = ref_u16.astype(np.float32) / np.float32(65535.0)
+            np.testing.assert_array_equal(
+                read_png16(out / f"color_{fn}.png"), ref_norm,
+                err_msg=f"face {fn}: stored channels differ from the derive",
+            )
+    finally:
+        snap.release()

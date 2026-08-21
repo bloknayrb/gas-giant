@@ -306,6 +306,9 @@ EXPECTED_LABELS = {
     "solver.baroclinic.smooth": "Storm edge softness",
     "solver.baroclinic.phase_jitter": "Stagger the storm band",
     "solver.baroclinic.spectrum_width": "Vary the storm spacing",
+    # "emission half" would read as engine vocabulary; the caption names the
+    # file format choice the artist is actually making.
+    "export.emission_half": "Half-float emission EXR",
 }
 
 

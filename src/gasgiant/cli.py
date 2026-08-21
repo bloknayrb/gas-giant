@@ -287,7 +287,9 @@ def _export(args: argparse.Namespace) -> int:
         if args.video and params.export.width > H264_MAX_DIM:
             # export_sequence_job raises on this too (the guard the GUI relies
             # on); checking here as well turns it into a clean CLI error before
-            # the sim is built and developed.
+            # the DEVELOPMENT RUN. The Simulation -- and its GL context -- is
+            # already constructed above, so this saves the minutes of stepping,
+            # not the setup.
             print(
                 f"error: --video cannot encode a {params.export.width}px-wide "
                 f"sequence: H.264 caps a coded dimension at {H264_MAX_DIM}",
@@ -320,12 +322,22 @@ def _export(args: argparse.Namespace) -> int:
             except RampError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 2
-        run_export_sequence(
-            sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame,
-            all_maps=args.all_maps, video=args.video, fps=args.fps, ramp_to=ramp_to,
-        )
+        try:
+            run_export_sequence(
+                sim, args.out, frames=args.frames, steps_per_frame=args.steps_per_frame,
+                all_maps=args.all_maps, video=args.video, fps=args.fps, ramp_to=ramp_to,
+            )
+        except MemoryError as exc:
+            # numpy names the exact shape and dtype it could not allocate, which
+            # is more useful than any estimate we could print here.
+            print(f"error: out of memory building the map set: {exc}", file=sys.stderr)
+            return 2
     else:
-        run_export(sim, args.out)
+        try:
+            run_export(sim, args.out)
+        except MemoryError as exc:
+            print(f"error: out of memory building the map set: {exc}", file=sys.stderr)
+            return 2
     elapsed = time.perf_counter() - started
     seq = f" + {args.frames}-frame sequence" if args.frames is not None else ""
     src = f" (resumed from {args.resume})" if args.resume is not None else ""

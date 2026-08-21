@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from gasgiant.core.domain import EquirectGrid
 from gasgiant.validate import validate_arrays
@@ -51,3 +52,52 @@ def test_rgb_maps_supported():
     arr = np.stack([_smooth_sphere_map()] * 3, axis=-1)
     report = validate_arrays({"rgb": arr})
     assert report.ok, report.summary()
+
+
+# -- half-float EXR quantization ----------------------------------------------
+
+
+def test_half_quantization_floor_tracks_the_representable_step():
+    """float16's ulp crosses ABS_FLOOR at 2.0, so the floor must follow the data.
+
+    Below 2.0 the flat-image floor still dominates and nothing changes; above it
+    a single representable step is larger than ABS_FLOOR and would otherwise be
+    reported as a real discontinuity."""
+    from gasgiant.validate.seams import ABS_FLOOR, quantization_floor
+
+    lo = np.full((4, 4), 1.5, dtype=np.float32)
+    hi = np.full((4, 4), 2.5, dtype=np.float32)
+
+    assert quantization_floor(lo, half=False) == ABS_FLOOR
+    assert quantization_floor(hi, half=False) == ABS_FLOOR
+    assert quantization_floor(lo, half=True) == ABS_FLOOR          # ulp 9.8e-4 < floor
+    assert quantization_floor(hi, half=True) == pytest.approx(1.953e-3, rel=1e-3)
+
+
+def test_half_quantization_floor_ignores_non_finite():
+    from gasgiant.validate.seams import ABS_FLOOR, quantization_floor
+
+    a = np.array([[1.0, np.inf, np.nan]], dtype=np.float32)
+    assert quantization_floor(a, half=True) == ABS_FLOOR
+    assert quantization_floor(np.array([], dtype=np.float32), half=True) == ABS_FLOOR
+
+
+def test_one_ulp_seam_on_a_half_map_is_not_a_discontinuity():
+    """The concrete failure the floor exists to prevent: a near-flat but nonzero
+    half map (an aurora alpha channel) whose interior quantizes to exactly flat,
+    with a single-ulp difference across the wrap seam. Without a
+    quantization-aware floor the limit collapses to ABS_FLOOR and the check
+    fails on rounding alone."""
+    from gasgiant.validate.seams import Report, check_wrap_continuity, quantization_floor
+
+    base = np.float16(2.5)
+    a = np.full((32, 64), float(base), dtype=np.float32)
+    a[:, 0] = float(np.nextafter(base, np.float16(100.0)))   # seam column, +1 ulp
+
+    strict = Report()
+    check_wrap_continuity(a, "alpha", strict)                 # old behaviour
+    assert not strict.ok, "test is vacuous: a 1-ulp seam already passed"
+
+    aware = Report()
+    check_wrap_continuity(a, "alpha", aware, abs_floor=quantization_floor(a, half=True))
+    assert aware.ok, "a single representable step must not read as a seam"

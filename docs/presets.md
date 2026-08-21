@@ -83,7 +83,7 @@ add-on warns and imports best-effort. The add-on vendors a stdlib-only
 reader (`blender_addon/gasgiant_importer/manifest_schema.py`); a unit test
 keeps it accepting exactly what the exporter writes.
 
-Per-map entries carry `file`, `format` (`png16` | `exr32f`), `colorspace`
+Per-map entries carry `file`, `format` (`png16` | `exr32f` | `exr16f`), `colorspace`
 (`srgb` | `non-color`), and optional `channels`/`convention`. `physical`
 carries `radius_km`, `height_scale` (full height-map range as a fraction of
 radius), and `height_midlevel` — the importer derives the physically correct

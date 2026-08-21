@@ -48,13 +48,14 @@ from gasgiant.params.model import ParamLeaf, StormOverride, StormsParams, iter_p
 #: them); this module deliberately does not carry a third copy.
 CORPUS: list[ParamLeaf] = list(iter_pfields())
 
-CORPUS_LEAVES = 233
-CORPUS_UNIQUE_DESCRIPTIONS = 228
+CORPUS_LEAVES = 234
+CORPUS_UNIQUE_DESCRIPTIONS = 229
 
 
 def test_corpus_size_is_pinned():
-    """The two numbers count different things and must never be conflated: 226
-    is dotted paths, 221 is distinct description STRINGS."""
+    """The two numbers count different things and must never be conflated:
+    CORPUS_LEAVES counts dotted paths, CORPUS_UNIQUE_DESCRIPTIONS counts
+    distinct description STRINGS. Adding one pfield bumps both."""
     assert len(CORPUS) == CORPUS_LEAVES
     assert len({leaf.description for leaf in CORPUS}) == CORPUS_UNIQUE_DESCRIPTIONS
 

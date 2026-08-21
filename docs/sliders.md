@@ -1978,11 +1978,19 @@ Also export flow.exr: the sim's per-step velocity field resampled to the equirec
 
 _Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
 
+### Half-float emission EXR
+
+`export.emission_half` &mdash; toggle (on/off), default **`False`**, tier `post`.
+
+Writes emission.exr at half precision instead of full. The glow looks the same; the file is about 2.4x smaller and writes about twice as fast, so it is the better default for anything you are not compositing in 32-bit. Off = full float32, byte for byte what earlier versions wrote. Only affects the emission map (half carries ~450x the headroom the brightest thermal + lightning + aurora stack can reach, assuming colour components stay within 0..1). No rand.
+
+_Boolean toggle (GUI checkbox) &mdash; documented as text; no rendered example._
+
 ### png compression
 
 `export.png_compression` &mdash; range **0 to 9**, default **2**, tier `post`.
 
-How hard the color PNG is squeezed on export. Lower = much faster writes, which matters at 16K; higher = a smaller file. Only the color map uses it; the 16-bit height PNGs are always written at the default level (zlib deflate level)
+How hard the PNG maps are squeezed on export. Lower = much faster writes, which matters at 16K and up; higher = a smaller file. The color map is the slow one, so this sets the pace of the whole export: a 32K map set measures about 120s at level 2 against 58s at level 0, for roughly a quarter more disk, which makes 0 worth having while you iterate. On a detailed map 1 and 2 land within a fraction of a percent of each other. Applies to the color map and to the 16-bit height PNGs in a frame sequence (zlib deflate level)
 
 _Passed to the Blender importer / controls the output file, not the texture appearance &mdash; no visual example._
 

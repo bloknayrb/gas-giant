@@ -60,3 +60,35 @@ def test_export_dev_steps_override_changes_output(_require_gl, tmp_path):
     a = read_png16(a_dir / "color.png")
     b = read_png16(b_dir / "color.png")
     assert (a != b).any()
+
+
+@pytest.mark.parametrize("seq", [False, True])
+def test_cli_reports_memoryerror_instead_of_traceback(_require_gl, tmp_path, monkeypatch, capsys, seq):
+    """cli.py wrapped neither export entry point, so an out-of-memory export
+    exited 1 with a raw traceback. numpy's own message names the exact shape and
+    dtype it could not allocate -- better than any estimate we could print.
+
+    GPU-tier because the CLI builds a real context and Simulation before it ever
+    reaches the export call this patches."""
+    import gasgiant.export.exporter as exporter
+
+    boom = MemoryError(
+        "Unable to allocate 8.00 GiB for an array with shape (16384, 32768, 4) "
+        "and data type float32"
+    )
+
+    def _raise(*a, **k):
+        raise boom
+
+    monkeypatch.setattr(exporter, "run_export", _raise)
+    monkeypatch.setattr(exporter, "run_export_sequence", _raise)
+
+    argv = ["export", "--preset", "jupiter_like", "--res", "512", "--out", str(tmp_path / "o")]
+    if seq:
+        argv += ["--frames", "3", "--steps-per-frame", "2"]
+
+    rc = main(argv)
+    err = capsys.readouterr().err
+    assert rc == 2, f"expected exit 2, got {rc}"
+    assert "out of memory" in err
+    assert "8.00 GiB" in err, "numpy's own detail must survive to the user"

@@ -358,11 +358,39 @@ only sim-resolution snapshot textures + analytic noise, so tiles need no
 apron), assemble per map directly in final dtype on the CPU, then encode in
 a thread pool. The GUI runs one slice per frame with progress + cancel
 (cancellation removes only the files we wrote); the CLI drains the same
-generator. Maps: 16-bit color PNG + float32 height EXR, plus a float32
-RGBA emission EXR (thermal hot-spot glow + lightning in RGB, aurora
-intensity in alpha) when any `emission.*_strength` is nonzero. Measured:
+generator. Maps: 16-bit color PNG + float32 height EXR, plus an RGBA
+emission EXR (thermal hot-spot glow + lightning in RGB, aurora intensity in
+alpha) when any `emission.*_strength` is nonzero — float32, or half if
+`export.emission_half`. Measured:
 16384×8192 with all maps and all FX variants on in ~31 s on an RTX 3070
 (encode-bound).
+
+**Host memory is the real ceiling at 16K and above**, because "assemble per
+map" means whole-map arrays resident at once: at 32768 that is color 3.00 GiB
+(uint16) + height 2.00 + emission 8.00. Two things keep the peak bounded.
+The color buffer stores **BGR**, OpenCV's native order, so `imwrite` gets a
+contiguous array instead of materialising a duplicate of the whole map (1.00x
+the buffer, measured). The sequence and cube jobs **double-buffer**: two frame
+sets, filled alternately, each refilled only after its own encodes finish, so
+buffers reach the pool with no copy and the peak is exactly two sets at any
+width (one set for a sequence short enough to render a single frame) — and two
+is the throughput optimum, since a two-stage pipeline already runs at
+`max(render, encode)` with two buffers whichever stage dominates. A third
+change does not affect the peak but belongs with them: allocation failures now
+release the snapshot explicitly, because the buffers are allocated before the
+`try` whose `finally` owns it. Measured at 32768 on an RTX 3070 (peak host
+commit): mapset 16.00 -> 13.21 GiB, cube 8.60 -> 3.64, and a 3-frame
+`--all-maps` sequence from 18.10 GiB of pagefile growth to none.
+`export.emission_half` (opt-in) writes emission at half precision, taking the
+mapset to 9.35 GiB — the file is ~2.4x smaller and the glow looks the same
+(it is quantized, not preserved bit-for-bit).
+
+Encode dominates wall time, and `export.png_compression` sets its pace:
+level 0 rather than the default 2 takes a 32768 map set from **119.5 s to
+58.0 s** for ~24% more disk. Since a map set writes height and emission as EXR,
+that lever touches only `color.png` -- so the color PNG alone accounts for at
+least the 61.5 s difference, i.e. half the default-settings export. No other
+single knob is close.
 
 **Projection + extra maps (all default-off, byte-identical when off).**
 `export.projection = equirect` (default) writes the classic 2:1 set; `cube`
