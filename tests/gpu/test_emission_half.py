@@ -29,7 +29,18 @@ def _params(half: bool, width: int = 512) -> PlanetParams:
 
 
 def test_emission_half_off_is_byte_identical(gpu, tmp_path):
-    """The default path must be untouched by the lever existing."""
+    """With the lever off, two independent exports agree byte for byte.
+
+    Read this for exactly what it is: no in-test comparison CAN reach the
+    pre-lever code, so this pins DETERMINISM of the default path, not
+    off-vs-before identity. The evidence for the latter is the 4096
+    jupiter_like SHA-256 pair and p05 --check in the PR body, neither of which
+    CI re-runs.
+
+    Keep "identical" in the name regardless -- gpu-smoke selects on
+    ``-k "identical or noop or no_op"``, so renaming drops this out of the
+    PR-blocking job.
+    """
     from gasgiant.export.exporter import run_export
 
     a, b = tmp_path / "a", tmp_path / "b"
